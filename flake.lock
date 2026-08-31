@@ -1,0 +1,45 @@
+{
+  "nodes": {
+    "imgui-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1729281843,
+        "narHash": "sha256-6j4keBOAzbBDsV0+R4zTNlsltxz2dJDGI43UIrHXDNM=",
+        "owner": "ocornut",
+        "repo": "imgui",
+        "rev": "99109c0b3b052cffa154a9295440f68868a39f74",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ocornut",
+        "ref": "v1.91.4",
+        "repo": "imgui",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1776548001,
+        "narHash": "sha256-ZSK0NL4a1BwVbbTBoSnWgbJy9HeZFXLYQizjb2DPF24=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "b12141ef619e0a9c1c84dc8c684040326f27cdcc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "imgui-src": "imgui-src",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

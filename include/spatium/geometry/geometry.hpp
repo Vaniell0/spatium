@@ -1,0 +1,20 @@
+#pragma once
+
+#include <spatium/geometry/concepts.hpp>
+#include <spatium/geometry/box.hpp>
+#include <spatium/geometry/line.hpp>
+#include <spatium/geometry/hyperplane.hpp>
+#include <spatium/geometry/triangle.hpp>
+#include <spatium/geometry/simplex.hpp>
+#include <spatium/geometry/circle.hpp>
+#include <spatium/geometry/polygon.hpp>
+#include <spatium/geometry/intersection.hpp>
+#include <spatium/geometry/distance.hpp>
+#include <spatium/geometry/make.hpp>
+#include <spatium/geometry/transform.hpp>
+#include <spatium/geometry/convex_hull.hpp>
+#include <spatium/geometry/clip.hpp>
+#include <spatium/geometry/boolean.hpp>
+#include <spatium/geometry/surface_adapter.hpp>
+#include <spatium/geometry/ray_surface.hpp>
+#include <spatium/geometry/format.hpp>

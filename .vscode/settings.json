@@ -1,0 +1,8 @@
+{
+    "clangd.path": "clangd",
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}/build",
+        "--header-insertion=never"
+    ],
+    "nixEnvSelector.nixFile": "${workspaceFolder}/flake.nix"
+}

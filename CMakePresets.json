@@ -1,0 +1,120 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 23, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "default",
+            "displayName": "Default (header-only, Debug)",
+            "description": "Plain header-only build at every option's own default -- matches the bare `cmake -B build` documented in CLAUDE.md.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release (Eigen, for RSC training)",
+            "description": "Release + Eigen3, kept alongside the default Debug config for RSC's training-heavy work -- see CLAUDE.md's own note that this hasn't measured a real wall-clock win over Debug yet, kept anyway.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SPATIUM_EIGEN": "ON"
+            }
+        },
+        {
+            "name": "modules",
+            "displayName": "C++23 modules (tests only)",
+            "description": "Modules build path, tests-only (SPATIUM_USE_MODULES=ON is untested by CI and known to lag the header tree -- see docs/conventions.md / docs/ROADMAP.md).",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-modules",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SPATIUM_USE_MODULES": "ON",
+                "SPATIUM_BUILD_EXAMPLES": "OFF",
+                "SPATIUM_BUILD_VIEWER": "OFF"
+            }
+        },
+        {
+            "name": "bench",
+            "displayName": "Benchmark harness (header-only)",
+            "description": "Release, tests-only build used as the header-only side of a modules-vs-header-tree benchmark comparison.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-bench",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SPATIUM_EIGEN": "ON",
+                "SPATIUM_BUILD_EXAMPLES": "OFF",
+                "SPATIUM_BUILD_VIEWER": "OFF"
+            }
+        },
+        {
+            "name": "bench-modules",
+            "displayName": "Benchmark harness (modules)",
+            "description": "Same as 'bench', with SPATIUM_USE_MODULES=ON -- the modules-side counterpart for the same comparison.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-bench-modules",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SPATIUM_EIGEN": "ON",
+                "SPATIUM_USE_MODULES": "ON",
+                "SPATIUM_BUILD_EXAMPLES": "OFF",
+                "SPATIUM_BUILD_VIEWER": "OFF"
+            }
+        },
+        {
+            "name": "cuda",
+            "displayName": "CUDA render kernels (gpu/)",
+            "description": "SPATIUM_CUDA=ON for the gpu/ black-hole render kernels -- requires nvcc, meant for the GPU-equipped render machine, not local iteration.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-cuda",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SPATIUM_CUDA": "ON",
+                "SPATIUM_EIGEN": "OFF",
+                "SPATIUM_BUILD_TESTS": "OFF",
+                "SPATIUM_BUILD_RSC_TOOLS": "ON"
+            }
+        },
+        {
+            "name": "noeigen",
+            "displayName": "No-Eigen verification",
+            "description": "Confirms the library and examples build with the optional Eigen3 dependency fully absent.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-noeigen",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SPATIUM_EIGEN": "OFF",
+                "SPATIUM_BUILD_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "vulkan-dev",
+            "displayName": "Vulkan demo iteration",
+            "description": "Fast inner loop for Vulkan viewer/demo work -- tests and Eigen off, nothing unrelated to rebuild.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-vk",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SPATIUM_EIGEN": "OFF",
+                "SPATIUM_BUILD_TESTS": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "default", "configurePreset": "default" },
+        { "name": "release", "configurePreset": "release" },
+        { "name": "modules", "configurePreset": "modules" },
+        { "name": "bench", "configurePreset": "bench" },
+        { "name": "bench-modules", "configurePreset": "bench-modules" },
+        { "name": "cuda", "configurePreset": "cuda" },
+        { "name": "noeigen", "configurePreset": "noeigen" },
+        { "name": "vulkan-dev", "configurePreset": "vulkan-dev" }
+    ],
+    "testPresets": [
+        { "name": "default", "configurePreset": "default" },
+        { "name": "release", "configurePreset": "release" },
+        { "name": "modules", "configurePreset": "modules" }
+    ]
+}

@@ -1,0 +1,22 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Never
+ColumnLimit: 100
+PointerAlignment: Left
+ReferenceAlignment: Left
+AlignAfterOpenBracket: BlockIndent
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+IndentCaseLabels: false
+NamespaceIndentation: None
+SortIncludes: CaseInsensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<spatium/'
+    Priority: 1
+  - Regex: '^<'
+    Priority: 2
+  - Regex: '.*'
+    Priority: 3

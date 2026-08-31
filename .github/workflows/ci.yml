@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Only run the latest push for each branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nix-build:
+    name: nix build (gcc15 + viewer + Eigen)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build default package
+        run: nix build .#default --print-build-logs
+
+      - name: Configure for tests
+        run: |
+          nix develop --command bash -c '
+            cmake -B build-ci -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSPATIUM_BUILD_VIEWER=OFF \
+              -DSPATIUM_BUILD_BENCHMARKS=OFF \
+              -DSPATIUM_BUILD_TESTS=ON \
+              -DSPATIUM_EIGEN=ON
+          '
+
+      - name: Build tests
+        run: |
+          nix develop --command bash -c 'cmake --build build-ci -j'
+
+      - name: Run tests
+        run: |
+          nix develop --command bash -c \
+            'ctest --test-dir build-ci --output-on-failure -j'
+
+  modules-build:
+    name: C++23 modules build (SPATIUM_USE_MODULES=ON)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Configure (modules preset)
+        run: nix develop --command bash -c 'cmake --preset modules'
+
+      - name: Build
+        run: nix develop --command bash -c 'cmake --build --preset modules -j'
+
+      - name: Run tests
+        run: nix develop --command bash -c 'ctest --preset modules --output-on-failure -j'
+
+  dependency-graph:
+    name: dependency graph is up to date
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/dependency-graph.dot matches the real #include graph
+        run: python3 scripts/gen_dependency_graph.py --check
+
+  claude-md-layout:
+    name: CLAUDE.md directory layout is up to date
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CLAUDE.md mentions every real include/spatium/ subdirectory
+        run: python3 scripts/check_claude_md_layout.py
+
+  bare-build:
+    name: cmake build without Nix (gcc15)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev
+          # Catch2 v3 may not be packaged on the runner image yet; the build
+          # falls back to FetchContent_MakeAvailable in CMakeLists.txt if
+          # find_package(Catch2 3) returns NOT_FOUND in a future patch.
+
+      - name: Configure
+        env:
+          CC: gcc-15
+          CXX: g++-15
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSPATIUM_BUILD_VIEWER=OFF \
+            -DSPATIUM_BUILD_BENCHMARKS=OFF \
+            -DSPATIUM_BUILD_EXAMPLES=ON \
+            -DSPATIUM_EIGEN=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j

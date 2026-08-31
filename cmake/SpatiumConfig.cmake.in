@@ -1,0 +1,37 @@
+@PACKAGE_INIT@
+
+# Optional pieces baked at install time.  Downstream code may guard on these.
+set(SPATIUM_HAS_VIEWER @SPATIUM_INSTALLED_HAS_VIEWER@)
+set(SPATIUM_HAS_EIGEN  @SPATIUM_INSTALLED_HAS_EIGEN@)
+set(SPATIUM_HAS_IMGUI  @SPATIUM_INSTALLED_HAS_IMGUI@)
+
+include(CMakeFindDependencyMacro)
+if(SPATIUM_HAS_EIGEN)
+    find_dependency(Eigen3 3.4)
+endif()
+if(SPATIUM_HAS_VIEWER)
+    find_dependency(Vulkan)
+    find_dependency(glfw3 3.3)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/SpatiumTargets.cmake")
+
+# Componentised consumption: find_package(Spatium COMPONENTS viewer ...).
+set(_spatium_components sdk core)
+if(SPATIUM_HAS_VIEWER)
+    list(APPEND _spatium_components viewer)
+endif()
+foreach(_c IN LISTS Spatium_FIND_COMPONENTS)
+    if(NOT _c IN_LIST _spatium_components)
+        set(Spatium_${_c}_FOUND FALSE)
+        if(Spatium_FIND_REQUIRED_${_c})
+            set(Spatium_FOUND FALSE)
+            set(Spatium_NOT_FOUND_MESSAGE
+                "Spatium installed without component '${_c}' (rebuild with the matching option ON)")
+        endif()
+    else()
+        set(Spatium_${_c}_FOUND TRUE)
+    endif()
+endforeach()
+
+check_required_components(Spatium)

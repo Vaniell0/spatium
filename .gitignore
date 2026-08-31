@@ -1,0 +1,70 @@
+# Whitelist .gitignore: everything is ignored by default; only what's
+# explicitly un-ignored below gets tracked. Adding a new top-level
+# source directory means adding a rule here, not the other way around --
+# deliberate, so build output / local scratch / anything not meant to
+# ship can never silently end up in a commit.
+
+*
+
+# Allow traversal into directories so the rules below can reach into them
+# (an ignored directory is never descended into, even with matching
+# unignore rules further down).
+!*/
+
+# Editor/scratch cruft, re-ignored inside every unignored directory below
+# (a real .save file slipped into examples/ and got tracked once already).
+**/*.save
+**/*.bak
+**/*.orig
+**/*~
+**/*.swp
+
+# Source
+!/include/
+!/include/**
+!/src/
+!/src/**
+!/tests/
+!/tests/**
+/tests/build/
+!/benchmarks/
+!/benchmarks/**
+!/examples/
+!/examples/**
+!/docs/
+!/docs/**
+!/cmake/
+!/cmake/**
+!/scripts/
+!/scripts/**
+!/shaders/
+!/shaders/**
+!/rsc/
+!/rsc/**
+!/modules/
+!/modules/**
+!/.github/
+!/.github/**
+
+!/gpu/
+!/gpu/**
+
+# Top-level project files
+!/CMakeLists.txt
+!/CMakePresets.json
+!/CLAUDE.md
+!/CONTRIBUTING.md
+!/LICENSE
+!/README.md
+!/flake.nix
+!/flake.lock
+!/.gitignore
+
+# Root-level PNG/MP4 dropped from the whitelist deliberately -- curated
+# hero assets move into gallery/ instead (user picks which ones), not
+# loose in the repo root. SVGs (small demo-generated diagrams, not
+# hero content) stay whitelisted at the root for now.
+!/*.svg
+
+!/gallery/
+!/gallery/**
