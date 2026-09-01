@@ -4,7 +4,6 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <cmath>
-#  include <compare>
 #  include <format>
 #endif
 
@@ -98,6 +97,19 @@ template<Scalar T>
 Dual<T> abs(const Dual<T>& x) {
     using std::abs;
     return {abs(x.value), x.value >= T{0} ? x.deriv : -x.deriv};
+}
+
+template<Scalar T>
+Dual<T> acos(const Dual<T>& x) {
+    using std::acos, std::sqrt;
+    return {acos(x.value), -x.deriv / sqrt(T{1} - x.value * x.value)};
+}
+
+template<Scalar T>
+Dual<T> tan(const Dual<T>& x) {
+    using std::tan, std::cos;
+    auto c = cos(x.value);
+    return {tan(x.value), x.deriv / (c * c)};
 }
 
 // Real-exponent power; n is a plain constant, not itself a Dual (matches the

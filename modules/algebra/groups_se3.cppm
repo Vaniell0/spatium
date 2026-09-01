@@ -3,6 +3,7 @@ export module spatium.algebra:groups_se3;
 import std.compat;
 import spatium.core;
 import :concepts;
+import :dual;
 import :groups_so3;
 import :matrix;
 import :vector;

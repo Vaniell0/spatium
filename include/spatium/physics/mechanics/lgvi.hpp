@@ -59,13 +59,13 @@
 SPATIUM_EXPORT namespace spatium::physics::mechanics {
 
 struct LGVIRigidBodyState {
-    spatium::algebra::SO3::ElementType R;       // orientation
-    spatium::algebra::SO3::AlgebraType  Pi;     // body angular momentum (Vec3 ≅ so(3)*)
+    spatium::algebra::SO3<double>::ElementType R;       // orientation
+    spatium::algebra::SO3<double>::AlgebraType  Pi;     // body angular momentum (Vec3 ≅ so(3)*)
 };
 
 // Hat map: ℝ³ → so(3). Returns 3×3 skew-symmetric matrix.
-inline spatium::algebra::SO3::ElementType hat_so3(const spatium::algebra::SO3::AlgebraType& v) {
-    using M = spatium::algebra::SO3::ElementType;
+inline spatium::algebra::SO3<double>::ElementType hat_so3(const spatium::algebra::SO3<double>::AlgebraType& v) {
+    using M = spatium::algebra::SO3<double>::ElementType;
     M m;
     m(0, 0) =  0;     m(0, 1) = -v[2];  m(0, 2) =  v[1];
     m(1, 0) =  v[2];  m(1, 1) =  0;     m(1, 2) = -v[0];
@@ -74,8 +74,8 @@ inline spatium::algebra::SO3::ElementType hat_so3(const spatium::algebra::SO3::A
 }
 
 // Inverse hat map: so(3) → ℝ³. Reads off the off-diagonal entries.
-inline spatium::algebra::SO3::AlgebraType vee_so3(const spatium::algebra::SO3::ElementType& M) {
-    return spatium::algebra::SO3::AlgebraType{ M(2,1), M(0,2), M(1,0) };
+inline spatium::algebra::SO3<double>::AlgebraType vee_so3(const spatium::algebra::SO3<double>::ElementType& M) {
+    return spatium::algebra::SO3<double>::AlgebraType{ M(2,1), M(0,2), M(1,0) };
 }
 
 // Solve the Sylvester equation  ŷ · J_diag + J_diag · ŷ = h · Π̂ for y ∈ ℝ³,
@@ -84,12 +84,12 @@ inline spatium::algebra::SO3::AlgebraType vee_so3(const spatium::algebra::SO3::E
 // permutation of (1, 2, 3). This is the linearised (Cayley 1-cut) solve —
 // exact when the RHS is treated as Π̂; the full LLM step folds the
 // nonlinear (I − ŷ/2) Π̂ (I + ŷ/2) into the RHS and iterates.
-inline spatium::algebra::SO3::AlgebraType lgvi_solve_y_diag(
-    const spatium::algebra::SO3::AlgebraType& J_diag,
-    const spatium::algebra::SO3::AlgebraType& Pi,
+inline spatium::algebra::SO3<double>::AlgebraType lgvi_solve_y_diag(
+    const spatium::algebra::SO3<double>::AlgebraType& J_diag,
+    const spatium::algebra::SO3<double>::AlgebraType& Pi,
     double h)
 {
-    using Vec3 = spatium::algebra::SO3::AlgebraType;
+    using Vec3 = spatium::algebra::SO3<double>::AlgebraType;
     return Vec3{
         h * Pi[0] / (J_diag[1] + J_diag[2]),
         h * Pi[1] / (J_diag[0] + J_diag[2]),
@@ -116,15 +116,15 @@ inline spatium::algebra::SO3::AlgebraType lgvi_solve_y_diag(
 // full paper bound (~1e-6) needs Newton iteration on the coupled
 // pair, which is a bigger refinement than this header hosts — a real
 // open follow-up, not attempted here.
-inline spatium::algebra::SO3::AlgebraType lgvi_solve_y_diag_implicit(
-    const spatium::algebra::SO3::AlgebraType& J_diag,
-    const spatium::algebra::SO3::AlgebraType& Pi,
+inline spatium::algebra::SO3<double>::AlgebraType lgvi_solve_y_diag_implicit(
+    const spatium::algebra::SO3<double>::AlgebraType& J_diag,
+    const spatium::algebra::SO3<double>::AlgebraType& Pi,
     double h,
     int max_iter = 8,
     double tol = 1e-14)
 {
-    using Vec3 = spatium::algebra::SO3::AlgebraType;
-    using M    = spatium::algebra::SO3::ElementType;
+    using Vec3 = spatium::algebra::SO3<double>::AlgebraType;
+    using M    = spatium::algebra::SO3<double>::ElementType;
 
     // Initial guess: linear Cayley 1-cut.
     Vec3 y = lgvi_solve_y_diag(J_diag, Pi, h);
@@ -156,10 +156,10 @@ inline spatium::algebra::SO3::AlgebraType lgvi_solve_y_diag_implicit(
 }
 
 // Cayley map: y ∈ ℝ³ → F ∈ SO(3) via F = (I − ½ŷ)⁻¹(I + ½ŷ).
-inline spatium::algebra::SO3::ElementType lgvi_cayley(
-    const spatium::algebra::SO3::AlgebraType& y)
+inline spatium::algebra::SO3<double>::ElementType lgvi_cayley(
+    const spatium::algebra::SO3<double>::AlgebraType& y)
 {
-    using M = spatium::algebra::SO3::ElementType;
+    using M = spatium::algebra::SO3<double>::ElementType;
     M y_hat = hat_so3(y);
     M I = M::identity();
     // (I − ½ŷ)⁻¹(I + ½ŷ); for skew matrices both factors are well-defined small h.
@@ -182,11 +182,11 @@ inline spatium::algebra::SO3::ElementType lgvi_cayley(
 // the SO(3) symmetry of L_d).
 inline LGVIRigidBodyState lgvi_rigid_body_step(
     LGVIRigidBodyState s,
-    const spatium::algebra::SO3::AlgebraType& J_diag,
+    const spatium::algebra::SO3<double>::AlgebraType& J_diag,
     double h)
 {
-    using Vec3 = spatium::algebra::SO3::AlgebraType;
-    using SO3  = spatium::algebra::SO3;
+    using Vec3 = spatium::algebra::SO3<double>::AlgebraType;
+    using SO3 = spatium::algebra::SO3<double>;
 
     // Full implicit Lee-Leok-McClamroch solve — iterates the
     // nonlinear (I − ŷ/2) Π̂ (I + ŷ/2) RHS to machine precision.
@@ -209,8 +209,8 @@ inline LGVIRigidBodyState lgvi_rigid_body_step(
 
 // Body-frame kinetic energy ½ Πᵀ J⁻¹ Π for diagonal inertia.
 // For free rigid body this is the conserved Hamiltonian.
-inline double lgvi_kinetic_energy(const spatium::algebra::SO3::AlgebraType& Pi,
-                                  const spatium::algebra::SO3::AlgebraType& J_diag) {
+inline double lgvi_kinetic_energy(const spatium::algebra::SO3<double>::AlgebraType& Pi,
+                                  const spatium::algebra::SO3<double>::AlgebraType& J_diag) {
     return 0.5 * (Pi[0] * Pi[0] / J_diag[0]
                 + Pi[1] * Pi[1] / J_diag[1]
                 + Pi[2] * Pi[2] / J_diag[2]);
@@ -218,10 +218,10 @@ inline double lgvi_kinetic_energy(const spatium::algebra::SO3::AlgebraType& Pi,
 
 // Spatial angular momentum L_world = R · Π_body. Should be conserved EXACTLY
 // (to numerical roundoff) for free rigid body, by discrete Noether.
-inline spatium::algebra::SO3::AlgebraType lgvi_spatial_angular_momentum(
+inline spatium::algebra::SO3<double>::AlgebraType lgvi_spatial_angular_momentum(
     const LGVIRigidBodyState& s)
 {
-    using Vec3 = spatium::algebra::SO3::AlgebraType;
+    using Vec3 = spatium::algebra::SO3<double>::AlgebraType;
     return Vec3{
         s.R(0,0) * s.Pi[0] + s.R(0,1) * s.Pi[1] + s.R(0,2) * s.Pi[2],
         s.R(1,0) * s.Pi[0] + s.R(1,1) * s.Pi[1] + s.R(1,2) * s.Pi[2],

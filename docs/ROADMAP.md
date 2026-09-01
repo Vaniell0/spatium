@@ -197,6 +197,16 @@ Third and smallest of the three manifold-backlog ideas raised 2026-08-28 (the ot
 
 Two real, non-obvious things found while tuning it, not guessed: (1) a hyperbolic ball's apparent angular size follows `sin(alpha) = sinh(radius)/sinh(distance)`, not the Euclidean `radius/distance` — an initial `radius=0.25` at `distance=1.0` filled a third of the frame, corrected to `0.08`; (2) with only 12 base directions spread across the *entire* sphere of view (not clustered toward the camera's forward hemisphere the way objects in ordinary scenes are), a normal ~40-55° FOV only ever catches 1-3 of them by chance — needed a wide (130°) FOV plus the subdivision (12→42 directions) to show a genuinely scattered field in one still frame; the wide-FOV rectilinear projection itself stretches off-center markers into radiating streaks, an honest projection-formula side effect (not a hyperbolic-metric effect) left in because it reads as a striking, correctly-motivated part of the image rather than a defect. Palette also needed golden-ratio-conjugate hue decorrelation (`hue = fmod(i * 0.618034, 1)`) since consecutive icosahedron-vertex indices are often spatially adjacent, which otherwise clustered same-hued neighbors together on screen. Wired into `examples/CMakeLists.txt` and `flake.nix` (`nix run .#hyperbolic-tessellation`), `nix flake check --no-build` passes, 825/825 tests still green (no library code changed, only the new example + existing `subdivide_once`/`icosahedron`/render-engine reuse).
 
+## SO(3)/SE(3) templated on Scalar (2026-08-31)
+
+`SO3`/`SE3` (`algebra/groups/so3.hpp`, `se3.hpp`) moved from hardcoded `double` to `template<Scalar T = double>`, matching every other Scalar-templated type in the tree — `SO3<double>`/`SE3<double>` behave exactly as before (all call sites updated: `physics/mechanics/lgvi.hpp`, `examples/tumbling_body_demo.cpp`, test helpers), and `SO3<Dual<double>>`/`SE3<Dual<double>>` now satisfy `Group`/`LieGroup` (checked via `static_assert`, plus a real differentiation test — rotating a point about Z with a `Dual`-seeded angle recovers the exact closed-form derivative, no hand-derived Jacobian). This is what Sophus/manif already give C++ robotics/SLAM/pose-graph optimization; Spatium didn't until now.
+
+Two real, non-hypothetical things found while templating, not assumed:
+- `Dual<T>` gained `acos()`/`tan()` (`algebra/dual.hpp`) — `SO3::log()` needs the former, `SE3::log()` the latter; neither existed before since nothing had exercised `Dual<T>` through a Lie-group log map yet.
+- A real latent bug, unmasked by the change itself: `SO3::log()`'s `sin(angle)` call had no `using std::sin;` in scope (unlike `exp()`, which did) and silently worked anyway because it resolved to the global `::sin` leaked in by `<cmath>` — invisible while `so3.hpp` didn't yet include `dual.hpp`. Once it did (needed for the `Dual<double>` `static_assert`), `spatium::algebra::sin<T>` (from `dual.hpp`) became visible via ordinary unqualified lookup inside the same namespace and shadowed the outer `::sin`, breaking the `T=double` case outright until `using std::sin;` was added explicitly. Caught by the compiler on the very first build, not by review.
+
+C++23-modules partitions (`modules/algebra/groups_so3.cppm`, `groups_se3.cppm`) needed `import :dual;` added — the `Dual<double>` static_asserts reference a type those partitions hadn't previously needed to see. 825→827 tests, one pre-existing unrelated failure (`embedded_base_is_current`, a stale CMake-configure artifact from the 2026-08-31 release's git-history squash — `kSpatiumCommitSha` reads "unknown" in the cached `build/`, needs a `cmake` reconfigure to pick up the real HEAD SHA, untouched by this change).
+
 ## C++23 modules: caught up to a working state (2026-08-28)
 
 The 2026-04-24 migration (see above) had gone stale — this closes the gap rather than deleting the subsystem, since the missing partitions were genuinely mechanical, not a design problem.
@@ -258,7 +268,6 @@ Grouped by topic, not by version — an item sits here until it's ready to becom
 ## Interop / ecosystem
 
 - Heat-method log map, CGAL-grade exact polyhedral geodesics (geometry-central and CGAL each cover one half of this; Spatium currently ships neither on top of Dijkstra/heat-distance).
-- SO(3)/SE(3) are hardcoded on `double` — Sophus/manif are templated + autodiff-compatible; Spatium isn't yet.
 - Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view` are planned once SVD/eigendecomposition (above) lands.
 
 ---
@@ -278,5 +287,4 @@ Grouped by topic, not by version — an item sits here until it's ready to becom
 
 **Caveats:**
 - Geodesics: Dijkstra (O(h) error on mesh edges) ships unconditionally; heat method (Crane 2013) ships with `SPATIUM_EIGEN=ON` via pre-factored `HeatSolver<S>` (see "Eigen interop, heat method" above). geometry-central also exposes the heat log map; CGAL adds exact MMP. See Backlog → Interop / ecosystem.
-- SO(3)/SE(3) are hardcoded on `double` — see Backlog → Interop / ecosystem.
 - Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — see Backlog → Interop / ecosystem.

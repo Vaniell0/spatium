@@ -18,8 +18,8 @@
 namespace spatium::tests {
 
 struct EulerTopState {
-    spatium::algebra::SO3::ElementType R;     // 3×3 orientation matrix
-    spatium::algebra::SO3::AlgebraType  omega; // body angular velocity (Vec3)
+    spatium::algebra::SO3<double>::ElementType R;     // 3×3 orientation matrix
+    spatium::algebra::SO3<double>::AlgebraType  omega; // body angular velocity (Vec3)
 };
 
 // One time-step. `inertia_inv(L)` returns ω given body angular momentum L = I·ω.
@@ -29,8 +29,8 @@ template<typename InertiaFn, typename InertiaInvFn>
 inline EulerTopState euler_top_step(EulerTopState s, double dt,
                                     InertiaFn&& inertia, InertiaInvFn&& inertia_inv)
 {
-    using Vec3 = spatium::algebra::SO3::AlgebraType;
-    using SO3  = spatium::algebra::SO3;
+    using Vec3 = spatium::algebra::SO3<double>::AlgebraType;
+    using SO3 = spatium::algebra::SO3<double>;
 
     SO3 group{};
     auto omega_field = [&](const SO3::ElementType& /*R*/) -> Vec3 {
@@ -57,8 +57,8 @@ template<typename InertiaFn, typename InertiaInvFn>
 inline EulerTopState euler_top_step_rkmk4(EulerTopState s, double dt,
                                           InertiaFn&& inertia, InertiaInvFn&& inertia_inv)
 {
-    using Vec3 = spatium::algebra::SO3::AlgebraType;
-    using SO3  = spatium::algebra::SO3;
+    using Vec3 = spatium::algebra::SO3<double>::AlgebraType;
+    using SO3 = spatium::algebra::SO3<double>;
 
     SO3 group{};
     auto omega_field = [&](const SO3::ElementType& /*R*/) -> Vec3 {
