@@ -93,6 +93,70 @@ TEST_CASE("eigen_sym: 3x3 non-diagonal matrix, known eigenvalues {4,9,25}", "[sp
     check_matrix_close(reconstructed, S, 1e-8);
 }
 
+TEST_CASE("eigen_sym: 2x2 scalar multiple of identity (repeated eigenvalue)", "[spd]") {
+    // Regression test: S=cI makes every direction an eigenvector, and the
+    // old tie-break (match each root to whichever diagonal entry it's
+    // closest to) picked the SAME vector for both slots here since both
+    // roots are equally close to both (equal) diagonal entries -- producing
+    // a rank-1 "eigenvector matrix" that silently reconstructs the wrong
+    // matrix despite the eigenvalues themselves being correct.
+    Matrix<double, 2, 2> S;
+    S(0, 0) = 5.0; S(1, 1) = 5.0;
+    auto eig = detail::eigen_sym(S);
+    CHECK_THAT(eig.values[0], WithinAbs(5.0, 1e-9));
+    CHECK_THAT(eig.values[1], WithinAbs(5.0, 1e-9));
+
+    auto UtU = eig.vectors.transpose() * eig.vectors;
+    check_matrix_close(UtU, Matrix<double, 2, 2>::identity()); // not rank-1
+
+    Matrix<double, 2, 2> D;
+    D(0, 0) = eig.values[0]; D(1, 1) = eig.values[1];
+    check_matrix_close(eig.vectors * D * eig.vectors.transpose(), S);
+}
+
+TEST_CASE("eigen_sym: 3x3 scalar multiple of identity (triple repeated eigenvalue)", "[spd]") {
+    Matrix<double, 3, 3> S;
+    S(0, 0) = 7.0; S(1, 1) = 7.0; S(2, 2) = 7.0;
+    auto eig = detail::eigen_sym(S);
+
+    auto UtU = eig.vectors.transpose() * eig.vectors;
+    check_matrix_close(UtU, Matrix<double, 3, 3>::identity(), 1e-8);
+
+    Matrix<double, 3, 3> D;
+    D(0, 0) = eig.values[0]; D(1, 1) = eig.values[1]; D(2, 2) = eig.values[2];
+    check_matrix_close(eig.vectors * D * eig.vectors.transpose(), S, 1e-8);
+}
+
+TEST_CASE("eigen_sym: 3x3 axisymmetric case (eigenvalue multiplicity 2, not a scalar multiple of I)", "[spd]") {
+    // diag(3,3,10) -- like an axisymmetric rigid body's inertia tensor.
+    // Two rows of (S - 3I) are exactly zero and the third is nonzero:
+    // rank 1, so the cross product of ANY two rows vanishes regardless of
+    // which pair is picked -- the failure mode the largest-norm-row
+    // fallback (not just the identity special case) exists for.
+    Matrix<double, 3, 3> S;
+    S(0, 0) = 3.0; S(1, 1) = 3.0; S(2, 2) = 10.0;
+    auto eig = detail::eigen_sym(S);
+
+    // A general cubic solver locates a genuine double root only to about
+    // sqrt(machine epsilon), not machine epsilon -- a repeated root's
+    // location is a square-root-sensitive function of the polynomial's
+    // coefficients (standard numerical-analysis fact, not solve_cubic
+    // imprecision), so the two "3.0" roots typically land ~1e-7 apart
+    // rather than agreeing to 1e-8.
+    std::array<double, 3> values{eig.values[0], eig.values[1], eig.values[2]};
+    std::sort(values.begin(), values.end());
+    CHECK_THAT(values[0], WithinAbs(3.0, 1e-6));
+    CHECK_THAT(values[1], WithinAbs(3.0, 1e-6));
+    CHECK_THAT(values[2], WithinAbs(10.0, 1e-8));
+
+    auto UtU = eig.vectors.transpose() * eig.vectors;
+    check_matrix_close(UtU, Matrix<double, 3, 3>::identity(), 1e-8); // not rank-deficient
+
+    Matrix<double, 3, 3> D;
+    D(0, 0) = eig.values[0]; D(1, 1) = eig.values[1]; D(2, 2) = eig.values[2];
+    check_matrix_close(eig.vectors * D * eig.vectors.transpose(), S, 1e-6);
+}
+
 TEST_CASE("SPD<2>::to_spd(from_spd(S)) roundtrip, diagonal and non-diagonal", "[spd]") {
     Matrix<double, 2, 2> S1;
     S1(0, 0) = 3.0; S1(1, 1) = 7.0;

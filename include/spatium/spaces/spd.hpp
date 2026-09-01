@@ -43,11 +43,19 @@ EigenSym2<T> eigen_sym(const Matrix<T, 2, 2>& S) {
         Vec<T, 2> v;
         if (abs(b) > epsilon<T>()) {
             v = Vec<T, 2>{b, lambda - a}.normalized();
-        } else {
-            // Already diagonal: no rotation to solve for, just match each
-            // root back to the diagonal entry it came from.
+        } else if (abs(a - d) > epsilon<T>()) {
+            // Already diagonal, distinct entries: match each root back to
+            // the diagonal entry it came from.
             v = (abs(lambda - a) <= abs(lambda - d)) ? Vec<T, 2>{T{1}, T{0}}
                                                        : Vec<T, 2>{T{0}, T{1}};
+        } else {
+            // a == d (S is a scalar multiple of the identity): every
+            // direction is an eigenvector, so the tie-break above would
+            // pick the SAME one for both i -- e.g. sqrt_sym(I) would
+            // reconstruct U diag(1,1) U^T from a rank-1 (duplicate-column)
+            // U, silently returning a wrong matrix instead of I. Assign by
+            // slot index instead so the pair stays orthonormal.
+            v = (i == 0) ? Vec<T, 2>{T{1}, T{0}} : Vec<T, 2>{T{0}, T{1}};
         }
         vecs(0, i) = v[0];
         vecs(1, i) = v[1];
@@ -63,6 +71,7 @@ struct EigenSym3 {
 
 template<Scalar T>
 EigenSym3<T> eigen_sym(const Matrix<T, 3, 3>& S) {
+    using std::abs;
     T a = S(0, 0), b = S(0, 1), c = S(0, 2),
                     d = S(1, 1), e = S(1, 2),
                                   f = S(2, 2);
@@ -74,19 +83,71 @@ EigenSym3<T> eigen_sym(const Matrix<T, 3, 3>& S) {
     auto roots = solve_cubic(T{1}, -trace, q, -det);
     Vec<T, 3> values{roots[0].re, roots[1].re, roots[2].re};
 
+    // Multiplicity detection, scaled to the matrix's own magnitude and
+    // compared directly on the eigenvalues themselves (not inferred from a
+    // shaky cross-product norm below): a general cubic solver locates a
+    // REPEATED root only to about sqrt(machine epsilon), not machine
+    // epsilon -- a double root's location is a genuinely square-root-
+    // sensitive function of the polynomial's coefficients, a standard
+    // numerical-analysis fact, not solve_cubic imprecision. Two roots that
+    // close are the same eigenvalue for null-space purposes even though
+    // they print as two slightly different doubles (e.g. an axisymmetric
+    // inertia tensor's repeated moment routinely comes back as
+    // 3.0000000284 and 2.9999999716, ~5.7e-8 apart).
+    using std::sqrt;
+    T scale = abs(trace) + abs(det);
+    T dup_tol = sqrt(epsilon<T>()) * (scale > T{1} ? scale : T{1});
+
     Matrix<T, 3, 3> vecs;
     for (std::size_t i = 0; i < 3; ++i) {
-        // Null space of (S - lambda*I): for a generic (rank-2) 3x3 matrix,
-        // the cross product of any two independent rows spans it. Picking
-        // the pair with the largest cross-product norm keeps this stable
-        // near-degenerate cases would otherwise amplify.
+        bool degenerate = false;
+        for (std::size_t j = 0; j < 3; ++j)
+            if (j != i && abs(values[i] - values[j]) < dup_tol) degenerate = true;
+
         Matrix<T, 3, 3> A = S - Matrix<T, 3, 3>::identity() * values[i];
         Vec<T, 3> r0 = A.row(0), r1 = A.row(1), r2 = A.row(2);
-        Vec<T, 3> c01 = r0.cross(r1), c02 = r0.cross(r2), c12 = r1.cross(r2);
-        T n01 = c01.norm(), n02 = c02.norm(), n12 = c12.norm();
-        Vec<T, 3> v = (n01 >= n02 && n01 >= n12) ? c01 : (n02 >= n12 ? c02 : c12);
-        auto vn = v.norm();
-        if (vn > epsilon<T>()) v = v / vn;
+        Vec<T, 3> v;
+
+        if (!degenerate) {
+            // Generic case: rank(A) == 2, null space is 1D -- the cross
+            // product of any two independent rows spans it. Picking the
+            // pair with the largest cross-product norm keeps this stable.
+            Vec<T, 3> c01 = r0.cross(r1), c02 = r0.cross(r2), c12 = r1.cross(r2);
+            T n01 = c01.norm(), n02 = c02.norm(), n12 = c12.norm();
+            v = (n01 >= n02 && n01 >= n12) ? c01 : (n02 >= n12 ? c02 : c12);
+            v = v / v.norm();
+        } else {
+            // rank(A) < 2: an eigenvalue with multiplicity >= 2 (e.g. an
+            // axisymmetric inertia tensor, or the fully degenerate S = c*I).
+            // A's rows are then all (numerically) parallel or all ~0, so
+            // EVERY pair's cross product above would be dominated by noise
+            // regardless of which two rows get picked -- not just the
+            // largest-norm one. Fall back to a construction that doesn't
+            // depend on two rows being independent: cross the single
+            // largest-norm row against a seed not (nearly) parallel to it,
+            // which still spans a genuine direction in the null space; if
+            // that row is itself ~0 (rank 0, triple root), any standard
+            // basis vector works. Two occurrences of the SAME repeated
+            // eigenvalue hit this branch with (numerically) the same A
+            // (hence the same r) -- starting the seed search from a
+            // different standard-basis vector per slot index (rather than
+            // always e_x first) keeps their raw candidates from coming out
+            // identical before Gram-Schmidt even gets a chance to separate
+            // them (which it cannot do to two near-equal vectors: that
+            // subtracts nearly the whole thing).
+            Vec<T, 3> e0{T{1}, T{0}, T{0}}, e1{T{0}, T{1}, T{0}}, e2{T{0}, T{0}, T{1}};
+            T rn0 = r0.norm(), rn1 = r1.norm(), rn2 = r2.norm();
+            Vec<T, 3> r = (rn0 >= rn1 && rn0 >= rn2) ? r0 : (rn1 >= rn2 ? r1 : r2);
+            auto rn = r.norm();
+            if (rn > dup_tol) {
+                Vec<T, 3> seed = (i == 0) ? e0 : (i == 1) ? e1 : e2;
+                if (abs(r.dot(seed)) > T{0.9} * rn) seed = (i == 0) ? e1 : (i == 1) ? e2 : e0;
+                v = r.cross(seed);
+                v = v / v.norm();
+            } else {
+                v = (i == 0) ? e0 : (i == 1) ? e1 : e2;
+            }
+        }
 
         // Gram-Schmidt against columns already placed: eigenvectors of a
         // symmetric matrix for distinct eigenvalues are exactly orthogonal
