@@ -378,3 +378,33 @@ TEST_CASE("frechet_mean_affine_invariant: minimizes the sum of squared affine-in
     for (const auto& s : samples) grad = grad + space.log_map(mean, s);
     CHECK_THAT(space.metric_at(mean, grad, grad), WithinAbs(0.0, 1e-16));
 }
+
+TEST_CASE("Naive matrix addition can break SPD validity; SPDAffineInvariant::exp_map cannot", "[spd]") {
+    // The enforced version of examples/spd_relationship_demo.cpp's claim:
+    // repeatedly nudging a relationship matrix in a fixed "strengthening"
+    // direction (as a sequence of similar causally-linked events would)
+    // breaks positive-definiteness under naive matrix addition within a
+    // bounded number of steps -- nothing about plain addition prevents an
+    // eigenvalue from crossing zero -- but exp_map's retraction back onto
+    // the manifold cannot produce an invalid matrix in exact arithmetic.
+    // 14 steps keeps this within double-precision's healthy range: pushed
+    // further, the same repeated raw nudge drives the point asymptotically
+    // toward the cone's boundary and ordinary floating-point underflow
+    // there eventually breaks contains() too -- a real precision
+    // phenomenon near the boundary, not a violation of the structural
+    // guarantee (see the demo's fuller note), just out of scope here.
+    SPDAffineInvariant<2> space;
+    Matrix<double, 2, 2> S_naive = Matrix<double, 2, 2>::identity();
+    Matrix<double, 2, 2> S_geo = Matrix<double, 2, 2>::identity();
+    Matrix<double, 2, 2> nudge;
+    nudge(0, 1) = 0.08; nudge(1, 0) = 0.08;
+
+    bool naive_broke = false;
+    for (int step = 0; step < 14; ++step) {
+        S_naive = S_naive + nudge;
+        S_geo = space.exp_map(S_geo, nudge, 1.0);
+        if (!space.contains(S_naive)) naive_broke = true;
+        CHECK(space.contains(S_geo)); // never fails, by construction
+    }
+    CHECK(naive_broke); // naive DOES break somewhere in these 14 steps
+}
