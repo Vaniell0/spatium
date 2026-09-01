@@ -240,3 +240,141 @@ TEST_CASE("frechet_mean: SPD<3> mean over three samples matches per-eigenvalue g
     expected(2, 2) = std::sqrt(25.0 * 49.0); // 35
     check_matrix_close(mean, expected, 1e-8);
 }
+
+TEST_CASE("SPDAffineInvariant<2>/<3> satisfy RiemannianManifold, not Surface", "[spd]") {
+    static_assert(Manifold<SPDAffineInvariant<2>>);
+    static_assert(RiemannianManifold<SPDAffineInvariant<2>>);
+    static_assert(!Surface<SPDAffineInvariant<2>>);
+    static_assert(Manifold<SPDAffineInvariant<3>>);
+    static_assert(RiemannianManifold<SPDAffineInvariant<3>>);
+    static_assert(!Surface<SPDAffineInvariant<3>>);
+    SUCCEED();
+}
+
+TEST_CASE("SPDAffineInvariant::contains: symmetric positive-definite only", "[spd]") {
+    SPDAffineInvariant<2> space;
+
+    Matrix<double, 2, 2> spd;
+    spd(0, 0) = 6.5; spd(1, 1) = 6.5; spd(0, 1) = -2.5; spd(1, 0) = -2.5; // eigenvalues 4,9
+    CHECK(space.contains(spd));
+
+    Matrix<double, 2, 2> not_symmetric;
+    not_symmetric(0, 0) = 1.0; not_symmetric(1, 1) = 1.0;
+    not_symmetric(0, 1) = 1.0; not_symmetric(1, 0) = 0.0;
+    CHECK_FALSE(space.contains(not_symmetric));
+
+    Matrix<double, 2, 2> not_pd; // symmetric, one negative eigenvalue
+    not_pd(0, 0) = 1.0; not_pd(1, 1) = -1.0;
+    CHECK_FALSE(space.contains(not_pd));
+}
+
+TEST_CASE("SPDAffineInvariant: exp_map/log_map at the identity reduces to plain matrix log/exp", "[spd]") {
+    // p = I makes p^{1/2} = p^{-1/2} = I, so the affine-invariant maps
+    // collapse to the same eigendecomposition-based matrix log/exp
+    // SPD<N,T> uses directly -- a real cross-check between the two classes,
+    // not just internal self-consistency.
+    SPDAffineInvariant<2> space;
+    Matrix<double, 2, 2> I = Matrix<double, 2, 2>::identity();
+
+    Matrix<double, 2, 2> q;
+    q(0, 0) = 6.5; q(1, 1) = 6.5; q(0, 1) = -2.5; q(1, 0) = -2.5; // eigenvalues 4,9
+
+    auto v = space.log_map(I, q);
+    check_matrix_close(v, SPD<2>::matrix_log_sym(q));
+
+    auto back = space.exp_map(I, v, 1.0);
+    check_matrix_close(back, q);
+}
+
+TEST_CASE("SPDAffineInvariant<2>: exp_map/log_map roundtrip at a non-identity base point", "[spd]") {
+    SPDAffineInvariant<2> space;
+    Matrix<double, 2, 2> p;
+    p(0, 0) = 3.0; p(1, 1) = 7.0; // diagonal, not identity
+
+    Matrix<double, 2, 2> q;
+    q(0, 0) = 6.5; q(1, 1) = 6.5; q(0, 1) = -2.5; q(1, 0) = -2.5; // rotated eigenbasis
+
+    auto v = space.log_map(p, q);
+    auto recovered = space.exp_map(p, v, 1.0);
+    check_matrix_close(recovered, q, 1e-8);
+}
+
+TEST_CASE("SPDAffineInvariant<3>: exp_map/log_map roundtrip at a non-identity base point", "[spd]") {
+    SPDAffineInvariant<3> space;
+    Matrix<double, 3, 3> p;
+    p(0, 0) = 6.5; p(1, 1) = 6.5; p(2, 2) = 25.0; p(0, 1) = -2.5; p(1, 0) = -2.5;
+
+    Matrix<double, 3, 3> q;
+    q(0, 0) = 3.0; q(1, 1) = 7.0; q(2, 2) = 12.0;
+
+    auto v = space.log_map(p, q);
+    auto recovered = space.exp_map(p, v, 1.0);
+    check_matrix_close(recovered, q, 1e-7);
+}
+
+TEST_CASE("SPDAffineInvariant::distance is symmetric", "[spd]") {
+    SPDAffineInvariant<2> space;
+    Matrix<double, 2, 2> p;
+    p(0, 0) = 3.0; p(1, 1) = 7.0;
+    Matrix<double, 2, 2> q;
+    q(0, 0) = 6.5; q(1, 1) = 6.5; q(0, 1) = -2.5; q(1, 0) = -2.5;
+
+    CHECK_THAT(space.distance(p, q), WithinAbs(space.distance(q, p), 1e-8));
+    CHECK_THAT(space.distance(p, p), WithinAbs(0.0, 1e-10));
+}
+
+TEST_CASE("SPDAffineInvariant::distance matches the generalized-eigenvalue closed form for a shared eigenbasis", "[spd]") {
+    // p, q share the standard basis (both diagonal): the affine-invariant
+    // distance has an independent, textbook closed form here --
+    // sqrt(sum(log(mu_i/lambda_i)^2)) over the per-axis eigenvalue ratios --
+    // that log_map()/metric_at() never explicitly compute. Cross-checking
+    // against it (not just roundtrip self-consistency) is the same standard
+    // this file already holds frechet_mean() to.
+    SPDAffineInvariant<2> space;
+    Matrix<double, 2, 2> p;
+    p(0, 0) = 4.0; p(1, 1) = 9.0;
+    Matrix<double, 2, 2> q;
+    q(0, 0) = 16.0; q(1, 1) = 1.0;
+
+    double expected = std::sqrt(std::pow(std::log(16.0 / 4.0), 2) + std::pow(std::log(1.0 / 9.0), 2));
+    CHECK_THAT(space.distance(p, q), WithinAbs(expected, 1e-8));
+}
+
+TEST_CASE("frechet_mean_affine_invariant: shared-eigenbasis case matches per-eigenvalue geometric mean", "[spd]") {
+    // When all samples commute (share an eigenbasis), the affine-invariant
+    // Karcher mean has to agree with the log-Euclidean closed form: both
+    // reduce to the per-eigenvalue geometric mean in that special case. This
+    // exercises the actual iteration (no closed form exists here in
+    // general, see spd.hpp) against an independently-derivable answer.
+    Matrix<double, 2, 2> S1; S1(0, 0) = 4.0; S1(1, 1) = 9.0;
+    Matrix<double, 2, 2> S2; S2(0, 0) = 16.0; S2(1, 1) = 1.0;
+    std::array<Matrix<double, 2, 2>, 2> samples{S1, S2};
+
+    auto mean = frechet_mean_affine_invariant<2>(std::span<const Matrix<double, 2, 2>>{samples});
+
+    Matrix<double, 2, 2> expected;
+    expected(0, 0) = std::sqrt(4.0 * 16.0); // 8
+    expected(1, 1) = std::sqrt(9.0 * 1.0);  // 3
+    check_matrix_close(mean, expected, 1e-8);
+}
+
+TEST_CASE("frechet_mean_affine_invariant: minimizes the sum of squared affine-invariant distances", "[spd]") {
+    // Non-commuting samples (rotated relative to each other): no closed
+    // form to check against directly, so verify the defining property
+    // instead -- the returned mean is a local minimum of the sum of squared
+    // distances, i.e. nudging it in any direction can't reduce the sum
+    // (the first-order optimality condition sum_i log_map(mean, S_i) ~ 0).
+    SPDAffineInvariant<2> space;
+    Matrix<double, 2, 2> S1;
+    S1(0, 0) = 6.5; S1(1, 1) = 6.5; S1(0, 1) = -2.5; S1(1, 0) = -2.5; // eigenvalues 4,9, rotated
+    Matrix<double, 2, 2> S2;
+    S2(0, 0) = 3.0; S2(1, 1) = 7.0; // axis-aligned
+    std::array<Matrix<double, 2, 2>, 2> samples{S1, S2};
+
+    auto mean = frechet_mean_affine_invariant<2>(std::span<const Matrix<double, 2, 2>>{samples});
+    CHECK(space.contains(mean));
+
+    Matrix<double, 2, 2> grad{};
+    for (const auto& s : samples) grad = grad + space.log_map(mean, s);
+    CHECK_THAT(space.metric_at(mean, grad, grad), WithinAbs(0.0, 1e-16));
+}

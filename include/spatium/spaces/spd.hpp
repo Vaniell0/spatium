@@ -332,4 +332,149 @@ static_assert(RiemannianManifold<SPD<2>>);
 static_assert(Manifold<SPD<3>>);
 static_assert(RiemannianManifold<SPD<3>>);
 
+// SPD(n) — same matrices as SPD<N,T> above, under the affine-invariant
+// metric (Pennec, Fillard, Ayache 2006; Moakher 2005) instead of
+// log-Euclidean's flat approximation. Where SPD<N,T> encodes a point as
+// vech(log(S)) precisely so every Manifold operation collapses to ordinary
+// flat arithmetic, this class keeps a point as the literal SPD matrix and
+// lets the real curvature show: the inner product genuinely depends on the
+// base point,
+//     <U, V>_S = trace(S^-1 U S^-1 V),
+// invariant under every congruence S -> A S A^T for invertible A (hence the
+// name) -- log-Euclidean's <U,V> = trace(UV) via vech is NOT invariant
+// under that action, which is the real mathematical gap this class closes,
+// not just an alternate style.
+//
+// exp_map/log_map are the standard closed forms
+//     Exp_S(V) = S^{1/2} exp(S^{-1/2} V S^{-1/2}) S^{1/2}
+//     Log_S(Q) = S^{1/2} log(S^{-1/2} Q S^{-1/2}) S^{1/2}
+// Both reduce to the same eigendecomposition-based symmetric matrix log/exp
+// as SPD<N,T> above (S^{-1/2} V S^{-1/2} is symmetric whenever V is, since
+// S^{-1/2} is symmetric) -- reused directly via detail::apply_eigen_sym, no
+// new numerical machinery, same N=2,3 restriction for the same reason.
+//
+// distance() is defined as sqrt(metric_at(p, log_map(p,q), log_map(p,q)))
+// rather than the textbook direct formula (generalized eigenvalues of
+// S1^-1 S2) -- deliberately: this is the general Riemannian identity
+// (distance = norm of the initial geodesic velocity, in the metric at the
+// start point), and it keeps distance/log_map/metric_at consistent by
+// construction instead of risking the three drifting out of sync under
+// independent hand derivations (see the SE3::exp() translation-Jacobian bug
+// in ROADMAP.md's SO(3)/SE(3) entry for what that risk actually costs in
+// this codebase).
+//
+// Unlike SPD<N,T>, no from_spd()/to_spd() are needed: PointType already IS
+// the SPD matrix, nothing to encode/decode at the boundary.
+//
+// SPD(n) under this metric is a Hadamard manifold (complete, non-positively
+// curved, uniquely geodesic): geodesics genuinely bend away from the
+// boundary of the SPD cone (Log_S(Q) diverges as Q approaches a singular
+// matrix) instead of being straight lines in disguise. That extra fidelity
+// over log-Euclidean's flat approximation is exactly what costs the closed
+// form: see frechet_mean_affine_invariant() below.
+template<std::size_t N, Scalar T = double>
+struct SPDAffineInvariant {
+    static_assert(N == 2 || N == 3,
+        "SPDAffineInvariant<N> currently supports N=2,3 only, for the same "
+        "reason as SPD<N,T> above -- see its static_assert.");
+
+    using ScalarType    = T;
+    using MatrixType    = Matrix<T, N, N>;
+    using PointType     = MatrixType; // the literal SPD matrix
+    using TangentVector = MatrixType; // a symmetric matrix at any base point
+
+    static constexpr std::size_t dimension = N * (N + 1) / 2;
+    static constexpr bool is_complete = true; // Hadamard manifold
+
+    // TopologicalSpace: the open SPD cone, not all of Matrix<T,N,N> -- unlike
+    // SPD<N,T>'s flat log-space (every vech(log(S)) is valid), a literal
+    // matrix point here must actually be symmetric with positive eigenvalues.
+    bool contains(const PointType& p) const {
+        auto asym = p - p.transpose();
+        T off{};
+        for (std::size_t i = 0; i < N; ++i)
+            for (std::size_t j = 0; j < N; ++j)
+                off += asym(i, j) * asym(i, j);
+        if (off > epsilon<T>() * epsilon<T>()) return false;
+        auto eig = detail::eigen_sym(p);
+        for (std::size_t i = 0; i < N; ++i)
+            if (eig.values[i] <= epsilon<T>()) return false;
+        return true;
+    }
+
+    ScalarType distance(const PointType& p, const PointType& q) const {
+        using std::sqrt;
+        auto v = log_map(p, q);
+        return sqrt(metric_at(p, v, v));
+    }
+
+    PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const {
+        auto p_half = sqrt_sym(p);
+        auto p_ih = inv_sqrt_sym(p);
+        MatrixType mid = p_ih * (v * t) * p_ih; // symmetric: v and p_ih both are
+        MatrixType e = detail::apply_eigen_sym(mid, [](T x) { using std::exp; return exp(x); });
+        return p_half * e * p_half;
+    }
+
+    TangentVector log_map(const PointType& p, const PointType& q) const {
+        auto p_half = sqrt_sym(p);
+        auto p_ih = inv_sqrt_sym(p);
+        MatrixType mid = p_ih * q * p_ih; // SPD: congruence of an SPD q stays SPD
+        MatrixType l = detail::apply_eigen_sym(mid, [](T x) { using std::log; return log(x); });
+        return p_half * l * p_half;
+    }
+
+    ScalarType metric_at(const PointType& p, const TangentVector& u, const TangentVector& v) const {
+        auto p_inv = inv_sym(p);
+        return (p_inv * u * p_inv * v).trace();
+    }
+
+    // ── Symmetric matrix sqrt/inverse-sqrt/inverse, via the same closed-form
+    // eigendecomposition as SPD<N,T>::matrix_log_sym/matrix_exp_sym ──
+
+    static MatrixType sqrt_sym(const MatrixType& S) {
+        return detail::apply_eigen_sym(S, [](T x) { using std::sqrt; return sqrt(x); });
+    }
+
+    static MatrixType inv_sqrt_sym(const MatrixType& S) {
+        return detail::apply_eigen_sym(S, [](T x) { using std::sqrt; return T{1} / sqrt(x); });
+    }
+
+    static MatrixType inv_sym(const MatrixType& S) {
+        return detail::apply_eigen_sym(S, [](T x) { return T{1} / x; });
+    }
+};
+
+static_assert(Manifold<SPDAffineInvariant<2>>);
+static_assert(RiemannianManifold<SPDAffineInvariant<2>>);
+static_assert(Manifold<SPDAffineInvariant<3>>);
+static_assert(RiemannianManifold<SPDAffineInvariant<3>>);
+
+// Affine-invariant Fréchet mean (Karcher mean): unlike log-Euclidean's
+// frechet_mean() above, this has NO closed form -- the defining tradeoff of
+// the fuller metric, per SPDAffineInvariant's file comment. Fixed-point
+// iteration (Pennec 2006): repeatedly walk the current estimate along the
+// average of log_map() to every sample, until that average tangent vector
+// is ~zero. No ambient projection step is needed here (unlike
+// algebra::riemannian_minimize() on Sphere/Hyperbolic), since this space's
+// tangent space is already the unconstrained space of symmetric matrices --
+// hand-rolled rather than calling riemannian_minimize(), which requires
+// HasNormal, deliberately absent here (see the class comment above).
+template<std::size_t N, Scalar T = double>
+Matrix<T, N, N> frechet_mean_affine_invariant(std::span<const Matrix<T, N, N>> matrices,
+                                               std::size_t max_iters = 50,
+                                               T tol = T{1e-12}) {
+    using S = SPDAffineInvariant<N, T>;
+    S space;
+    typename S::PointType mean = matrices[0]; // any SPD point as the starting estimate
+    for (std::size_t iter = 0; iter < max_iters; ++iter) {
+        typename S::TangentVector avg{};
+        for (const auto& m : matrices) avg = avg + space.log_map(mean, m);
+        avg = avg * (T{1} / T(matrices.size()));
+        if (space.metric_at(mean, avg, avg) < tol * tol) break;
+        mean = space.exp_map(mean, avg, T{1});
+    }
+    return mean;
+}
+
 } // namespace spatium
