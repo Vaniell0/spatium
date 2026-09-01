@@ -1,6 +1,7 @@
 spatium_add_example(NAME geometry_demo)
 spatium_add_example(NAME showcase)
 spatium_add_example(NAME sets_demo)
+spatium_add_example(NAME spd_relationship_demo)
 
 # CPU-only analytical renderer — no Vulkan required.
 #
