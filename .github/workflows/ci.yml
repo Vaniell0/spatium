@@ -92,10 +92,14 @@ jobs:
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev
+            gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev libboost-dev
           # Catch2 v3 may not be packaged on the runner image yet; the build
           # falls back to FetchContent_MakeAvailable in CMakeLists.txt if
           # find_package(Catch2 3) returns NOT_FOUND in a future patch.
+          # libboost-dev: core/precision.hpp unconditionally includes
+          # boost/multiprecision/cpp_dec_float.hpp (Real50/Real100) --
+          # header-only, so the -dev metapackage is enough, no boost libs
+          # need linking.
 
       - name: Configure
         env:
