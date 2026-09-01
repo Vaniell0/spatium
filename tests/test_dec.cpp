@@ -1,6 +1,9 @@
 // DEC primitives. Validate against existing differential.hpp.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+
+#if SPATIUM_HAS_EIGEN
+
 #include <spatium/mesh/mesh.hpp>
 #include <spatium/mesh/topology.hpp>
 #include <spatium/mesh/dec.hpp>
@@ -98,3 +101,5 @@ TEST_CASE("DEC: Form arithmetic", "[dec][form]") {
     auto scaled = a * 0.5;
     REQUIRE(scaled.coeffs(0) == 1.0);
 }
+
+#endif // SPATIUM_HAS_EIGEN
