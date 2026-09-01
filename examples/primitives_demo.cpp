@@ -10,6 +10,9 @@
 //                into R³, colored by x₄.
 //   klein      — classic Klein bottle R⁴→R³ immersion, animated 4D
 //                rotation separates / merges the self-intersection.
+//   rotavg     — SO(3) rotation averaging: N noisy measurements of one
+//                rotation, animated gradient descent (via SO3<Dual<double>>)
+//                converging to the estimate that best explains them all.
 
 #include "io_helpers.hpp"
 
@@ -20,7 +23,10 @@
 #include <spatium/viewer/app.hpp>
 #include <spatium/io/table.hpp>
 #include <spatium/geometry/ray_surface.hpp>
+#include <spatium/algebra/groups/so3.hpp>
+#include <spatium/algebra/calculus.hpp>
 #include <spatium/vendor/stb_image_write.h>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -49,6 +55,11 @@ using Clock = std::chrono::steady_clock;
 
 Mesh<Euclidean<3>> shifted(Mesh<Euclidean<3>> m, Vec3 offset) {
     for (auto& v : m.vertices) v = Vec3{v + offset};
+    return m;
+}
+
+Mesh<Euclidean<3>> rotated(Mesh<Euclidean<3>> m, const Mat3& R) {
+    for (auto& v : m.vertices) v = Vec3{R * v};
     return m;
 }
 
@@ -542,6 +553,145 @@ int run_klein(std::size_t resolution, bool do_viewer) {
     return 0;
 }
 
+// ── Scene: SO(3) rotation averaging (Dual<double>-differentiated) ──
+//
+// Rotation averaging: given N noisy measurements of the same underlying
+// rotation, find the one that best explains all of them — a real SLAM /
+// sensor-fusion building block, and the actual reason SO3 was templated
+// on Scalar (docs/ROADMAP.md, "SO(3)/SE(3) templated on Scalar"). Solved
+// via ordinary gradient descent (algebra/calculus.hpp's gradient()) on
+// f(v) = sum_i || log( exp(v)^-1 * R_i ) ||^2 over v in R^3 (axis-angle),
+// which needs zero hand-derived Jacobian: gradient() Dual-seeds v itself.
+
+std::array<Mesh<Euclidean<3>>, 3> gizmo_arms(const Mat3& R, Vec3 pos) {
+    std::array<Mesh<Euclidean<3>>, 3> arms;
+    for (int a = 0; a < 3; ++a) {
+        Vec3 half{0.04, 0.04, 0.04}; half[a] = 0.35;
+        Vec3 center{0.0, 0.0, 0.0};  center[a] = 0.35;
+        arms[a] = shifted(rotated(shifted(box_mesh(half), center), R), pos);
+    }
+    return arms;
+}
+
+int run_rotation_averaging(bool do_viewer) {
+    constexpr int N = 5;
+    SO3<double> so3;
+
+    Vec3 true_axis = Vec3{1, 1, 1}.normalized();
+    double true_angle = 55.0 * std::numbers::pi / 180.0;
+    Mat3 R_true = so3.from_axis_angle(true_axis, true_angle);
+
+    std::mt19937 rng(42);
+    std::normal_distribution<double> noise(0.0, 0.35); // radians, per axis-angle component
+    std::vector<Mat3> measurements;
+    measurements.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        Vec3 perturb{noise(rng), noise(rng), noise(rng)};
+        measurements.push_back(so3.compose(so3.exp(perturb), R_true));
+    }
+
+    // Generic over Scalar T (per calculus.hpp's Function convention) so
+    // gradient() can call it with Vec<Dual<double>,3> to differentiate
+    // and, unmodified, with Vec<double,3> for the plain value below.
+    auto residual = [&measurements](auto v) {
+        using T = typename decltype(v)::scalar_type;
+        SO3<T> group;
+        auto Rhat_inv = group.inverse(group.exp(v));
+        T total{0};
+        for (auto const& Rm : measurements) {
+            Matrix<T, 3, 3> Rt;
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    Rt(i, j) = T(Rm(i, j));
+            auto err = group.log(group.compose(Rhat_inv, Rt));
+            total = total + err.dot(err);
+        }
+        return total;
+    };
+
+    std::println("SO(3) rotation averaging: {} noisy measurements around a {:.0f}° ground-truth rotation",
+                 N, true_angle * 180.0 / std::numbers::pi);
+    std::println("Estimate found by gradient descent through SO3::exp/log via Dual<double> — no hand-derived Jacobian.");
+
+    if (!do_viewer) {
+        Vec3 v_est = minimize(residual, Vec3{0, 0, 0});
+        auto err = so3.log(so3.compose(so3.inverse(so3.exp(v_est)), R_true));
+        std::println("Converged. Residual axis-angle error vs ground truth: {:.6f} rad", err.norm());
+        return 0;
+    }
+
+    App app("Spatium — SO(3) Rotation Averaging (Dual<double> autodiff)", 1280, 720);
+
+    int total_slots = N + 2; // ground truth + N noisy + 1 estimate
+    double spacing = 1.7;
+    auto slot = [&](int i) { return Vec3{(i - (total_slots - 1) / 2.0) * spacing, 0.0, 0.0}; };
+    static const Vec4f axis_rgb[3] = {
+        {0.95f, 0.25f, 0.25f, 1.0f},
+        {0.30f, 0.85f, 0.30f, 1.0f},
+        {0.30f, 0.55f, 0.95f, 1.0f},
+    };
+
+    auto add_gizmo = [&](const Mat3& R, Vec3 pos, float alpha, bool colored) {
+        auto arms = gizmo_arms(R, pos);
+        for (int a = 0; a < 3; ++a) {
+            Vec4f c = colored ? axis_rgb[a] : Vec4f{0.8f, 0.8f, 0.82f, 1.0f};
+            c[3] = alpha;
+            app.add_mesh(arms[a], c);
+        }
+    };
+
+    add_gizmo(R_true, slot(0), 0.55f, false); // ground truth: neutral gray
+    for (int i = 0; i < N; ++i)
+        add_gizmo(measurements[i], slot(1 + i), 0.35f, true); // noisy: dim RGB
+
+    Vec3 v_est{0, 0, 0}; // start estimate at identity
+    Vec3 estimate_pos = slot(1 + N);
+    int estimate_base = 3 * (1 + N); // mesh index of the estimate gizmo's first arm
+    add_gizmo(so3.exp(v_est), estimate_pos, 1.0f, true); // estimate: bright RGB, animated
+
+    auto bounds = merge(shifted(box_mesh(Vec3{0.6, 0.6, 0.6}), slot(0)),
+                        shifted(box_mesh(Vec3{0.6, 0.6, 0.6}), slot(total_slots - 1)));
+    app.fit_to(bounds, 1.4f);
+
+    bool animating = true;
+    bool converged = false;
+
+    app.set_key_callback([&](int key, int action, int /*mods*/) {
+        if (action == 0) return; // GLFW_RELEASE
+        if (key == ' ') animating = !animating;
+        if (key == 'R' || key == 'r') { v_est = Vec3{0, 0, 0}; converged = false; animating = true; }
+    });
+
+    app.set_frame_callback([&]() {
+        // One Armijo-backtracking step per frame — the exact per-iteration
+        // logic calculus.hpp's minimize() uses internally, exposed here one
+        // step at a time so the convergence itself is watchable.
+        if (!animating || converged) return;
+        auto g = gradient(residual, v_est);
+        double g2 = g.dot(g);
+        if (std::sqrt(g2) < 1e-6) { converged = true; return; }
+
+        double f0 = residual(v_est);
+        double step = 1.0;
+        bool accepted = false;
+        for (int ls = 0; ls < 50; ++ls) {
+            Vec3 candidate = v_est - g * step;
+            if (residual(candidate) <= f0 - 1e-4 * step * g2) { v_est = candidate; accepted = true; break; }
+            step /= 2.0;
+        }
+        if (!accepted) { converged = true; return; }
+
+        auto arms = gizmo_arms(so3.exp(v_est), estimate_pos);
+        for (int a = 0; a < 3; ++a)
+            app.update_mesh_vertices(estimate_base + a, mesh_to_render_data(arms[a]));
+    });
+
+    std::println("\nBright RGB gizmo = live estimate, converging. Dim RGB = noisy measurements. Gray = ground truth.");
+    std::println("Controls: SPACE pause, R restart, drag=orbit, scroll=zoom, W=wireframe, S=screenshot, Q=quit");
+    app.run();
+    return 0;
+}
+
 // ── Dispatch ─────────────────────────────────────────────────
 
 void print_usage() {
@@ -550,6 +700,7 @@ void print_usage() {
     std::println("  primitives (default) — unified primitives + BVH raycast visualization");
     std::println("  torus                — Clifford torus S\u00b3 \u2192 R\u00b3");
     std::println("  klein                — Klein bottle R\u2074 \u2192 R\u00b3, animated");
+    std::println("  rotavg               — SO(3) rotation averaging, animated Dual<double> gradient descent");
     std::println("Options:");
     std::println("  --rays N         primitives scene: ray count (default 1024)");
     std::println("  --resolution N   torus/klein scene: UV grid resolution (default 64/80)");
@@ -584,6 +735,8 @@ int main(int argc, char* argv[]) {
         return run_torus(resolution == 0 ? 64 : resolution, do_viewer);
     if (scene == "klein")
         return run_klein(resolution == 0 ? 80 : resolution, do_viewer);
+    if (scene == "rotavg")
+        return run_rotation_averaging(do_viewer);
 
     std::println("Unknown scene: {}", scene);
     print_usage();
