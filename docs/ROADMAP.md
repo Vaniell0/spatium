@@ -231,49 +231,57 @@ The 2026-04-24 migration (see above) had gone stale — this closes the gap rath
 
 Grouped by topic, not by version — an item sits here until it's ready to become real work, then moves to Completed above with the date it landed.
 
+Each item carries a tag for *intent*, not difficulty or sequencing — Spatium's goal is to become the de-facto standard for computational work on arbitrary mathematical spaces, and that happens by earning the interest of people who know this territory well, not by chasing a release checklist:
+
+- **[course]** — genuinely useful, actively where we're steering the project right now.
+- **[want]** — we'd just like this to exist, or it'd be fun/interesting to build; no strong pull yet, no promise of order.
+- **[dare]** — big, uncertain, or hard enough that it won't get built by us any time soon — a standing, genuine invitation for whoever wants to take a swing at it.
+
+A PR against any tag here is welcome. So is a PR against nothing here — if you build something we didn't list, that's a real step toward Spatium becoming a standard in its own right, not a detour from this list.
+
 ## Mesh processing
 
-- Mesh simplification (edge collapse + QEM)
-- Isotropic remeshing on Surface
-- PLY import/export
+- **[course]** Mesh simplification (edge collapse + QEM)
+- **[course]** Isotropic remeshing on Surface
+- **[want]** PLY import/export
 
 ## Analytical rendering
 
-- Fragment shader raymarcher: GPU-native analytical render (GLSL quadric math)
-- Dual Quaternion
+- **[dare]** Fragment shader raymarcher: GPU-native analytical render (GLSL quadric math)
+- **[want]** Dual Quaternion
 
 ## Manifold applications
 
-- Fiber bundles (tangent/cotangent)
-- Geodesic FEM (Laplace-Beltrami, heat equation)
+- **[dare]** Fiber bundles (tangent/cotangent)
+- **[dare]** Geodesic FEM (Laplace-Beltrami, heat equation)
 
 ## GIS
 
-- Ellipsoid (WGS84) as Space — geodesic distance on Earth
+- **[want]** Ellipsoid (WGS84) as Space — geodesic distance on Earth
 
 ## Geometry
 
-- Boolean ops on concave mesh (BSP tree)
+- **[course]** Boolean ops on concave mesh (BSP tree)
 
 ## Native math (dependency reduction)
 
-- SVD / eigendecomposition — a real native-implementation candidate (unlike the heat method's sparse-Cholesky step or ipc-toolkit, whose cost/benefit doesn't favor a from-scratch rewrite). Blocks `Eigen::Ref<…>` public-API adapters noted above and dense-solve paths that currently require `SPATIUM_EIGEN=ON`.
+- **[course]** SVD / eigendecomposition — a real native-implementation candidate (unlike the heat method's sparse-Cholesky step or ipc-toolkit, whose cost/benefit doesn't favor a from-scratch rewrite). Blocks `Eigen::Ref<…>` public-API adapters noted above and dense-solve paths that currently require `SPATIUM_EIGEN=ON`.
 
 ## GPU rendering (CUDA)
 
-- Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
-- `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
+- **[course]** Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
+- **[want]** `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
 
 ## Contact physics / RSC
 
-- Full multi-config sweep for the implicit-contact Newton solver, matching the XPBD investigation's own 20-point discipline, plus a performance pass (current single traced config takes multiple CPU-minutes under ipc-toolkit's TBB-based collision detection).
-- RSC's calibration-search against the implicit-contact pipeline — not yet built.
-- RSC "real-time control of complex dynamics" domain (illustrative: an underwater drone) — depends on the base+custom deployment split actually working.
+- **[course]** Full multi-config sweep for the implicit-contact Newton solver, matching the XPBD investigation's own 20-point discipline, plus a performance pass (current single traced config takes multiple CPU-minutes under ipc-toolkit's TBB-based collision detection).
+- **[course]** RSC's calibration-search against the implicit-contact pipeline — not yet built.
+- **[dare]** RSC "real-time control of complex dynamics" domain (illustrative: an underwater drone) — depends on the base+custom deployment split actually working.
 
 ## Interop / ecosystem
 
-- Heat-method log map, CGAL-grade exact polyhedral geodesics (geometry-central and CGAL each cover one half of this; Spatium currently ships neither on top of Dijkstra/heat-distance).
-- Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view` are planned once SVD/eigendecomposition (above) lands.
+- **[dare]** Heat-method log map, CGAL-grade exact polyhedral geodesics (geometry-central and CGAL each cover one half of this; Spatium currently ships neither on top of Dijkstra/heat-distance).
+- **[want]** Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view` are planned once SVD/eigendecomposition (above) lands.
 
 ---
 
