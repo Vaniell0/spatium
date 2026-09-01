@@ -39,36 +39,71 @@ struct SO3 {
         return a.transpose(); // orthogonal matrix: inverse = transpose
     }
 
-    // Lie group: exponential map (Rodrigues formula)
-    // v = axis * angle (axis-angle representation)
+    // Lie group: exponential map (Rodrigues formula).
+    // R = I + a(θ)K + b(θ)K², K = skew(v) (UNNORMALIZED — K = θ·skew(axis)),
+    // a(θ) = sin(θ)/θ, b(θ) = (1-cos θ)/θ². Built from θ² = v·v (a smooth
+    // polynomial in v) rather than branching on the normalized axis v/θ:
+    // that division, and the old `if (angle < eps) return identity();`
+    // short-circuit, were both exact at θ=0 in VALUE but silently returned
+    // a v-INDEPENDENT constant there — under Dual<T> this zeroed the
+    // gradient of exp() at the identity, the single most common
+    // optimization starting point, even though exp() is analytically
+    // smooth there (its own Taylor series in v has no singularity; only
+    // the angle=sqrt(θ²) and axis=v/θ intermediates do).
     ElementType exp(const AlgebraType& v) const {
         using std::sin; using std::cos; using std::sqrt;
-        auto angle = v.norm();
-        if (angle < epsilon<T>()) return identity();
+        T theta2 = v.dot(v);
+        auto angle = sqrt(theta2);
+        auto K = skew(v);
 
-        auto axis = v / angle;
-        auto K = skew(axis);
-        auto s = sin(angle);
-        auto c = cos(angle);
+        T a, b;
+        if (angle < epsilon<T>()) {
+            // Taylor series in θ² (smooth at v=0): sin(θ)/θ = 1 - θ²/6 + ...,
+            // (1-cos θ)/θ² = 1/2 - θ²/24 + ...
+            a = T{1} - theta2 / T{6};
+            b = T{0.5} - theta2 / T{24};
+        } else {
+            a = sin(angle) / angle;
+            b = (T{1} - cos(angle)) / theta2;
+        }
 
-        // R = I + sin(θ)K + (1-cos(θ))K²
-        return identity() + K * s + (K * K) * (T{1} - c);
+        return identity() + K * a + (K * K) * b;
     }
 
-    // Logarithmic map: rotation matrix → axis-angle vector
+    // Logarithmic map: rotation matrix → axis-angle vector.
+    // v = raw · θ/(2 sin θ), raw = vee(R - Rᵀ) (linear in R, always smooth).
     AlgebraType log(const ElementType& R) const {
         using std::acos; using std::sqrt; using std::abs; using std::sin;
 
         auto trace = R(0, 0) + R(1, 1) + R(2, 2);
-        auto cos_angle = (trace - T{1}) * T{0.5};
-        cos_angle = std::clamp(cos_angle, T{-1}, T{1});
+        auto cos_angle = std::clamp((trace - T{1}) * T{0.5}, T{-1}, T{1});
+        AlgebraType raw{R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1)};
+
+        if (cos_angle > T{1} - epsilon<T>()) {
+            // Near R=I: acos'(x) = -1/sqrt(1-x²) itself diverges at x=1, so
+            // computing angle=acos(cos_angle) here would corrupt the
+            // derivative under Dual<T> before even reaching the (also
+            // removable) θ/sin(θ) singularity below — same failure mode as
+            // exp()'s old identity-at-origin shortcut, just one function
+            // upstream. θ² ≈ 2(1-cos_angle) (small-angle Taylor, smooth in
+            // R, no acos involved) sidesteps that; θ/(2 sin θ) ≈ 1/2 + θ²/12
+            // is the matching Taylor coefficient. The old
+            // `if (angle < eps) return AlgebraType{};` here had the exact
+            // same bug as exp()'s: correct in value, zero derivative w.r.t.
+            // R at the identity.
+            T theta2 = (T{1} - cos_angle) * T{2};
+            return raw * (T{0.5} + theta2 / T{12});
+        }
+
         auto angle = acos(cos_angle);
 
-        if (angle < epsilon<T>()) return AlgebraType{};
-
         if (abs(angle - T{std::numbers::pi}) < epsilon<T>()) {
-            // angle ≈ π: extract axis from R + I
-            // Find column of R + I with largest norm
+            // angle ≈ π: a genuine coordinate singularity of the axis-angle
+            // chart itself (+πn̂ and -πn̂ represent the same rotation) — not
+            // a removable Dual-derivative artifact like the two cases
+            // above, so left as the existing value-only extraction. Not
+            // part of this fix; a gradient-based optimizer essentially
+            // never lands exactly here in practice.
             auto RpI = R + identity();
             int best = 0;
             T best_norm{0};
@@ -81,14 +116,8 @@ struct SO3 {
             return axis * angle;
         }
 
-        // General case: axis from skew-symmetric part
         auto s = sin(angle);
-        AlgebraType axis{
-            (R(2, 1) - R(1, 2)) / (T{2} * s),
-            (R(0, 2) - R(2, 0)) / (T{2} * s),
-            (R(1, 0) - R(0, 1)) / (T{2} * s),
-        };
-        return axis * angle;
+        return raw * (angle / (T{2} * s));
     }
 
     // Action: rotate a point

@@ -114,6 +114,43 @@ TEST_CASE("SO3<Dual<double>> log/exp roundtrip differentiates correctly", "[alge
     CHECK_THAT(recovered[0].deriv, WithinAbs(1.0, 1e-6));
 }
 
+TEST_CASE("SO3<Dual<double>> exp differentiates AT v=0, not just away from it", "[algebra]") {
+    // Regression test for a real bug: exp()'s old angle<eps special case
+    // returned a v-INDEPENDENT identity() -- correct in VALUE exactly at
+    // v=0, but silently zero-derivative there under Dual<T>, exactly at the
+    // single most common optimization starting point (a standalone probe
+    // confirmed gradient(residual, Vec3{0,0,0}) came back hard [0,0,0] pre-
+    // fix on a rotation-averaging objective, vs. a real nonzero value one
+    // step away). Checks against the known first-order Taylor expansion
+    // exp(v) ~= I + skew(v): skew({1,0,0}) sets (1,2)=-1 and (2,1)=1, all
+    // else 0 -- exactly the derivatives seeding v[0] should produce.
+    SO3<Dual<double>> so3;
+    Vec<Dual<double>, 3> v{Dual<double>::variable(0.0), Dual<double>{0.0}, Dual<double>{0.0}};
+    auto R = so3.exp(v);
+
+    CHECK_THAT(R(1, 2).deriv, WithinAbs(-1.0, 1e-9));
+    CHECK_THAT(R(2, 1).deriv, WithinAbs(1.0, 1e-9));
+    CHECK_THAT(R(0, 1).deriv, WithinAbs(0.0, 1e-9));
+    CHECK_THAT(R(0, 0).value, WithinAbs(1.0, 1e-12)); // still exactly identity in value
+}
+
+TEST_CASE("SO3<Dual<double>> log/exp roundtrip differentiates AT v=0", "[algebra]") {
+    // Same regression as the exp-at-origin test above, but through both
+    // exp() AND log() at once (log()'s own near-identity branch had the
+    // identical bug — acos'(1) diverges, and the old `angle<eps -> return
+    // AlgebraType{}` shortcut zeroed the derivative there too). All three
+    // components at exactly zero reproduces the original failure mode
+    // exactly: a rotation-averaging optimizer starting from identity.
+    SO3<Dual<double>> so3;
+    auto v0 = Dual<double>::variable(0.0);
+    Vec<Dual<double>, 3> v{v0, Dual<double>{0.0}, Dual<double>{0.0}};
+    auto R = so3.exp(v);
+    auto recovered = so3.log(R);
+
+    CHECK_THAT(recovered[0].value, WithinAbs(0.0, 1e-12));
+    CHECK_THAT(recovered[0].deriv, WithinAbs(1.0, 1e-6));
+}
+
 TEST_CASE("SO3 verify group axioms", "[algebra]") {
     SO3<double> so3;
     std::array samples = {
