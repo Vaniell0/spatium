@@ -106,6 +106,19 @@ EigenSym3<T> eigen_sym(const Matrix<T, 3, 3>& S) {
     return {values, vecs};
 }
 
+// internal — do not use, no API stability. U diag(f(lambda_i)) U^T for a
+// real symmetric S = U diag(lambda_i) U^T: the shared reconstruction step
+// behind every symmetric matrix function used in this file (log, exp, sqrt,
+// inverse-sqrt, inverse) — same eigendecomposition, different scalar map
+// over the eigenvalues.
+template<std::size_t N, Scalar T, typename F>
+Matrix<T, N, N> apply_eigen_sym(const Matrix<T, N, N>& S, F&& f) {
+    auto eig = eigen_sym(S);
+    Matrix<T, N, N> D;
+    for (std::size_t i = 0; i < N; ++i) D(i, i) = f(eig.values[i]);
+    return eig.vectors * D * eig.vectors.transpose();
+}
+
 } // namespace detail
 
 // SPD(n) — symmetric positive-definite n×n matrices, under the
@@ -232,19 +245,11 @@ struct SPD {
     // -- always map back to a genuine SPD matrix via to_spd().
 
     static MatrixType matrix_log_sym(const MatrixType& S) {
-        using std::log;
-        auto eig = detail::eigen_sym(S);
-        MatrixType D;
-        for (std::size_t i = 0; i < N; ++i) D(i, i) = log(eig.values[i]);
-        return eig.vectors * D * eig.vectors.transpose();
+        return detail::apply_eigen_sym(S, [](T x) { using std::log; return log(x); });
     }
 
     static MatrixType matrix_exp_sym(const MatrixType& L) {
-        using std::exp;
-        auto eig = detail::eigen_sym(L);
-        MatrixType D;
-        for (std::size_t i = 0; i < N; ++i) D(i, i) = exp(eig.values[i]);
-        return eig.vectors * D * eig.vectors.transpose();
+        return detail::apply_eigen_sym(L, [](T x) { using std::exp; return exp(x); });
     }
 };
 
