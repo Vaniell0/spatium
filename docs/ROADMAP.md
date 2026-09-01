@@ -100,6 +100,7 @@ This document tracks what's done and what's open, by content and by date — not
 - **Eigen integration decision** — remain optional via `SPATIUM_EIGEN=ON`; heat method + differential + interop stay isolated. Vec/Matrix not migrated to Eigen; `Eigen::Ref<…>` planned for public APIs only once dense QR/SVD lands (see Backlog → Native math)
 - ~~CPU raytracer: Quadric → viewer texture (analytical render without mesh)~~ done: `ray_quadric`/`ray_quadric_proximity` in `geometry/ray_surface.hpp`, exercised by `examples/parametric_analytical_demo.cpp`'s `glow_sphere.png`; ships PNG output rather than a live viewer texture, which covers the same "analytical render without mesh" goal for the gallery use case
 - ~~Ray-ParametricSurface: Newton UV iteration for arbitrary f(u,v) surfaces~~ done: `geometry/ray_parametric.hpp` — no tessellation, no BVH, Newton-solves `S(u,v) = o + t·d`; exercised by `examples/parametric_analytical_demo.cpp` producing `klein_analytical.png`/`mobius_analytical.png`/`bumpy_analytical.png`/`parametric_gallery.png`
+- ~~Ray-quartic: torus intersection via solve_quartic~~ done: `geometry/ray_surface.hpp`'s `Torus<T>` + `ray_torus()`/`ray_torus_proximity()`, exercised by `primitives_demo`'s analytic-torus raycast row and `torus_analytical.png` — this had drifted stale in Backlog → Analytical rendering (fixed 2026-08-31)
 
 ## API stability, CI, docs truing-up, C++23 modules folded into main (2026-08-28)
 
@@ -239,7 +240,6 @@ Grouped by topic, not by version — an item sits here until it's ready to becom
 ## Analytical rendering
 
 - Fragment shader raymarcher: GPU-native analytical render (GLSL quadric math)
-- Ray-quartic: torus intersection via solve_quartic
 - Dual Quaternion
 
 ## Manifold applications
@@ -261,9 +261,8 @@ Grouped by topic, not by version — an item sits here until it's ready to becom
 
 ## GPU rendering (CUDA)
 
-- Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above), but the render's completion status was last confirmed "in flight" on 2026-08-28; treat as open until confirmed landed.
+- Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
 - `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
-- `gpu/` itself is not tracked in git yet (part of the uncommitted pile) and won't be until the above makes it a standard mechanism rather than a one-off port.
 
 ## Contact physics / RSC
 
