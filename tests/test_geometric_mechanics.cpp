@@ -4,7 +4,9 @@
 #include <catch2/catch_approx.hpp>
 #include <spatium/physics/mechanics/lgvi.hpp>
 #include <spatium/physics/mechanics/continuum.hpp>
-#include <spatium/mesh/dec.hpp>
+#if SPATIUM_HAS_EIGEN
+#  include <spatium/mesh/dec.hpp>
+#endif
 #include <spatium/mesh/mesh.hpp>
 #include <spatium/mesh/topology.hpp>
 #include <spatium/spaces/euclidean.hpp>
@@ -15,16 +17,6 @@ using namespace spatium::algebra;
 using namespace spatium::physics::mechanics;
 using namespace spatium::mesh;
 using Catch::Approx;
-
-namespace {
-Mesh<E3> make_tetrahedron() {
-    Mesh<E3> m;
-    m.vertices = {Vec3{0, 0, 0}, Vec3{1, 0, 0},
-                  Vec3{0, 1, 0}, Vec3{0, 0, 1}};
-    m.faces = {{0, 1, 2}, {0, 1, 3}, {1, 2, 3}, {0, 2, 3}};
-    return m;
-}
-}
 
 // ── LGVI tests ────────────────────────────────────────────────
 
@@ -157,6 +149,17 @@ TEST_CASE("LGVI free rigid body: orientation stays on SO(3)",
 }
 
 // ── DEC heat equation tests ───────────────────────────────────
+#if SPATIUM_HAS_EIGEN
+
+namespace {
+Mesh<E3> make_tetrahedron() {
+    Mesh<E3> m;
+    m.vertices = {Vec3{0, 0, 0}, Vec3{1, 0, 0},
+                  Vec3{0, 1, 0}, Vec3{0, 0, 1}};
+    m.faces = {{0, 1, 2}, {0, 1, 3}, {1, 2, 3}, {0, 2, 3}};
+    return m;
+}
+}
 
 TEST_CASE("DEC heat: backward-Euler step on tetrahedron preserves total mass",
           "[dec][heat]") {
@@ -199,6 +202,8 @@ TEST_CASE("DEC heat: long-time limit converges to mean value",
     for (int i = 0; i < phi.coeffs.size(); ++i)
         REQUIRE(std::abs(phi.coeffs(i) - mean) < 1e-3);
 }
+
+#endif // SPATIUM_HAS_EIGEN
 
 // ── Continuum scaffolding tests ────────────────────────────────
 
