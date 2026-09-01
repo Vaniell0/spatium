@@ -4,7 +4,7 @@
 // Focused entry point covering the typical "math + geometry"
 // usage: algebra (Vec/Matrix/Quat/Complex/Polynomial/literals),
 // concepts and verifiers, the canonical spaces (Euclidean,
-// Sphere, Hyperbolic, Product, ParametricSurface), all geometry
+// Sphere, Hyperbolic, SPD, Product, ParametricSurface), all geometry
 // primitives and operations, the BVH, and the textual IO helpers
 // (Table). Pulls in NO mesh data structure and NO physics models.
 // Prefer this over <spatium/spatium.hpp> when you do not need
@@ -27,6 +27,7 @@
 #include <spatium/spaces/euclidean.hpp>
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
+#include <spatium/spaces/spd.hpp>
 #include <spatium/spaces/product.hpp>
 #include <spatium/geometry/geometry.hpp>
 #include <spatium/spatial/bvh.hpp>

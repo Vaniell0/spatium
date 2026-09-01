@@ -13,6 +13,7 @@ import spatium.mesh;
 #include <spatium/spaces/euclidean.hpp>
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
+#include <spatium/spaces/spd.hpp>
 #include <spatium/spaces/product.hpp>
 #include <spatium/spaces/parametric.hpp>
 #include <spatium/spaces/implicit.hpp>
