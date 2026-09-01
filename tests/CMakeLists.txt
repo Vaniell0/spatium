@@ -12,6 +12,7 @@ add_executable(spatium_tests
     test_intersection.cpp
     test_sphere.cpp
     test_hyperbolic.cpp
+    test_spd.cpp
     test_morphism.cpp
     test_format.cpp
     test_mesh.cpp
