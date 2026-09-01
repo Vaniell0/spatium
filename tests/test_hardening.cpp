@@ -192,7 +192,7 @@ TEST_CASE("near_zero works", "[hardening]") {
 // ── SE3 known-good test (not just roundtrip) ───────────────────
 
 TEST_CASE("SE3 exp known-good: pure translation", "[hardening]") {
-    algebra::SE3 se3;
+    algebra::SE3<double> se3;
     // Pure translation (zero rotation): exp should give identity + translation
     Vec<double, 6> xi{0, 0, 0, 1, 2, 3};
     auto T = se3.exp(xi);
@@ -203,10 +203,10 @@ TEST_CASE("SE3 exp known-good: pure translation", "[hardening]") {
 }
 
 TEST_CASE("SE3 exp known-good: 90deg Z rotation + translation", "[hardening]") {
-    algebra::SE3 se3;
+    algebra::SE3<double> se3;
     // 90 degrees around Z, then check act on (1,0,0)
     auto R = se3.so3.rz(std::numbers::pi / 2);
-    auto T = algebra::SE3::from_Rt(R, Vec3{5, 0, 0});
+    auto T = algebra::SE3<double>::from_Rt(R, Vec3{5, 0, 0});
     auto p = se3.act(T, Vec3{1, 0, 0});
     // R*(1,0,0) = (0,1,0), then + (5,0,0) = (5,1,0)
     CHECK_THAT(p[0], WithinAbs(5.0, 1e-8));

@@ -25,17 +25,17 @@ using Catch::Approx;
 
 TEST_CASE("RKMK4 commutator-free: orthogonality preserved over many steps",
           "[lie][rkmk4]") {
-    SO3 group{};
+    SO3<double> group{};
     auto R = group.identity();
     Vec3 omega{0.4, -0.6, 0.8};
-    auto field = [&](const SO3::ElementType&) { return omega; };
+    auto field = [&](const SO3<double>::ElementType&) { return omega; };
 
     for (int i = 0; i < 1000; ++i)
         R = lie_rkmk4_cf_step(group, R, 0.01, field);
 
     // R^T R should remain identity to ≈ 1e-10 even with 1000 exp's.
     auto RtR = R.transpose() * R;
-    auto I = SO3::ElementType::identity();
+    auto I = SO3<double>::ElementType::identity();
     double err = 0;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
@@ -54,7 +54,7 @@ TEST_CASE("RKMK4 vs midpoint on Euler top: |L| drift drops by ≥ 100×",
     };
 
     auto run = [&](auto&& stepper) {
-        EulerTopState s{ SO3::ElementType::identity(), Vec3{1.0, 0.5, 0.2} };
+        EulerTopState s{ SO3<double>::ElementType::identity(), Vec3{1.0, 0.5, 0.2} };
         Vec3 L0_body = inertia(s.omega);
         double L0_mag = std::sqrt(L0_body.dot(L0_body));
 

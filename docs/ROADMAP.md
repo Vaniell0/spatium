@@ -100,6 +100,7 @@ This document tracks what's done and what's open, by content and by date — not
 - **Eigen integration decision** — remain optional via `SPATIUM_EIGEN=ON`; heat method + differential + interop stay isolated. Vec/Matrix not migrated to Eigen; `Eigen::Ref<…>` planned for public APIs only once dense QR/SVD lands (see Backlog → Native math)
 - ~~CPU raytracer: Quadric → viewer texture (analytical render without mesh)~~ done: `ray_quadric`/`ray_quadric_proximity` in `geometry/ray_surface.hpp`, exercised by `examples/parametric_analytical_demo.cpp`'s `glow_sphere.png`; ships PNG output rather than a live viewer texture, which covers the same "analytical render without mesh" goal for the gallery use case
 - ~~Ray-ParametricSurface: Newton UV iteration for arbitrary f(u,v) surfaces~~ done: `geometry/ray_parametric.hpp` — no tessellation, no BVH, Newton-solves `S(u,v) = o + t·d`; exercised by `examples/parametric_analytical_demo.cpp` producing `klein_analytical.png`/`mobius_analytical.png`/`bumpy_analytical.png`/`parametric_gallery.png`
+- ~~Ray-quartic: torus intersection via solve_quartic~~ done: `geometry/ray_surface.hpp`'s `Torus<T>` + `ray_torus()`/`ray_torus_proximity()`, exercised by `primitives_demo`'s analytic-torus raycast row and `torus_analytical.png` — this had drifted stale in Backlog → Analytical rendering (fixed 2026-08-31)
 
 ## API stability, CI, docs truing-up, C++23 modules folded into main (2026-08-28)
 
@@ -197,6 +198,22 @@ Third and smallest of the three manifold-backlog ideas raised 2026-08-28 (the ot
 
 Two real, non-obvious things found while tuning it, not guessed: (1) a hyperbolic ball's apparent angular size follows `sin(alpha) = sinh(radius)/sinh(distance)`, not the Euclidean `radius/distance` — an initial `radius=0.25` at `distance=1.0` filled a third of the frame, corrected to `0.08`; (2) with only 12 base directions spread across the *entire* sphere of view (not clustered toward the camera's forward hemisphere the way objects in ordinary scenes are), a normal ~40-55° FOV only ever catches 1-3 of them by chance — needed a wide (130°) FOV plus the subdivision (12→42 directions) to show a genuinely scattered field in one still frame; the wide-FOV rectilinear projection itself stretches off-center markers into radiating streaks, an honest projection-formula side effect (not a hyperbolic-metric effect) left in because it reads as a striking, correctly-motivated part of the image rather than a defect. Palette also needed golden-ratio-conjugate hue decorrelation (`hue = fmod(i * 0.618034, 1)`) since consecutive icosahedron-vertex indices are often spatially adjacent, which otherwise clustered same-hued neighbors together on screen. Wired into `examples/CMakeLists.txt` and `flake.nix` (`nix run .#hyperbolic-tessellation`), `nix flake check --no-build` passes, 825/825 tests still green (no library code changed, only the new example + existing `subdivide_once`/`icosahedron`/render-engine reuse).
 
+## SO(3)/SE(3) templated on Scalar (2026-08-31)
+
+`SO3`/`SE3` (`algebra/groups/so3.hpp`, `se3.hpp`) moved from hardcoded `double` to `template<Scalar T = double>`, matching every other Scalar-templated type in the tree — `SO3<double>`/`SE3<double>` behave exactly as before (all call sites updated: `physics/mechanics/lgvi.hpp`, `examples/tumbling_body_demo.cpp`, test helpers), and `SO3<Dual<double>>`/`SE3<Dual<double>>` now satisfy `Group`/`LieGroup` (checked via `static_assert`, plus a real differentiation test — rotating a point about Z with a `Dual`-seeded angle recovers the exact closed-form derivative, no hand-derived Jacobian). This is what Sophus/manif already give C++ robotics/SLAM/pose-graph optimization; Spatium didn't until now.
+
+Two real, non-hypothetical things found while templating, not assumed:
+- `Dual<T>` gained `acos()`/`tan()` (`algebra/dual.hpp`) — `SO3::log()` needs the former, `SE3::log()` the latter; neither existed before since nothing had exercised `Dual<T>` through a Lie-group log map yet.
+- A real latent bug, unmasked by the change itself: `SO3::log()`'s `sin(angle)` call had no `using std::sin;` in scope (unlike `exp()`, which did) and silently worked anyway because it resolved to the global `::sin` leaked in by `<cmath>` — invisible while `so3.hpp` didn't yet include `dual.hpp`. Once it did (needed for the `Dual<double>` `static_assert`), `spatium::algebra::sin<T>` (from `dual.hpp`) became visible via ordinary unqualified lookup inside the same namespace and shadowed the outer `::sin`, breaking the `T=double` case outright until `using std::sin;` was added explicitly. Caught by the compiler on the very first build, not by review.
+
+C++23-modules partitions (`modules/algebra/groups_so3.cppm`, `groups_se3.cppm`) needed `import :dual;` added — the `Dual<double>` static_asserts reference a type those partitions hadn't previously needed to see. 825→827 tests, one pre-existing unrelated failure (`embedded_base_is_current`, a stale CMake-configure artifact from the 2026-08-31 release's git-history squash — `kSpatiumCommitSha` reads "unknown" in the cached `build/`, needs a `cmake` reconfigure to pick up the real HEAD SHA, untouched by this change).
+
+**Follow-up same day: `SO3::exp()`/`log()` rewritten for real differentiability at the origin.** Building an actual rotation-averaging demo (`examples/primitives_demo.cpp --scene rotavg`, below) exposed that `gradient(f, Vec3{0,0,0})` came back a hard `[0,0,0]` on a genuine rotation-averaging objective — confirmed via a standalone probe against the same objective evaluated 0.01 away (a real, nonzero gradient there). Root cause: `SO3::exp()`'s old `if (angle < eps) return identity();` and `SO3::log()`'s old `if (angle < eps) return AlgebraType{};` were both exactly correct in *value* at the origin/identity but silently *v-independent* there — under `Dual<T>` this zeroed every derivative exactly at the single most common optimization starting point, even though `exp()`/`log()` are analytically smooth there (the singularity is entirely in the intermediate `axis = v/angle` division and `acos'(1) = -1/√0`, not in the functions themselves). Fixed by re-deriving both in terms of `θ² = v·v` (a smooth polynomial in `v`, unlike `angle = √θ²`) with Taylor-series coefficients near the origin instead of a constant-value shortcut — `SO3::exp()`'s `R = I + a(θ)K + b(θ)K²` now uses `K = skew(v)` directly (not `skew(v/angle)`) with `a,b` the (now removable-singularity-safe) `sin(θ)/θ`, `(1-cos θ)/θ²`; `SO3::log()`'s general formula was refactored around `vee(R-Rᵀ)` (always linear/smooth in `R`) scaled by a coefficient that's Taylor-expanded near `cos_angle=1` *before* ever calling `acos` there, since `acos`'s own derivative diverges at exactly that point. The `angle≈π` branch is untouched — a genuine, non-removable coordinate singularity of the axis-angle chart itself (two antipodal axes represent the same rotation there), not a Dual artifact, and out of scope for this fix. Two new regression tests (`tests/test_algebra.cpp`): `SO3<Dual<double>>` differentiates correctly *at* `v=0` (checked against the known first-order Taylor expansion `exp(v) ≈ I + skew(v)`) and through a `log(exp(v))` roundtrip at `v=0`. 827→829 tests, same one pre-existing unrelated failure as above.
+
+Re-deriving `SO3::exp()` this carefully surfaced the same *shape* of problem in `SE3::exp()`'s translation part — and cross-checking it against an independent ground truth (a 40-term brute-force Taylor sum of the 4×4 se(3) generator's own matrix exponential, computed independently of `so3.hpp`/`se3.hpp`) turned up a **real, pre-existing, silent correctness bug**, not just a differentiability gap: the old `V` matrix used `skew(ω/angle)` (the unit axis) with coefficients `(1-cos θ)/θ²`, `(θ-sin θ)/θ³` that are only valid for `skew(ω)` (unnormalized) — wrong for any nonzero rotation combined with a translation. Confirmed numerically: the old formula gave `t=[0.897, 0.646, 0.218]` against the ground truth's `[0.975, 0.603, -0.062]` for a representative `(ω,v)` — not close, and the *z* component even has the wrong sign. No prior test caught it: `"SE3 exp/log roundtrip"` is self-consistent under either convention (both sides used the same wrong one), and `"SE3 exp known-good: 90deg Z rotation + translation"` builds `T` via `from_Rt()` directly, bypassing `exp()`'s `V` matrix entirely — a real, honest test-coverage gap, not carelessness caught late. Fixed by extracting a shared `translation_jacobian(ω)` (the corrected, ground-truth-verified `V(ω) = I + b(θ)K + c(θ)K²` with `K = skew(ω)`, Taylor-safe near `ω=0` the same way `SO3::exp()` is) used by both `SE3::exp()` (as `V` itself) and `SE3::log()` — which now inverts it via the library's own general `invert()` (`algebra/linear_solve.hpp`) rather than a second hand-derived `V⁻¹` closed form, deliberately trading a small runtime cost for not risking a *third* manually-derived formula after the first one turned out wrong. One more regression test (`tests/test_algebra.cpp`): `SE3::exp()` checked directly against the brute-force ground truth, closing the exact coverage gap that let the bug through. 829→830 tests, same one pre-existing unrelated failure as above.
+
+**`examples/primitives_demo.cpp --scene rotavg`** — the demo that surfaced all of this: SO(3) rotation averaging (N noisy measurements of one rotation → the estimate that best explains them all, a real SLAM/sensor-fusion building block), solved via `calculus.hpp`'s existing `gradient()`/`minimize()` with zero hand-derived Jacobian, animated one Armijo-backtracking step per frame (the same per-iteration logic `minimize()` uses internally, exposed step-by-step) so the convergence itself is watchable — bright RGB gizmo (live estimate) converging toward a gray reference (ground truth) alongside dim RGB gizmos (the noisy inputs).
+
 ## C++23 modules: caught up to a working state (2026-08-28)
 
 The 2026-04-24 migration (see above) had gone stale — this closes the gap rather than deleting the subsystem, since the missing partitions were genuinely mechanical, not a design problem.
@@ -214,52 +231,57 @@ The 2026-04-24 migration (see above) had gone stale — this closes the gap rath
 
 Grouped by topic, not by version — an item sits here until it's ready to become real work, then moves to Completed above with the date it landed.
 
+Each item carries a tag for *intent*, not difficulty or sequencing — Spatium's goal is to become the de-facto standard for computational work on arbitrary mathematical spaces, and that happens by earning the interest of people who know this territory well, not by chasing a release checklist:
+
+- **[course]** — genuinely useful, actively where we're steering the project right now.
+- **[want]** — we'd just like this to exist, or it'd be fun/interesting to build; no strong pull yet, no promise of order.
+- **[dare]** — big, uncertain, or hard enough that it won't get built by us any time soon — a standing, genuine invitation for whoever wants to take a swing at it.
+
+A PR against any tag here is welcome. So is a PR against nothing here — if you build something we didn't list, that's a real step toward Spatium becoming a standard in its own right, not a detour from this list.
+
 ## Mesh processing
 
-- Mesh simplification (edge collapse + QEM)
-- Isotropic remeshing on Surface
-- PLY import/export
+- **[course]** Mesh simplification (edge collapse + QEM)
+- **[course]** Isotropic remeshing on Surface
+- **[want]** PLY import/export
 
 ## Analytical rendering
 
-- Fragment shader raymarcher: GPU-native analytical render (GLSL quadric math)
-- Ray-quartic: torus intersection via solve_quartic
-- Dual Quaternion
+- **[dare]** Fragment shader raymarcher: GPU-native analytical render (GLSL quadric math)
+- **[want]** Dual Quaternion
 
 ## Manifold applications
 
-- Fiber bundles (tangent/cotangent)
-- Geodesic FEM (Laplace-Beltrami, heat equation)
+- **[dare]** Fiber bundles (tangent/cotangent)
+- **[dare]** Geodesic FEM (Laplace-Beltrami, heat equation)
 
 ## GIS
 
-- Ellipsoid (WGS84) as Space — geodesic distance on Earth
+- **[want]** Ellipsoid (WGS84) as Space — geodesic distance on Earth
 
 ## Geometry
 
-- Boolean ops on concave mesh (BSP tree)
+- **[course]** Boolean ops on concave mesh (BSP tree)
 
 ## Native math (dependency reduction)
 
-- SVD / eigendecomposition — a real native-implementation candidate (unlike the heat method's sparse-Cholesky step or ipc-toolkit, whose cost/benefit doesn't favor a from-scratch rewrite). Blocks `Eigen::Ref<…>` public-API adapters noted above and dense-solve paths that currently require `SPATIUM_EIGEN=ON`.
+- **[course]** SVD / eigendecomposition — a real native-implementation candidate (unlike the heat method's sparse-Cholesky step or ipc-toolkit, whose cost/benefit doesn't favor a from-scratch rewrite). Blocks `Eigen::Ref<…>` public-API adapters noted above and dense-solve paths that currently require `SPATIUM_EIGEN=ON`.
 
 ## GPU rendering (CUDA)
 
-- Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above), but the render's completion status was last confirmed "in flight" on 2026-08-28; treat as open until confirmed landed.
-- `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
-- `gpu/` itself is not tracked in git yet (part of the uncommitted pile) and won't be until the above makes it a standard mechanism rather than a one-off port.
+- **[course]** Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
+- **[want]** `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
 
 ## Contact physics / RSC
 
-- Full multi-config sweep for the implicit-contact Newton solver, matching the XPBD investigation's own 20-point discipline, plus a performance pass (current single traced config takes multiple CPU-minutes under ipc-toolkit's TBB-based collision detection).
-- RSC's calibration-search against the implicit-contact pipeline — not yet built.
-- RSC "real-time control of complex dynamics" domain (illustrative: an underwater drone) — depends on the base+custom deployment split actually working.
+- **[course]** Full multi-config sweep for the implicit-contact Newton solver, matching the XPBD investigation's own 20-point discipline, plus a performance pass (current single traced config takes multiple CPU-minutes under ipc-toolkit's TBB-based collision detection).
+- **[course]** RSC's calibration-search against the implicit-contact pipeline — not yet built.
+- **[dare]** RSC "real-time control of complex dynamics" domain (illustrative: an underwater drone) — depends on the base+custom deployment split actually working.
 
 ## Interop / ecosystem
 
-- Heat-method log map, CGAL-grade exact polyhedral geodesics (geometry-central and CGAL each cover one half of this; Spatium currently ships neither on top of Dijkstra/heat-distance).
-- SO(3)/SE(3) are hardcoded on `double` — Sophus/manif are templated + autodiff-compatible; Spatium isn't yet.
-- Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view` are planned once SVD/eigendecomposition (above) lands.
+- **[dare]** Heat-method log map, CGAL-grade exact polyhedral geodesics (geometry-central and CGAL each cover one half of this; Spatium currently ships neither on top of Dijkstra/heat-distance).
+- **[want]** Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view` are planned once SVD/eigendecomposition (above) lands.
 
 ---
 
@@ -278,5 +300,4 @@ Grouped by topic, not by version — an item sits here until it's ready to becom
 
 **Caveats:**
 - Geodesics: Dijkstra (O(h) error on mesh edges) ships unconditionally; heat method (Crane 2013) ships with `SPATIUM_EIGEN=ON` via pre-factored `HeatSolver<S>` (see "Eigen interop, heat method" above). geometry-central also exposes the heat log map; CGAL adds exact MMP. See Backlog → Interop / ecosystem.
-- SO(3)/SE(3) are hardcoded on `double` — see Backlog → Interop / ecosystem.
 - Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — see Backlog → Interop / ecosystem.

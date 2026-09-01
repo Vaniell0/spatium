@@ -16,10 +16,10 @@ using spatium::tests::euler_top_step;
 using Catch::Approx;
 
 TEST_CASE("Lie-Euler step on SO(3): preserves orthogonality", "[lie][so3]") {
-    SO3 group{};
+    SO3<double> group{};
     auto R = group.identity();
     Vec3 omega{0.5, 1.0, -0.3};
-    auto field = [&](const SO3::ElementType&) { return omega; };
+    auto field = [&](const SO3<double>::ElementType&) { return omega; };
 
     for (int i = 0; i < 100; ++i)
         R = lie_euler_step(group, R, 0.01, field);
@@ -27,17 +27,17 @@ TEST_CASE("Lie-Euler step on SO(3): preserves orthogonality", "[lie][so3]") {
     // R^T R should still be identity (no drift off the manifold — all updates
     // happen via exp on so(3), which is orthogonality-preserving by construction).
     auto RtR = R.transpose() * R;
-    auto I = SO3::ElementType::identity();
+    auto I = SO3<double>::ElementType::identity();
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
             REQUIRE(RtR(i, j) == Approx(I(i, j)).margin(1e-10));
 }
 
 TEST_CASE("Lie-midpoint step recovers analytical rotation", "[lie][so3]") {
-    SO3 group{};
+    SO3<double> group{};
     auto R = group.identity();
     Vec3 omega_z{0.0, 0.0, 1.0};       // 1 rad/s about z
-    auto field = [&](const SO3::ElementType&) { return omega_z; };
+    auto field = [&](const SO3<double>::ElementType&) { return omega_z; };
 
     constexpr double dt = 0.01;
     constexpr int steps = 100;          // total t = 1 rad
@@ -62,7 +62,7 @@ TEST_CASE("Torque-free Euler top: |L| conserved", "[lie][euler-top]") {
         return Vec3{v[0] / I_diag[0], v[1] / I_diag[1], v[2] / I_diag[2]};
     };
 
-    EulerTopState s{ SO3::ElementType::identity(), Vec3{1.0, 0.5, 0.2} };
+    EulerTopState s{ SO3<double>::ElementType::identity(), Vec3{1.0, 0.5, 0.2} };
 
     auto L0_body = inertia(s.omega);
     double L0_mag = std::sqrt(L0_body.dot(L0_body));
@@ -81,7 +81,7 @@ TEST_CASE("Torque-free Euler top: |L| conserved", "[lie][euler-top]") {
 
     // R should still be orthogonal after thousands of exp updates.
     auto RtR = s.R.transpose() * s.R;
-    auto I_mat = SO3::ElementType::identity();
+    auto I_mat = SO3<double>::ElementType::identity();
     double orth_err = 0;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)

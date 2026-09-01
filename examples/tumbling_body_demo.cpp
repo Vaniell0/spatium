@@ -89,7 +89,6 @@
 #include <filesystem>
 #include <numbers>
 #include <print>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -99,7 +98,7 @@ using spatium::geometry::ray_quadric;
 using spatium::geometry::Ray;
 using spatium::physics::mechanics::LGVIRigidBodyState;
 using spatium::physics::mechanics::lgvi_rigid_body_step;
-using SO3 = spatium::algebra::SO3;
+using SO3 = spatium::algebra::SO3<double>;
 using spatium::render::hsv_to_rgb255;
 using spatium::render::make_starfield;
 using spatium::render::sample_sky_color;

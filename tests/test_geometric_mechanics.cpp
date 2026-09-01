@@ -32,7 +32,7 @@ TEST_CASE("LGVI: hat & vee maps round-trip", "[lgvi][hat]") {
 TEST_CASE("LGVI: cay map of zero is identity", "[lgvi][cayley]") {
     Vec3 zero{0, 0, 0};
     auto F = lgvi_cayley(zero);
-    auto I = SO3::ElementType::identity();
+    auto I = SO3<double>::ElementType::identity();
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
             REQUIRE(F(i, j) == Approx(I(i, j)).margin(1e-15));
@@ -44,7 +44,7 @@ TEST_CASE("LGVI: cay of small y produces near-rotation matrix",
     auto F = lgvi_cayley(y);
     // F^T F should be I to high precision (Cayley map → SO(3) image).
     auto FtF = F.transpose() * F;
-    auto I = SO3::ElementType::identity();
+    auto I = SO3<double>::ElementType::identity();
     double err = 0;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
@@ -59,7 +59,7 @@ TEST_CASE("LGVI free rigid body: spatial momentum L = R · Π conserved",
     Vec3 J_diag{1.0, 2.0, 3.0};
 
     LGVIRigidBodyState s;
-    s.R = SO3::ElementType::identity();
+    s.R = SO3<double>::ElementType::identity();
     Vec3 omega0{1.0, 0.5, 0.2};
     s.Pi = Vec3{omega0[0] * J_diag[0],
                 omega0[1] * J_diag[1],
@@ -93,7 +93,7 @@ TEST_CASE("LGVI free rigid body: kinetic energy bounded over many steps",
     // issue / refinement target documented in lgvi.hpp.
     Vec3 J_diag{1.0, 2.0, 3.0};
     LGVIRigidBodyState s;
-    s.R = SO3::ElementType::identity();
+    s.R = SO3<double>::ElementType::identity();
     s.Pi = Vec3{1.0, 0.5, 0.2};
 
     double E0 = lgvi_kinetic_energy(s.Pi, J_diag);
@@ -117,7 +117,7 @@ TEST_CASE("LGVI |Π| body momentum conserved to machine precision",
     // least an isometry on so(3)* (as it should be for F ∈ SO(3)).
     Vec3 J_diag{1.0, 2.0, 3.0};
     LGVIRigidBodyState s;
-    s.R = SO3::ElementType::identity();
+    s.R = SO3<double>::ElementType::identity();
     s.Pi = Vec3{1.0, 0.5, 0.2};
     double mag0_sq = s.Pi[0]*s.Pi[0] + s.Pi[1]*s.Pi[1] + s.Pi[2]*s.Pi[2];
 
@@ -132,7 +132,7 @@ TEST_CASE("LGVI free rigid body: orientation stays on SO(3)",
           "[lgvi][so3]") {
     Vec3 J_diag{1.0, 1.0, 1.0};      // symmetric body
     LGVIRigidBodyState s;
-    s.R = SO3::ElementType::identity();
+    s.R = SO3<double>::ElementType::identity();
     s.Pi = Vec3{0.5, 1.0, -0.3};
 
     constexpr double dt = 1e-3;
@@ -140,7 +140,7 @@ TEST_CASE("LGVI free rigid body: orientation stays on SO(3)",
         s = lgvi_rigid_body_step(s, J_diag, dt);
 
     auto RtR = s.R.transpose() * s.R;
-    auto I = SO3::ElementType::identity();
+    auto I = SO3<double>::ElementType::identity();
     double err = 0;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
