@@ -151,6 +151,29 @@ TEST_CASE("SO3<Dual<double>> log/exp roundtrip differentiates AT v=0", "[algebra
     CHECK_THAT(recovered[0].deriv, WithinAbs(1.0, 1e-6));
 }
 
+TEST_CASE("SE3 exp known-good: rotation + translation vs. brute-force matrix exponential", "[algebra]") {
+    // Regression test for a real, pre-existing correctness bug found while
+    // making exp()/log() Dual-differentiable: the old translation_jacobian
+    // (V matrix) used skew(omega/angle) (the UNIT axis) with coefficients
+    // that are only valid for skew(omega) (unnormalized) -- silently wrong
+    // for any nonzero rotation combined with a translation. No prior test
+    // caught it: "SE3 exp/log roundtrip" is self-consistent under either
+    // convention, and the other "known-good" test builds T via from_Rt()
+    // directly, bypassing exp()'s V matrix entirely. Expected values are an
+    // independent ground truth: a 40-term brute-force Taylor sum of the
+    // 4x4 se(3) generator's matrix exponential, unrelated to so3.hpp/
+    // se3.hpp's own formulas.
+    SE3<double> se3;
+    Vec3 omega{0.4, -0.25, 0.15};
+    Vec3 vel{1.0, 0.5, -0.3};
+    auto T = se3.exp(Vec<double, 6>{omega[0], omega[1], omega[2], vel[0], vel[1], vel[2]});
+    auto t = SE3<double>::translation_of(T);
+
+    CHECK_THAT(t[0], WithinAbs(0.9748105589992107, 1e-10));
+    CHECK_THAT(t[1], WithinAbs(0.6026315246925509, 1e-10));
+    CHECK_THAT(t[2], WithinAbs(-0.06177561617697668, 1e-10));
+}
+
 TEST_CASE("SO3 verify group axioms", "[algebra]") {
     SO3<double> so3;
     std::array samples = {

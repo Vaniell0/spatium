@@ -4,6 +4,7 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/algebra/concepts.hpp>
 #  include <spatium/algebra/groups/so3.hpp>
+#  include <spatium/algebra/linear_solve.hpp>
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/vector.hpp>
 #endif
@@ -48,54 +49,28 @@ struct SE3 {
         return result;
     }
 
-    // Exponential map: se(3) → SE(3)
+    // Exponential map: se(3) → SE(3). t = V(ω)·vel — see
+    // translation_jacobian() below for V and why it changed.
     ElementType exp(const AlgebraType& xi) const {
         Vec3 omega{xi[0], xi[1], xi[2]};
         Vec3 vel{xi[3], xi[4], xi[5]};
 
         auto R = so3.exp(omega);
-        auto angle = omega.norm();
-
-        Vec3 t;
-        if (angle < epsilon<T>()) {
-            t = vel; // pure translation
-        } else {
-            // V = I + (1-cos θ)/θ² K + (θ - sin θ)/θ³ K²
-            auto axis = omega / angle;
-            auto K = skew(axis);
-            using std::sin; using std::cos;
-            auto a2 = angle * angle;
-            auto a3 = a2 * angle;
-            auto V = Mat3::identity()
-                   + K * ((T{1} - cos(angle)) / a2)
-                   + (K * K) * ((angle - sin(angle)) / a3);
-            t = V * vel;
-        }
+        Vec3 t = translation_jacobian(omega) * vel;
 
         return from_Rt(R, t);
     }
 
-    // Logarithmic map: SE(3) → se(3)
+    // Logarithmic map: SE(3) → se(3). vel = V(ω)⁻¹·t.
     AlgebraType log(const ElementType& T_mat) const {
         auto R = rotation_of(T_mat);
         auto t = translation_of(T_mat);
         auto omega = so3.log(R);
-        auto angle = omega.norm();
 
-        Vec3 vel;
-        if (angle < epsilon<T>()) {
-            vel = t; // pure translation
-        } else {
-            auto axis = omega / angle;
-            auto K = skew(axis);
-            using std::sin; using std::cos; using std::tan;
-            // V^{-1} = I - θ/2 K + (1 - θ/(2 tan(θ/2))) K²
-            auto half = angle * T{0.5};
-            auto V_inv = Mat3::identity()
-                       - K * half
-                       + (K * K) * (T{1} - half / tan(half));
-            vel = V_inv * t;
-        }
+        auto V = translation_jacobian(omega);
+        auto V_inv_result = invert(V);
+        Mat3 V_inv = V_inv_result ? *V_inv_result : Mat3::identity();
+        Vec3 vel = V_inv * t;
 
         return AlgebraType{omega[0], omega[1], omega[2], vel[0], vel[1], vel[2]};
     }
@@ -138,6 +113,50 @@ private:
         K(1, 0) =  v[2]; K(1, 2) = -v[0];
         K(2, 0) = -v[1]; K(2, 1) =  v[0];
         return K;
+    }
+
+    // V(ω) = I + b(θ)K + c(θ)K², K = skew(ω) — UNNORMALIZED, unlike so3.hpp's
+    // own exp()/log() which use skew of the axis-angle vector directly too.
+    // b(θ) = (1-cos θ)/θ², c(θ) = (θ-sin θ)/θ³ — verified against a
+    // brute-force 4×4 matrix exponential of the se(3) generator. Shared by
+    // exp() (used as V itself) and log() (inverted via the library's own
+    // invert(), rather than a second hand-derived V⁻¹ closed form — safer
+    // given what follows).
+    //
+    // The previous code used skew(ω/θ) (the UNIT axis) with these same
+    // coefficients in exp(), and a differently-shaped closed form for V⁻¹ in
+    // log() — a real, pre-existing, silent correctness bug for any nonzero
+    // rotation combined with a translation, not just the Dual-
+    // differentiability gap this whole rewrite was actually chasing: no
+    // prior test exercised exp()'s general branch against an independent
+    // ground truth, only self-consistent exp/log roundtrips (pass under
+    // either convention, since both sides used the same wrong one) and
+    // act()-only checks that build T via from_Rt() directly, bypassing
+    // exp() entirely.
+    //
+    // Taylor-expanded in θ² (not branching on the axis=ω/θ division) for
+    // the same reason as so3.hpp's exp(): V is analytically smooth at ω=0
+    // (V(0)=I exactly, with a well-defined first-order dependence on ω),
+    // but the old `if (angle < eps) { t = vel; }` shortcut returned a
+    // constant, ω-independent value there — correct at ω=0 itself, but
+    // silently zero-derivative under Dual<T> at the identity, again the
+    // single most common optimization starting point.
+    static Mat3 translation_jacobian(const Vec3& omega) {
+        using std::sin; using std::cos; using std::sqrt;
+        T theta2 = omega.dot(omega);
+        auto angle = sqrt(theta2);
+        auto K = skew(omega);
+
+        T b, c;
+        if (angle < epsilon<T>()) {
+            b = T{0.5} - theta2 / T{24};
+            c = T{1} / T{6} - theta2 / T{120};
+        } else {
+            b = (T{1} - cos(angle)) / theta2;
+            c = (angle - sin(angle)) / (theta2 * angle);
+        }
+
+        return Mat3::identity() + K * b + (K * K) * c;
     }
 };
 

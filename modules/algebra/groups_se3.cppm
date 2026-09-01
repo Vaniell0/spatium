@@ -5,6 +5,7 @@ import spatium.core;
 import :concepts;
 import :dual;
 import :groups_so3;
+import :linear_solve;
 import :matrix;
 import :vector;
 #define SPATIUM_BUILDING_MODULE 1
