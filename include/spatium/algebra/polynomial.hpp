@@ -83,8 +83,22 @@ std::array<Complex<T>, 3> solve_cubic(T a, T b, T c, T d) {
                 Complex<T>{re_part, im_part},
                 Complex<T>{re_part, -im_part}};
     } else if (abs(disc) <= epsilon<T>()) {
-        // All real, at least two equal
-        auto u = cbrt(-q1 / T{2});
+        // All real, at least two equal. u = cbrt(-q1/2) in general, but
+        // cbrt has an infinite derivative at 0 -- for the triple-root case
+        // (q1 itself already within tolerance of zero, t^3 = 0 exactly),
+        // computing cbrt of whatever tiny residual arithmetic noise q1
+        // actually carries amplifies that residual by roughly a cube-root
+        // power law instead of damping it, turning a machine-epsilon-scale
+        // q1 error into a much larger (epsilon^(1/3)-scale) error in the
+        // returned root. Real, reproduced case: solve_cubic<Real50>(1,-6,
+        // 12,-8) -- exact integer coefficients for (x-2)^3 -- passes under
+        // one Boost.Multiprecision build (q1 computed near bit-exact) but
+        // failed CI under another (a few-ULP q1 residual, amplified via
+        // cbrt into a visible ~1e-24 root error against a 1e-25 tolerance;
+        // the two returned duplicate roots' errors coming out equal and
+        // the third exactly double is the -u/-u/2u structure below showing
+        // through). Skip the amplification entirely when it can't matter.
+        auto u = (abs(q1) <= epsilon<T>()) ? T{0} : cbrt(-q1 / T{2});
         return {Complex<T>{T{2} * u + shift},
                 Complex<T>{-u + shift},
                 Complex<T>{-u + shift}};
