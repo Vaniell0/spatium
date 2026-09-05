@@ -22,27 +22,11 @@
 using namespace spatium::render;
 
 int main() {
-    TerminalSize term = query_terminal_size({.cols = 80, .rows = 45, .cell_aspect = 0.5});
-    const int width = term.cols;
-    const int height = std::max(1, term.rows - 1); // leave the last line for the shell prompt
-    const double cell_aspect = term.cell_aspect;
-
     const double R1 = 1.0;                  // tube radius
     const double R2 = 2.0;                  // donut radius (center to tube center)
     const double K2 = 12.5;                 // viewer distance -- pulled back ~2.5x; K1
                                              // below scales with K2 so apparent size is
                                              // unchanged, only perspective distortion drops
-    const double K1 = width * K2 * 3.0 / (8.0 * (R1 + R2)); // projection scale
-
-    // The reference donut.c's 0.07/0.02 spacing was tuned for an ~80-column
-    // terminal. On a wider one the same angular step covers proportionally
-    // more on-screen pixels (K1 grows with width), so consecutive samples
-    // land more than a cell apart and leave gaps a viewer reads as
-    // "transparent" patches (the far wall of the tube showing through).
-    // Scaling both spacings down by 80/width keeps the on-screen distance
-    // between samples roughly constant regardless of terminal size.
-    const double theta_spacing = 0.07 * 80.0 / width;
-    const double phi_spacing = 0.02 * 80.0 / width;
     const double two_pi = 2.0 * std::numbers::pi;
 
     // Custom palette -- write_terminal_frame_ascii takes any ordered
@@ -51,12 +35,42 @@ int main() {
 
     TerminalCursorGuard cursor_guard;
 
-    std::vector<std::vector<double>> intensity(height, std::vector<double>(width, -1.0));
-    std::vector<double> zbuffer(static_cast<std::size_t>(width) * height);
+    // Re-queried every frame below rather than once up front: a resize
+    // while the demo is running (dragging the terminal window, tmux pane
+    // split/resize) would otherwise leave it rendering at a stale size --
+    // ioctl() is cheap enough at 20fps that polling it costs nothing worth
+    // avoiding with a SIGWINCH handler.
+    int width = 0, height = 0;
+    std::vector<std::vector<double>> intensity;
+    std::vector<double> zbuffer;
     std::string frame_buf;
 
     double A = 0.0, B = 0.0;
     while (true) {
+        TerminalSize term = query_terminal_size({.cols = 80, .rows = 45, .cell_aspect = 0.5});
+        int new_width = term.cols;
+        int new_height = std::max(1, term.rows - 1); // leave the last line for the shell prompt
+        if (new_width != width || new_height != height) {
+            width = new_width;
+            height = new_height;
+            intensity.assign(height, std::vector<double>(width, -1.0));
+            zbuffer.assign(static_cast<std::size_t>(width) * height, 0.0);
+        }
+        const double cell_aspect = term.cell_aspect;
+
+        const double K1 = width * K2 * 3.0 / (8.0 * (R1 + R2)); // projection scale
+
+        // The reference donut.c's 0.07/0.02 spacing was tuned for an
+        // ~80-column terminal. On a wider one the same angular step covers
+        // proportionally more on-screen pixels (K1 grows with width), so
+        // consecutive samples land more than a cell apart and leave gaps a
+        // viewer reads as "transparent" patches (the far wall of the tube
+        // showing through). Scaling both spacings down by 80/width keeps
+        // the on-screen distance between samples roughly constant
+        // regardless of terminal size.
+        const double theta_spacing = 0.07 * 80.0 / width;
+        const double phi_spacing = 0.02 * 80.0 / width;
+
         std::fill(zbuffer.begin(), zbuffer.end(), 0.0);
         for (auto& row : intensity) std::fill(row.begin(), row.end(), -1.0);
 
