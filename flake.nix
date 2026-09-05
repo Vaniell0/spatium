@@ -83,6 +83,7 @@
               install_demo examples/burning_ship_demo          burning-ship
               install_demo examples/atom_demo                  atom-demo
               install_demo examples/primitives_demo            primitives-demo
+              install_demo examples/terminal_donut_demo        terminal-donut
               [ -f benchmarks/spatium_bench ] && install -Dm755 benchmarks/spatium_bench $out/bin/spatium-bench
               for so in lib*.so; do [ -f "$so" ] && install -Dm755 "$so" $out/lib/; done
               cp -r ${src}/include/spatium $out/include/
@@ -129,6 +130,7 @@
           wave          = p.mkApp "spatium-wave";
           collatz       = p.mkApp "spatium-collatz";
           burning-ship  = p.mkApp "spatium-burning-ship";
+          terminal-donut = p.mkApp "spatium-terminal-donut";
           bench         = p.mkApp "spatium-bench";
         });
 
