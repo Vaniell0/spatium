@@ -6,6 +6,7 @@
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/sky.hpp>
 #include <spatium/render/spectral.hpp>
+#include <spatium/render/terminal_canvas.hpp>
 #include <spatium/render/write_image.hpp>
 #include <atomic>
 #include <cmath>
@@ -176,4 +177,77 @@ TEST_CASE("make_starfield places every star findable via sample_sky_color", "[re
         double expected = s.brightness * 255.0;
         CHECK(c[0] >= expected - 1e-6);
     }
+}
+
+TEST_CASE("write_terminal_frame packs two rows per half-block cell", "[render][terminal]") {
+    // 2x2 frame: row 0 is the fg (top half), row 1 is the bg (bottom half)
+    // of the single emitted output row.
+    std::vector<std::vector<Vec<double, 3>>> frame = {
+        {Vec<double, 3>{255, 0, 0}, Vec<double, 3>{0, 255, 0}},
+        {Vec<double, 3>{0, 0, 255}, Vec<double, 3>{255, 255, 0}},
+    };
+    std::string out;
+    write_terminal_frame(out, frame);
+    CHECK(out ==
+          "\033[H"
+          "\033[38;2;255;0;0m\033[48;2;0;0;255m\xE2\x96\x80"
+          "\033[38;2;0;255;0m\033[48;2;255;255;0m\xE2\x96\x80"
+          "\033[0m\n");
+}
+
+TEST_CASE("write_terminal_frame gives an odd trailing row default background",
+          "[render][terminal]") {
+    std::vector<std::vector<Vec<double, 3>>> frame = {
+        {Vec<double, 3>{10, 20, 30}},
+    };
+    std::string out;
+    write_terminal_frame(out, frame);
+    CHECK(out ==
+          "\033[H"
+          "\033[38;2;10;20;30m\033[49m\xE2\x96\x80"
+          "\033[0m\n");
+}
+
+TEST_CASE("write_terminal_frame clamps out-of-range color components",
+          "[render][terminal]") {
+    std::vector<std::vector<Vec<double, 3>>> frame = {
+        {Vec<double, 3>{-40, 300, 128}},
+    };
+    std::string out;
+    write_terminal_frame(out, frame);
+    CHECK(out ==
+          "\033[H"
+          "\033[38;2;0;255;128m\033[49m\xE2\x96\x80"
+          "\033[0m\n");
+}
+
+TEST_CASE("write_terminal_frame_ascii maps intensity through the default palette",
+          "[render][terminal]") {
+    std::vector<std::vector<double>> intensity = {
+        {-1.0, 0.0, 1.0},
+    };
+    std::string out;
+    write_terminal_frame_ascii(out, intensity);
+    // -1 -> space (nothing drawn), 0.0 -> dimmest char, 1.0 -> brightest char.
+    CHECK(out == "\033[H .@\n");
+}
+
+TEST_CASE("write_terminal_frame_ascii accepts a caller-supplied palette",
+          "[render][terminal]") {
+    std::vector<std::vector<double>> intensity = {
+        {0.0, 0.5, 1.0},
+    };
+    std::string out;
+    write_terminal_frame_ascii(out, intensity, "ab");
+    CHECK(out == "\033[Habb\n");
+}
+
+TEST_CASE("query_terminal_size falls back off a non-TTY stdout", "[render][terminal]") {
+    // Under Catch2's test runner stdout isn't a TTY, so ioctl(TIOCGWINSZ)
+    // fails and the given fallback must come back unchanged.
+    TerminalSize fallback{123, 45, 0.6};
+    TerminalSize size = query_terminal_size(fallback);
+    CHECK(size.cols == 123);
+    CHECK(size.rows == 45);
+    CHECK(size.cell_aspect == 0.6);
 }

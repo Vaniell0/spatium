@@ -3,6 +3,12 @@ spatium_add_example(NAME showcase)
 spatium_add_example(NAME sets_demo)
 spatium_add_example(NAME spd_relationship_demo)
 
+# Live terminal animation, header-only (spatium::render::terminal_canvas) --
+# -O3 for the tight per-frame theta/phi trig loop, same reasoning as the
+# offline raytracers below (real per-frame cost, not meant to be stepped
+# through in a debugger).
+spatium_add_example(NAME terminal_donut_demo OPTIONS -O3 -march=native)
+
 # CPU-only analytical renderer — no Vulkan required.
 #
 # -O3 -march=native regardless of the project's overall CMAKE_BUILD_TYPE:
