@@ -8,6 +8,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ── Top-level vs. subproject detection ─────────────────────────
+# True only when Spatium's own project() call above is the outermost one
+# for the whole configure (i.e. someone ran cmake directly on this repo).
+# False when Spatium is pulled in via add_subdirectory()/FetchContent from
+# a downstream project that already called its own project() first. Used
+# below to default the "build everything" options (viewer, examples,
+# tests, RSC tools) OFF for downstream consumers, so FetchContent_MakeAvailable
+# just yields the header-only Spatium::sdk target without forcing Vulkan,
+# Catch2, or anything else the consumer didn't ask for.
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    set(SPATIUM_IS_TOP_LEVEL ON)
+else()
+    set(SPATIUM_IS_TOP_LEVEL OFF)
+endif()
+
 # ── RSC reproducibility: commit SHA baked in at configure time ────
 # rsc/checkpoint.hpp pins a saved base checkpoint to the exact commit it
 # was trained against (ground truth IS Spatium's own code, so a Spatium
@@ -300,7 +315,10 @@ target_compile_options(spatium_core PRIVATE
 )
 
 # ── Viewer library (Vulkan + GLFW) ────────────────────────────
-option(SPATIUM_BUILD_VIEWER "Build Vulkan viewer" ON)
+# Defaults ON standalone, OFF as a subproject/FetchContent dependency (see
+# SPATIUM_IS_TOP_LEVEL above) -- a downstream consumer linking Spatium::sdk
+# shouldn't need Vulkan/GLFW/shaderc just to get the header-only library.
+option(SPATIUM_BUILD_VIEWER "Build Vulkan viewer" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_VIEWER)
     find_package(Vulkan QUIET)
     find_package(glfw3 3.3 QUIET)
@@ -379,7 +397,10 @@ endif()
 add_library(spatium ALIAS spatium_sdk)
 
 # ── Tests ──────────────────────────────────────────────────────
-option(SPATIUM_BUILD_TESTS "Build tests" ON)
+# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): this
+# find_package(Catch2 3 REQUIRED) below would otherwise hard-fail a
+# downstream FetchContent consumer that doesn't have Catch2 installed.
+option(SPATIUM_BUILD_TESTS "Build tests" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_TESTS)
     enable_testing()
     find_package(Catch2 3 REQUIRED)
@@ -393,14 +414,20 @@ if(SPATIUM_BUILD_BENCHMARKS)
 endif()
 
 # ── Examples ───────────────────────────────────────────────────
-option(SPATIUM_BUILD_EXAMPLES "Build examples" ON)
+# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): a
+# downstream consumer pulling Spatium in via FetchContent wants
+# Spatium::sdk, not a build of every demo in examples/.
+option(SPATIUM_BUILD_EXAMPLES "Build examples" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_EXAMPLES)
     include(${CMAKE_SOURCE_DIR}/cmake/SpatiumTarget.cmake)
     add_subdirectory(examples)
 endif()
 
 # ── RSC tools ──────────────────────────────────────────────────
-option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ON)
+# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): RSC's
+# training tools are specific to this repo, not something a downstream
+# consumer pulling in Spatium::sdk needs built.
+option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_RSC_TOOLS)
     add_subdirectory(rsc/tools)
 endif()
