@@ -80,6 +80,7 @@
               install_demo examples/tumbling_body_demo          tumbling
               install_demo examples/wave_ca_demo               wave
               install_demo examples/collatz_demo               collatz
+              install_demo examples/native_collision_demo      native-collision
               install_demo examples/burning_ship_demo          burning-ship
               install_demo examples/atom_demo                  atom-demo
               install_demo examples/primitives_demo            primitives-demo
@@ -129,6 +130,7 @@
           tumbling      = p.mkApp "spatium-tumbling";
           wave          = p.mkApp "spatium-wave";
           collatz       = p.mkApp "spatium-collatz";
+          native-collision = p.mkApp "spatium-native-collision";
           burning-ship  = p.mkApp "spatium-burning-ship";
           terminal-donut = p.mkApp "spatium-terminal-donut";
           bench         = p.mkApp "spatium-bench";

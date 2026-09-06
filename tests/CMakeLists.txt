@@ -66,6 +66,7 @@ add_executable(spatium_tests
     test_contact_xpbd.cpp
     test_ipc_toolkit.cpp
     test_narrow_phase.cpp
+    test_rigid_contact.cpp
     test_relativity.cpp
     test_rsc_registry.cpp
     test_rsc_task.cpp

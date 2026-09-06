@@ -11,6 +11,7 @@
 
 #include <benchmark/benchmark.h>
 #include <spatium/physics/mechanics/narrow_phase.hpp>
+#include <spatium/physics/mechanics/rigid_contact.hpp>
 #include <spatium/spaces/parametric.hpp>
 #include <random>
 #include <vector>
@@ -149,3 +150,125 @@ static void BM_IpcContactPipeline_Torus(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_IpcContactPipeline_Torus);
+
+// ── rigid_contact.hpp: pairwise dynamic-body queries ────────────
+// Same query-cost comparison as above, for the closed-form pairwise
+// contact queries (discrete sphere-sphere, discrete sphere-AABB, and
+// continuous/swept sphere-sphere) that back the XPBD rigid-collision
+// path — sit these next to the static-surface numbers above
+// (`BM_PointToSphere*`/`BM_PointToTorus*` at 3.7-17.7 ns/op, the full
+// point_to+energy+force IPC pipeline at 12.6-25.5 ns/op via
+// `BM_IpcContactPipeline_*`) for an honest side-by-side against the
+// closed-form work this header adds. The swept query is expected to
+// cost more than the discrete one — it runs a full quadratic solve
+// (`ray_quadric`) instead of a handful of dot products — so the two
+// numbers are reported separately rather than implying "continuous
+// detection is free."
+
+static void BM_SphereSphereContact_Separated(benchmark::State& state) {
+    auto pts = query_cloud(2048, 3.0, 6.0);   // well outside contact range
+    Vec<double, 3> a{};
+    std::size_t i = 0;
+    for (auto _ : state) {
+        auto q = sphere_sphere_contact(a, 1.0, pts[i++ & 2047], 1.0);
+        benchmark::DoNotOptimize(q);
+    }
+}
+BENCHMARK(BM_SphereSphereContact_Separated);
+
+static void BM_SphereSphereContact_Overlapping(benchmark::State& state) {
+    // Centers within 2·radius of the origin -- guaranteed overlap with
+    // a unit sphere fixed at the origin.
+    auto pts = query_cloud(2048, 0.1, 1.8);
+    Vec<double, 3> a{};
+    std::size_t i = 0;
+    for (auto _ : state) {
+        auto q = sphere_sphere_contact(a, 1.0, pts[i++ & 2047], 1.0);
+        benchmark::DoNotOptimize(q);
+    }
+}
+BENCHMARK(BM_SphereSphereContact_Overlapping);
+
+static void BM_SweepSphereSphere_Crossing(benchmark::State& state) {
+    // A crosses a stationary unit sphere at the origin every call --
+    // the general (non-degenerate, real-root) path through
+    // `ray_quadric`'s quadratic solve, the case a moving-body pair
+    // actually needs continuous detection for.
+    Vec<double, 3> b{};
+    Vec<double, 3> disp_b{};
+    std::vector<Vec<double, 3>> starts = query_cloud(2048, 3.0, 6.0);
+    std::size_t i = 0;
+    for (auto _ : state) {
+        Vec<double, 3> a0 = starts[i++ & 2047];
+        Vec<double, 3> disp_a = Vec<double, 3>{b - a0};   // straight at the target
+        auto s = sweep_sphere_sphere(a0, 1.0, disp_a, b, 1.0, disp_b);
+        benchmark::DoNotOptimize(s);
+    }
+}
+BENCHMARK(BM_SweepSphereSphere_Crossing);
+
+static void BM_SweepSphereSphere_NoCrossing(benchmark::State& state) {
+    // Miss case: motion that passes well clear of the target sphere --
+    // still runs the full quadratic solve (a miss is a real-vs-complex
+    // root distinction, not an early out), so worth its own number.
+    Vec<double, 3> b{};
+    Vec<double, 3> disp_b{};
+    std::mt19937 rng(99);
+    std::uniform_real_distribution<double> off(3.0, 6.0);
+    std::vector<Vec<double, 3>> pairs_a, pairs_disp;
+    for (int k = 0; k < 2048; ++k) {
+        Vec<double, 3> a0{-off(rng), 5.0, 0.0};
+        pairs_a.push_back(a0);
+        pairs_disp.push_back(Vec<double, 3>{off(rng) * 2.0, 0.0, 0.0});   // sweeps past, not through
+    }
+    std::size_t i = 0;
+    for (auto _ : state) {
+        std::size_t k = i++ & 2047;
+        auto s = sweep_sphere_sphere(pairs_a[k], 1.0, pairs_disp[k], b, 1.0, disp_b);
+        benchmark::DoNotOptimize(s);
+    }
+}
+BENCHMARK(BM_SweepSphereSphere_NoCrossing);
+
+static void BM_SphereAabbContact_Outside(benchmark::State& state) {
+    auto pts = query_cloud(2048, 3.0, 6.0);
+    Vec<double, 3> box_min{-1, -1, -1}, box_max{1, 1, 1};
+    std::size_t i = 0;
+    for (auto _ : state) {
+        auto q = sphere_aabb_contact(pts[i++ & 2047], 0.5, box_min, box_max);
+        benchmark::DoNotOptimize(q);
+    }
+}
+BENCHMARK(BM_SphereAabbContact_Outside);
+
+static void BM_SphereAabbContact_DeepPenetration(benchmark::State& state) {
+    // Centers well inside the box on all axes -- exercises the
+    // minimum-translation-axis fallback path, not just the cheap clamp.
+    auto pts = query_cloud(2048, 0.0, 3.0);
+    Vec<double, 3> box_min{-10, -10, -10}, box_max{10, 10, 10};
+    std::size_t i = 0;
+    for (auto _ : state) {
+        auto q = sphere_aabb_contact(pts[i++ & 2047], 0.5, box_min, box_max);
+        benchmark::DoNotOptimize(q);
+    }
+}
+BENCHMARK(BM_SphereAabbContact_DeepPenetration);
+
+// ── broad phase: O(n^2) AABB sweep at demo scale ────────────────
+// This header targets "tens, not thousands" of bodies (see
+// rigid_contact.hpp's file header for why that rules out spatial/
+// bvh.hpp here) -- benchmark exactly that regime instead of an
+// unrealistically large n that would make the O(n^2) choice look
+// worse than it is at the scale it's actually meant for.
+static void BM_BroadPhaseAabbPairs(benchmark::State& state) {
+    auto pts = query_cloud(static_cast<std::size_t>(state.range(0)), 0.0, 10.0);
+    std::vector<geometry::Box<3, double>> boxes;
+    boxes.reserve(pts.size());
+    for (auto& p : pts) boxes.push_back(sphere_aabb(p, 0.3));
+
+    for (auto _ : state) {
+        auto pairs = broad_phase_aabb_pairs(boxes);
+        benchmark::DoNotOptimize(pairs);
+    }
+}
+BENCHMARK(BM_BroadPhaseAabbPairs)->Arg(16)->Arg(32)->Arg(64);
