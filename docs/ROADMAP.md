@@ -291,6 +291,20 @@ A PR against any tag here is welcome. So is a PR against nothing here — if you
 - **[dare]** Fiber bundles (tangent/cotangent)
 - **[dare]** Geodesic FEM (Laplace-Beltrami, heat equation)
 
+## Object model as manifold substrate
+
+Unlocked by the object→exact-`Surface` bridge (extending `geometry/surface_adapter.hpp`'s `ShapeSurface`, in flight as `feat/scene-object-model`): any renderable scene object exposing a real Surface, not an approximate tangent-plane one, means every manifold operation in the library (geodesics, Voronoi, parallel transport, DEC, contact, Riemannian optimization) becomes available on it for free instead of needing per-shape hand integration. Brainstormed 2026-09-06, honestly triaged (not everything below is equally close):
+
+- **[course]** Recursive procedural world generation — geodesic Voronoi/Delaunay cell on a surface, one object per cell oriented by the normal, recurse per-object for a fractal scene. Mostly composition of what already exists (`mesh/voronoi.hpp`'s geodesic Voronoi, `Point`/`Morphism` pipes) once the object bridge lands; not new math.
+- **[course]** Manifold-native RL as a new RSC domain — agent state = point on a `Surface`, action space = tangent space, transitions via `exp_map`. Fits RSC's existing REINFORCE-dispatcher methodology directly; also the concrete way to eventually fill the "geometric/manifold-constrained control theory" and "real-time control" candidates raised in the 2026-08-31 industry-directions session.
+- **[course]** `GeodesicPath<S>` as a first-class 1D `MetricSpace` — a geodesic curve carries its own arc-length parametrization, so points/distance/Voronoi work along a route. Real routing use case: waypoints along a path, optimal stop placement.
+- **[want]** Geodesic-guided growth simulation (cracks/roots/vessels) via existing parallel transport + distance fields — doesn't need the object bridge at all, already buildable on `Sphere`/`Hyperbolic`/`ParametricSurface` directly. Gallery-tier demo, not new library code.
+- **[want]** Manifold-native game movement (walk on an asteroid, "up" = surface normal, Mario-Galaxy-style) — same status as above, a composition/demo of existing primitives (`Surface`, `exp_map`, `normal`, `render::Camera`), not a new subsystem.
+- **[want]** Multiscale geometry pipeline (scan → mesh → `Quadric`/parametric fit → geodesic segmentation → recurse per segment) — not a separate idea, a continuation of the already-noted point-cloud → mesh reconstruction industry candidate (2026-08-31 session): reuses `ImplicitSurface`/`marching_cubes`/geodesic Voronoi, the new piece is only the fit-then-recurse loop.
+- **[dare]** Cloth/shell dynamics intrinsic to a curved surface — solving the material's own equations of motion in tangent space accounting for curvature, distinct from the already-shipped "drape cloth onto a fixed obstacle" work (`examples/cloth_sphere_probe.cpp`, Contact physics section above). Real research-level lift, not a quick extension of XPBD.
+- **[dare]** Topology optimization on an evolving surface (solve a stress/heat PDE on the current surface, remove material, iterate on the new one) — needs real elasticity FEM, well beyond the current DEC/heat-method infrastructure (which only covers scalar diffusion, not stress). Exciting, not scoped.
+- Explicitly NOT a new subsystem, just a consequence of the type system once the object bridge lands: composing nested local frames (a point on a robot → a point on one of its sensors → a point on that sensor's own chip surface) through the same `Point<Space>` vocabulary at every level. Worth a demo to show it falls out for free; not separate work.
+
 ## GIS
 
 - **[want]** Ellipsoid (WGS84) as Space — geodesic distance on Earth
