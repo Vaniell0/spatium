@@ -8,6 +8,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ── Top-level vs. subproject detection ─────────────────────────
+# True only when Spatium's own project() call above is the outermost one
+# for the whole configure (i.e. someone ran cmake directly on this repo).
+# False when Spatium is pulled in via add_subdirectory()/FetchContent from
+# a downstream project that already called its own project() first. Used
+# below to default the "build everything" options (viewer, examples,
+# tests, RSC tools) OFF for downstream consumers, so FetchContent_MakeAvailable
+# just yields the header-only Spatium::sdk target without forcing Vulkan,
+# Catch2, or anything else the consumer didn't ask for.
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    set(SPATIUM_IS_TOP_LEVEL ON)
+else()
+    set(SPATIUM_IS_TOP_LEVEL OFF)
+endif()
+
 # ── RSC reproducibility: commit SHA baked in at configure time ────
 # rsc/checkpoint.hpp pins a saved base checkpoint to the exact commit it
 # was trained against (ground truth IS Spatium's own code, so a Spatium
@@ -17,7 +32,7 @@ find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         OUTPUT_VARIABLE SPATIUM_GIT_SHA
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
@@ -27,8 +42,8 @@ if(NOT SPATIUM_GIT_SHA)
     set(SPATIUM_GIT_SHA "unknown")
 endif()
 configure_file(
-    ${CMAKE_SOURCE_DIR}/rsc/include/build_info.hpp.in
-    ${CMAKE_BINARY_DIR}/generated/build_info.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rsc/include/build_info.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.hpp
     @ONLY
 )
 
@@ -39,15 +54,15 @@ configure_file(
 # doesn't. Re-runs at every configure so the embedded weights always
 # match whatever's checked into rsc/checkpoints/.
 set(SPATIUM_RSC_BASE_CHECKPOINT
-    ${CMAKE_SOURCE_DIR}/rsc/checkpoints/base_v1.checkpoint
+    ${CMAKE_CURRENT_SOURCE_DIR}/rsc/checkpoints/base_v1.checkpoint
     CACHE FILEPATH "Base checkpoint to embed into the binary at configure time")
-set(SPATIUM_EMBEDDED_BASE_HEADER ${CMAKE_BINARY_DIR}/generated/embedded_base_data.hpp)
+set(SPATIUM_EMBEDDED_BASE_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_base_data.hpp)
 if(EXISTS ${SPATIUM_RSC_BASE_CHECKPOINT})
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_FOUND)
         execute_process(
             COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_SOURCE_DIR}/rsc/tools/embed_checkpoint.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/rsc/tools/embed_checkpoint.py
                 ${SPATIUM_RSC_BASE_CHECKPOINT}
                 ${SPATIUM_EMBEDDED_BASE_HEADER}
             RESULT_VARIABLE SPATIUM_EMBED_RESULT
@@ -89,7 +104,7 @@ if(SPATIUM_USE_MODULES)
             "SPATIUM_USE_MODULES requires GCC >= 14 (got ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
     endif()
     set(CMAKE_CXX_SCAN_FOR_MODULES ON)
-    list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
     include(SpatiumModule)
 
     # `import std;` BMI producer. GCC has no CMAKE_CXX_MODULE_STD=ON support yet,
@@ -98,10 +113,10 @@ if(SPATIUM_USE_MODULES)
     target_sources(spatium_std
         PUBLIC
             FILE_SET CXX_MODULES
-            BASE_DIRS ${CMAKE_SOURCE_DIR}/modules
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/modules
             FILES
-                ${CMAKE_SOURCE_DIR}/modules/std.cppm
-                ${CMAKE_SOURCE_DIR}/modules/std.compat.cppm
+                ${CMAKE_CURRENT_SOURCE_DIR}/modules/std.cppm
+                ${CMAKE_CURRENT_SOURCE_DIR}/modules/std.compat.cppm
     )
     target_compile_features(spatium_std PUBLIC cxx_std_23)
     target_compile_options(spatium_std PUBLIC -fmodules-ts)
@@ -113,36 +128,36 @@ if(SPATIUM_USE_MODULES)
     # `import std;` link.
     spatium_module(NAME spatium_core_module
         PARTITIONS
-            ${CMAKE_SOURCE_DIR}/modules/core.cppm
-            ${CMAKE_SOURCE_DIR}/modules/core/concepts.cppm
-            ${CMAKE_SOURCE_DIR}/modules/core/error.cppm
-            ${CMAKE_SOURCE_DIR}/modules/core/epsilon.cppm
-            ${CMAKE_SOURCE_DIR}/modules/core/precision.cppm
-            ${CMAKE_SOURCE_DIR}/modules/core/verify.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/concepts.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/error.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/epsilon.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/precision.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/verify.cppm
         DEPS spatium_sdk)
     add_library(Spatium::core_module ALIAS spatium_core_module)
 
     # ── spatium.algebra (Phase 1) ──────────────────────────────
     spatium_module(NAME spatium_algebra_module
         PARTITIONS
-            ${CMAKE_SOURCE_DIR}/modules/algebra.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/concepts.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/vec_simd.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/vector.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/matrix.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/format.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/literals.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/complex.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/polynomial.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/functions.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/quaternion.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/verify.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/groups_so3.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/groups_se3.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/dual.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/ode.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/linear_solve.cppm
-            ${CMAKE_SOURCE_DIR}/modules/algebra/calculus.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/concepts.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/vec_simd.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/vector.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/matrix.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/format.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/literals.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/complex.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/polynomial.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/functions.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/quaternion.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/verify.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_so3.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_se3.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/dual.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/ode.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/linear_solve.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/calculus.cppm
         DEPS spatium_sdk spatium_core_module)
     add_library(Spatium::algebra_module ALIAS spatium_algebra_module)
 
@@ -150,7 +165,7 @@ if(SPATIUM_USE_MODULES)
     # Excludes primitives.hpp (depends on spatium.spaces) and operations.hpp
     # (depends on spatium.geometry) to avoid cycles; both stay header-only.
     spatium_module(NAME spatium_mesh_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/mesh.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/mesh.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module)
     add_library(Spatium::mesh_module ALIAS spatium_mesh_module)
 
@@ -158,13 +173,13 @@ if(SPATIUM_USE_MODULES)
     # write_image.hpp exclusion rationale (STB implementation macro is a
     # link-time contract, not a module one).
     spatium_module(NAME spatium_render_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/render.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/render.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module)
     add_library(Spatium::render_module ALIAS spatium_render_module)
 
     # ── spatium.spaces (Phase 2): single partition, see spaces.cppm comment.
     spatium_module(NAME spatium_spaces_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/spaces.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/spaces.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_mesh_module)
     add_library(Spatium::spaces_module ALIAS spatium_spaces_module)
@@ -172,34 +187,34 @@ if(SPATIUM_USE_MODULES)
     # ── spatium.point (Phase 2): point + morphism
     spatium_module(NAME spatium_point_module
         PARTITIONS
-            ${CMAKE_SOURCE_DIR}/modules/point_primary.cppm
-            ${CMAKE_SOURCE_DIR}/modules/point.cppm
-            ${CMAKE_SOURCE_DIR}/modules/morphism.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/point_primary.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/point.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/morphism.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module)
     add_library(Spatium::point_module ALIAS spatium_point_module)
 
     # ── spatium.geometry (Phase 3): single partition, see geometry.cppm
     spatium_module(NAME spatium_geometry_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/geometry.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/geometry.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_mesh_module spatium_spaces_module spatium_point_module)
     add_library(Spatium::geometry_module ALIAS spatium_geometry_module)
 
     # ── spatium.spatial / discrete / io (Phase 5)
     spatium_module(NAME spatium_spatial_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/spatial.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/spatial.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_geometry_module)
     add_library(Spatium::spatial_module ALIAS spatium_spatial_module)
 
     spatium_module(NAME spatium_discrete_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/discrete.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/discrete.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_geometry_module)
     add_library(Spatium::discrete_module ALIAS spatium_discrete_module)
 
     spatium_module(NAME spatium_io_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/io.cppm
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/io.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_spaces_module spatium_mesh_module)
     add_library(Spatium::io_module ALIAS spatium_io_module)
@@ -208,8 +223,8 @@ if(SPATIUM_USE_MODULES)
     # viewer/* stays out of modules: Vulkan/GLFW/ImGui pull C-linkage and
     # would conflict with algebra :vec_simd BMI (same pitfall as :eigen).
     spatium_module(NAME spatium_physics_module
-        PARTITIONS ${CMAKE_SOURCE_DIR}/modules/physics.cppm
-        IMPL       ${CMAKE_SOURCE_DIR}/modules/physics_impl.cpp
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/physics.cppm
+        IMPL       ${CMAKE_CURRENT_SOURCE_DIR}/modules/physics_impl.cpp
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_spaces_module spatium_mesh_module spatium_io_module
              spatium_geometry_module)
@@ -226,7 +241,7 @@ add_library(Spatium::sdk ALIAS spatium_sdk)
 set_target_properties(spatium_sdk PROPERTIES EXPORT_NAME sdk)
 
 target_include_directories(spatium_sdk INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(spatium_sdk INTERFACE cxx_std_23)
@@ -300,7 +315,10 @@ target_compile_options(spatium_core PRIVATE
 )
 
 # ── Viewer library (Vulkan + GLFW) ────────────────────────────
-option(SPATIUM_BUILD_VIEWER "Build Vulkan viewer" ON)
+# Defaults ON standalone, OFF as a subproject/FetchContent dependency (see
+# SPATIUM_IS_TOP_LEVEL above) -- a downstream consumer linking Spatium::sdk
+# shouldn't need Vulkan/GLFW/shaderc just to get the header-only library.
+option(SPATIUM_BUILD_VIEWER "Build Vulkan viewer" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_VIEWER)
     find_package(Vulkan QUIET)
     find_package(glfw3 3.3 QUIET)
@@ -379,7 +397,10 @@ endif()
 add_library(spatium ALIAS spatium_sdk)
 
 # ── Tests ──────────────────────────────────────────────────────
-option(SPATIUM_BUILD_TESTS "Build tests" ON)
+# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): this
+# find_package(Catch2 3 REQUIRED) below would otherwise hard-fail a
+# downstream FetchContent consumer that doesn't have Catch2 installed.
+option(SPATIUM_BUILD_TESTS "Build tests" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_TESTS)
     enable_testing()
     find_package(Catch2 3 REQUIRED)
@@ -393,14 +414,20 @@ if(SPATIUM_BUILD_BENCHMARKS)
 endif()
 
 # ── Examples ───────────────────────────────────────────────────
-option(SPATIUM_BUILD_EXAMPLES "Build examples" ON)
+# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): a
+# downstream consumer pulling Spatium in via FetchContent wants
+# Spatium::sdk, not a build of every demo in examples/.
+option(SPATIUM_BUILD_EXAMPLES "Build examples" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_EXAMPLES)
-    include(${CMAKE_SOURCE_DIR}/cmake/SpatiumTarget.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SpatiumTarget.cmake)
     add_subdirectory(examples)
 endif()
 
 # ── RSC tools ──────────────────────────────────────────────────
-option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ON)
+# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): RSC's
+# training tools are specific to this repo, not something a downstream
+# consumer pulling in Spatium::sdk needs built.
+option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_RSC_TOOLS)
     add_subdirectory(rsc/tools)
 endif()
@@ -447,7 +474,7 @@ set(SPATIUM_INSTALLED_HAS_EIGEN  ${SPATIUM_EIGEN})
 set(SPATIUM_INSTALLED_HAS_IMGUI  ${SPATIUM_HAS_IMGUI})
 
 configure_package_config_file(
-    ${CMAKE_SOURCE_DIR}/cmake/SpatiumConfig.cmake.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/SpatiumConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/SpatiumConfig.cmake
     INSTALL_DESTINATION lib/cmake/Spatium
 )
