@@ -286,10 +286,19 @@ A PR against any tag here is welcome. So is a PR against nothing here — if you
 - **[dare]** Fragment shader raymarcher: GPU-native analytical render (GLSL quadric math)
 - **[want]** Dual Quaternion
 
+## Sound synthesis
+
+- **[want]** Physically-based sound synthesis — resonant modes of a surface via Laplace-Beltrami eigenvalues (already computable through the existing heat-method infrastructure), geometric room acoustics via ray-traced reflections on the existing BVH, and time-domain wave-equation integration (string/membrane/percussion) reusing `algebra/ode.hpp`. The only missing piece is audio output: a hand-rolled WAV writer in the `io/` house style (zero-dependency, matching OBJ/STL/SVG) — no audio library needed for offline export.
+
+## Calculus
+
+- **[course]** Region-aware integration over Spatium's own geometry (Box/Sphere/Polygon volumes, intersection overlap) — `integrate()` in `algebra/calculus.hpp` is deliberately scoped to 1-D; this is the next step the function's own docstring already flags.
+
 ## Manifold applications
 
 - **[dare]** Fiber bundles (tangent/cotangent)
 - **[dare]** Geodesic FEM (Laplace-Beltrami, heat equation)
+- **[want]** Stochastic processes on Riemannian manifolds — Brownian motion / SDEs via Euler-Maruyama through `exp_map` retraction (drift + diffusion tangent vector, the same shape the existing Lie-group integrators already use). Reuses the `RiemannianManifold` concept directly, no new abstraction needed. Genuinely underserved outside bespoke research code — general manifold-ML libraries don't cover this.
 
 ## Object model as manifold substrate
 
@@ -304,10 +313,15 @@ Unlocked by the object→exact-`Surface` bridge (extending `geometry/surface_ada
 - **[dare]** Cloth/shell dynamics intrinsic to a curved surface — solving the material's own equations of motion in tangent space accounting for curvature, distinct from the already-shipped "drape cloth onto a fixed obstacle" work (`examples/cloth_sphere_probe.cpp`, Contact physics section above). Real research-level lift, not a quick extension of XPBD.
 - **[dare]** Topology optimization on an evolving surface (solve a stress/heat PDE on the current surface, remove material, iterate on the new one) — needs real elasticity FEM, well beyond the current DEC/heat-method infrastructure (which only covers scalar diffusion, not stress). Exciting, not scoped.
 - Explicitly NOT a new subsystem, just a consequence of the type system once the object bridge lands: composing nested local frames (a point on a robot → a point on one of its sensors → a point on that sensor's own chip surface) through the same `Point<Space>` vocabulary at every level. Worth a demo to show it falls out for free; not separate work.
+- **[dare]** Reconstruction pipeline for real-world objects — photos/video → learned geometric latents (e.g. a JEPA-style encoder) → a small decoder predicting a continuous SDF → wrap as `ImplicitSurface` → existing Spatium post-processing (smoothing, simplification, geodesics, self-intersection checks, OBJ export). A continuation of the multiscale point-cloud → mesh pipeline above, but starting from raw imagery instead of a scan. Not researched yet.
 
 ## GIS
 
 - **[want]** Ellipsoid (WGS84) as Space — geodesic distance on Earth
+
+## Discrete / graph geometry
+
+- **[want]** Graphs as metric spaces embedded in a Riemannian manifold — hyperbolic embeddings for hierarchical/tree-like data, using the existing `Hyperbolic<N>` space directly as the embedding target rather than a separate library.
 
 ## Geometry
 
@@ -316,6 +330,10 @@ Unlocked by the object→exact-`Surface` bridge (extending `geometry/surface_ada
 ## Native math (dependency reduction)
 
 - **[course]** SVD / eigendecomposition — a real native-implementation candidate (unlike the heat method's sparse-Cholesky step or ipc-toolkit, whose cost/benefit doesn't favor a from-scratch rewrite). Blocks `Eigen::Ref<…>` public-API adapters noted above and dense-solve paths that currently require `SPATIUM_EIGEN=ON`.
+
+## Materials & structures
+
+- **[want]** Porous/microstructure analysis — geodesics on pore surfaces, effective conductivity/strength, and grain-shape/orientation analysis in metals, all as manifold queries on a reconstructed surface rather than a bespoke materials-science pipeline.
 
 ## GPU rendering (CUDA)
 
