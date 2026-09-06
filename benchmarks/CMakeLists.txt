@@ -8,6 +8,7 @@ add_executable(spatium_bench
     bench_orbital.cpp
     bench_raycast.cpp
     bench_narrow_phase.cpp
+    bench_eigen_decomp.cpp
 )
 
 target_link_libraries(spatium_bench PRIVATE
