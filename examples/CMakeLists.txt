@@ -47,6 +47,13 @@ spatium_add_example(NAME wormhole_demo OPTIONS -O3 -march=native)
 # parallel_for_rows, supersample_pixel, write_png_rgb) -- see file header.
 spatium_add_example(NAME tumbling_body_demo OPTIONS -O3 -march=native)
 
+# Loads a JSON scene file (io/scene.hpp: objects + optional camera,
+# shape kinds resolved through an open registry) and renders it with
+# the same render/ engine primitives as tumbling_body_demo above.
+# -O3 -march=native: same per-pixel-cost reasoning as the raytracers
+# above. Sample scene shipped alongside as scene_demo_sample.json.
+spatium_add_example(NAME scene_demo OPTIONS -O3 -march=native)
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel
