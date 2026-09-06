@@ -10,6 +10,7 @@
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <cstddef>
+#  include <vector>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
@@ -213,6 +214,62 @@ typename S::PointType riemannian_minimize(const S& space, F&& f, typename S::Poi
         }
     }
     return theta;
+}
+
+// ── Riemannian statistics ───────────────────────────────────────
+
+// Fréchet/Karcher mean: the point minimizing the sum of squared geodesic
+// distances to a set of samples. Not built on riemannian_minimize() above
+// -- that machinery needs the objective itself to be scalar-type-generic
+// (evaluable at both T and Dual<T>), which a call into `space`'s own
+// distance()/log_map() (locked to one fixed T) isn't. Instead this uses
+// the standard closed-form fact that grad_p distance(p,q)^2 = -2 log_map(p,q)
+// on any Riemannian manifold, giving a direct fixed-point iteration with
+// no autodiff needed: average the tangent vectors pointing at every
+// sample, retract, repeat until that average is ~zero. Same mechanism as
+// spaces/spd.hpp's frechet_mean_affine_invariant(), generalized here to
+// any RiemannianManifold (Sphere, Hyperbolic, ShapeSurface-wrapped
+// shapes, ...) instead of being reimplemented per space.
+template<typename S>
+    requires RiemannianManifold<S>
+typename S::PointType frechet_mean(
+        const S& space,
+        const std::vector<typename S::PointType>& points,
+        typename S::PointType initial_guess,
+        typename S::ScalarType tol
+            = epsilon<typename S::ScalarType>() * typename S::ScalarType{1000},
+        int max_iters = 100) {
+    using T = typename S::ScalarType;
+    using Tangent = typename S::TangentVector;
+    using std::sqrt; using std::abs;
+
+    auto mean = initial_guess;
+    T inv_n = T{1} / static_cast<T>(points.size());
+    for (int iter = 0; iter < max_iters; ++iter) {
+        Tangent avg{};
+        for (const auto& p : points)
+            avg = Tangent{avg + space.log_map(mean, p)};
+        avg = Tangent{avg * inv_n};
+
+        T avg_norm2 = abs(space.metric_at(mean, avg, avg));
+        if (sqrt(avg_norm2) < tol) break;
+
+        mean = space.exp_map(mean, avg, T{1});
+    }
+    return mean;
+}
+
+// Convenience overload: starts the iteration from the first sample instead
+// of requiring an explicit initial guess.
+template<typename S>
+    requires RiemannianManifold<S>
+typename S::PointType frechet_mean(
+        const S& space,
+        const std::vector<typename S::PointType>& points,
+        typename S::ScalarType tol
+            = epsilon<typename S::ScalarType>() * typename S::ScalarType{1000},
+        int max_iters = 100) {
+    return frechet_mean(space, points, points.front(), tol, max_iters);
 }
 
 } // namespace algebra

@@ -130,6 +130,72 @@ TEST_CASE("riemannian_minimize finds the closest point on a sphere to a target",
     CHECK_THAT(result.norm(), WithinAbs(1.0, 1e-6)); // stays on the manifold
 }
 
+TEST_CASE("frechet_mean of two sphere points is the normalized geodesic midpoint", "[calculus]") {
+    // Independent ground truth, not self-consistency: for two points on a
+    // unit sphere the minor-arc midpoint is exactly the normalized vector
+    // sum (p+q)/|p+q| -- a separate closed form from log_map/exp_map.
+    Sphere<2> sph;
+    Vec<double, 3> p{1.0, 0.0, 0.0};
+    Vec<double, 3> q{0.0, 1.0, 0.0};
+    std::vector<Vec<double, 3>> points{p, q};
+
+    auto mean = frechet_mean(sph, points);
+    auto expected = (p + q).normalized();
+
+    CHECK_THAT(mean[0], WithinAbs(expected[0], 1e-6));
+    CHECK_THAT(mean[1], WithinAbs(expected[1], 1e-6));
+    CHECK_THAT(mean[2], WithinAbs(expected[2], 1e-6));
+    CHECK_THAT(mean.norm(), WithinAbs(1.0, 1e-9)); // stays on the manifold
+}
+
+TEST_CASE("frechet_mean of two hyperboloid points is the geodesic midpoint", "[calculus]") {
+    // Same "two-point mean = midpoint of the connecting geodesic" theorem
+    // holds on any Riemannian manifold -- cross-checked here against the
+    // hyperboloid's own exp_map/log_map directly, proving frechet_mean()
+    // is genuinely generic (Part of this PR's point: one implementation,
+    // not one per space).
+    Hyperbolic<2> hyp;
+    auto p = Hyperbolic<2>::origin();
+    Vec<double, 3> q{std::cosh(1.0), std::sinh(1.0), 0.0};
+    std::vector<Vec<double, 3>> points{p, q};
+
+    auto mean = frechet_mean(hyp, points);
+    auto expected_midpoint = hyp.exp_map(p, hyp.log_map(p, q), 0.5);
+
+    CHECK_THAT(mean[0], WithinAbs(expected_midpoint[0], 1e-6));
+    CHECK_THAT(mean[1], WithinAbs(expected_midpoint[1], 1e-6));
+    CHECK_THAT(mean[2], WithinAbs(expected_midpoint[2], 1e-6));
+    CHECK_THAT(hyp.distance(mean, p), WithinAbs(hyp.distance(mean, q), 1e-6));
+}
+
+TEST_CASE("frechet_mean minimizes total squared geodesic distance", "[calculus]") {
+    // Generic local-optimality sanity check, valid on any RiemannianManifold:
+    // the mean's total loss must not exceed the loss centered at any single
+    // sample (each sample has zero distance to itself but nonzero distance
+    // to the other three, unless the samples happen to coincide).
+    Sphere<2> sph;
+    std::vector<Vec<double, 3>> points{
+        Vec<double, 3>{1.0, 0.0, 0.0}.normalized(),
+        Vec<double, 3>{0.3, 0.9, 0.2}.normalized(),
+        Vec<double, 3>{-0.5, 0.1, 0.8}.normalized(),
+        Vec<double, 3>{0.1, -0.6, 0.7}.normalized(),
+    };
+
+    auto total_loss = [&](const Vec<double, 3>& center) {
+        double sum = 0.0;
+        for (const auto& p : points) {
+            auto d = sph.distance(center, p);
+            sum += d * d;
+        }
+        return sum;
+    };
+
+    auto mean = frechet_mean(sph, points);
+    double mean_loss = total_loss(mean);
+    for (const auto& p : points)
+        CHECK(mean_loss <= total_loss(p) + 1e-9);
+}
+
 TEST_CASE("riemannian_minimize finds the closest point on a hyperboloid to a target", "[calculus]") {
     // -minkowski(p, target) == cosh(distance(p, target)) on the hyperboloid,
     // minimized exactly at p = target.
