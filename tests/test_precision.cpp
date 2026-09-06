@@ -3,6 +3,7 @@
 #include <spatium/algebra/vector.hpp>
 #include <spatium/spaces/euclidean.hpp>
 #include <spatium/geometry/triangle.hpp>
+#include <limits>
 
 using namespace spatium;
 using namespace spatium::geometry;
@@ -40,6 +41,50 @@ TEST_CASE("Triangle with Real50 — high precision area", "[precision]") {
     auto area = tri.area();
     // 0.5 with 50 digits of precision
     CHECK(area == Real50{"0.5"});
+}
+
+TEST_CASE("Real<N> generalizes Real50/Real100 to any digit count", "[precision]") {
+    static_assert(std::is_same_v<Real50, Real<50>>);
+    static_assert(std::is_same_v<Real100, Real<100>>);
+    static_assert(Scalar<Real<17>>);
+
+    using T = Real<17>;
+    T a{1};
+    T b{2};
+    CHECK(a + b == T{3});
+}
+
+TEST_CASE("Real<N> reaches accuracy no 50- or 100-digit preset could represent", "[precision]") {
+    // std::numeric_limits<>::digits10 is the exact, guaranteed contract --
+    // proves digit count is a real compile-time parameter, not a choice
+    // between two fixed presets.
+    static_assert(std::numeric_limits<Real50>::digits10 == 50);
+    static_assert(std::numeric_limits<Real100>::digits10 == 100);
+    static_assert(std::numeric_limits<Real<300>>::digits10 == 300);
+
+    // A runtime demonstration, not just the type-level contract: sqrt(2)
+    // computed at Real<300> is accurate to a relative error near 1e-300 --
+    // meaningless to even ask of a 50- or 100-digit type, since there
+    // aren't that many digits to be accurate WITH. (cpp_dec_float's
+    // internal guard digits mean naively probing "does adding 1e-60 to 1
+    // get rounded away" is NOT a reliable way to test this -- the digit
+    // count contract above and an actual high-precision computation are.)
+    using T = Real<300>;
+    using std::sqrt; using std::abs; // ADL: Real<N> provides its own
+    T two{2};
+    T root = sqrt(two);
+    T residual = abs(root * root - two);
+    CHECK(residual < T{"1e-290"});
+}
+
+TEST_CASE("Vec with an arbitrary (non-preset) Real<N> digit count", "[precision]") {
+    using T = Real<37>;
+    Vec<T, 3> a{T{1}, T{2}, T{3}};
+    Vec<T, 3> b{T{4}, T{5}, T{6}};
+    auto c = a + b;
+    CHECK(c[0] == T{5});
+    CHECK(c[1] == T{7});
+    CHECK(c[2] == T{9});
 }
 
 TEST_CASE("High precision pi approximation via polygon", "[precision]") {
