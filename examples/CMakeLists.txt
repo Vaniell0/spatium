@@ -63,6 +63,14 @@ spatium_add_example(NAME wave_ca_demo)
 # Collatz orbits as 4D parametric surface (height view + R^4->R^3 stereographic).
 spatium_add_example(NAME collatz_demo)
 
+# Native rigid-body collision -- spheres falling, colliding with each
+# other (XPBD, physics/mechanics/rigid_contact.hpp) and a ground plane
+# (existing IPC barrier force, physics/mechanics/contact.hpp +
+# narrow_phase.hpp), zero ipc-toolkit dependency. -O3 -march=native:
+# same reasoning as the other offline raytracers above -- per-pixel
+# analytical ray-sphere/ray-plane cost, real across N_FRAMES images.
+spatium_add_example(NAME native_collision_demo OPTIONS -O3 -march=native)
+
 # Visual cloth demos (cloth_on_sphere/_torus, cloth_visual) stay removed
 # pending a real viewer-facing implicit-contact pipeline — explicit
 # position-based contact couldn't keep a stiff cloth with heavy
