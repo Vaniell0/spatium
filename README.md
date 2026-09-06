@@ -96,17 +96,23 @@ ninja -C build
 
 | Option                       | Default | Notes |
 |------------------------------|:-------:|-------|
-| `SPATIUM_BUILD_TESTS`        | `ON`    | Catch2 v3 unit tests (`ctest --preset default`) |
-| `SPATIUM_BUILD_EXAMPLES`     | `ON`    | All `examples/*` binaries |
+| `SPATIUM_BUILD_TESTS`        | `ON`*   | Catch2 v3 unit tests (`ctest --preset default`) |
+| `SPATIUM_BUILD_EXAMPLES`     | `ON`*   | All `examples/*` binaries |
 | `SPATIUM_BUILD_BENCHMARKS`   | `OFF`   | Google Benchmark suite (`benchmarks/`) |
-| `SPATIUM_BUILD_VIEWER`       | `ON`    | Vulkan + GLFW + shaderc viewer. Emits a `WARNING` and skips the target if any of those packages are missing. |
+| `SPATIUM_BUILD_VIEWER`       | `ON`*   | Vulkan + GLFW + shaderc viewer. Emits a `WARNING` and skips the target if any of those packages are missing. |
 | `SPATIUM_EIGEN`              | `OFF`   | Required by the heat-method geodesic solver and the cotangent-Laplacian DEC operators. |
 | `SPATIUM_NATIVE_ARCH`        | `OFF`   | Adds `-march=native`. Resulting binaries are not portable across CPUs — use only for local performance work. |
 | `SPATIUM_USE_MODULES`        | `OFF`   | C++23 named-modules build. Currently behind the header tree (see the option's own comment in `CMakeLists.txt`) — not a compiler-bug wait, real catch-up work. |
 | `SPATIUM_IPC_TOOLKIT`        | `OFF`   | Implicit contact physics via [ipc-toolkit](https://github.com/ipc-sim/ipc-toolkit) (Newton + log-barrier + CCD). `FetchContent`-based, pulls its own dependency tree. |
 | `SPATIUM_CUDA`                | `OFF`   | CUDA GPU kernels (`gpu/`) for GR ray tracing. Requires nvcc; not part of a default build. |
-| `SPATIUM_BUILD_RSC_TOOLS`     | `ON`    | RSC training tools (`rsc/tools/train_base`, ...). |
+| `SPATIUM_BUILD_RSC_TOOLS`     | `ON`*   | RSC training tools (`rsc/tools/train_base`, ...). |
 | `IMGUI_DIR` (env or `-D`)    | unset   | Source path of Dear ImGui; enables the in-viewer panel when set. |
+
+\* Defaults to `ON` only when Spatium is the top-level CMake project (built
+standalone, as above). Pulled in via `add_subdirectory()` or `FetchContent`
+from another project, these four default to `OFF` instead, so a downstream
+consumer gets just `Spatium::sdk` without forcing a Vulkan/Catch2/example
+build it never asked for -- see "Using in Your Project" below.
 
 ## Using in Your Project
 
@@ -122,6 +128,13 @@ FetchContent_MakeAvailable(spatium)
 
 target_link_libraries(your_target PRIVATE Spatium::sdk)
 ```
+
+This pulls in only the header-only `Spatium::sdk` interface target -- the
+Vulkan viewer, examples, tests, and RSC tools all default OFF when Spatium
+isn't the top-level CMake project, so nothing beyond `Spatium::sdk` and its
+one required dependency (Boost headers, for `Real50`/`Real100`) gets built.
+See [`examples/external-consumer/`](examples/external-consumer/) for a
+complete, independently-buildable project using exactly this snippet.
 
 ### After Install
 
