@@ -68,6 +68,8 @@ add_executable(spatium_tests
     test_narrow_phase.cpp
     test_rigid_contact.cpp
     test_relativity.cpp
+    test_json.cpp
+    test_scene.cpp
     test_rsc_registry.cpp
     test_rsc_task.cpp
     test_rsc_dispatcher.cpp
