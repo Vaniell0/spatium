@@ -9,6 +9,7 @@ add_executable(spatium_tests
     test_simplex.cpp
     test_circle.cpp
     test_polygon.cpp
+    test_combinatorics.cpp
     test_intersection.cpp
     test_sphere.cpp
     test_hyperbolic.cpp

@@ -4,6 +4,7 @@ digraph spatium_dependencies {
     "algebra" -> "spatium";
     "core" -> "spatium";
     "discrete" -> "algebra";
+    "discrete" -> "core";
     "discrete" -> "geometry";
     "discrete" -> "spatium";
     "geometry" -> "algebra";
