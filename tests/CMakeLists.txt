@@ -50,6 +50,7 @@ add_executable(spatium_tests
     test_render.cpp
     test_polynomial.cpp
     test_eigen_decomp.cpp
+    test_svd.cpp
     test_ray_surface.cpp
     test_ray_parametric.cpp
     test_eigen_interop.cpp
