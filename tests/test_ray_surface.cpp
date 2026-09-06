@@ -212,3 +212,60 @@ TEST_CASE("Ray-torus: tangent ray", "[ray_surface]") {
     CHECK(hits.size() >= 1);
 }
 
+// ── Quadric Shape concept (project/distance/centroid) ───────
+
+TEST_CASE("Quadric satisfies Shape and DistanceQueryable", "[ray_surface]") {
+    static_assert(Shape<Quadric<double>>);
+    static_assert(DistanceQueryable<Quadric<double>>);
+    SUCCEED();
+}
+
+TEST_CASE("Quadric sphere: project pulls a point radially onto the surface", "[ray_surface]") {
+    auto q = Quadric<>::sphere(5.0);
+    auto p = q.project(Vec3{10, 0, 0});
+    CHECK_THAT(p[0], WithinAbs(5.0, 1e-10));
+    CHECK_THAT(p[1], WithinAbs(0.0, 1e-10));
+
+    // Off-axis point: projection stays exactly on the sphere.
+    auto p2 = q.project(Vec3{3, 4, 0}); // already on the |.|=5 shell
+    CHECK_THAT(p2[0], WithinAbs(3.0, 1e-9));
+    CHECK_THAT(p2[1], WithinAbs(4.0, 1e-9));
+
+    auto p3 = q.project(Vec3{1, 1, 1});
+    CHECK_THAT(p3.norm(), WithinAbs(5.0, 1e-9));
+}
+
+TEST_CASE("Quadric sphere: distance is zero on the surface, positive off it", "[ray_surface]") {
+    auto q = Quadric<>::sphere(2.0);
+    CHECK_THAT(q.distance(Vec3{2, 0, 0}), WithinAbs(0.0, 1e-9));
+    CHECK_THAT(q.distance(Vec3{4, 0, 0}), WithinAbs(2.0, 1e-9));
+    CHECK_THAT(q.distance(Vec3{0, 0, 0}), WithinAbs(2.0, 1e-9));
+}
+
+TEST_CASE("Quadric cylinder: project keeps the axial coordinate fixed", "[ray_surface]") {
+    auto q = Quadric<>::cylinder_z(2.0);
+    auto p = q.project(Vec3{5, 0, 7});
+    CHECK_THAT(p[0], WithinAbs(2.0, 1e-9));
+    CHECK_THAT(p[2], WithinAbs(7.0, 1e-9)); // Z is untouched -- exact for the cylinder too
+}
+
+TEST_CASE("Quadric sphere: is_round_sphere true, exposes center and radius", "[ray_surface]") {
+    auto q = Quadric<>::sphere(3.5);
+    CHECK(q.is_round_sphere());
+    auto c = q.sphere_center();
+    CHECK_THAT(c.norm(), WithinAbs(0.0, 1e-10));
+    CHECK_THAT(q.sphere_radius(), WithinAbs(3.5, 1e-10));
+}
+
+TEST_CASE("Quadric ellipsoid/cylinder/cone are not round spheres", "[ray_surface]") {
+    CHECK_FALSE(Quadric<>::ellipsoid(2.0, 1.0, 1.0).is_round_sphere());
+    CHECK_FALSE(Quadric<>::cylinder_z(1.0).is_round_sphere());
+    CHECK_FALSE(Quadric<>::cone_z().is_round_sphere());
+}
+
+TEST_CASE("Quadric: a uniform ellipsoid IS a round sphere", "[ray_surface]") {
+    // ellipsoid(r, r, r) is mathematically identical to sphere(r).
+    CHECK(Quadric<>::ellipsoid(4.0, 4.0, 4.0).is_round_sphere());
+    CHECK_THAT(Quadric<>::ellipsoid(4.0, 4.0, 4.0).sphere_radius(), WithinAbs(4.0, 1e-10));
+}
+

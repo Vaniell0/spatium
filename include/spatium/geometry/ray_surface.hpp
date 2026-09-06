@@ -5,9 +5,12 @@
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/polynomial.hpp>
 #  include <spatium/algebra/vector.hpp>
+#  include <spatium/core/epsilon.hpp>
 #  include <spatium/core/error.hpp>
+#  include <spatium/geometry/concepts.hpp>
 #  include <spatium/geometry/line.hpp>
 #  include <algorithm>
+#  include <cmath>
 #  include <variant>
 #  include <vector>
 #endif
@@ -20,6 +23,10 @@ SPATIUM_EXPORT namespace spatium::geometry {
 
 template<Scalar T = double>
 struct Quadric {
+    using ScalarType = T;
+    using PointType = Vec<T, 3>;
+    static constexpr std::size_t ambient_dimension = 3;
+
     Matrix<T, 4, 4> Q;
 
     // Evaluate: positive outside, negative inside, zero on surface
@@ -37,6 +44,86 @@ struct Quadric {
         Vec<T, 3> grad{Qh[0], Qh[1], Qh[2]};
         auto n = grad.norm();
         return n > epsilon<T>() ? grad / n : Vec<T, 3>{};
+    }
+
+    // Closest point on the quadric surface to p, via Newton iteration
+    // on F(x) = 0 walking along the local gradient each step. Exact
+    // for a round sphere (the gradient is radial, so every iterate
+    // stays on the ray through the center and the sequence converges
+    // to the true nearest point) and for the canonical Z-cylinder (the
+    // gradient has no Z component, so the axial coordinate is left
+    // alone and the radial one converges exactly); approximate for the
+    // general ellipsoid/cone, where the nearest point has no closed
+    // form and this instead walks a curved descent path.
+    PointType project(const PointType& p) const {
+        PointType x = p;
+        for (int i = 0; i < 20; ++i) {
+            Vec<T, 4> h{x[0], x[1], x[2], T{1}};
+            auto Qh = Q * h;
+            Vec<T, 3> grad{T{2} * Qh[0], T{2} * Qh[1], T{2} * Qh[2]};
+            auto glen2 = grad.dot(grad);
+            if (glen2 < epsilon<T>()) {
+                // Gradient vanishes at x itself -- a singular point (the
+                // center of a sphere, the axis of a cylinder, the apex
+                // of a cone) with no uniquely nearest surface point.
+                // On the very first step, nudge off it and keep going,
+                // matching the arbitrary-point convention Circle::project
+                // and Sphere::project already use at their own degenerate
+                // inputs; otherwise we've genuinely converged, so stop.
+                if (i == 0) { x[0] += T{1}; continue; }
+                break;
+            }
+            T f = h.dot(Qh);
+            x = x - grad * (f / glen2);
+        }
+        return x;
+    }
+
+    // Euclidean distance from p to the nearest point on the surface.
+    ScalarType distance(const PointType& p) const {
+        return (p - project(p)).norm();
+    }
+
+    // Center implied by the quadric's linear terms (solves for the
+    // point where the quadratic form's gradient has no linear part).
+    // Exact for sphere/ellipsoid/cone; for a cylinder the axis
+    // direction is left at zero since any point along the axis is
+    // equally a "center" for that translation-invariant term.
+    PointType centroid() const {
+        using std::abs;
+        PointType c{};
+        for (std::size_t i = 0; i < 3; ++i)
+            if (abs(Q(i, i)) > epsilon<T>())
+                c[i] = -Q(i, 3) / Q(i, i);
+        return c;
+    }
+
+    // True when this quadric is a round sphere (uniform radius, as
+    // opposed to a general ellipsoid): the upper-left 3x3 block is a
+    // positive multiple of the identity with no cross terms. This is a
+    // runtime query rather than a type-level tag -- sphere(), cylinder_z(),
+    // cone_z() and ellipsoid() all produce the same Quadric<T> type,
+    // differing only in the matrix values, so whether a *given instance*
+    // is a round sphere cannot be known at compile time.
+    bool is_round_sphere() const {
+        using std::abs; using std::max;
+        T a = Q(0, 0);
+        if (a <= epsilon<T>()) return false;
+        T tol = epsilon<T>() * max(abs(a), T{1});
+        if (abs(Q(1, 1) - a) > tol || abs(Q(2, 2) - a) > tol) return false;
+        if (abs(Q(0, 1)) > tol || abs(Q(0, 2)) > tol || abs(Q(1, 2)) > tol) return false;
+        return true;
+    }
+
+    // Sphere center -- meaningful only when is_round_sphere() holds.
+    PointType sphere_center() const { return centroid(); }
+
+    // Sphere radius -- meaningful only when is_round_sphere() holds.
+    ScalarType sphere_radius() const {
+        using std::sqrt; using std::max;
+        auto c = sphere_center();
+        auto r2 = c.dot(c) - Q(3, 3) / Q(0, 0);
+        return sqrt(max(r2, T{0}));
     }
 
     // ── Factories ─────────────────────────────────────────────
@@ -74,6 +161,9 @@ struct Quadric {
         return {Q};
     }
 };
+
+static_assert(Shape<Quadric<double>>);
+static_assert(DistanceQueryable<Quadric<double>>);
 
 // ── Ray-quadric intersection result ──────────────────────────
 
