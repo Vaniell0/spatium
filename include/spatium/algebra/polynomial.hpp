@@ -146,35 +146,70 @@ std::array<Complex<T>, 4> solve_quartic(T a, T b, T c, T d, T e) {
                 Complex<T>{T(-r1.re + shift), T(-r1.im)}};
     }
 
-    // Resolvent cubic: m³ + (α/2)m² + ((α²-4γ)/16)m - β²/64 = 0
-    // Actually use: 8m³ - 4αm² + 2(α²-4γ)m - β² = 0 (scaled for stability)
-    auto cubic_roots = solve_cubic(T{8}, T(-T{4} * alpha),
+    // Resolvent cubic: 8m³ + 8αm² + 2(α²-4γ)m - β² = 0
+    //
+    // Derivation: completing the square on the depressed quartic gives, as
+    // an identity in y for any m (no need to assume the quartic holds),
+    //   (y²+α/2+m)² - [2m·y² - βy + (m²+αm+α²/4-γ)] = y⁴+αy²+βy+γ.
+    // The bracket is a perfect square in y exactly when its discriminant
+    // vanishes: β² - 4·(2m)·(m²+αm+α²/4-γ) = 0, i.e. this cubic. A
+    // previous version of this comment (and the code) had -4αm² here --
+    // an outright wrong resolvent, not a root-selection nuance -- which
+    // meant NO choice of resolvent root reconstructed the original
+    // quartic's roots correctly except by accident.
+    auto cubic_roots = solve_cubic(T{8}, T(T{8} * alpha),
                                     T(T{2} * (alpha * alpha - T{4} * gamma)),
                                     T(-(beta * beta)));
 
-    // Pick a real root of the resolvent
+    // Pick the LARGEST real root of the resolvent, not "the first real
+    // root above epsilon, else any real root" (the old logic, which could
+    // and did land on a near-zero or negative m -- see torus_quartic's
+    // comment for the observed fallout). At m=0 the resolvent evaluates
+    // to -β² < 0 (this branch only runs once β is confirmed non-negligible
+    // above), and its leading 8m³ term dominates as m→+∞, so by the
+    // intermediate value theorem a positive real root is always present
+    // when the coefficients are real. Taking the largest real root both
+    // guarantees landing on that positive one and keeps 2m as large as
+    // the resolvent allows, which keeps sqrt(2m) away from zero -- the
+    // same amplify-tiny-residuals concern the solve_cubic repeated-root
+    // fix documents, just showing up here as a division by a near-zero
+    // sqrt(2m) instead of a cbrt of a near-zero residual.
     T m{};
+    bool have_m = false;
     for (auto& cr : cubic_roots) {
-        if (cr.is_real() && cr.re > epsilon<T>()) {
+        if (cr.is_real() && (!have_m || cr.re > m)) {
             m = cr.re;
-            break;
-        }
-    }
-    // Fallback: take any real root
-    if (abs(m) < epsilon<T>()) {
-        for (auto& cr : cubic_roots) {
-            if (cr.is_real()) {
-                m = cr.re;
-                break;
-            }
+            have_m = true;
         }
     }
 
-    auto sq_2m = sqrt(abs(T{2} * m));
+    // Declared as T, not auto: Boost.Multiprecision's number<> composes
+    // abs()/sqrt() into lazy expression-template objects, and letting auto
+    // deduce that expression type here (rather than the concrete T it
+    // evaluates to) leaves sq_2m holding a dangling reference into a
+    // temporary from this statement -- garbage silently, not a compile
+    // error. Reproduced directly: solve_quartic<Real50> on an asymmetric-
+    // root case landed sq_2m on a nonsense value despite m itself being
+    // exactly right, only once a test actually exercised this branch
+    // (every prior Real50 quartic test used symmetric roots, which take
+    // the biquadratic shortcut above and never reach this line). abs() is
+    // a NaN guard against sub-epsilon negative noise on an m that should
+    // be exactly >= 0 by the argument above, not a correctness mechanism
+    // anymore.
+    T sq_2m = sqrt(abs(T{2} * m));
 
-    // Two quadratics: y² ± √(2m)·y + (m ± β/(2√(2m))) = 0
-    // (sign chosen so product gives the right depressed quartic)
-    auto half_beta_over_sq = beta / (T{2} * sq_2m);
+    // Ferrari's difference-of-squares step factors the quartic as
+    //   (y² - √(2m)·y + (α/2+m+β/(2√(2m)))) · (y² + √(2m)·y + (α/2+m-β/(2√(2m)))) = 0
+    // Both the missing α/2 term and the sign pairing between √(2m) and
+    // β/(2√(2m)) were wrong in the old code (verified by reconstructing a
+    // quartic with known roots by hand): dropping α/2 and swapping which
+    // sign of √(2m) goes with which sign of β/(2√(2m)) both produce a
+    // factorization that does NOT multiply back out to the original
+    // quartic, for any choice of m.
+    // T, not auto, for the same dangling-expression-template reason as
+    // sq_2m above.
+    T half_beta_over_sq = beta / (T{2} * sq_2m);
+    T half_alpha = alpha / T{2};
 
     // T(...) on every argument: Boost.Multiprecision's number<> arithmetic
     // returns lazy expression-template types, not T -- passed straight into
@@ -182,8 +217,8 @@ std::array<Complex<T>, 4> solve_quartic(T a, T b, T c, T d, T e) {
     // from three differently-typed expressions at once instead of a single
     // consistent T. Forcing each to T here is what makes that deduction
     // (and everything downstream that reads .re/.im off the result) honest.
-    auto roots1 = solve_quadratic(T{1}, T(sq_2m), T(m + half_beta_over_sq));
-    auto roots2 = solve_quadratic(T{1}, T(-sq_2m), T(m - half_beta_over_sq));
+    auto roots1 = solve_quadratic(T{1}, T(-sq_2m), T(half_alpha + m + half_beta_over_sq));
+    auto roots2 = solve_quadratic(T{1}, T(sq_2m), T(half_alpha + m - half_beta_over_sq));
 
     return {Complex<T>{T(roots1[0].re + shift), T(roots1[0].im)},
             Complex<T>{T(roots1[1].re + shift), T(roots1[1].im)},

@@ -195,16 +195,13 @@ TEST_CASE("resolve_shape's box hit-test actually applies the object's orientatio
     CHECK_THAT(hits[0].normal[1], WithinAbs(0.0, 1e-9));
 }
 
-// geometry::ray_torus()'s quartic solver turned out to be unreliable for
+// geometry::ray_torus()'s quartic solver (algebra::solve_quartic()) used
+// to have a root-caused resolvent-cubic bug that made it unreliable for
 // most oblique rays -- confirmed by calling it directly, independent of
-// this registry entirely (see io/scene.hpp's make_torus() comment and
-// this PR's description for the repro: a sweep at a range of viewing
-// angles found essentially every ray except the exactly-symmetric one
-// below either misses a genuine hit or returns a root that fails the
-// torus's own implicit equation). This test deliberately stays on that
-// one reliable, symmetric configuration -- a ray in the ring's own
-// plane through its center -- so it exercises real, currently-working
-// behavior rather than asserting on a known upstream limitation.
+// this registry entirely (see io/scene.hpp's make_torus() comment). That
+// solver bug is fixed now; the symmetric-axis case below still passes as
+// a basic sanity check, and the off-axis case right after it is the one
+// this comment used to say couldn't be asserted on.
 TEST_CASE("resolve_shape hits a registered torus on its symmetric axis", "[scene]") {
     SceneObject<double> obj;
     obj.shape_kind = "torus";
@@ -222,6 +219,32 @@ TEST_CASE("resolve_shape hits a registered torus on its symmetric axis", "[scene
     CHECK_THAT(hits[1].point[1], WithinAbs(-1.05, 1e-9)); // -(R-r)
     CHECK_THAT(hits[2].point[1], WithinAbs(1.05, 1e-9));  //  (R-r)
     CHECK_THAT(hits[3].point[1], WithinAbs(1.75, 1e-9));  //  (R+r)
+}
+
+TEST_CASE("resolve_shape hits a registered torus on an oblique ray", "[scene]") {
+    // The registry-level counterpart to test_ray_surface.cpp's off-axis
+    // ray_torus() regression tests: this goes through resolve_shape() /
+    // make_torus() -- position offset, SO3 orientation, and the
+    // defensive implicit-equation filter included -- rather than calling
+    // geometry::ray_torus() directly.
+    SceneObject<double> obj;
+    obj.shape_kind = "torus";
+    obj.params.set("major_radius", 1.4);
+    obj.params.set("minor_radius", 0.35);
+    obj.position = Vec<double, 3>{1.0, -2.0, 0.5};
+    obj.orientation = Vec<double, 3>{0.3, -0.2, 0.1};
+
+    auto resolved = resolve_shape(obj);
+    REQUIRE(resolved.has_value());
+
+    Vec<double, 3> origin{6.0, 3.0, 4.0};
+    Vec<double, 3> target = obj.position + Vec<double, 3>{0.2, -0.1, 0.15};
+    Vec<double, 3> dir = target - origin;
+    dir = dir / dir.norm();
+    geometry::Ray<3, double> ray{origin, dir};
+
+    auto hits = resolved->ray_hits(ray);
+    REQUIRE(hits.size() >= 1);
 }
 
 TEST_CASE("resolve_shape returns an error for an unknown shape kind", "[scene]") {

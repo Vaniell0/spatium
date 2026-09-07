@@ -130,6 +130,64 @@ TEST_CASE("Quartic: (x-1)(x-2)(x-3)(x-4)", "[polynomial]") {
     CHECK_THAT(reals[3], WithinAbs(4.0, 1e-4));
 }
 
+TEST_CASE("Quartic: four distinct asymmetric real roots (resolvent-cubic path)",
+          "[polynomial]") {
+    // (x-1)(x-2)(x-4)(x-7) = x^4 - 14x^3 + 63x^2 - 106x + 56.
+    // Unlike the (x-1)(x-2)(x-3)(x-4) case above -- whose roots are
+    // symmetric about their mean, depress to beta==0, and take the
+    // biquadratic shortcut without ever touching the resolvent cubic --
+    // these roots are asymmetric, so beta != 0 and solve_quartic() must
+    // go through "Pick a real root of the resolvent" / Ferrari's
+    // difference-of-squares reconstruction. That path had three
+    // compounding bugs: a wrong sign/magnitude on the resolvent cubic's
+    // m^2 coefficient, a missing alpha/2 term in the reconstructed
+    // quadratics' constant, and a swapped sign pairing between sqrt(2m)
+    // and beta/(2*sqrt(2m)) -- together they meant no choice of resolvent
+    // root reconstructed the original roots, so this case is exactly what
+    // the old code could not have passed.
+    auto roots = solve_quartic(1.0, -14.0, 63.0, -106.0, 56.0);
+    std::vector<double> reals;
+    for (auto& r : roots) if (r.is_real(1e-6)) reals.push_back(r.re);
+    std::sort(reals.begin(), reals.end());
+    REQUIRE(reals.size() == 4);
+    CHECK_THAT(reals[0], WithinAbs(1.0, 1e-6));
+    CHECK_THAT(reals[1], WithinAbs(2.0, 1e-6));
+    CHECK_THAT(reals[2], WithinAbs(4.0, 1e-6));
+    CHECK_THAT(reals[3], WithinAbs(7.0, 1e-6));
+}
+
+TEST_CASE("Quartic: torus resolvent coefficients that used to come back (inf,inf) or near-center",
+          "[polynomial]") {
+    // Exact coefficients geometry::ray_torus() derives (via
+    // detail::torus_quartic_coeffs) for a torus of major_radius=1.4,
+    // minor_radius=0.35 at the origin, probed by a ray o=(-dist,0,0),
+    // d=(1,0,0) in the torus' local frame -- this is precisely the sweep
+    // documented in io/scene.hpp's make_torus() comment. Before the fix,
+    // distances 5/9/15 came back as a single (t,y)=(inf,inf) "hit" and
+    // 7/12/20 came back with two roots collapsed near the ring's center
+    // (y near 0) instead of the four genuine crossings at
+    // t = dist-1.75, dist-1.05, dist+1.05, dist+1.75.
+    struct Case { double dist, c3, c2, c1, c0; };
+    // c4 is always 1 for this family (|d|=1 along local x).
+    Case cases[] = {
+        {5.0,  -20.0,  145.835,     -458.35,      524.2514062500001},
+        {9.0,  -36.0,  481.835,    -2841.0299999999997, 6227.011406249999},
+        {15.0, -60.0, 1345.835,   -13375.05,      49691.251406250005},
+    };
+    for (auto& c : cases) {
+        auto roots = solve_quartic(1.0, c.c3, c.c2, c.c1, c.c0);
+        std::vector<double> reals;
+        for (auto& r : roots) if (r.is_real(1e-6)) reals.push_back(r.re);
+        std::sort(reals.begin(), reals.end());
+        INFO("dist = " << c.dist);
+        REQUIRE(reals.size() == 4);
+        CHECK_THAT(reals[0], WithinAbs(c.dist - 1.75, 1e-4));
+        CHECK_THAT(reals[1], WithinAbs(c.dist - 1.05, 1e-4));
+        CHECK_THAT(reals[2], WithinAbs(c.dist + 1.05, 1e-4));
+        CHECK_THAT(reals[3], WithinAbs(c.dist + 1.75, 1e-4));
+    }
+}
+
 // ── Real50 (arbitrary precision) ───────────────────────────────
 // Every solver here is a plain `template<Scalar T>`, implying it should work
 // for any Scalar, Real50 included. It didn't: polynomial.hpp and complex.hpp
@@ -190,4 +248,20 @@ TEST_CASE("Quartic with Real50", "[polynomial]") {
     CHECK(abs(reals[1] - Real50{2}) < Real50{1e-20});
     CHECK(abs(reals[2] - Real50{3}) < Real50{1e-20});
     CHECK(abs(reals[3] - Real50{4}) < Real50{1e-20});
+}
+
+TEST_CASE("Quartic with Real50: asymmetric roots (resolvent-cubic path)", "[polynomial]") {
+    // (x-1)(x-2)(x-4)(x-7) -- see the double-precision test of the same
+    // name above for why symmetric roots (the (x-1)(x-2)(x-3)(x-4) case
+    // just above) can't exercise the resolvent-cubic branch at all.
+    auto roots = solve_quartic(Real50{1}, Real50{-14}, Real50{63}, Real50{-106}, Real50{56});
+    std::vector<Real50> reals;
+    for (auto& r : roots)
+        if (r.is_real(Real50{1e-20})) reals.push_back(r.re);
+    REQUIRE(reals.size() == 4);
+    std::sort(reals.begin(), reals.end());
+    CHECK(abs(reals[0] - Real50{1}) < Real50{1e-20});
+    CHECK(abs(reals[1] - Real50{2}) < Real50{1e-20});
+    CHECK(abs(reals[2] - Real50{4}) < Real50{1e-20});
+    CHECK(abs(reals[3] - Real50{7}) < Real50{1e-20});
 }

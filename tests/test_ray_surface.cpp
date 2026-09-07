@@ -2,6 +2,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/geometry/ray_surface.hpp>
 #include <spatium/geometry/make.hpp>
+#include <cmath>
+#include <numbers>
+#include <random>
 
 using namespace spatium;
 using namespace spatium::geometry;
@@ -210,6 +213,118 @@ TEST_CASE("Ray-torus: tangent ray", "[ray_surface]") {
     auto hits = ray_torus(r, torus);
     // Tangent: 1 or 2 very close hits
     CHECK(hits.size() >= 1);
+}
+
+TEST_CASE("Ray-torus: camera-distance sweep along the symmetric axis (solve_quartic resolvent-cubic regression)",
+          "[ray_surface]") {
+    // Exact repro documented in io/scene.hpp's make_torus(): a torus at
+    // the origin (major_radius=1.4, minor_radius=0.35), camera stepping
+    // along the ring's own symmetric axis with o=(0,-dist,0), d=(0,1,0),
+    // always aimed exactly through the tube's true hit points at
+    // y = ±1.05/±1.75. Before the resolvent-cubic fix, solve_quartic()
+    // returned a single (t,y)=(inf,inf) "hit" at dist=5/9/15 and two
+    // spurious roots collapsed near y=0 at dist=7/12/20, instead of the
+    // four genuine crossings every one of these distances actually has.
+    Torus<> torus{.major_radius = 1.4, .minor_radius = 0.35};
+    for (double dist : {3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 11.6, 12.0, 15.0, 20.0}) {
+        auto r = unwrap(ray(Vec3{0, -dist, 0}, Vec3{0, 1, 0}));
+        auto hits = ray_torus(r, torus);
+        INFO("dist = " << dist);
+        REQUIRE(hits.size() == 4);
+        for (auto& h : hits) {
+            CHECK(std::isfinite(h.t));
+            CHECK(std::isfinite(h.point[1]));
+        }
+        CHECK_THAT(hits[0].point[1], WithinAbs(-1.75, 1e-6));
+        CHECK_THAT(hits[1].point[1], WithinAbs(-1.05, 1e-6));
+        CHECK_THAT(hits[2].point[1], WithinAbs(1.05, 1e-6));
+        CHECK_THAT(hits[3].point[1], WithinAbs(1.75, 1e-6));
+    }
+}
+
+TEST_CASE("Ray-torus: off-axis hits land on the actual surface (solve_quartic resolvent-cubic regression)",
+          "[ray_surface]") {
+    // The symmetric-axis sweep above is the exact documented repro, but
+    // make_torus()'s comment also reports the bug getting *worse* off
+    // that one axis ("a sweep of viewing elevations away from it found
+    // zero mathematically valid hits at every angle except the
+    // exactly-symmetric one"). Cross-check a handful of hand-picked
+    // off-axis rays directly against the implicit torus equation,
+    // independent of solve_quartic(), the way make_torus()'s defensive
+    // filter does.
+    Torus<> torus{.major_radius = 1.4, .minor_radius = 0.35};
+    double R = torus.major_radius, r = torus.minor_radius;
+    auto on_surface = [&](const Vec3& p) {
+        double lp2 = p.dot(p);
+        double s = lp2 + R * R - r * r;
+        double lhs = s * s;
+        double rhs = 4 * R * R * (p[0] * p[0] + p[1] * p[1]);
+        double scale = std::max({std::abs(lhs), std::abs(rhs), 1.0});
+        return std::abs(lhs - rhs) < 1e-6 * scale;
+    };
+    struct Case { Vec3 origin, target; };
+    Case cases[] = {
+        {Vec3{6, 2, 1}, Vec3{0.2, -0.1, 0.3}},
+        {Vec3{-5, 3, -2}, Vec3{-0.1, 0.2, -0.2}},
+        {Vec3{4, -6, 2.5}, Vec3{0.0, 0.3, 0.1}},
+        {Vec3{0, 7, -1.3}, Vec3{0.3, 0.0, -0.2}},
+    };
+    for (auto& c : cases) {
+        Vec3 dir = c.target - c.origin;
+        dir = dir / dir.norm();
+        auto ry = unwrap(ray(c.origin, dir));
+        auto hits = ray_torus(ry, torus);
+        INFO("origin = (" << c.origin[0] << "," << c.origin[1] << "," << c.origin[2] << ")");
+        REQUIRE(hits.size() >= 1);
+        for (auto& h : hits) CHECK(on_surface(h.point));
+    }
+}
+
+TEST_CASE("Ray-torus: fuzzed off-axis rays always land on the actual surface",
+          "[ray_surface]") {
+    // Same implicit-equation cross-check as the hand-picked case above,
+    // swept over many random rays with a fixed seed for reproducibility.
+    // This is the basis for io/scene.hpp's make_torus() comment's claim
+    // that its defensive implicit-equation filter is not currently
+    // observed to reject any hit solve_quartic() actually produces.
+    Torus<> torus{.major_radius = 1.4, .minor_radius = 0.35};
+    double R = torus.major_radius, r = torus.minor_radius;
+    auto on_surface = [&](const Vec3& p) {
+        double lp2 = p.dot(p);
+        double s = lp2 + R * R - r * r;
+        double lhs = s * s;
+        double rhs = 4 * R * R * (p[0] * p[0] + p[1] * p[1]);
+        double scale = std::max({std::abs(lhs), std::abs(rhs), 1.0});
+        return std::abs(lhs - rhs) < 1e-6 * scale;
+    };
+
+    std::mt19937 rng(12345);
+    std::uniform_real_distribution<double> ang(0.0, 2 * std::numbers::pi);
+    std::uniform_real_distribution<double> elev(-1.4, 1.4);
+    std::uniform_real_distribution<double> distd(2.0, 8.0);
+
+    int total_hits = 0;
+    for (int trial = 0; trial < 300; ++trial) {
+        double theta = ang(rng), dist = distd(rng), z = elev(rng);
+        Vec3 origin{dist * std::cos(theta), dist * std::sin(theta), z};
+        Vec3 target{elev(rng) * 0.3, elev(rng) * 0.3, elev(rng) * 0.3};
+        Vec3 dir = target - origin;
+        dir = dir / dir.norm();
+
+        auto ry = unwrap(ray(origin, dir));
+        auto hits = ray_torus(ry, torus);
+        INFO("trial = " << trial << " theta = " << theta << " dist = " << dist << " z = " << z);
+        for (auto& h : hits) {
+            CHECK(std::isfinite(h.t));
+            CHECK(on_surface(h.point));
+        }
+        total_hits += static_cast<int>(hits.size());
+    }
+    // Sanity: rays aimed roughly at the torus should hit it most of the
+    // time -- a near-total absence of hits would mean the fuzz aim itself
+    // is bad (not exercising the surface at all) rather than confirming
+    // anything about solve_quartic().
+    CHECK(total_hits > 300);
 }
 
 // ── Quadric Shape concept (project/distance/centroid) ───────
