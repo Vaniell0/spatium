@@ -78,6 +78,16 @@ spatium_add_example(NAME collatz_demo)
 # analytical ray-sphere/ray-plane cost, real across N_FRAMES images.
 spatium_add_example(NAME native_collision_demo OPTIONS -O3 -march=native)
 
+# Physically-based sound synthesis -- plucked string (1D wave equation,
+# physics/mechanics/wave_string.hpp) and struck rectangular drumhead (2D
+# wave equation, physics/mechanics/wave_membrane.hpp), explicit finite-
+# difference time-stepping sampled straight into WAV files via the new
+# zero-dependency io/wav.hpp writer. -O3 -march=native: the membrane's
+# 2D stencil over a full audio-length simulation (tens of thousands of
+# steps x thousands of grid nodes) is real per-sample cost, same
+# reasoning as the offline raytracers above.
+spatium_add_example(NAME sound_synthesis_demo OPTIONS -O3 -march=native)
+
 # Visual cloth demos (cloth_on_sphere/_torus, cloth_visual) stay removed
 # pending a real viewer-facing implicit-contact pipeline — explicit
 # position-based contact couldn't keep a stiff cloth with heavy
