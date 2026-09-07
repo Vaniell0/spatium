@@ -72,6 +72,7 @@ add_executable(spatium_tests
     test_relativity.cpp
     test_json.cpp
     test_scene.cpp
+    test_wav.cpp
     test_rsc_registry.cpp
     test_rsc_task.cpp
     test_rsc_dispatcher.cpp
