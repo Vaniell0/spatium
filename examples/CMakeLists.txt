@@ -88,6 +88,16 @@ spatium_add_example(NAME native_collision_demo OPTIONS -O3 -march=native)
 # reasoning as the offline raytracers above.
 spatium_add_example(NAME sound_synthesis_demo OPTIONS -O3 -march=native)
 
+# Ball pit -- gallery/promotional showcase for the same rigid_contact.hpp
+# machinery as native_collision_demo above, pushed further: a five-wall
+# vat (floor + four Hyperplane side walls, one shared contact function)
+# holds several dozen vividly-colored spheres that pour in staggered,
+# jostle, and settle, rendered with per-sphere specular/rim/shadow on
+# top of the diffuse shading native_collision_demo established. -O3
+# -march=native: same reasoning as the other offline raytracers above,
+# multiplied by a shadow ray and a bounded-wall test per primary hit.
+spatium_add_example(NAME ball_pit_demo OPTIONS -O3 -march=native)
+
 # Visual cloth demos (cloth_on_sphere/_torus, cloth_visual) stay removed
 # pending a real viewer-facing implicit-contact pipeline — explicit
 # position-based contact couldn't keep a stiff cloth with heavy
