@@ -283,44 +283,28 @@ Result<ResolvedShape<T>> make_torus(const SceneObject<T>& obj) {
         auto hits = geometry::ray_torus(local_ray, torus);
 
         // ray_torus() sits on algebra::solve_quartic() (Ferrari's
-        // method), which has a real, root-caused robustness bug: its
-        // resolvent-cubic root selection (algebra/polynomial.hpp,
-        // "Pick a real root of the resolvent" and the fallback right
-        // after it) takes the first real root above epsilon, or -- if
-        // none clears that bar -- silently falls back to ANY real root,
-        // including a negative or near-zero one. `sq_2m =
-        // sqrt(abs(2*m))` and the later `beta/(2*sq_2m)` divide don't
-        // care whether that m actually corresponds to a valid
-        // factorization: a near-zero m blows the division up to +-inf,
-        // and a wrong-sign m reconstructs two quadratics that don't
-        // multiply back out to the original quartic at all. Confirmed
-        // independent of this file: geometry::ray_torus() called
-        // directly against a torus at the origin (major_radius 1.4,
-        // minor_radius 0.35), varying ONLY the camera's distance along
-        // the ring's own symmetric axis (o=(0,-dist,0), d=(0,1,0),
-        // always exactly through the tube's true hit points at
-        // y = +-1.05/+-1.75) -- distances 3,4,6,8,10,11,11.6 came back
-        // exactly right, while 5, 9 and 15 returned a single (t, y) =
-        // (inf, inf) "hit" and 7, 12, 20 returned two hits sitting near
-        // y=0, nowhere close to the real intersection points. Moving off
-        // that one symmetric axis makes it worse, not better: a sweep
-        // of viewing elevations away from it found zero mathematically
-        // valid hits at every angle except the exactly-symmetric one.
-        // test_scene.cpp's own torus test deliberately sits on a
-        // verified-good distance for exactly this reason. None of this
-        // is introduced by this factory or by the to_local_ray()/
-        // to_world_hit() transform above -- see this PR's description
-        // for the full repro. The filter below at least stops the
-        // spurious (but finite) roots from rendering as visibly wrong
-        // hits; it cannot recover the genuine hits solve_quartic() fails
-        // to find in the first place, so a torus resolved through this
-        // factory can legitimately render sparser than it should for
-        // most camera angles. A real fix -- e.g. always taking the
-        // largest real resolvent root, or polishing with a Newton step
-        // -- belongs in solve_quartic()/ray_torus() itself, out of scope
-        // here; solve_quartic() has no other caller in this codebase
-        // besides ray_torus(), so the blast radius is contained to
-        // torus rendering.
+        // method). That solver used to have a real, root-caused
+        // robustness bug in its resolvent-cubic step -- wrong resolvent
+        // coefficient, a missing term and a swapped sign in the
+        // reconstructed quadratics, compounding so that no choice of
+        // resolvent root reconstructed the quartic's actual roots except
+        // by accident -- which made ray_torus() return false (inf, inf)
+        // misses or spurious near-center hits for most rays, on and off
+        // this torus's symmetric axis alike. That's fixed now (see
+        // algebra/polynomial.hpp's solve_quartic() and its regression
+        // tests in tests/test_polynomial.cpp and tests/test_ray_surface.cpp,
+        // both of which exercise exactly the sweep that used to fail
+        // here). The filter below is kept anyway, downgraded from a
+        // correctness workaround to a cheap belt-and-suspenders check:
+        // it costs a few multiplies per hit, and it still catches genuine
+        // floating-point roundoff on the kind of degenerate input this
+        // one-line check can't rule out up front (near-tangent rays,
+        // extreme major_radius/minor_radius ratios) without depending on
+        // solve_quartic() staying bug-free forever. It is not currently
+        // observed to reject any hit solve_quartic() produces for
+        // reasonable inputs -- see the fuzzed off-axis regression test
+        // in test_ray_surface.cpp, which checks exactly this equation
+        // against 300 random rays and finds none rejected.
         T R = torus.major_radius, r = torus.minor_radius;
         std::vector<geometry::RayHit<T>> valid;
         valid.reserve(hits.size());
