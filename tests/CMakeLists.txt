@@ -59,6 +59,8 @@ add_executable(spatium_tests
     test_heat_geodesic.cpp
     test_atom_upgrade.cpp
     test_mechanics.cpp
+    test_wave_string.cpp
+    test_wave_membrane.cpp
     test_dec.cpp
     test_lie_integrator.cpp
     test_manifold_body.cpp
