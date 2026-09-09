@@ -18,10 +18,10 @@ C++23, in large part header-only — three deliberate exceptions exist where rea
 
 ## Gallery
 
-<p align="center">
-  <a href="gallery/blackhole_gr.mp4"><img src="gallery/blackhole_gr.png" alt="Rotating Kerr black hole, GPU-rendered" width="800"></a>
-  <br><sub>Kerr black hole, full 4-coordinate geodesic integration, GPU-rendered (CUDA) at 1920x1080 — click for video</sub>
-</p>
+- [Kerr black hole](gallery/blackhole_gr.png) — full 4-coordinate geodesic integration, GPU-rendered (CUDA) at 1920x1080 ([video](gallery/blackhole_gr.mp4))
+- [A donut, declaratively](gallery/donut_dsl.png) — built entirely from `torus()`/`offset()`/`scatter()`, see the [getting-started guide](docs/getting-started-dsl.md) ([build-up video](gallery/donut_dsl.mp4))
+
+More in [`gallery/`](gallery/).
 
 ## Features
 
@@ -30,6 +30,7 @@ C++23, in large part header-only — three deliberate exceptions exist where rea
 - **Geometric primitives & operations** — Line/Ray/Segment/Hyperplane/Triangle/Polygon/Circle/Disk/Box/Simplex; intersection (Moller-Trumbore, slab method, analytical ray-quadric), distance, boolean ops, clipping
 - **Mesh & geodesics** — Mesh\<Surface\>, subdivision with surface projection, LOD chains, geodesic distance (Dijkstra + heat method), geodesic Voronoi, discrete exterior calculus
 - **Morphisms** — typed maps between spaces with pipe composition: `point | scale | shift | project`
+- **Declarative scene DSL** (`io::build`) — `torus()`/`offset()`/`scatter()`/`compose()` build a flat, inspectable `Trace`, not a tree of opaque closures; analytic until the last mile (offset surfaces and area-weighted placement are real function composition, no mesh anywhere until something actually needs triangles). Getting-started tutorial: [`docs/getting-started-dsl.md`](docs/getting-started-dsl.md), runnable in [`examples/donut_demo.cpp`](examples/donut_demo.cpp)
 - **Arbitrary precision** — Boost.Multiprecision (Real50, Real100, any digit count), same generic algorithms
 - **Physics & relativity research track** — geometric-mechanics integrators (symplectic, Lie-group, variational), metric-agnostic geodesic integration (Schwarzschild/Kerr), and RSC — a trained dispatcher that picks which method/precision to use per problem, not hand-tuned; see [Roadmap](docs/ROADMAP.md)
 - **N-dimensional, zero-cost** — templated on dimension and scalar type, concepts checked at compile time, no virtual dispatch
@@ -189,6 +190,7 @@ auto d = space.distance(a, b);  // 5.000...000 (50 digits)
 - [Conventions](docs/conventions.md) — namespace/subdivision/error-handling rules, and the known violations being fixed
 - [API Reference](docs/api-reference.md) — all types, methods, concepts
 - [Quick Start Guide](docs/quickstart.md) — getting started
+- [Getting Started: The Declarative Scene DSL](docs/getting-started-dsl.md) — zero-barrier-to-entry, build a donut in three declarative steps
 - [Extending Spatium](docs/extending.md) — defining custom spaces and primitives
 - [Roadmap](docs/ROADMAP.md) — what's done, what's planned, project history
 - [Concept-Driven Physics](docs/concept-driven-physics.md) — how `physics/mechanics/` fits the concept hierarchy

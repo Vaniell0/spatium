@@ -246,6 +246,12 @@ auto mesh = tessellate(torus, 32, 16);
 
 Factories (in `spaces/parametric.hpp`): `make_torus`, `make_cylinder`, `make_cone`, `make_mobius`, `parametric(fn, domain)`.
 
+| Related free function | Header | Description |
+|---|---|---|
+| `area_element(u, v)` | `spaces/parametric.hpp` (member) | sqrt(EG-F²) of the first fundamental form — how much a unit (du,dv) patch stretches into R³ area here |
+| `offset_surface(base, thickness)` | `spaces/offset.hpp` | Compose a new `ParametricSurface` pushed out along `base`'s own normal — `thickness` a constant or `std::function<T(T,T)>` field. Analytic, no mesh |
+| `sample_surface_uniform(surface, count, seed)` | `spaces/sample.hpp` | Rejection sampling weighted by `area_element` — points even by actual surface area, not by (u,v) or a mesh/Voronoi graph. Returns `SurfaceSample<T>{u, v, position, normal}` |
+
 ### `ImplicitSurface<T>` (`spaces/implicit.hpp`)
 
 Level set F(x,y,z) = 0. Auto gradient, Newton projection, marching cubes.
@@ -464,6 +470,15 @@ Substitutes p(t) = o + t·d into quadric equation → at² + bt + c = 0 → `sol
 | `real_roots_cubic(...)` | 148 | `vector<T>` | Filter |
 | `real_roots_quartic(...)` | 155 | `vector<T>` | Filter |
 
+### Noise (`algebra/noise.hpp`)
+
+`PerlinNoise` — Ken Perlin's 2002 "improved noise", seeded (each instance owns its own permutation table, no shared mutable state). `PerlinNoise(seed)(x, y, z)` or `(Vec<T,3>)` returns a value in [-1, 1].
+
+```cpp
+algebra::PerlinNoise noise(7);
+double v = noise(1.0, 2.0, 3.0);
+```
+
 ### Generic Algebra (`algebra/functions.hpp`)
 
 | Function | Line | Constraint | Description |
@@ -587,12 +602,40 @@ auto hit = bvh.ray_cast(ray);   // optional<Hit>
 | SVG | `io/svg.hpp` | `mesh_wireframe()`, `mesh_filled()`, `mesh_colored()`, `mesh_to_svg()` |
 | OBJ | `io/obj.hpp` | `load_obj(path) → Result<Mesh<E3>>`, `save_obj(mesh, path)` |
 | STL | `io/stl.hpp` | `load_stl(path) → Result<Mesh<E3>>`, `save_stl(mesh, path)` |
+| JSON | `io/json.hpp` | Hand-rolled `JsonValue` parser/serializer, no external dependency |
+| Scene | `io/scene.hpp` | `Scene`/`SceneObject`/`Material`, `ShapeRegistry` (open shape-kind registry), `load_scene`/`save_scene` |
+| WAV | `io/wav.hpp` | Hand-rolled 16-bit PCM writer, no external dependency, writer-only |
+
+### Declarative Scene DSL (`io/build.hpp`, namespace `spatium::io::build`)
+
+A `Trace<T>` is a flat, indexable record of operations — not a tree of closures. Each factory method appends one `TraceNode` and returns a `Handle<T>` (a `{trace*, index}` pair); nothing is computed until `materialize()` walks the trace. Space and Offset nodes stay analytic (a real `ParametricSurface`, composed by function, no mesh) until that walk tessellates for display — see [`docs/getting-started-dsl.md`](getting-started-dsl.md) for the full walkthrough.
+
+```cpp
+namespace bd = spatium::io::build;
+bd::Trace<double> scene;
+auto dough = scene.torus(2.0, 1.0).colored({.base_color = {0.8, 0.55, 0.32}});
+auto icing = scene.offset(dough, 0.035);
+auto sprinkles = scene.scatter(scene.cylinder(0.025, 0.12), icing, 200);
+auto root = scene.compose({dough, icing, sprinkles});
+auto placed = bd::materialize(scene, root.index);  // vector<Placed<T>>{mesh, material}
+```
+
+| `Trace<T>` method | Kind | Description |
+|---|---|---|
+| `space(surface, u_steps, v_steps)` | `Space` | Wrap any `ParametricSurface<T>` directly |
+| `torus(major_r, minor_r, ...)`, `cylinder(radius, height, ...)` | `Space` | Convenience factories over `space()` |
+| `literal(mesh)`, `cube(half_extents)` | `Literal` | Escape hatch for shapes with no natural (u,v)→R³ formula |
+| `offset(base, thickness)` | `Offset` | `offset_surface(resolve_surface(base), thickness)` — stays analytic |
+| `scatter(item, target, count, seed)` | `Scatter` | `sample_surface_uniform` placement, each instance oriented by the target's normal (`basis_from_normal`) |
+| `compose({...})` | `Compose` | Groups child handles; `materialize()` flattens recursively |
+
+Every node also has `.colored(Material<T>)` and `.moving(fn(point, t) -> point)` — the one motion/mutation slot, taking a constant, a `Morphism` pipe, or a genuine function of time, uniformly. Free functions `resolve_surface(trace, idx)` (Space/Offset only, throws otherwise), `materialize_mesh(trace, idx, t)`, `materialize(trace, idx, t)`.
 
 ---
 
-## Discrete (`discrete/finite_set.hpp`)
+## Discrete (`discrete/`)
 
-### `FiniteSet<T>`
+### `FiniteSet<T>` (`discrete/finite_set.hpp`)
 
 | Operator | Line | Description |
 |----------|------|-------------|
@@ -604,6 +647,17 @@ auto hit = bvh.ray_cast(ray);   // optional<Hit>
 | `<` | 77 | Proper subset (⊂) |
 
 Methods: `size()`, `empty()`, `contains()`, `insert()`, `erase()`, `power_set()`, `cartesian()`, `map()`, `filter()`.
+
+### Combinatorics (`discrete/combinatorics.hpp`)
+
+| Function | Line | Returns | Description |
+|----------|------|---------|-------------|
+| `factorial(n)` | 42 | `Result<T>` | n!, overflow-checked |
+| `binomial_coefficient(n, k)` | 81 | `Result<T>` | C(n,k); 128-bit accumulator internally, cross-validated against Python's `math.comb` over 4.5M pairs |
+| `permutations_count(n, k)` | 115 | `Result<T>` | n!/(n-k)! |
+| `k_combinations(set, k)` | 138 | `vector<FiniteSet<T>>` | Every size-k subset of `set` |
+
+No dedicated probability-theory module (distributions, random variables as first-class types) exists yet — the RNG usage in `algebra/noise.hpp`, `spaces/sample.hpp`, `physics/atomic/orbital.hpp` and `render/sky.hpp` is all ad-hoc sampling, not a shared abstraction. Stochastic processes on Riemannian manifolds (Brownian motion / SDEs via `exp_map`) are tracked as a `[want]` in [Roadmap](ROADMAP.md), not started.
 
 ---
 
