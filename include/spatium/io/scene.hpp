@@ -51,6 +51,13 @@ struct Material {
     // render::hsv_to_rgb255()/blackbody_to_rgb255() use for a final
     // pixel value.
     Vec<T, 3> base_color{T{0.8}, T{0.8}, T{0.8}};
+
+    // 1 = fully matte/rough (pure Lambertian diffuse, the old default
+    // behavior for anyone not setting this). 0 = mirror-glossy: a tight,
+    // bright specular lobe plus a real reflected ray, not just a
+    // highlight hack -- a renderer that honors this is what tells rough
+    // dough from glossy icing apart, not just their base_color.
+    T roughness{T{1}};
 };
 
 // ── Scene object ─────────────────────────────────────────────────
