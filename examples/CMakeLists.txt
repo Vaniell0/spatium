@@ -54,6 +54,11 @@ spatium_add_example(NAME tumbling_body_demo OPTIONS -O3 -march=native)
 # above. Sample scene shipped alongside as scene_demo_sample.json.
 spatium_add_example(NAME scene_demo OPTIONS -O3 -march=native)
 
+# spatium::io::build's declarative scene DSL, getting-started demo. Console
+# output by default; --photo raytraces to PNG (BVH<Triangle3>, same
+# per-pixel-cost reasoning as the raytracers above).
+spatium_add_example(NAME donut_demo OPTIONS -O3 -march=native)
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel
