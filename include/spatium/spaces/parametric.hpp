@@ -125,6 +125,21 @@ public:
         return sqrt(lambda_max / lambda_min);
     }
 
+    // Area element sqrt(EG - F^2) of the first fundamental form at (u,v) --
+    // how much a unit (du,dv) patch stretches into R^3 area here. The
+    // per-point weight uniform-by-surface-area sampling needs (see
+    // spaces/sample.hpp): sampling (u,v) uniformly instead would bunch
+    // points wherever the parametrization compresses space, e.g. near a
+    // thin-ring torus's inner rim.
+    T area_element(T u, T v) const {
+        auto fu = du(u, v);
+        auto fv = dv(u, v);
+        T E = fu.dot(fu), F = fu.dot(fv), G = fv.dot(fv);
+        T disc = E * G - F * F;
+        using std::sqrt;
+        return disc > T{0} ? sqrt(disc) : T{0};
+    }
+
 private:
     ParamFn fn_;
     Domain domain_;

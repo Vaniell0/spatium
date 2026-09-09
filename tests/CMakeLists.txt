@@ -92,6 +92,7 @@ add_executable(spatium_tests
     test_rsc_checkpoint.cpp
     test_rsc_embedded_base.cpp
     test_rsc_custom_layer.cpp
+    test_build_dsl.cpp
 )
 
 target_include_directories(spatium_tests PRIVATE
