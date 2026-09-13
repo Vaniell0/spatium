@@ -94,9 +94,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev libboost-dev
-          # Catch2 v3 may not be packaged on the runner image yet; the build
-          # falls back to FetchContent_MakeAvailable in CMakeLists.txt if
-          # find_package(Catch2 3) returns NOT_FOUND in a future patch.
+          # catch2 is not optional when SPATIUM_BUILD_TESTS is on:
+          # CMakeLists.txt's find_package(Catch2 3) is REQUIRED with no
+          # FetchContent fallback. (A comment here used to claim there was
+          # one; there is not, and two new jobs below were written against
+          # that claim and failed on it.)
           # libboost-dev backs SPATIUM_BOOST=ON below (Real50/Real100 tests
           # and the RSC precision domain). Header-only, so the -dev
           # metapackage is enough and no boost libs need linking. Boost is
@@ -137,8 +139,11 @@ jobs:
           # configuration someone evaluating Spatium gets from a bare
           # `cmake -B build` on a machine with nothing installed, which is
           # what core/precision.hpp used to break outright.
+          # catch2 is here because it is a test-harness dependency, not one
+          # of the optional library features under test, and find_package
+          # for it is REQUIRED.
           sudo apt-get install -y --no-install-recommends \
-            gcc-15 g++-15 cmake ninja-build
+            gcc-15 g++-15 cmake ninja-build catch2
 
       - name: Configure
         env:
@@ -221,7 +226,7 @@ jobs:
           # <print>, and pairing clang with the platform's own standard
           # library is what a downstream user on Linux actually has.
           sudo apt-get install -y --no-install-recommends \
-            clang-19 libstdc++-14-dev cmake ninja-build
+            clang-19 libstdc++-14-dev cmake ninja-build catch2
 
       - name: Configure
         env:
