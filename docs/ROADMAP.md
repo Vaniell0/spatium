@@ -361,9 +361,14 @@ Ambitions past the 2026-09-09 donut demo (Completed above) for `io::build`'s `Tr
 
 - **[course]** Boolean ops on concave mesh (BSP tree)
 
-## Native math (dependency reduction)
+## Native math (working defaults, not dependency removal)
 
-- **[course]** SVD / eigendecomposition — a real native-implementation candidate (unlike the heat method's sparse-Cholesky step or ipc-toolkit, whose cost/benefit doesn't favor a from-scratch rewrite). Blocks `Eigen::Ref<…>` public-API adapters noted above and dense-solve paths that currently require `SPATIUM_EIGEN=ON`.
+Reframed 2026-09-13. The old heading was "dependency reduction" and the item below claimed native SVD/eigendecomposition was still open — both stale. Dense linear algebra landed natively on 2026-09-06 (`0372794` general-N symmetric eigendecomposition via cyclic Jacobi, `4c77d38` general MxN SVD via eigendecomposition of AᵀA, benchmarked in `cb7978a`), works for any `Scalar` including `Real<Digits>`, and is cross-validated against `Eigen::JacobiSVD` in `tests/test_svd.cpp` — which passes, contrary to the "one pre-existing unrelated failure" note repeated in several Completed entries above, written when it did fail.
+
+The goal was never to remove dependencies. It is to have a working default for every operation so no capability is gated behind an optional package, while any specialized library can still be absorbed behind the same interface — the pattern `SPATIUM_HAS_EIGEN` / `SPATIUM_HAS_BOOST_MULTIPRECISION` / `SPATIUM_HAS_IPC_TOOLKIT` already implements. Spatium does not need to beat specialized libraries at their own work; it needs to compose with them and still stand alone without them.
+
+- **[course]** Sparse linear algebra — the real remaining gap, and the only place with no native default at all. The heat method, DEC, `differential.hpp` and `mesh/geodesic.hpp` all require `SPATIUM_EIGEN=ON` because there is no sparse matrix type or sparse factorization in the tree. Until that exists, geodesics via the heat method are a capability a default build simply does not have.
+- **[want]** `Eigen::Ref<…>` public-API adapters — was blocked on dense SVD/QR, which has since landed, so this is now unblocked rather than waiting.
 
 ## Materials & structures
 
@@ -383,7 +388,7 @@ Ambitions past the 2026-09-09 donut demo (Completed above) for `io::build`'s `Tr
 ## Interop / ecosystem
 
 - **[dare]** Heat-method log map, CGAL-grade exact polyhedral geodesics (geometry-central and CGAL each cover one half of this; Spatium currently ships neither on top of Dijkstra/heat-distance).
-- **[want]** Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view` are planned once SVD/eigendecomposition (above) lands.
+- **[want]** Own Vec/Matrix creates impedance mismatch with the Eigen ecosystem — interop adapters beyond the current `to_eigen`/`from_eigen`/`eigen_view`. Previously gated on native SVD/eigendecomposition, which landed 2026-09-06 (see Backlog → Native math), so nothing blocks this now.
 
 ---
 
