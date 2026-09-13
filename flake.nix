@@ -49,6 +49,9 @@
               "-DSPATIUM_BUILD_TESTS=OFF"
               "-DSPATIUM_BUILD_BENCHMARKS=ON"
               "-DSPATIUM_EIGEN=ON"
+              # boost is already in coreDeps; opt in explicitly now that
+              # core/precision.hpp no longer assumes it is just there.
+              "-DSPATIUM_BOOST=ON"
               "-DCMAKE_SKIP_BUILD_RPATH=ON"
               "-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON"
               "-DIMGUI_DIR=${imgui-src}"

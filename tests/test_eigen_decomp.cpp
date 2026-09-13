@@ -148,6 +148,7 @@ TEST_CASE("eigen_decompose: N=5 generic symmetric matrix, reconstruction + ortho
     check_matrix_close(reconstruct(eig), S, 1e-8);
 }
 
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
 TEST_CASE("eigen_decompose works with Real50 (generic Scalar path)", "[eigen_decomp][precision]") {
     using T = Real50;
     Matrix<T, 3, 3> S;
@@ -164,6 +165,7 @@ TEST_CASE("eigen_decompose works with Real50 (generic Scalar path)", "[eigen_dec
         for (std::size_t j = 0; j < 3; ++j)
             CHECK(approx_equal(rec(i, j), S(i, j)));
 }
+#endif // SPATIUM_HAS_BOOST_MULTIPRECISION
 
 #if SPATIUM_HAS_EIGEN
 #include <spatium/algebra/eigen_interop.hpp>

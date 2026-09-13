@@ -267,6 +267,27 @@ else()
     target_compile_definitions(spatium_sdk INTERFACE SPATIUM_HAS_EIGEN=0)
 endif()
 
+# ── Boost.Multiprecision (optional) ──────────────────────────
+# Backs core/precision.hpp's Real<Digits> (Real50/Real100) -- the only
+# header in the tree that actually needs Boost; every other Real50
+# mention is a comment. Header-only, so Boost::headers is enough and
+# nothing links a compiled Boost library.
+#
+# OFF by default, matching SPATIUM_EIGEN: a bare `cmake -B build` with
+# no system packages installed has to work, since that is the first
+# thing anyone evaluating the library runs. Every environment we
+# control (flake.nix, the CMake presets, CI) turns it ON explicitly, so
+# our own test coverage loses nothing.
+option(SPATIUM_BOOST "Enable Boost.Multiprecision (Real<Digits>, Real50/Real100)" OFF)
+if(SPATIUM_BOOST)
+    find_package(Boost 1.74 REQUIRED)
+    target_link_libraries(spatium_sdk INTERFACE Boost::headers)
+    target_compile_definitions(spatium_sdk INTERFACE SPATIUM_HAS_BOOST_MULTIPRECISION=1)
+    message(STATUS "Spatium: Boost.Multiprecision ENABLED")
+else()
+    target_compile_definitions(spatium_sdk INTERFACE SPATIUM_HAS_BOOST_MULTIPRECISION=0)
+endif()
+
 # ── ipc-toolkit (optional) ────────────────────────────────────
 # Implicit contact backend for contact physics/soft bodies (Newton +
 # log-barrier + line-search filter, Li-Kaufman 2020 §5) -- replaces
@@ -427,8 +448,17 @@ endif()
 # OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): RSC's
 # training tools are specific to this repo, not something a downstream
 # consumer pulling in Spatium::sdk needs built.
+#
+# Also requires SPATIUM_BOOST: RSC's founding dispatch domain is
+# "f64 vs. Real50 on casus-irreducibilis cubics" (rsc/precision_ops.hpp
+# calls solve_cubic<Real50> directly), so without Boost.Multiprecision
+# there is no domain to train, not merely a compile error to patch around.
 option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ${SPATIUM_IS_TOP_LEVEL})
-if(SPATIUM_BUILD_RSC_TOOLS)
+if(SPATIUM_BUILD_RSC_TOOLS AND NOT SPATIUM_BOOST)
+    message(STATUS
+        "Spatium: RSC tools SKIPPED -- they need arbitrary precision "
+        "(rsc/precision_ops.hpp uses Real50). Re-run with -DSPATIUM_BOOST=ON.")
+elseif(SPATIUM_BUILD_RSC_TOOLS)
     add_subdirectory(rsc/tools)
 endif()
 
@@ -472,6 +502,7 @@ install(EXPORT SpatiumTargets
 set(SPATIUM_INSTALLED_HAS_VIEWER ${SPATIUM_HAS_VIEWER})
 set(SPATIUM_INSTALLED_HAS_EIGEN  ${SPATIUM_EIGEN})
 set(SPATIUM_INSTALLED_HAS_IMGUI  ${SPATIUM_HAS_IMGUI})
+set(SPATIUM_INSTALLED_HAS_BOOST  ${SPATIUM_BOOST})
 
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/SpatiumConfig.cmake.in

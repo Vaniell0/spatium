@@ -69,6 +69,7 @@ TEST_CASE("binomial_coefficient: does not spuriously overflow uint64_t on values
     CHECK(*r == 759510004936100355ULL);
 }
 
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
 TEST_CASE("binomial_coefficient: Real50 reaches counts uint64_t cannot hold", "[combinatorics]") {
     // C(100,50) = 100891344545564193334812497256, far past uint64_t's
     // ~1.8e19 ceiling -- computed independently via Python's
@@ -83,6 +84,7 @@ TEST_CASE("binomial_coefficient: Real50 reaches counts uint64_t cannot hold", "[
     if (diff < Real50(0)) diff = -diff;
     CHECK(diff < Real50("1e10")); // well within Real50's working precision
 }
+#endif // SPATIUM_HAS_BOOST_MULTIPRECISION
 
 // ── permutations_count ────────────────────────────────────────────
 

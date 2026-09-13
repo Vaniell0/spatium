@@ -18,7 +18,6 @@ add_executable(spatium_tests
     test_morphism.cpp
     test_format.cpp
     test_mesh.cpp
-    test_precision.cpp
     test_verify.cpp
     test_hardening.cpp
     test_matrix.cpp
@@ -75,23 +74,6 @@ add_executable(spatium_tests
     test_json.cpp
     test_scene.cpp
     test_wav.cpp
-    test_rsc_registry.cpp
-    test_rsc_task.cpp
-    test_rsc_dispatcher.cpp
-    test_rsc_describe.cpp
-    test_rsc_train.cpp
-    test_rsc_chain.cpp
-    test_rsc_precision.cpp
-    test_rsc_geodesic.cpp
-    test_rsc_rootfind.cpp
-    test_rsc_ode.cpp
-    test_rsc_integrator.cpp
-    test_rsc_mesh.cpp
-    test_rsc_linear.cpp
-    test_rsc_base.cpp
-    test_rsc_checkpoint.cpp
-    test_rsc_embedded_base.cpp
-    test_rsc_custom_layer.cpp
     test_build_dsl.cpp
 )
 
@@ -108,6 +90,44 @@ target_link_libraries(spatium_tests PRIVATE
 
 if(SPATIUM_IPC_TOOLKIT)
     target_link_libraries(spatium_tests PRIVATE ipc::toolkit)
+endif()
+
+# Sources that need Boost.Multiprecision, added conditionally rather than
+# left in the list above wrapped in whole-file #ifs.
+#
+# test_precision.cpp is entirely about Real<Digits>, so it has nothing to
+# assert without it.
+#
+# The RSC tests go with it as a block, not file by file: rsc/checkpoint.hpp
+# includes precision_ops.hpp, so every RSC header reaches Real50 through
+# train.hpp regardless of which domain it tests. Guarding only the Real50
+# candidate inside precision_ops.hpp would be worse than losing the tests --
+# the op set defines the registry's layout, which the embedded base
+# checkpoint is pinned to, so making that set depend on a build flag would
+# silently desynchronise the checkpoint instead of failing loudly.
+# Same rule the SPATIUM_BUILD_RSC_TOOLS guard states in the top-level
+# CMakeLists: RSC needs arbitrary precision, full stop.
+if(SPATIUM_BOOST)
+    target_sources(spatium_tests PRIVATE
+        test_precision.cpp
+        test_rsc_registry.cpp
+        test_rsc_task.cpp
+        test_rsc_dispatcher.cpp
+        test_rsc_describe.cpp
+        test_rsc_train.cpp
+        test_rsc_chain.cpp
+        test_rsc_precision.cpp
+        test_rsc_geodesic.cpp
+        test_rsc_rootfind.cpp
+        test_rsc_ode.cpp
+        test_rsc_integrator.cpp
+        test_rsc_mesh.cpp
+        test_rsc_linear.cpp
+        test_rsc_base.cpp
+        test_rsc_checkpoint.cpp
+        test_rsc_embedded_base.cpp
+        test_rsc_custom_layer.cpp
+    )
 endif()
 
 target_compile_options(spatium_tests PRIVATE

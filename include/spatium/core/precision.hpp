@@ -1,6 +1,16 @@
 #pragma once
 
+// Arbitrary-precision scalars, backed by Boost.Multiprecision.
+// Only available when SPATIUM_HAS_BOOST_MULTIPRECISION is defined and
+// nonzero (CMake's SPATIUM_BOOST option) -- compiles to nothing
+// otherwise, the same way mesh/heat_geodesic.hpp does for Eigen, so
+// <spatium/core.hpp> can keep including this unconditionally and still
+// build on a machine with no Boost installed.
+
 #include <spatium/_export_macro.hpp>
+
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <boost/multiprecision/cpp_dec_float.hpp>
@@ -34,3 +44,5 @@ static_assert(Scalar<Real<24>>);
 static_assert(Scalar<Real<250>>);
 
 } // namespace spatium
+
+#endif // SPATIUM_HAS_BOOST_MULTIPRECISION
