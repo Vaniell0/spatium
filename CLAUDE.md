@@ -6,11 +6,18 @@ C++23 header-only math library for arbitrary mathematical spaces, geometric prim
 
 ```bash
 nix develop
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSPATIUM_BOOST=ON
 ninja -C build
 ctest --test-dir build
 ./build/examples/showcase
 ```
+
+`-DSPATIUM_BOOST=ON` is what keeps the full test set in play: without it
+`test_precision.cpp` and every `test_rsc_*` are dropped (RSC's registry
+reaches `Real50` through `checkpoint.hpp`). Leave it off only to reproduce
+what someone with no system packages gets — `cmake --preset noboost`, the
+counterpart to `noeigen`, does exactly that and is the configuration a bare
+`cmake -B build` with no flags now produces.
 
 A second config, `build-release/` (`-DCMAKE_BUILD_TYPE=Release -DSPATIUM_EIGEN=ON`,
 modules off), exists alongside `build/` for RSC training-heavy work.
@@ -77,7 +84,7 @@ differential.hpp — cotangent Laplacian, mass matrix, face gradients, divergenc
 - `Function<F,Domain,Codomain>` concept, `gradient() / integrate() / minimize()` — calculus over plain callables, no wrapper type
 - `raise_gradient() / project_tangent() / riemannian_minimize()` — Riemannian gradient descent on any RiemannianManifold+Surface (Euclidean, Sphere, Hyperbolic): index-raise the ambient covector via the space's own metric_at(), project to the tangent space, retract via exp_map
 - `verify_metric / verify_inner_product / verify_exp_log` — axiom verification
-- `Real50 / Real100` — arbitrary precision (Boost.Multiprecision)
+- `Real50 / Real100` — arbitrary precision (Boost.Multiprecision, requires `SPATIUM_BOOST=ON`)
 - `Table / Svg` — structured output and 2D visualization
 - `std::format` support for all types
 - UDLs: `_deg`, `_pi`, `_x`, `_y`, `_z`
@@ -119,7 +126,7 @@ differential.hpp — cotangent Laplacian, mass matrix, face gradients, divergenc
 - PascalCase classes, snake_case functions, trailing underscore for private members
 - `Result<T> = std::expected<T, Error>` for fallible operations
 - constexpr where possible, ADL-friendly math (using std::sqrt etc)
-- Header-only, Boost optional (multiprecision only), Eigen optional (SPATIUM_EIGEN=ON for heat method)
+- Header-only, Boost optional (`SPATIUM_BOOST=ON`, multiprecision only), Eigen optional (`SPATIUM_EIGEN=ON` for heat method). Both follow the same pattern: a CMake option sets `SPATIUM_HAS_<DEP>=0/1`, and the headers that need the dependency compile to nothing when it is off — so a bare `-Iinclude` with no packages installed still builds `<spatium/core.hpp>` and `<spatium/spatium.hpp>`
 - Catch2 v3 for tests
 - Template params: `<std::size_t N, Scalar T = double>`
 - Clean constructors: `Triangle3(a, b, c)` not `{{{a, b, c}}}`

@@ -343,7 +343,7 @@ struct MyFloat {
 
 Spatium uses `using std::sqrt; sqrt(x)` pattern, so ADL-discovered functions take precedence.
 
-Built-in: `Real50`, `Real100` from Boost.Multiprecision (`core/precision.hpp`).
+Built-in: `Real50`, `Real100` from Boost.Multiprecision (`core/precision.hpp`, built with `-DSPATIUM_BOOST=ON`).
 
 ---
 

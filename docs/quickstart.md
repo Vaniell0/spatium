@@ -12,7 +12,10 @@ nix develop       # enters dev shell with all deps
 
 ### Manual
 
-Requirements: GCC 15+ or Clang 19+, CMake 3.28+, Catch2 v3, Boost (for multiprecision).
+Requirements: GCC 15+ or Clang 19+, CMake 3.28+, Catch2 v3 (tests only).
+Optional: Boost (`-DSPATIUM_BOOST=ON`, for `Real<Digits>`/`Real50`/`Real100`),
+Eigen3 (`-DSPATIUM_EIGEN=ON`, for the heat method and DEC). Neither is needed
+to include `<spatium/core.hpp>` or `<spatium/spatium.hpp>`.
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
