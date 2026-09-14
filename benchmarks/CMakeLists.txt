@@ -10,6 +10,7 @@ add_executable(spatium_bench
     bench_narrow_phase.cpp
     bench_eigen_decomp.cpp
     bench_spherical_boolean.cpp
+    bench_trace.cpp
 )
 
 target_link_libraries(spatium_bench PRIVATE
