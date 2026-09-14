@@ -31,9 +31,13 @@ struct BVH {
     // `bounding_box()`. When the Shape ALSO satisfies `RayHittable`,
     // Hit carries the shape-specific barycentric weights and unit
     // normal harvested from `ray_hit`. The canonical such shape is
-    // `Triangle<3, T>`. `Quadric` / `Torus` are RayHittable but not
-    // currently Bounded, so they cannot enter a BVH yet — they
-    // shine via direct `ray_quadric` / `ray_torus` calls instead.
+    // `Triangle<3, T>`. `BoundedQuadric` is the analytic counterpart:
+    // RayHittable *and* Bounded, so a tree can hold exact surfaces
+    // instead of the triangles they would otherwise be tessellated
+    // into. Bare `Quadric` / `Torus` stay RayHittable but unbounded —
+    // an infinite cylinder or cone has no bounding box to give — so
+    // they remain direct-call shapes, as does any quadric that has
+    // not been confined to a box.
     // Bounded shapes that lack a `ray_hit` overload fall through to
     // the legacy `intersect(ray, shape)` path; only `t` and `point`
     // are filled in that case.

@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/catch_template_test_macros.hpp>
 #include <spatium/geometry/ray_surface.hpp>
+#include <spatium/geometry/ray_hit.hpp>
 #include <spatium/geometry/make.hpp>
 #include <cmath>
 #include <numbers>
@@ -384,3 +386,79 @@ TEST_CASE("Quadric: a uniform ellipsoid IS a round sphere", "[ray_surface]") {
     CHECK_THAT(Quadric<>::ellipsoid(4.0, 4.0, 4.0).sphere_radius(), WithinAbs(4.0, 1e-10));
 }
 
+
+// ── BoundedQuadric ────────────────────────────────────────────
+
+TEST_CASE("Quadric::sphere(center, radius) puts the center in the linear terms",
+          "[ray_surface]") {
+    Vec<double, 3> c{2.0, -1.0, 0.5};
+    auto q = Quadric<>::sphere(c, 1.5);
+    CHECK(q.is_round_sphere());
+    CHECK_THAT((q.sphere_center() - c).norm(), WithinAbs(0.0, 1e-12));
+    CHECK_THAT(q.sphere_radius(), WithinAbs(1.5, 1e-12));
+    // On-surface points evaluate to zero; the center evaluates to -r².
+    CHECK_THAT(q(c + Vec<double, 3>{1.5, 0, 0}), WithinAbs(0.0, 1e-12));
+    CHECK_THAT(q(c), WithinAbs(-2.25, 1e-12));
+}
+
+TEST_CASE("BoundedQuadric sphere: box is the surface's own extent", "[ray_surface]") {
+    Vec<double, 3> c{2.0, 0.0, 0.0};
+    auto s = BoundedQuadric<>::sphere(c, 0.5);
+    auto b = s.bounding_box();
+    CHECK_THAT(b.min_corner[0], WithinAbs(1.5, 1e-12));
+    CHECK_THAT(b.max_corner[0], WithinAbs(2.5, 1e-12));
+    CHECK_THAT((s.centroid() - c).norm(), WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("BoundedQuadric sphere: a tangent hit is not rejected by its own box",
+          "[ray_surface]") {
+    // The silhouette of a sphere lands exactly on its bounding box, so an
+    // exact containment test would discard every grazing ray -- the reason
+    // within_clip() carries a tolerance rather than comparing directly.
+    auto s = BoundedQuadric<>::sphere(1.0);
+    Ray<3, double> grazing{Vec<double, 3>{-5.0, 1.0, 0.0}, Vec<double, 3>{1.0, 0.0, 0.0}};
+    auto h = ray_hit(grazing, s);
+    REQUIRE(h.has_value());
+    CHECK_THAT(h->point[1], WithinAbs(1.0, 1e-6));
+}
+
+TEST_CASE("BoundedQuadric cylinder: the clip actually truncates", "[ray_surface]") {
+    auto c = BoundedQuadric<>::cylinder_z(1.0, 0.0, 2.0);
+
+    // Through the infinite surface, but above the extent: both algebraic
+    // solutions are real and both must be rejected.
+    Ray<3, double> above{Vec<double, 3>{-5.0, 0.0, 5.0}, Vec<double, 3>{1.0, 0.0, 0.0}};
+    CHECK_FALSE(ray_hit(above, c).has_value());
+
+    Ray<3, double> through{Vec<double, 3>{-5.0, 0.0, 1.0}, Vec<double, 3>{1.0, 0.0, 0.0}};
+    auto h = ray_hit(through, c);
+    REQUIRE(h.has_value());
+    CHECK_THAT(h->point[0], WithinAbs(-1.0, 1e-9)); // near wall, not the far one
+
+    auto b = c.bounding_box();
+    CHECK_THAT(b.min_corner[2], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(b.max_corner[2], WithinAbs(2.0, 1e-12));
+}
+
+TEST_CASE("BoundedQuadric cone: the box widens with distance from the apex",
+          "[ray_surface]") {
+    // x² + y² = z², so the radius at height z is |z|.
+    auto k = BoundedQuadric<>::cone_z(0.0, 3.0);
+    auto b = k.bounding_box();
+    CHECK_THAT(b.max_corner[0], WithinAbs(3.0, 1e-12));
+    CHECK_THAT(b.min_corner[0], WithinAbs(-3.0, 1e-12));
+
+    // Straddling the apex: the wider end sets the width.
+    auto straddling = BoundedQuadric<>::cone_z(-1.0, 4.0);
+    CHECK_THAT(straddling.bounding_box().max_corner[0], WithinAbs(4.0, 1e-12));
+}
+
+TEST_CASE("BoundedQuadric satisfies what a BVH demands of a shape", "[ray_surface]") {
+    // The whole point of the type: Bounded lets it into the tree, and
+    // RayHittable makes the tree call the exact surface at the leaf
+    // rather than a tessellation of it.
+    STATIC_REQUIRE(Bounded<BoundedQuadric<double>>);
+    STATIC_REQUIRE(RayHittable<BoundedQuadric<double>, double>);
+    // A bare Quadric must NOT qualify: most quadrics are unbounded.
+    STATIC_REQUIRE_FALSE(Bounded<Quadric<double>>);
+}
