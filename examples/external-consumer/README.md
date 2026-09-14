@@ -17,11 +17,12 @@ repository the same way.
 - CMake >= 3.28
 - GCC >= 15 or Clang >= 19 (C++23)
 - A CMake generator (Ninja recommended, Make also works)
-- Boost headers (e.g. `libboost-dev` on Debian/Ubuntu) -- `spatium/core.hpp`
-  unconditionally uses Boost.Multiprecision for `Real50`/`Real100`, so Boost
-  is required even for this tiny example
 
-No Nix, no Eigen, no Catch2, no Vulkan, and no Google Benchmark are needed.
+Nothing else. No Nix, no Boost, no Eigen, no Catch2, no Vulkan, no Google
+Benchmark. `spatium/core.hpp` used to include Boost.Multiprecision
+unconditionally, which made Boost headers a hard requirement even here;
+since `SPATIUM_BOOST` exists that is opt-in, and this example is built in
+CI on a runner with no optional package installed at all.
 Pulling Spatium in via `FetchContent` (rather than configuring Spatium's
 own repository standalone) builds only the header-only `Spatium::sdk`
 interface target -- Spatium's viewer, examples, tests, and RSC tools all
