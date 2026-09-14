@@ -189,6 +189,10 @@ TEST_CASE("Quartic: torus resolvent coefficients that used to come back (inf,inf
 }
 
 // ── Real50 (arbitrary precision) ───────────────────────────────
+// Everything below needs Boost.Multiprecision (SPATIUM_BOOST=ON); the
+// rest of this file is portable and stays compiled either way.
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+//
 // Every solver here is a plain `template<Scalar T>`, implying it should work
 // for any Scalar, Real50 included. It didn't: polynomial.hpp and complex.hpp
 // called std::sqrt/cbrt/cos/acos/atan2/abs *qualified*, which only overloads
@@ -265,3 +269,5 @@ TEST_CASE("Quartic with Real50: asymmetric roots (resolvent-cubic path)", "[poly
     CHECK(abs(reals[2] - Real50{4}) < Real50{1e-20});
     CHECK(abs(reals[3] - Real50{7}) < Real50{1e-20});
 }
+
+#endif // SPATIUM_HAS_BOOST_MULTIPRECISION

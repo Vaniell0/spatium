@@ -138,6 +138,7 @@ TEST_CASE("svd: rank-deficient 4x3 matrix -- one column a linear combination of 
     check_matrix_close(reconstruct(r), A, 1e-7);
 }
 
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
 TEST_CASE("svd works with Real50 (generic Scalar path)", "[svd][precision]") {
     using T = Real50;
     Matrix<T, 3, 2> A;
@@ -153,6 +154,7 @@ TEST_CASE("svd works with Real50 (generic Scalar path)", "[svd][precision]") {
         for (std::size_t j = 0; j < 2; ++j)
             CHECK(approx_equal(rec(i, j), A(i, j)));
 }
+#endif // SPATIUM_HAS_BOOST_MULTIPRECISION
 
 #if SPATIUM_HAS_EIGEN
 #include <spatium/algebra/eigen_interop.hpp>

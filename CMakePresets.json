@@ -20,7 +20,8 @@
             "binaryDir": "${sourceDir}/build-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "SPATIUM_EIGEN": "ON"
+                "SPATIUM_EIGEN": "ON",
+                "SPATIUM_BOOST": "ON"
             }
         },
         {
@@ -32,6 +33,7 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SPATIUM_USE_MODULES": "ON",
+                "SPATIUM_BOOST": "ON",
                 "SPATIUM_BUILD_EXAMPLES": "OFF",
                 "SPATIUM_BUILD_VIEWER": "OFF"
             }
@@ -45,6 +47,7 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "SPATIUM_EIGEN": "ON",
+                "SPATIUM_BOOST": "ON",
                 "SPATIUM_BUILD_EXAMPLES": "OFF",
                 "SPATIUM_BUILD_VIEWER": "OFF"
             }
@@ -58,6 +61,7 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "SPATIUM_EIGEN": "ON",
+                "SPATIUM_BOOST": "ON",
                 "SPATIUM_USE_MODULES": "ON",
                 "SPATIUM_BUILD_EXAMPLES": "OFF",
                 "SPATIUM_BUILD_VIEWER": "OFF"
@@ -73,6 +77,7 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "SPATIUM_CUDA": "ON",
                 "SPATIUM_EIGEN": "OFF",
+                "SPATIUM_BOOST": "ON",
                 "SPATIUM_BUILD_TESTS": "OFF",
                 "SPATIUM_BUILD_RSC_TOOLS": "ON"
             }
@@ -87,6 +92,19 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "SPATIUM_EIGEN": "OFF",
                 "SPATIUM_BUILD_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "noboost",
+            "displayName": "No-Boost verification",
+            "description": "Confirms the library, tests and examples build with the optional Boost.Multiprecision dependency fully absent -- the configuration someone evaluating Spatium gets from a bare `cmake -B build` on a machine with no system packages installed. Counterpart to 'noeigen'.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-noboost",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SPATIUM_BOOST": "OFF",
+                "SPATIUM_EIGEN": "OFF",
+                "SPATIUM_BUILD_VIEWER": "OFF"
             }
         },
         {
@@ -110,11 +128,13 @@
         { "name": "bench-modules", "configurePreset": "bench-modules" },
         { "name": "cuda", "configurePreset": "cuda" },
         { "name": "noeigen", "configurePreset": "noeigen" },
+        { "name": "noboost", "configurePreset": "noboost" },
         { "name": "vulkan-dev", "configurePreset": "vulkan-dev" }
     ],
     "testPresets": [
         { "name": "default", "configurePreset": "default" },
         { "name": "release", "configurePreset": "release" },
-        { "name": "modules", "configurePreset": "modules" }
+        { "name": "modules", "configurePreset": "modules" },
+        { "name": "noboost", "configurePreset": "noboost" }
     ]
 }

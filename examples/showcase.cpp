@@ -221,6 +221,7 @@ int main(int argc, char** argv) {
         .print();
 
     // ── Multiprecision ─────────────────────────────────────────
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
     section("Multiprecision (50-digit precision)");
 
     using boost::multiprecision::asin;
@@ -236,6 +237,7 @@ int main(int argc, char** argv) {
         .row("100000-gon",    poly_pi.str(40))
         .row("error",         error.str(10))
         .print();
+#endif // SPATIUM_HAS_BOOST_MULTIPRECISION
 
     // ── SVG Output ─────────────────────────────────────────────
     section("SVG Output");

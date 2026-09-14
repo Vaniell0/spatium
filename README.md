@@ -31,7 +31,7 @@ More in [`gallery/`](gallery/).
 - **Mesh & geodesics** — Mesh\<Surface\>, subdivision with surface projection, LOD chains, geodesic distance (Dijkstra + heat method), geodesic Voronoi, discrete exterior calculus
 - **Morphisms** — typed maps between spaces with pipe composition: `point | scale | shift | project`
 - **Declarative scene DSL** (`io::build`) — `torus()`/`offset()`/`scatter()`/`compose()` build a flat, inspectable `Trace`, not a tree of opaque closures; analytic until the last mile (offset surfaces and area-weighted placement are real function composition, no mesh anywhere until something actually needs triangles). Getting-started tutorial: [`docs/getting-started-dsl.md`](docs/getting-started-dsl.md), runnable in [`examples/donut_demo.cpp`](examples/donut_demo.cpp)
-- **Arbitrary precision** — Boost.Multiprecision (Real50, Real100, any digit count), same generic algorithms
+- **Arbitrary precision** — Boost.Multiprecision (Real50, Real100, any digit count), same generic algorithms; optional, `-DSPATIUM_BOOST=ON`
 - **Physics & relativity research track** — geometric-mechanics integrators (symplectic, Lie-group, variational), metric-agnostic geodesic integration (Schwarzschild/Kerr), and RSC — a trained dispatcher that picks which method/precision to use per problem, not hand-tuned; see [Roadmap](docs/ROADMAP.md)
 - **N-dimensional, zero-cost** — templated on dimension and scalar type, concepts checked at compile time, no virtual dispatch
 
