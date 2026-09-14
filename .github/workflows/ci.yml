@@ -205,13 +205,12 @@ jobs:
   clang:
     name: clang 19 (libstdc++, no optional deps)
     runs-on: ubuntu-24.04
-    # Expected to be red on introduction: nothing in this tree has ever been
-    # compiled by anything but GCC, and std::print appears in 25 example and
-    # test files, which is the most likely thing to break under libstdc++
-    # driven by clang. The job earns its place by producing the actual list
-    # of breakages instead of leaving portability an open question -- it is
-    # non-blocking until that list is worked through, then this line goes.
-    continue-on-error: true
+    # This was expected to be red on introduction -- nothing in the tree had
+    # ever been compiled by anything but GCC, and std::print appears in 25
+    # example and test files. It passed on the first run that got as far as
+    # compiling: 871/871 tests green under clang 19 + libstdc++ 14. So it is
+    # blocking from the start rather than advisory; a clang break should fail
+    # CI like any other.
     steps:
       - uses: actions/checkout@v4
 
