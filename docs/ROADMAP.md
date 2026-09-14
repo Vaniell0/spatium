@@ -339,10 +339,35 @@ Unlocked by the object→exact-`Surface` bridge (extending `geometry/surface_ada
 
 ## Declarative scene DSL
 
-Ambitions past the 2026-09-09 donut demo (Completed above) for `io::build`'s `Trace`:
+### Direction, settled 2026-09-14
 
+Where this is going, so the individual items below read as one line of work rather than a pile of improvements.
+
+**The authoring layer and the execution layer are different layers, and only the first one may be open.** Spatium's whole argument is that a space is an extension point, and the same should hold for scene operations — a user with a better geodesic solver or a new kind of node should not have to edit our headers. But openness is bought with indirection, and indirection is exactly what cannot be lowered to a GPU kernel or fused across operations. The resolution is not to pick one: type erasure, registries and anything else ergonomic belong to *describing* a scene, which happens once; *evaluating* it must be monomorphic, either at compile time or compiled from an IR. This is why the trace was built as a flat record of tagged operations rather than a tree of closures in the first place — closures cannot be lowered, data can. The trace is the IR.
+
+This is not a novel architecture and should not be designed as though it were. Dr.Jit (Mitsuba 3's backend) traces C++ operations into an IR and JIT-compiles to CUDA/OptiX/LLVM for exactly this class of problem; Taichi captures an AST and compiles to CPU/GPU kernels; Halide separates the algorithm from its schedule; Kokkos gets one source onto both CPU and GPU through lambdas and execution spaces, and forbids `std::function` inside kernels for the reason above. What would be ours is the particular IR over Spatium's own operations, not the shape of the solution.
+
+**Measured, not assumed** (`benchmarks/bench_trace.cpp`, on the shape `examples/donut_demo.cpp` actually builds: 19 800 single-mesh nodes, 12 vertices each, one motion hook per node). Three plausible performance hypotheses were tested and all three came back smaller than expected, which is the reason this section exists in this form:
+
+| suspected cost | measured |
+|---|---|
+| the per-vertex indirect call | ~3.3 ns/vertex — about 4% of a realistic motion callee, invisible unless the callee is trivial |
+| 9.7 MB of duplicated `PerlinNoise` tables captured into 19 800 closures | ~3% of frame time |
+| materializing the nodes with no motion hook at all | **~20% of frame time** |
+
+So the dominant structural cost is none of the things that looked like the problem: it is that the same 12-vertex mesh is stored and copied per instance, because the trace has no notion of instancing. `std::move_only_function` was still worth adopting, but for what it enables (hooks owning move-only or shared state, const-correct invocation through the `const Trace&` that `materialize()` holds) rather than for speed, and the commit says so.
+
+The order that follows from this: instancing first, because it is the measured cost; then the structural field representation, justified by caching, GPU lowering and hoisting time-invariant subexpressions out of the per-vertex loop — not by call overhead; then opening the node set; then time.
+
+### Open items
+
+- **[course]** Instancing in the trace — one mesh plus N transforms, instead of N copies of the same mesh. The largest measured cost in `bench_trace.cpp` (~20% of a frame at demo scale, with no motion hook involved at all).
+- **[course]** Structural fields — a `Field` that is either an expression tree or an opaque callable, the latter being the same kind of deliberate escape hatch `Kind::Literal` already is for shapes. Buys three things a closure cannot: a structural hash, so `(trace, t)` becomes a cache key; lowering to branchless GPU code, where a `std::function` cannot be lowered at all, making this a question of possibility rather than speed; and hoisting subexpressions that depend only on `t` out of the per-vertex loop, which the compiler cannot do through an opaque call. Composition then becomes substitution of one tree into another's point slot — which is why `.moving()` was made to compose first, so the callable and structural forms agree. The risk to watch is that an expression IR quietly becomes a language users must learn; the escape hatch from a plain lambda has to stay first-class, and the donut demo is the place that failure would show.
+- **[want]** Time as a property of the space rather than a global scalar. A scene's `t` is currently one number shared by every node. Deriving each object's local time from where it sits degenerates to exactly today's behaviour in flat space at no cost, and in a curved one gravitational time dilation falls out of a metric the library already has — `physics/relativity/` ships Schwarzschild and Kerr as substitutable callables. What is missing is small and specific: no proper-time or local-clock-rate helper exists there yet. Deliberately preferred over a conventional keyframe timeline, which was considered and dropped.
+- **[want]** Open the node set — `Kind` is a closed `enum class`, so a user cannot add an operation without editing `build.hpp`. `io/scene.hpp` already solved the same problem in the same namespace with an open registry (`register_shape_kind()`), so this is a consistency gap, not an unknown. Sequenced after the field work because whatever opens `Kind` has to survive lowering.
 - **[course]** Vulkan live display — CPU raytraces (`donut_demo.cpp`'s `--photo` engine, extended), a small new Vulkan path just presents the frame (swapchain + one texture, uploaded and blitted every frame), not `viewer::App`'s mesh/point-cloud rasterizer. Real new plumbing (no sampled-texture descriptor/pipeline exists today), deliberately deferred rather than landed blind against a deadline.
 - **[want]** Texture/UV mapping — `io::Material` currently has only `base_color`/`roughness`, no texture at all. Flagged back on 2026-09-07 alongside conform-to-surface (now shipped as `offset_surface`) as one of two primitives needed before the DSL; still open.
+
 - **[want]** Scattered items lying fully flush to the target surface, not slightly proud of it — a tangent-plane offset fix in `scatter()`'s placement, not attempted in the first pass.
 - **[want]** Per-instance orientation variance in `scatter()` — today every instance at a site is oriented by the exact same `basis_from_normal(normal)` construction (varies smoothly with the target's own curvature, but not randomized in-plane per instance). A seeded per-site rotation about the normal would read more organic for things like sprinkles without touching the underlying area-weighted placement.
 - **[want]** Generalize `Trace::space()`/`resolve_surface()` beyond `ParametricSurface<T>` to any `Surface` (`ImplicitSurface`, `Sphere`, `Hyperbolic`, ...) — today's `offset()`/`scatter()` chain is hand-specialized to `ParametricSurface`'s `evaluate`/`normal_at`/`area_element`, not the general `Surface` concept.

@@ -66,6 +66,7 @@
 #include <fstream>
 #include <functional>
 #include <numbers>
+#include <memory>
 #include <random>
 #include <utility>
 #include <print>
@@ -524,7 +525,13 @@ int main(int argc, char* argv[]) {
     std::uniform_real_distribution<double> unit(-1.0, 1.0);
     std::uniform_real_distribution<double> dist_amt(1.6, 2.6);
     std::uniform_real_distribution<double> unit01(0.0, 1.0);
-    algebra::PerlinNoise swirl_noise(4);
+    // Shared, not copied into every closure: each particle's motion hook
+    // needs the same field, and capturing it by value duplicated a
+    // 512-byte permutation table 19 800 times (~9.7 MB of identical
+    // tables against a 12 MB L3). std::function forced that shape by
+    // requiring a copyable callable; the DSL's slots are
+    // move_only_function now, so a shared_ptr capture just works.
+    auto swirl_noise = std::make_shared<const algebra::PerlinNoise>(4);
 
     // Grey far from any target, shifting toward red-yellow the closer a
     // particle's *current* position (recomputed live at whatever t this
@@ -573,11 +580,11 @@ int main(int argc, char* argv[]) {
 
         dust.push_back(
             scene.literal(dust_speck(0.014))
-                .colored(std::function<Vec<double, 3>(const Vec<double, 3>&, double)>{
+                .colored(bd::PointField<double>{
                     [target, dust_color](const Vec<double, 3>& p, double) { return dust_color(p, target); }})
                 .moving([burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl_noise](
                             const Vec<double, 3>& p, double time) {
-                    return particle_motion(p, time, burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl_noise);
+                    return particle_motion(p, time, burst_dir, burst_dist, target, pull_strength, swirl_seed, *swirl_noise);
                 }));
     }
 
@@ -596,7 +603,7 @@ int main(int argc, char* argv[]) {
     // clean along the torus's natural equator, with a *few* localized
     // drips past it, not an all-over ragged boundary.
     algebra::PerlinNoise surface_noise(2);
-    auto dough_bump = std::function<double(double, double)>{[surface_noise](double u, double v) {
+    auto dough_bump = bd::ScalarField<double>{[surface_noise](double u, double v) {
         return 0.020 * surface_noise(u * 3.0, v * 3.0, 0.0); // visible but still broad, not fine-grain
     }};
     auto dough_base = scene.torus(2.0, 1.0, 160, 80);
@@ -610,7 +617,7 @@ int main(int argc, char* argv[]) {
     // settles in broad waves, not fine ripples) rather than a mirror.
     algebra::PerlinNoise icing_noise(3);
     auto icing_base = scene.offset(scene.space(torus_cap(2.0, 1.0), 160, 64), dough_bump);
-    auto icing = scene.offset(icing_base, std::function<double(double, double)>{[icing_noise](double u, double v) {
+    auto icing = scene.offset(icing_base, bd::ScalarField<double>{[icing_noise](double u, double v) {
                         constexpr double pi = std::numbers::pi;
                         double edge_dist = std::min(v - pi * 0.02, pi * 0.98 - v); // distance to the band's edge
                         double wobble = icing_noise(std::cos(u) * 2.0, std::sin(u) * 2.0, 0.0) * (pi * 0.03);
