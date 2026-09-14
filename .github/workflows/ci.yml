@@ -225,8 +225,15 @@ jobs:
           # libstdc++-14-dev, not libc++: libstdc++ 14 is the first with
           # <print>, and pairing clang with the platform's own standard
           # library is what a downstream user on Linux actually has.
+          # clang-tools-19 provides clang-scan-deps. CMake 3.28+ runs
+          # module dependency scanning for any C++20-or-later target under
+          # Ninja even when SPATIUM_USE_MODULES is off, and g++ has that
+          # scanner built in while clang ships it as a separate package --
+          # without it the build dies at
+          # CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS-NOTFOUND before compiling
+          # a single file.
           sudo apt-get install -y --no-install-recommends \
-            clang-19 libstdc++-14-dev cmake ninja-build catch2
+            clang-19 clang-tools-19 libstdc++-14-dev cmake ninja-build catch2
 
       - name: Configure
         env:
