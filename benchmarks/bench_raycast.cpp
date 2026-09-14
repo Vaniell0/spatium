@@ -194,3 +194,111 @@ static void BM_RayParametric_TorusFirst(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_RayParametric_TorusFirst);
+
+// ── A scene of many small round objects, two ways ─────────────
+//
+// The shape examples/donut_demo.cpp actually builds: ~19 800 dust specks,
+// each an icosahedron of 12 vertices and 20 faces. Rendered as triangles
+// that is ~396 000 leaves; rendered as exact spheres it is 19 800.
+//
+// Both trees do the same culling work -- the question is only what sits
+// at the leaf and how many of them there are. A single exact quadric hit
+// costs about what a single triangle test costs (see BM_RayQuadric_Sphere
+// vs BM_RayTriangleHit above), so any win here comes from leaf count and
+// from never building the tessellation at all, not from the intersection
+// being cheaper per call.
+//
+// Measured (12-core, loaded machine, so read the ratios):
+//
+//                     build      per ray    leaves     memory
+//   triangles        291 ms       121 ns      396k     ~28.5 MB
+//   exact spheres   11.8 ms       143 ns     19.8k      ~3.5 MB
+//
+// Per ray the analytic path is *slower* by about a fifth, and that is
+// not a defect to fix: a sphere's AABB overlaps its neighbours more than
+// a triangle's does, so traversal visits more nodes, and the leaf test
+// itself is two matrix-vector products and two square roots against
+// Moller-Trumbore's cross products and one division.
+//
+// The decision is made elsewhere. At 960x720 the whole frame costs
+// 291 + 84 = 375 ms through triangles and 12 + 99 = 111 ms through
+// spheres -- 3.4x, driven entirely by tree construction, which an
+// animated scene pays again on every single frame while the per-ray cost
+// is paid once per pixel. The tessellation also never exists, which is
+// the eightfold memory difference and the ~20% of frame time
+// benchmarks/bench_trace.cpp attributes to assembling those meshes.
+
+namespace {
+
+constexpr std::size_t kSpecks = 19800;
+constexpr double kSpeckRadius = 0.014;
+
+std::vector<Vec3> speck_centers() {
+    std::mt19937 rng(4242);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    std::vector<Vec3> c;
+    c.reserve(kSpecks);
+    for (std::size_t i = 0; i < kSpecks; ++i) c.push_back(Vec3{u(rng), u(rng), u(rng)});
+    return c;
+}
+
+std::vector<BoundedQuadric<double>> speck_quadrics() {
+    std::vector<BoundedQuadric<double>> out;
+    out.reserve(kSpecks);
+    for (const auto& c : speck_centers())
+        out.push_back(BoundedQuadric<double>::sphere(c, kSpeckRadius));
+    return out;
+}
+
+std::vector<Triangle3> speck_triangles() {
+    Sphere<2> unit;
+    auto ico = icosahedron(unit);
+    std::vector<Triangle3> out;
+    out.reserve(kSpecks * ico.face_count());
+    for (const auto& c : speck_centers())
+        for (auto [a, b, d] : ico.triangles())
+            out.push_back(Triangle3(Vec3{c + a * kSpeckRadius},
+                                    Vec3{c + b * kSpeckRadius},
+                                    Vec3{c + d * kSpeckRadius}));
+    return out;
+}
+
+} // namespace
+
+static void BM_SpeckScene_Build_Triangles(benchmark::State& state) {
+    auto tris = speck_triangles();
+    for (auto _ : state) benchmark::DoNotOptimize(BVH<Triangle3>::build(tris));
+    state.counters["leaves"] = static_cast<double>(tris.size());
+}
+BENCHMARK(BM_SpeckScene_Build_Triangles)->Unit(benchmark::kMillisecond);
+
+static void BM_SpeckScene_Build_Quadrics(benchmark::State& state) {
+    auto qs = speck_quadrics();
+    for (auto _ : state) benchmark::DoNotOptimize(BVH<BoundedQuadric<double>>::build(qs));
+    state.counters["leaves"] = static_cast<double>(qs.size());
+}
+BENCHMARK(BM_SpeckScene_Build_Quadrics)->Unit(benchmark::kMillisecond);
+
+static void BM_SpeckScene_RayCast_Triangles(benchmark::State& state) {
+    auto tris = speck_triangles();
+    auto bvh = BVH<Triangle3>::build(tris);
+    auto rays = make_rays(256, 0.9);
+    std::size_t i = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(bvh.ray_cast(rays[i++ % rays.size()]));
+    }
+    state.counters["leaves"] = static_cast<double>(tris.size());
+}
+BENCHMARK(BM_SpeckScene_RayCast_Triangles);
+
+static void BM_SpeckScene_RayCast_Quadrics(benchmark::State& state) {
+    auto qs = speck_quadrics();
+    auto bvh = BVH<BoundedQuadric<double>>::build(qs);
+    auto rays = make_rays(256, 0.9);
+    std::size_t i = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(bvh.ray_cast(rays[i++ % rays.size()]));
+    }
+    state.counters["leaves"] = static_cast<double>(qs.size());
+}
+BENCHMARK(BM_SpeckScene_RayCast_Quadrics);
