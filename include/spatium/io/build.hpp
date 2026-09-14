@@ -39,6 +39,35 @@
 
 SPATIUM_EXPORT namespace spatium::io::build {
 
+// ── Field slots ───────────────────────────────────────────────────
+//
+// A node's motion/thickness/color hooks are std::move_only_function,
+// not std::function, for two reasons that are about capability rather
+// than speed (the indirect call itself measures ~3.3 ns/vertex, ~4% of
+// a realistic motion callee -- see benchmarks/bench_trace.cpp):
+//
+//   - std::function requires its callable to be copy-constructible, so
+//     anything a hook wants to own has to be copyable too. That makes
+//     capturing heavy state by value the path of least resistance:
+//     donut_demo captured a 512-byte PerlinNoise into each of 19 800
+//     closures, ~9.7 MB of identical tables, because sharing it would
+//     have needed a hand-rolled shared_ptr dance. move_only_function
+//     accepts move-only state directly.
+//   - The signatures are const-qualified, so a hook is callable through
+//     the `const Trace&` materialize() actually holds. std::function's
+//     operator() is const but happily calls a non-const callable, a
+//     known hole this type closes.
+template<Scalar T = double>
+using PointField = std::move_only_function<Vec<T, 3>(const Vec<T, 3>&, T) const>;
+
+// Deliberately still std::function, unlike PointField: a thickness flows
+// through offset_surface() into a ParametricSurface, whose ParamFn is
+// itself a std::function and therefore requires a copy-constructible
+// callable. The constraint belongs to ParametricSurface, not to the DSL,
+// and moving this slot needs that type to change first.
+template<Scalar T = double>
+using ScalarField = std::function<T(T, T)>;
+
 enum class Kind { Space, Offset, Scatter, Compose, Literal };
 
 template<Scalar T = double>
@@ -56,7 +85,7 @@ struct TraceNode {
 
     // Offset
     std::size_t base = 0;
-    std::function<T(T, T)> thickness;
+    ScalarField<T> thickness;
 
     // Scatter
     std::size_t item = 0, target = 0;
@@ -67,14 +96,14 @@ struct TraceNode {
     std::vector<std::size_t> children;
 
     Material<T> material{};
-    std::function<Vec<T, 3>(const Vec<T, 3>&, T)> transform;
+    PointField<T> transform;
 
     // Optional: color as a function of (a representative point, t) --
     // evaluated once per node per materialize() call (at the
     // materialized mesh's own centroid), same "evaluate at t" spirit as
     // `transform`, just producing a color instead of a position. When
     // set, overrides `material.base_color` for that materialize() call.
-    std::function<Vec<T, 3>(const Vec<T, 3>&, T)> color_fn;
+    PointField<T> color_fn;
 };
 
 template<Scalar T = double>
@@ -106,8 +135,8 @@ struct Handle {
     std::size_t index;
 
     Handle colored(Material<T> m) const;
-    Handle colored(std::function<Vec<T, 3>(const Vec<T, 3>&, T)> color_fn) const;
-    Handle moving(std::function<Vec<T, 3>(const Vec<T, 3>&, T)> f) const;
+    Handle colored(PointField<T> color_fn) const;
+    Handle moving(PointField<T> f) const;
 };
 
 template<Scalar T>
@@ -154,7 +183,7 @@ public:
         return literal(mesh::box_mesh<T>(half_extents));
     }
 
-    Handle<T> offset(Handle<T> base, std::function<T(T, T)> thickness) {
+    Handle<T> offset(Handle<T> base, ScalarField<T> thickness) {
         TraceNode<T> n{};
         n.kind = Kind::Offset;
         n.base = base.index;
@@ -163,7 +192,7 @@ public:
     }
 
     Handle<T> offset(Handle<T> base, T thickness) {
-        return offset(base, std::function<T(T, T)>{[thickness](T, T) { return thickness; }});
+        return offset(base, ScalarField<T>{[thickness](T, T) { return thickness; }});
     }
 
     Handle<T> scatter(Handle<T> item, Handle<T> target, std::size_t count, std::uint32_t seed = 42) {
@@ -205,14 +234,16 @@ Handle<T> Handle<T>::colored(Material<T> m) const {
     return *this;
 }
 
+// Last call wins, deliberately: a color is a value a point maps to, and
+// two such maps have no meaningful composition (unlike motion below).
 template<Scalar T>
-Handle<T> Handle<T>::colored(std::function<Vec<T, 3>(const Vec<T, 3>&, T)> color_fn) const {
+Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
     trace->node(index).color_fn = std::move(color_fn);
     return *this;
 }
 
 template<Scalar T>
-Handle<T> Handle<T>::moving(std::function<Vec<T, 3>(const Vec<T, 3>&, T)> f) const {
+Handle<T> Handle<T>::moving(PointField<T> f) const {
     trace->node(index).transform = std::move(f);
     return *this;
 }

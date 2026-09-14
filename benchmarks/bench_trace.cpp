@@ -77,6 +77,28 @@ struct SwirlMotion {
     }
 };
 
+// Same swirl, but owning its PerlinNoise by value instead of pointing
+// at a shared one -- which is what examples/donut_demo.cpp:578 actually
+// does, capturing `swirl_noise` by value into every one of its 19 800
+// closures. sizeof(PerlinNoise) is 512 bytes (a 512-entry permutation
+// table), so that is ~9.7 MB of identical tables against a 12 MB L3.
+// std::function requires its callable to be copy-constructible, which
+// is what makes capture-by-value the path of least resistance here.
+struct SwirlMotionOwned {
+    algebra::PerlinNoise noise{3};
+    V3 dir;
+    double dist = 1.0;
+    V3 operator()(const V3& p, double t) const {
+        V3 base{p + dir * (dist * t)};
+        double s = 0.7;
+        V3 swirl{
+            noise(base[0] * s, base[1] * s, t),
+            noise(base[1] * s, base[2] * s, t),
+            noise(base[2] * s, base[0] * s, t)};
+        return V3{base + swirl * 0.35};
+    }
+};
+
 // Build a dust-shaped scene: `count` Literal nodes composed into one
 // root, each carrying its own motion hook when `with_motion`.
 template<typename Motion>
@@ -133,6 +155,14 @@ static void BM_Materialize_SwirlMotion(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * kDustCount);
 }
 BENCHMARK(BM_Materialize_SwirlMotion)->Unit(benchmark::kMillisecond);
+
+static void BM_Materialize_SwirlMotion_OwnedNoise(benchmark::State& state) {
+    auto [trace, root] = build_dust(kDustCount, SwirlMotionOwned{}, true);
+    for (auto _ : state)
+        benchmark::DoNotOptimize(materialize(trace, root, 0.5));
+    state.SetItemsProcessed(state.iterations() * kDustCount);
+}
+BENCHMARK(BM_Materialize_SwirlMotion_OwnedNoise)->Unit(benchmark::kMillisecond);
 
 // ── The indirection in isolation ──────────────────────────────────
 //

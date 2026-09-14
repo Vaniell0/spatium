@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/catch_approx.hpp>
+#include <memory>
 #include <spatium/algebra/noise.hpp>
 #include <spatium/io/build.hpp>
 #include <spatium/spaces/offset.hpp>
@@ -148,4 +150,22 @@ TEST_CASE("resolve_surface throws for a non-Space/Offset node", "[build_dsl]") {
     bd::Trace<double> scene;
     auto cube = scene.cube();
     CHECK_THROWS_AS(bd::resolve_surface(scene, cube.index), std::logic_error);
+}
+
+TEST_CASE("A motion hook may own move-only state", "[build_dsl]") {
+    // std::function required a copy-constructible callable, so a hook
+    // could not own anything move-only and sharing heavy state meant
+    // hand-rolling it. PointField is a move_only_function.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+
+    auto offset = std::make_unique<V3>(V3{0.0, 3.0, 0.0});
+    auto node = scene.cube({1.0, 1.0, 1.0})
+                    .moving([off = std::move(offset)](const V3& p, double) { return V3{p + *off}; });
+
+    auto moved = bd::materialize_mesh(scene, node.index, 0.0);
+    auto plain = bd::materialize_mesh(scene, scene.cube({1.0, 1.0, 1.0}).index, 0.0);
+    REQUIRE(moved.vertex_count() == plain.vertex_count());
+    for (std::size_t i = 0; i < plain.vertex_count(); ++i)
+        CHECK(moved.vertices[i][1] == Catch::Approx(plain.vertices[i][1] + 3.0));
 }
