@@ -7,6 +7,7 @@
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <spatium/core/error.hpp>
+#  include <spatium/geometry/box.hpp>
 #  include <spatium/geometry/concepts.hpp>
 #  include <spatium/geometry/line.hpp>
 #  include <algorithm>
@@ -136,6 +137,20 @@ struct Quadric {
         return {Q};
     }
 
+    // (p - c)·(p - c) - r² = 0. The linear terms carry the center, so
+    // `centroid()` recovers `c` exactly -- an off-origin sphere needs no
+    // wrapper transform, unlike the rotated forms.
+    static Quadric sphere(const PointType& center, T radius) {
+        auto Q = Matrix<T, 4, 4>{};
+        Q(0, 0) = T{1}; Q(1, 1) = T{1}; Q(2, 2) = T{1};
+        for (std::size_t i = 0; i < 3; ++i) {
+            Q(i, 3) = -center[i];
+            Q(3, i) = -center[i];
+        }
+        Q(3, 3) = center.dot(center) - radius * radius;
+        return {Q};
+    }
+
     // x² + y² - r² = 0 (infinite cylinder along Z)
     static Quadric cylinder_z(T radius) {
         auto Q = Matrix<T, 4, 4>{};
@@ -164,6 +179,106 @@ struct Quadric {
 
 static_assert(Shape<Quadric<double>>);
 static_assert(DistanceQueryable<Quadric<double>>);
+
+// ── Bounded quadric ───────────────────────────────────────────
+//
+// A `Quadric` plus the box it is confined to. This exists because
+// `Bounded` is not something a general quadric can satisfy: an infinite
+// cylinder, a cone, a hyperboloid and a plane are all perfectly good
+// quadrics with no bounding box at all, so a `bounding_box()` on
+// `Quadric` itself would have to lie for most of its own factories.
+// Carrying the bound in a separate type makes boundedness a fact of the
+// type rather than a runtime hope -- `BVH<BoundedQuadric<T>>` compiles
+// and `BVH<Quadric<T>>` correctly does not.
+//
+// The box does double duty: for a sphere or ellipsoid it is exactly the
+// surface's own extent, and for a cylinder or cone it is also the
+// truncation that makes the shape finite in the first place. One
+// mechanism, both meanings.
+//
+// Why this matters: an exact hit against one of these costs about what
+// a single triangle test costs (48 ns vs 44 ns measured in
+// benchmarks/bench_raycast.cpp), but it replaces every triangle the
+// shape would otherwise have been tessellated into. A BVH whose leaves
+// are these instead of triangles is the same tree doing the same
+// culling over far fewer, far cheaper leaves.
+//
+// Not yet expressible: a rotated quadric. The transform rule is
+// Q' = M^-T Q M^-1, which nothing here implements, so the canonical
+// axis-aligned forms plus a sphere's translation are the coverage
+// today. Enough for round particles; rotated finite cylinders also want
+// end caps, which is the open-patch boundary question, not this one.
+template<Scalar T = double>
+struct BoundedQuadric {
+    using ScalarType = T;
+    using PointType = Vec<T, 3>;
+    static constexpr std::size_t ambient_dimension = 3;
+
+    Quadric<T> surface{};
+    Box<3, T> clip{};
+
+    PointType centroid() const { return clip.centroid(); }
+    Box<3, T> bounding_box() const { return clip; }
+
+    // Inside the clip, with a tolerance scaled to the box itself. A
+    // tangent hit on a sphere lands exactly on its own bounding box, so
+    // an exact comparison would reject the silhouette of every sphere.
+    bool within_clip(const PointType& p) const {
+        using std::abs; using std::max;
+        auto e = clip.extents();
+        for (std::size_t i = 0; i < 3; ++i) {
+            T tol = epsilon<T>() * max(abs(e[i]), T{1}) * T{8};
+            if (p[i] < clip.min_corner[i] - tol) return false;
+            if (p[i] > clip.max_corner[i] + tol) return false;
+        }
+        return true;
+    }
+
+    ScalarType distance(const PointType& p) const { return surface.distance(p); }
+    PointType project(const PointType& p) const { return surface.project(p); }
+
+    // ── Factories ─────────────────────────────────────────────
+    //
+    // Naturally bounded forms derive the box from the surface; forms
+    // that are infinite without one take it as a required argument,
+    // so an unbounded shape cannot be constructed by accident.
+
+    static BoundedQuadric sphere(T radius) {
+        return sphere(PointType{}, radius);
+    }
+
+    static BoundedQuadric sphere(const PointType& center, T radius) {
+        PointType r{radius, radius, radius};
+        return {Quadric<T>::sphere(center, radius),
+                Box<3, T>{center - r, center + r}};
+    }
+
+    static BoundedQuadric ellipsoid(T a, T b, T c) {
+        PointType r{a, b, c};
+        return {Quadric<T>::ellipsoid(a, b, c), Box<3, T>{PointType{} - r, r}};
+    }
+
+    // Infinite along Z without the extent, hence the required bounds.
+    static BoundedQuadric cylinder_z(T radius, T z_min, T z_max) {
+        return {Quadric<T>::cylinder_z(radius),
+                Box<3, T>{PointType{-radius, -radius, z_min},
+                          PointType{radius, radius, z_max}}};
+    }
+
+    // x² + y² = z², so the radius at height z is |z| and the widest
+    // point of the truncated cone is whichever end is further from the
+    // apex.
+    static BoundedQuadric cone_z(T z_min, T z_max) {
+        using std::abs; using std::max;
+        T r = max(abs(z_min), abs(z_max));
+        return {Quadric<T>::cone_z(),
+                Box<3, T>{PointType{-r, -r, z_min}, PointType{r, r, z_max}}};
+    }
+};
+
+static_assert(Shape<BoundedQuadric<double>>);
+static_assert(Bounded<BoundedQuadric<double>>);
+static_assert(DistanceQueryable<BoundedQuadric<double>>);
 
 // ── Ray-quadric intersection result ──────────────────────────
 

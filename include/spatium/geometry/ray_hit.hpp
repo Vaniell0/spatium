@@ -53,6 +53,34 @@ inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
     return RayHit3<T>{h.t, h.point, h.normal, T{0}, T{0}};
 }
 
+// BoundedQuadric<T> — nearest forward hit that also lies inside the clip.
+// Not simply the nearest hit: a ray crossing a truncated cylinder beyond
+// its end passes through the infinite surface twice, and both of those
+// solutions are real. Rejecting the ones outside the box is what makes
+// the truncation mean something rather than just labelling the shape
+// finite.
+//
+// Deliberately does not go through ray_quadric(): that returns a
+// std::vector, so it heap-allocates on every call that hits and then
+// sorts a list of at most two. Harmless for a direct call, but this
+// overload is a BVH leaf test invoked many times per ray, where the
+// allocation dominates the arithmetic it is wrapping. A quadratic has
+// at most two roots, so the nearest valid one can be picked in place.
+template<Scalar T>
+inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
+                                         const BoundedQuadric<T>& bq) {
+    auto [a, b, c] = detail::quadric_coeffs(ray, bq.surface);
+    std::optional<RayHit3<T>> best;
+    for (const auto& root : solve_quadratic(a, b, c)) {
+        if (!root.is_real() || root.re < T{0}) continue;
+        if (best && root.re >= best->t) continue;
+        Vec<T, 3> pt{ray.origin + ray.direction * root.re};
+        if (!bq.within_clip(pt)) continue;
+        best = RayHit3<T>{root.re, pt, bq.surface.normal(pt), T{0}, T{0}};
+    }
+    return best;
+}
+
 // Torus<T> — first forward quartic hit, if any.
 template<Scalar T>
 inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
