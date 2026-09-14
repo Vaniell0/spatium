@@ -242,9 +242,24 @@ Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
     return *this;
 }
 
+// Composes, rather than replacing: `.moving(f).moving(g)` applies f then
+// g, i.e. g(f(p, t), t). This used to be a plain assignment, so the
+// earlier motion was silently dropped and the chaining syntax quietly
+// meant something other than what it reads as -- with no diagnostic.
+// Composition is also what makes the eventual structural form work: two
+// expression trees compose by substituting one into the other's point
+// slot, and that has to agree with what the callable form does here.
 template<Scalar T>
 Handle<T> Handle<T>::moving(PointField<T> f) const {
-    trace->node(index).transform = std::move(f);
+    auto& slot = trace->node(index).transform;
+    if (!slot) {
+        slot = std::move(f);
+        return *this;
+    }
+    slot = PointField<T>{
+        [prev = std::move(slot), next = std::move(f)](const Vec<T, 3>& p, T t) -> Vec<T, 3> {
+            return next(prev(p, t), t);
+        }};
     return *this;
 }
 

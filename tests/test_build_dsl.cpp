@@ -152,6 +152,45 @@ TEST_CASE("resolve_surface throws for a non-Space/Offset node", "[build_dsl]") {
     CHECK_THROWS_AS(bd::resolve_surface(scene, cube.index), std::logic_error);
 }
 
+TEST_CASE("moving() composes instead of replacing the previous motion", "[build_dsl]") {
+    // Regression: .moving() used to assign the slot, so a second call
+    // silently discarded the first and the chain quietly meant something
+    // other than it reads as. Chained motion now applies in call order.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+
+    auto shift = [](const V3& p, double) { return V3{p + V3{1.0, 0.0, 0.0}}; };
+    auto double_it = [](const V3& p, double) { return V3{p * 2.0}; };
+
+    auto a = scene.cube({1.0, 1.0, 1.0}).moving(shift).moving(double_it);
+    auto only_shift = scene.cube({1.0, 1.0, 1.0}).moving(shift);
+    auto plain = scene.cube({1.0, 1.0, 1.0});
+
+    auto composed = bd::materialize_mesh(scene, a.index, 0.0);
+    auto shifted = bd::materialize_mesh(scene, only_shift.index, 0.0);
+    auto base = bd::materialize_mesh(scene, plain.index, 0.0);
+
+    REQUIRE(composed.vertex_count() == base.vertex_count());
+    for (std::size_t i = 0; i < base.vertex_count(); ++i) {
+        // double_it(shift(p)) == (p + x) * 2, not just (p + x) and not p * 2
+        V3 expected{(base.vertices[i] + V3{1.0, 0.0, 0.0}) * 2.0};
+        CHECK(composed.vertices[i][0] == Catch::Approx(expected[0]));
+        CHECK(composed.vertices[i][1] == Catch::Approx(expected[1]));
+        CHECK(composed.vertices[i][2] == Catch::Approx(expected[2]));
+    }
+
+    // ...and the result is genuinely not the old "last call wins" one.
+    // Checked across the mesh rather than per vertex: individual vertices
+    // can agree by coincidence (a vertex at x = -1 shifts to 0, and
+    // doubling 0 is still 0), so only the whole mesh distinguishes them.
+    bool differs_somewhere = false;
+    for (std::size_t i = 0; i < base.vertex_count() && !differs_somewhere; ++i)
+        for (std::size_t k = 0; k < 3; ++k)
+            if (shifted.vertices[i][k] != Catch::Approx(composed.vertices[i][k]))
+                differs_somewhere = true;
+    CHECK(differs_somewhere);
+}
+
 TEST_CASE("A motion hook may own move-only state", "[build_dsl]") {
     // std::function required a copy-constructible callable, so a hook
     // could not own anything move-only and sharing heavy state meant
