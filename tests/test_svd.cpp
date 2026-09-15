@@ -180,8 +180,13 @@ TEST_CASE("svd cross-validated against Eigen::JacobiSVD", "[svd][eigen]") {
 
         auto r = svd(A);
 
+        // Full, not thin: Eigen offers thin U/V only when the column count
+        // is dynamic, and asserts otherwise. A Release build compiles that
+        // assert away, which is why CI never saw this and a local Debug
+        // build aborts on it. We read only the singular values, and those
+        // are the same either way.
         Eigen::JacobiSVD<Eigen::Matrix<double, static_cast<int>(M), static_cast<int>(N)>> solver(
-            to_eigen(A), Eigen::ComputeThinU | Eigen::ComputeThinV);
+            to_eigen(A), Eigen::ComputeFullU | Eigen::ComputeFullV);
         auto svals = solver.singularValues(); // descending, matching our convention
 
         for (std::size_t k = 0; k < SVDResult<double, M, N>::K; ++k)

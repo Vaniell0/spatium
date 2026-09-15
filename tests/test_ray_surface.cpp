@@ -440,6 +440,24 @@ TEST_CASE("BoundedQuadric cylinder: the clip actually truncates", "[ray_surface]
     CHECK_THAT(b.max_corner[2], WithinAbs(2.0, 1e-12));
 }
 
+TEST_CASE("BoundedQuadric cylinder: a ray down the axis misses", "[ray_surface]") {
+    // The ray travels inside the tube and never touches the wall, so the
+    // honest answer is "no hit". Algebraically it is the degenerate case:
+    // the direction lies in the quadric's null space, the t² coefficient
+    // vanishes, and solve_quadratic divides by it. The roots come back NaN,
+    // and NaN survives every naive rejection test -- including the clip box,
+    // whose two comparisons are both false for NaN. Without a filter phrased
+    // to *keep* only real, forward roots, this reports a hit at t = NaN.
+    auto c = BoundedQuadric<>::cylinder_z(1.0, 0.0, 2.0);
+    Ray<3, double> axis{Vec<double, 3>{0.0, 0.0, -1.0}, Vec<double, 3>{0.0, 0.0, 1.0}};
+    CHECK_FALSE(ray_hit(axis, c).has_value());
+
+    // Off-axis but still parallel to it: same degeneracy, and this one runs
+    // the length of the tube without ever crossing the wall either.
+    Ray<3, double> parallel{Vec<double, 3>{0.5, 0.0, -1.0}, Vec<double, 3>{0.0, 0.0, 1.0}};
+    CHECK_FALSE(ray_hit(parallel, c).has_value());
+}
+
 TEST_CASE("BoundedQuadric cone: the box widens with distance from the apex",
           "[ray_surface]") {
     // x² + y² = z², so the radius at height z is |z|.
