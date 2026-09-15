@@ -302,3 +302,79 @@ static void BM_SpeckScene_RayCast_Quadrics(benchmark::State& state) {
     state.counters["leaves"] = static_cast<double>(qs.size());
 }
 BENCHMARK(BM_SpeckScene_RayCast_Quadrics);
+
+// ── The dough: one torus, or the 25 600 triangles it becomes ─────
+//
+// examples/donut_demo.cpp tessellates its dough at 160x80, which is
+// 12 800 quads and so 25 600 triangles -- for one shape that has an
+// exact closed form. Torus now satisfies Bounded (bounded by
+// construction, unlike a general quadric, so no clip wrapper), which is
+// what lets the same BVH hold it directly.
+//
+// This is a different question from the speck scene above. There the win
+// came from leaf *count* at equal per-leaf cost, and the per-ray number
+// went the wrong way. Here the leaf count collapses from 25 600 to 1
+// while the leaf itself gets much more expensive -- a quartic solve
+// rather than a Moller-Trumbore test -- so the two effects pull against
+// each other and the ratio had to be measured rather than assumed.
+//
+// Measured (12-core, loaded machine, same ray set for both):
+//
+//                      build      per ray    leaves
+//   25 600 triangles   10.8 ms     40.8 ns    25.6k
+//   one exact torus       ~0       20.9 ns        1
+//
+// The per-ray cost went the *right* way this time, which the speck
+// scene's result gives no reason to expect: half, not a fifth worse.
+// A torus's AABB is one box around one object rather than 25 600
+// overlapping slivers, so traversal is a single test, and the quartic
+// only runs on rays that survive it -- BM_RayTorus's 117 ns is the cost
+// of a solve that actually happens, not of an average ray.
+//
+// At 960x720 that is 10.8 + 28.2 = 39 ms a frame through triangles
+// against 14.4 ms through the exact form, and the tessellation never
+// exists: ~1.8 MB of triangles replaced by a 40-byte struct.
+
+namespace {
+
+constexpr std::size_t kDoughU = 160, kDoughV = 80;
+
+std::vector<Triangle3> dough_triangles() {
+    auto surf = make_torus<double>(2.0, 1.0);
+    auto m = tessellate(surf, kDoughU, kDoughV);
+    std::vector<Triangle3> tris;
+    tris.reserve(m.faces.size());
+    for (const auto& f : m.faces)
+        tris.push_back(Triangle3{m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]});
+    return tris;
+}
+
+} // namespace
+
+static void BM_Dough_Build_Triangles(benchmark::State& state) {
+    auto tris = dough_triangles();
+    for (auto _ : state) {
+        auto bvh = BVH<Triangle3>::build(tris);
+        benchmark::DoNotOptimize(bvh);
+    }
+    state.counters["leaves"] = static_cast<double>(tris.size());
+}
+BENCHMARK(BM_Dough_Build_Triangles)->Unit(benchmark::kMillisecond);
+
+static void BM_Dough_RayCast_Triangles(benchmark::State& state) {
+    auto bvh = BVH<Triangle3>::build(dough_triangles());
+    auto rays = make_rays(256, 3.0);
+    std::size_t i = 0;
+    for (auto _ : state) benchmark::DoNotOptimize(bvh.ray_cast(rays[i++ % rays.size()]));
+}
+BENCHMARK(BM_Dough_RayCast_Triangles);
+
+static void BM_Dough_RayCast_ExactTorus(benchmark::State& state) {
+    std::vector<Torus<double>> one{Torus<double>{.major_radius = 2.0, .minor_radius = 1.0}};
+    auto bvh = BVH<Torus<double>>::build(one);
+    auto rays = make_rays(256, 3.0);
+    std::size_t i = 0;
+    for (auto _ : state) benchmark::DoNotOptimize(bvh.ray_cast(rays[i++ % rays.size()]));
+    state.counters["leaves"] = 1.0;
+}
+BENCHMARK(BM_Dough_RayCast_ExactTorus);
