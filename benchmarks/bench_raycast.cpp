@@ -13,10 +13,12 @@
 #include <spatium/mesh/subdivision.hpp>
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/parametric.hpp>
+#include <spatium/io/build.hpp>
 #include <random>
 #include <vector>
 
 using namespace spatium;
+namespace bd = spatium::io::build;
 using namespace spatium::geometry;
 using namespace spatium::mesh;
 using namespace spatium::spatial;
@@ -324,16 +326,17 @@ BENCHMARK(BM_SpeckScene_RayCast_Quadrics);
 //   25 600 triangles   10.8 ms     40.8 ns    25.6k
 //   one exact torus       ~0       20.9 ns        1
 //
-// The per-ray cost went the *right* way this time, which the speck
-// scene's result gives no reason to expect: half, not a fifth worse.
-// A torus's AABB is one box around one object rather than 25 600
-// overlapping slivers, so traversal is a single test, and the quartic
-// only runs on rays that survive it -- BM_RayTorus's 117 ns is the cost
-// of a solve that actually happens, not of an average ray.
+// The per-ray cost went the right way here -- half, not a fifth worse.
+// Corrected 2026-09-15 after BM_DSL_Tori below: that is an artefact of
+// this case's extreme ratio, one leaf against 25 600, and not a general
+// property. With 64 tori against 147 456 triangles the per-ray numbers
+// come back to a wash (44 ns against 49). Read this 2x as "one leaf
+// beats a deep tree", not as "exact hits are faster".
 //
-// At 960x720 that is 10.8 + 28.2 = 39 ms a frame through triangles
-// against 14.4 ms through the exact form, and the tessellation never
-// exists: ~1.8 MB of triangles replaced by a 40-byte struct.
+// The claim that survives all three measurements -- specks, this, and
+// the DSL tori -- is about build and memory, not about rays: the
+// tessellation never exists. Here that is ~1.8 MB of triangles replaced
+// by a 40-byte struct and 10.8 ms a frame that is not spent.
 
 namespace {
 
@@ -378,3 +381,153 @@ static void BM_Dough_RayCast_ExactTorus(benchmark::State& state) {
     state.counters["leaves"] = 1.0;
 }
 BENCHMARK(BM_Dough_RayCast_ExactTorus);
+
+// ── The same scene, through the DSL, at two levels ───────────────
+//
+// Every measurement above hand-builds its shapes. This one goes through
+// io::build: a Trace of 64 tori, materialized, then bucketed by what
+// Placed::render_level() says. That matters because the DSL is where the
+// choice actually gets made -- a number measured on hand-built shapes
+// says the exact path *could* be faster, and this one says the path a
+// caller reaches through `.rendered_as()` is.
+//
+// Both buckets come from the same trace. The difference is one call.
+//
+// Measured (12-core, loaded machine):
+//
+//                    build       per ray    leaves
+//   exact          0.011 ms      44.2 ns        64
+//   tessellated      78.8 ms     48.5 ns   147 456
+//
+// Seven thousand times the build cost, for a tenth of the per-ray cost
+// back. That ratio is the whole argument for the exact path, and it is
+// the same argument the speck scene made -- the per-ray numbers are a
+// wash in both, and what actually differs is that one of them never
+// builds the triangles at all. An animated scene pays the build on every
+// frame while the per-ray cost is paid once per pixel.
+
+namespace {
+
+constexpr std::size_t kTori = 64;
+
+bd::Trace<double> tori_trace(bool force_tessellation) {
+    bd::Trace<double> scene;
+    std::vector<bd::Handle<double>> handles;
+    for (std::size_t i = 0; i < kTori; ++i) {
+        auto h = scene.torus(0.22, 0.07);
+        if (force_tessellation) h.rendered_as(bd::RenderLevel::Tessellated);
+        handles.push_back(h);
+    }
+    scene.compose(handles);
+    return scene;
+}
+
+// The tori are built at the origin, so they are placed here instead --
+// materialize() has no per-node placement yet (that is instancing, still
+// open), and overlapping leaves would measure BVH degeneracy rather than
+// the level choice.
+//
+// Placed as a cloud around the origin at the scale the speck scene uses,
+// deliberately: make_rays() fires from (3,3,3) toward the origin, so a
+// scene spread wider than that gets a ray set that mostly misses it, and
+// the comparison becomes one of hit rates rather than of leaf cost. A
+// first version of this benchmark laid the tori out on a 42-unit grid
+// and reported the exact path as slower; that number was measuring the
+// layout, not the level.
+std::vector<Vec3> tori_centers() {
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    std::vector<Vec3> c;
+    c.reserve(kTori);
+    while (c.size() < kTori) {
+        Vec3 p{u(rng), u(rng), u(rng)};
+        if (p.norm() <= 1.0) c.push_back(p);
+    }
+    return c;
+}
+
+} // namespace
+
+static void BM_DSL_Tori_Exact(benchmark::State& state) {
+    auto scene = tori_trace(false);
+    auto placed = bd::materialize(scene, scene.size() - 1);
+
+    auto centers = tori_centers();
+    std::vector<Torus<double>> tori;
+    std::size_t i = 0;
+    for (const auto& obj : placed) {
+        if (obj.render_level() != bd::RenderLevel::Exact) continue;
+        auto t = *obj.exact_as<Torus<double>>();
+        t.center = centers[i++];
+        tori.push_back(t);
+    }
+    auto bvh = BVH<Torus<double>>::build(tori);
+    auto rays = make_rays(256, 0.9);
+    std::size_t r = 0;
+    for (auto _ : state) benchmark::DoNotOptimize(bvh.ray_cast(rays[r++ % rays.size()]));
+    state.counters["leaves"] = static_cast<double>(tori.size());
+}
+BENCHMARK(BM_DSL_Tori_Exact);
+
+static void BM_DSL_Tori_Tessellated(benchmark::State& state) {
+    auto scene = tori_trace(true);
+    auto placed = bd::materialize(scene, scene.size() - 1);
+
+    auto centers = tori_centers();
+    std::vector<Triangle3> tris;
+    std::size_t i = 0;
+    for (const auto& obj : placed) {
+        auto shift = centers[i++];
+        auto m = obj.mesh();
+        for (const auto& f : m.faces)
+            tris.push_back(Triangle3{Vec3{m.vertices[f[0]] + shift},
+                                     Vec3{m.vertices[f[1]] + shift},
+                                     Vec3{m.vertices[f[2]] + shift}});
+    }
+    auto bvh = BVH<Triangle3>::build(tris);
+    auto rays = make_rays(256, 0.9);
+    std::size_t r = 0;
+    for (auto _ : state) benchmark::DoNotOptimize(bvh.ray_cast(rays[r++ % rays.size()]));
+    state.counters["leaves"] = static_cast<double>(tris.size());
+}
+BENCHMARK(BM_DSL_Tori_Tessellated);
+
+static void BM_DSL_Tori_Build_Exact(benchmark::State& state) {
+    auto scene = tori_trace(false);
+    auto centers = tori_centers();
+    for (auto _ : state) {
+        auto placed = bd::materialize(scene, scene.size() - 1);
+        std::vector<Torus<double>> tori;
+        std::size_t i = 0;
+        for (const auto& obj : placed) {
+            if (obj.render_level() != bd::RenderLevel::Exact) continue;
+            auto t = *obj.exact_as<Torus<double>>();
+            t.center = centers[i++];
+            tori.push_back(t);
+        }
+        auto bvh = BVH<Torus<double>>::build(std::move(tori));
+        benchmark::DoNotOptimize(bvh);
+    }
+}
+BENCHMARK(BM_DSL_Tori_Build_Exact)->Unit(benchmark::kMillisecond);
+
+static void BM_DSL_Tori_Build_Tessellated(benchmark::State& state) {
+    auto scene = tori_trace(true);
+    auto centers = tori_centers();
+    for (auto _ : state) {
+        auto placed = bd::materialize(scene, scene.size() - 1);
+        std::vector<Triangle3> tris;
+        std::size_t i = 0;
+        for (const auto& obj : placed) {
+            auto shift = centers[i++];
+            auto m = obj.mesh();
+            for (const auto& f : m.faces)
+                tris.push_back(Triangle3{Vec3{m.vertices[f[0]] + shift},
+                                         Vec3{m.vertices[f[1]] + shift},
+                                         Vec3{m.vertices[f[2]] + shift}});
+        }
+        auto bvh = BVH<Triangle3>::build(std::move(tris));
+        benchmark::DoNotOptimize(bvh);
+    }
+}
+BENCHMARK(BM_DSL_Tori_Build_Tessellated)->Unit(benchmark::kMillisecond);
