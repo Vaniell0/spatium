@@ -117,6 +117,43 @@ TEST_CASE("ray_quadric_full: hit returns vector", "[ray_surface]") {
     CHECK(std::get<std::vector<RayHit<double>>>(result).size() == 2);
 }
 
+// The third instance of the degenerate-leading-coefficient defect, and
+// the worst-presenting of them. Tagged [!shouldfail] like the other two
+// (see test_polynomial.cpp and the cone-generator case below): the suite
+// stays green while the defect stays visible, and fixing the solvers
+// makes this pass, which Catch2 reports as a failure and forces the tag
+// off.
+//
+// Why this one is worse than a NaN. ray_quadric_proximity indexes
+// roots[0] directly rather than iterating, so it reads a root that a
+// degenerate quadratic does not have. The NaN it gets back has an
+// imaginary part of exactly zero, and `miss` is abs() of that -- so the
+// function returns Result *success* reporting a clean grazing hit, for a
+// ray running down the middle of the tube that never approaches the
+// wall. closest_t and the point are NaN and conspicuous; `miss` is 0.0
+// and looks like an answer, in the one field a caller branches on.
+TEST_CASE("ray_quadric_proximity: a ray down the axis is not a grazing hit",
+          "[ray_surface][!shouldfail]") {
+    Quadric<double> cylinder{};
+    cylinder.Q = {};
+    cylinder.Q(0, 0) = 1.0;
+    cylinder.Q(1, 1) = 1.0;
+    cylinder.Q(3, 3) = -1.0;  // x^2 + y^2 = 1, infinite in z
+
+    auto axis = unwrap(ray(Vec3{0, 0, -5}, Vec3{0, 0, 1}));
+    auto prox = ray_quadric_proximity(axis, cylinder);
+
+    // The right answer is a refusal, not a better number. This function's
+    // whole model -- "re is the closest approach, |im| is the miss" --
+    // assumes a genuine near-miss, and a ray inside the tube parallel to
+    // its axis is not one: it never approaches and never recedes. So the
+    // fix is a degeneracy check on the t^2 coefficient *before*
+    // solve_quadratic, not a bounds check after it. Catching it at
+    // roots[0] would catch the symptom and leave the semantics wrong.
+    CHECK_FALSE(prox.has_value());
+    if (!prox) CHECK(prox.error().code == ErrorCode::DegenerateInput);
+}
+
 TEST_CASE("ray_quadric_full: miss returns proximity", "[ray_surface]") {
     auto r = unwrap(ray(Vec3{-10, 5, 0}, Vec3{1, 0, 0}));
     auto q = Quadric<>::sphere(3.0);

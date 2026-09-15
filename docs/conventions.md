@@ -106,6 +106,41 @@ that-can't-happen this project should avoid. It means the convention is
 now named, so a new fallible *boundary* function in either domain has an
 unambiguous answer: `Result<T>`.
 
+## Failure to signal, wearing the costume of an answer
+
+Named 2026-09-15, after finding the third instance and realising the
+first two had been treated as unrelated bugs.
+
+The class: **a value that looks like a valid answer, in the place where
+the algorithm should have said "I cannot answer".** Not a wrong number —
+a wrong number gets noticed. A *plausible* one.
+
+Instances found so far, all in one week:
+
+| what came back | what it meant | why it passed |
+|---|---|---|
+| a `NaN` root through a filter phrased as "skip if `t < 0`" | no root exists | every comparison against `NaN` is false, so a filter that lists what to *skip* skips nothing |
+| a test passing under `NDEBUG` | the assertion never ran | a check that does not execute reads as a check that succeeded |
+| `miss = 0.0` from `ray_quadric_proximity` | the model does not apply here | the imaginary part is a literal zero, so `abs()` of it is a clean number |
+
+The third has a mechanism worth stating exactly, because it is the same
+mechanism as the first. `Complex<T>`'s one-argument constructor sets
+`im` to a literal `T{0}`; every real-root path in all three polynomial
+solvers uses it; and `is_real()` tests only `abs(im) <= eps`. So when a
+degenerate leading coefficient turns `re` into `NaN`, `im` stays exactly
+zero and `is_real()` answers **true** — correctly, for the question it
+was asked ("is the imaginary part negligible"), and disastrously for the
+question the caller meant ("is this a usable real root"). One mechanism,
+three symptoms, not three bugs.
+
+What to do with the name: when a caller reads a field as a signal, ask
+what that field holds when the algorithm had nothing to say. If the
+answer is "whatever it was initialised to", the signal is not a signal.
+Phrase filters as what to **keep**, not what to skip; refuse at the point
+where the model stops applying rather than patching the value it
+produced; and prefer a type that can say "no answer" over a sentinel that
+has to be recognised.
+
 ## A check needs the thing that runs it, first
 
 Added 2026-09-15, after getting the order right by accident.
