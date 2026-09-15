@@ -377,6 +377,43 @@ Only the third case needs a rule at all, and `EdgeRule::ZeroThickness` is one an
 
 `is_closed()` today collapses this to a yes/no because that is all `offset()` needs. The three-way classifier is what the boundary concept should be built on, and it should be built before the concept, not after.
 
+### Render levels, settled 2026-09-15 — and what the number actually says
+
+A node now carries a `RenderLevel`: `Exact` (closed form), `Tessellated`
+(triangles in a BVH), `Newton` (Newton's method on the `(u,v)` map).
+Inferred in one place — an exact form when the node has one, tessellation
+otherwise, and **Newton never inferred**, because at three orders of
+magnitude nobody should pay it by accident. `.rendered_as()` overrides
+and refuses on the spot a level the node cannot serve.
+
+**The argument for it is build cost, not per-ray cost.** This was got
+wrong twice on the way here and is worth stating flatly, because the
+per-ray numbers point in whichever direction the leaf ratio happens to
+push them:
+
+| scene | exact leaf vs triangles | per ray | build |
+|---|---|---|---|
+| 19 800 specks | quadric vs 396k tris | exact **20% slower** | 11.8 ms vs 291 ms |
+| one dough | torus vs 25 600 tris | exact **2× faster** | ~0 vs 10.8 ms |
+| 64 tori, through the DSL | torus vs 147 456 tris | **a wash** (44 vs 49 ns) | 0.011 ms vs 78.8 ms |
+
+The dough's 2× was read at the time as the speck result reversing. It
+was not: one leaf against 25 600 is an extreme ratio, and adding 63 more
+tori brings the per-ray cost back level. Nor is it true, as a related
+guess had it, that the exact path's advantage grows with scene size in
+*traversal* — the third row is the test of that and it came back flat.
+
+What survives all three is that **the tessellation never exists**. Seven
+thousand times the build cost in the DSL row, ~8× the memory in the
+speck row. An animated scene pays the build on every frame while the
+per-ray cost is paid once per pixel, and that is the whole case.
+
+A finding from the demo, kept because it is the mechanism working:
+`donut_demo` reports `0 exact, 19 809 tessellated, 0 newton`. The dough
+is an `Offset` carrying a noise bump, so it stopped being a torus the
+moment it got bread texture. An exact form is a promise about the shape,
+and a bumped torus cannot keep it.
+
 ### Open items
 
 - **[course]** Classify what a chart's edge maps to — point, curve, or nothing — per direction, generalizing `is_closed()`'s yes/no. See "Chart versus manifold" above. This is the thing `SurfaceWithBoundary` (`boundary_distance`, `is_on_boundary`, what `exp_map` does past the edge) should be designed on top of, and it is cheap enough to have before there is a second consumer for the concept itself.
