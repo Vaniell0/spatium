@@ -632,6 +632,7 @@ for (const auto& obj : placed) {
 |---|---|
 | `surface()` | `optional<ParametricSurface<T>>` — present for `Space`/`Offset`, with the node's motion composed into the map |
 | `is_analytic()` | Whether `surface()` will yield anything |
+| `is_exact()` / `exact_type()` / `exact_as<Shape>()` | The closed form, when the node has one — see below |
 | `mesh()` | The triangle view, built on demand, not cached |
 | `material()` | Resolved material; a node with a `color_fn` pays for its mesh here |
 
@@ -644,6 +645,20 @@ for (const auto& obj : placed) {
 | `offset_shell(base, thickness, edge)` | `Offset` | Same construction over any base, with the rim rule stated |
 | `scatter(item, target, count, seed)` | `Scatter` | `sample_surface_uniform` placement, each instance oriented by the target's normal (`basis_from_normal`) |
 | `compose({...})` | `Compose` | Groups child handles; `materialize()` flattens recursively |
+
+**A node can know what shape it is, not only what map it has.** `torus()` and `cylinder()` record the exact closed form — a `geometry::Torus` and a clipped `geometry::BoundedQuadric` — alongside the `(u,v)` map, so a renderer can hit the real surface instead of a tessellation of it. `space()` records nothing, because an arbitrary `(u,v)→R³` formula has no closed form to record, even when it happens to be a torus underneath.
+
+```cpp
+for (const auto& obj : bd::materialize(scene, root.index)) {
+    if (auto* t = obj.exact_as<geometry::Torus<double>>()) { /* one BVH leaf, not 25 600 */ }
+    else if (auto* q = obj.exact_as<geometry::BoundedQuadric<double>>()) { /* ... */ }
+    else { /* obj.mesh(), or obj.surface() and Newton */ }
+}
+```
+
+The slot is a `std::any`, deliberately **not** the shape of `io/scene.hpp`'s `ResolvedShape` (which erases to a `std::function` returning hits). Both are open, but a renderer needs the *concrete type back* to bucket nodes into one monomorphic `BVH<Shape>` per type; erasing to a callable would instead put an indirect call at every leaf test. Type erasure belongs to describing a scene; evaluating one stays monomorphic.
+
+**It is an invariant, not a field.** The exact form must agree with the map, so any operation that can move them apart clears it — `.moving()` drops it unconditionally, including for a pure translation that would in fact have preserved it. Deciding otherwise means asking an opaque callable what it does, which is the one question a callable cannot answer; it becomes answerable once motion has a structural form. A stale exact form would render a picture correct for the shape and wrong for the scene, with nothing to notice, which is why `is_exact()` is visible rather than inferred from a frame time.
 
 **`offset` and `offset_shell` are two operations, not one with a flag.** Offsetting a closed surface produces a closed surface and there is no edge to rule on. Offsetting a surface that *has* an edge — a band cut out of a torus, a tube with open ends — produces a shell, and what happens at the rim is a real choice that the caller has to make. `offset()` refuses an open base and says so, naming `offset_shell()`; `offset_shell()` takes any base and requires an `EdgeRule`.
 

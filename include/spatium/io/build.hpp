@@ -9,6 +9,8 @@
 #  include <spatium/spaces/offset.hpp>
 #  include <spatium/spaces/parametric.hpp>
 #  include <spatium/spaces/sample.hpp>
+#  include <spatium/geometry/ray_surface.hpp>
+#  include <any>
 #  include <cstdint>
 #  include <functional>
 #  include <initializer_list>
@@ -104,6 +106,27 @@ struct TraceNode {
     std::optional<ParametricSurface<T>> surface;
     std::size_t u_steps = 48, v_steps = 24;
 
+    // The exact analytic form, when this node has one -- a Torus, a
+    // BoundedQuadric, or any user type that is Bounded and RayHittable.
+    // A renderer that can consume it never tessellates this node at all;
+    // one that cannot ignores the slot entirely.
+    //
+    // std::any rather than a closed variant, so adding a shape kind does
+    // not mean editing this header. And deliberately NOT the shape of
+    // io/scene.hpp's ResolvedShape, which erases to a std::function
+    // returning hits: that buys the same openness at the price of an
+    // indirect call at every leaf test. The renderer needs the concrete
+    // type *back* in order to bucket it into a monomorphic BVH, and
+    // std::any keeps the type tag that makes that possible. Erasure
+    // belongs to describing a scene; evaluating one stays monomorphic.
+    //
+    // This is an invariant, not a field. It must agree with `surface`,
+    // and any operation that can move them apart is required to clear it
+    // -- see Handle::moving(). A stale exact form renders a picture that
+    // is correct for the shape and wrong for the scene, silently, which
+    // is the same class of defect as a NaN walking through a filter.
+    std::any exact;
+
     // Literal -- a precomputed mesh, for shapes with no natural single
     // (u,v)->R^3 formula (a cube, most obviously). The escape hatch out
     // of the analytic-first path, not the default.
@@ -175,6 +198,23 @@ struct Placed {
 
     bool is_analytic() const;
 
+    // Whether this object has an exact closed form a renderer can hit
+    // directly, rather than only a (u,v) map to tessellate or run Newton
+    // against. Visible on purpose: losing the exact form is a silent
+    // downgrade from a closed-form hit to a tessellation, and a caller
+    // that cares should be able to see it rather than infer it from a
+    // frame time. `exact_type()` says which shape it is, for a renderer
+    // bucketing nodes into one monomorphic tree per type.
+    bool is_exact() const;
+    const std::type_info& exact_type() const;
+
+    // The exact form itself, when it is the type asked for. Returns null
+    // when the node has no exact form or has a different one, so the
+    // bucketing loop is a cast attempt rather than a type interrogation
+    // followed by a cast.
+    template<class Shape>
+    const Shape* exact_as() const;
+
     // Resolved material. A node's color_fn needs a representative point,
     // which today means the mesh centroid, so a node that has one pays
     // for its mesh here; a node with a plain Material does not.
@@ -233,12 +273,23 @@ public:
         return push(std::move(n));
     }
 
+    // The factories that know their shape exactly record it alongside the
+    // (u,v) map, so a renderer can hit the real surface instead of a
+    // tessellation of it. space() deliberately does not: an arbitrary
+    // (u,v)->R^3 formula has no closed form to record.
     Handle<T> torus(T major_r, T minor_r, std::size_t u_steps = 48, std::size_t v_steps = 24) {
-        return space(make_torus<T>(major_r, minor_r), u_steps, v_steps);
+        auto h = space(make_torus<T>(major_r, minor_r), u_steps, v_steps);
+        node(h.index).exact =
+            geometry::Torus<T>{.major_radius = major_r, .minor_radius = minor_r};
+        return h;
     }
 
     Handle<T> cylinder(T radius, T height, std::size_t u_steps = 12, std::size_t v_steps = 4) {
-        return space(make_cylinder<T>(radius, height), u_steps, v_steps);
+        auto h = space(make_cylinder<T>(radius, height), u_steps, v_steps);
+        // make_cylinder puts v in [0, height], so the clip matches the map.
+        node(h.index).exact =
+            geometry::BoundedQuadric<T>::cylinder_z(radius, T{0}, height);
+        return h;
     }
 
     Handle<T> literal(mesh::Mesh<Euclidean<3, T>> m) {
@@ -377,6 +428,20 @@ Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
 // slot, and that has to agree with what the callable form does here.
 template<Scalar T>
 Handle<T> Handle<T>::moving(PointField<T> f) const {
+    // The exact form goes, always. `f` is an arbitrary point map, so in
+    // general it does not send a torus to a torus, and a recorded shape
+    // that no longer agrees with the map is worse than no recorded shape
+    // at all: the render would be correct for the shape and wrong for
+    // the scene, with nothing to notice.
+    //
+    // Always, not "unless f is an isometry", on purpose. Recognising an
+    // isometry means asking an opaque callable what it does, which is
+    // exactly the question a callable cannot answer -- it becomes
+    // answerable once motion has a structural form, and that is where it
+    // belongs. Until then this costs the exact path on a moving node and
+    // keeps the invariant true, which is the cheaper of the two mistakes.
+    trace->node(index).exact.reset();
+
     auto& slot = trace->node(index).transform;
     if (!slot) {
         slot = std::move(f);
@@ -458,6 +523,22 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
 template<Scalar T>
 mesh::Mesh<Euclidean<3, T>> Placed<T>::mesh() const {
     return materialize_mesh(*trace, index, t);
+}
+
+template<Scalar T>
+bool Placed<T>::is_exact() const {
+    return trace->node(index).exact.has_value();
+}
+
+template<Scalar T>
+const std::type_info& Placed<T>::exact_type() const {
+    return trace->node(index).exact.type();
+}
+
+template<Scalar T>
+template<class Shape>
+const Shape* Placed<T>::exact_as() const {
+    return std::any_cast<Shape>(&trace->node(index).exact);
 }
 
 template<Scalar T>

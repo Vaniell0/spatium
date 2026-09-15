@@ -325,3 +325,101 @@ TEST_CASE("A motion hook may own move-only state", "[build_dsl]") {
     for (std::size_t i = 0; i < plain.vertex_count(); ++i)
         CHECK(moved.vertices[i][1] == Catch::Approx(plain.vertices[i][1] + 3.0));
 }
+
+// ── The exact form a node keeps, and when it loses it ────────────
+
+TEST_CASE("A torus node keeps the shape it is, not just its (u,v) map",
+          "[build_dsl]") {
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 1.0);
+
+    REQUIRE(bd::materialize(scene, dough.index).size() == 1);
+    auto obj = bd::materialize(scene, dough.index)[0];
+    REQUIRE(obj.is_exact());
+    CHECK(obj.exact_type() == typeid(geometry::Torus<double>));
+
+    const auto* t = obj.exact_as<geometry::Torus<double>>();
+    REQUIRE(t != nullptr);
+    CHECK_THAT(t->major_radius, WithinAbs(2.0, 1e-12));
+    CHECK_THAT(t->minor_radius, WithinAbs(1.0, 1e-12));
+
+    // Asking for the wrong shape gives nothing rather than garbage, so a
+    // renderer's bucketing loop can be a cast attempt.
+    CHECK(obj.exact_as<geometry::BoundedQuadric<double>>() == nullptr);
+}
+
+TEST_CASE("The exact form agrees with the map it sits beside", "[build_dsl]") {
+    // The invariant that makes the exact form usable at all. If these
+    // two ever disagree, a render is correct for the shape and wrong for
+    // the scene, with nothing to notice -- so it gets checked against
+    // the torus's own implicit equation rather than assumed from the
+    // fact that both were built from the same two numbers.
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 1.0);
+    auto obj = bd::materialize(scene, dough.index)[0];
+    const auto* t = obj.exact_as<geometry::Torus<double>>();
+    REQUIRE(t != nullptr);
+    auto surf = obj.surface();
+    REQUIRE(surf.has_value());
+
+    const double R = t->major_radius, r = t->minor_radius;
+    for (double u : {0.0, 0.7, 2.1, 4.5}) {
+        for (double v : {0.0, 1.3, 3.0, 5.5}) {
+            auto p = surf->evaluate(u, v);
+            // (|p|^2 + R^2 - r^2)^2 - 4 R^2 (x^2 + y^2) = 0
+            double n2 = p.dot(p);
+            double lhs = (n2 + R * R - r * r) * (n2 + R * R - r * r)
+                       - 4.0 * R * R * (p[0] * p[0] + p[1] * p[1]);
+            CHECK_THAT(lhs, WithinAbs(0.0, 1e-9));
+        }
+    }
+}
+
+TEST_CASE("space() records no exact form, because it has none", "[build_dsl]") {
+    // An arbitrary (u,v) -> R^3 formula has no closed form to record,
+    // even when it happens to be a torus underneath: the DSL only knows
+    // what the caller told it.
+    bd::Trace<double> scene;
+    auto same_shape = scene.space(make_torus<double>(2.0, 1.0));
+    auto obj = bd::materialize(scene, same_shape.index)[0];
+    CHECK_FALSE(obj.is_exact());
+    CHECK(obj.is_analytic());   // still a surface, just not a named one
+}
+
+TEST_CASE("moving() drops the exact form, isometry or not", "[build_dsl]") {
+    using V3 = spatium::Vec<double, 3>;
+
+    // A pure translation *is* an isometry and does send a torus to a
+    // torus, so this case could in principle be preserved. It is not,
+    // deliberately: deciding that means asking an opaque callable what
+    // it does, which is the one question a callable cannot answer. The
+    // conservative rule costs the exact path on a moving node and keeps
+    // the invariant true, which is the cheaper mistake.
+    bd::Trace<double> scene;
+    auto moved = scene.torus(2.0, 1.0)
+                     .moving([](const V3& p, double) { return V3{p + V3{0, 0, 5}}; });
+    CHECK_FALSE(bd::materialize(scene, moved.index)[0].is_exact());
+
+    // And a genuinely non-rigid motion, where keeping it would be wrong.
+    bd::Trace<double> squashed_scene;
+    auto squashed = squashed_scene.torus(2.0, 1.0)
+                        .moving([](const V3& p, double) { return V3{p * 0.5}; });
+    CHECK_FALSE(bd::materialize(squashed_scene, squashed.index)[0].is_exact());
+}
+
+TEST_CASE("A cylinder node's exact form is clipped to the map's extent",
+          "[build_dsl]") {
+    // make_cylinder puts v in [0, height], so an unclipped quadric would
+    // describe an infinite tube the map never covers.
+    bd::Trace<double> scene;
+    auto tube = scene.cylinder(0.5, 3.0);
+    auto obj = bd::materialize(scene, tube.index)[0];
+    REQUIRE(obj.is_exact());
+
+    const auto* q = obj.exact_as<geometry::BoundedQuadric<double>>();
+    REQUIRE(q != nullptr);
+    auto b = q->bounding_box();
+    CHECK_THAT(b.min_corner[2], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(b.max_corner[2], WithinAbs(3.0, 1e-12));
+    CHECK_THAT(b.max_corner[0], WithinAbs(0.5, 1e-12));
+}
