@@ -264,20 +264,30 @@ mesh::Mesh<Euclidean<3, double>> solid_cylinder(double radius, double height, in
 // cylinders through the origin. Shown during the build-up (cube ->
 // donut), hidden once the donut is finished and the camera starts to
 // orbit, so the final hero shot stays clean.
-std::vector<bd::Placed<double>> axes_placed(double length = 3.5, double radius = 0.012) {
-    std::vector<bd::Placed<double>> out;
-    auto arm = [&](const Vec<double, 3>& color) {
-        auto m = solid_cylinder(radius, length, 10);
-        return bd::Placed<double>{m, Material<double>{.base_color = color, .roughness = 0.6}};
-    };
-    auto x_arm = arm({0.85, 0.15, 0.15});
-    for (auto& v : x_arm.mesh.vertices) v = Vec<double, 3>{v[2], v[0], v[1]}; // z-axis cylinder -> x
-    auto y_arm = arm({0.15, 0.75, 0.15});
-    for (auto& v : y_arm.mesh.vertices) v = Vec<double, 3>{v[0], v[2], v[1]}; // z-axis cylinder -> y
-    auto z_arm = arm({0.15, 0.25, 0.85});
-    out.push_back(x_arm);
-    out.push_back(y_arm);
-    out.push_back(z_arm);
+// The arms live in their own small Trace rather than being assembled as
+// loose meshes: a Placed is a view onto a node, so anything that wants to
+// be a scene object has to be one. Held in a function-local static so the
+// trace outlives every view handed out, and because the axes are constant
+// geometry there is nothing to rebuild per frame.
+const std::vector<bd::Placed<double>>& axes_placed(double length = 3.5, double radius = 0.012) {
+    static bd::Trace<double> axes;
+    static std::vector<bd::Placed<double>> out = [&] {
+        auto arm = [&](std::size_t a, std::size_t b, std::size_t c,
+                       const Vec<double, 3>& color) {
+            auto m = solid_cylinder(radius, length, 10);
+            // The cylinder is built along z; permute its axes to aim it.
+            for (auto& v : m.vertices) v = Vec<double, 3>{v[a], v[b], v[c]};
+            axes.literal(m).colored(
+                Material<double>{.base_color = color, .roughness = 0.6});
+        };
+        arm(2, 0, 1, {0.85, 0.15, 0.15}); // z-cylinder -> x
+        arm(0, 2, 1, {0.15, 0.75, 0.15}); // z-cylinder -> y
+        arm(0, 1, 2, {0.15, 0.25, 0.85}); // already along z
+        std::vector<bd::Placed<double>> v;
+        for (std::size_t i = 0; i < axes.size(); ++i)
+            v.push_back(bd::Placed<double>{&axes, i, 0.0});
+        return v;
+    }();
     return out;
 }
 
@@ -314,11 +324,15 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
     std::vector<Triangle3> tris;
     std::vector<Prim> prims;
     for (const auto& obj : scene) {
-        auto vn = smooth_normals(obj.mesh);
-        for (const auto& f : obj.mesh.faces) {
-            Triangle3 t(obj.mesh.vertices[f[0]], obj.mesh.vertices[f[1]], obj.mesh.vertices[f[2]]);
+        // Bound once: Placed::mesh() builds on each call rather than
+        // caching, so the triangle view is taken here and reused.
+        auto m = obj.mesh();
+        auto mat = obj.material();
+        auto vn = smooth_normals(m);
+        for (const auto& f : m.faces) {
+            Triangle3 t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
             tris.push_back(t);
-            prims.push_back(Prim{t, {vn[f[0]], vn[f[1]], vn[f[2]]}, obj.material.base_color, obj.material.roughness});
+            prims.push_back(Prim{t, {vn[f[0]], vn[f[1]], vn[f[2]]}, mat.base_color, mat.roughness});
         }
     }
     auto bvh = BVH<Triangle3>::build(tris);
@@ -672,7 +686,7 @@ int main(int argc, char* argv[]) {
 
     auto placed = bd::materialize(scene, lesson.index, t);
     std::size_t verts = 0, faces = 0;
-    for (auto& obj : placed) { verts += obj.mesh.vertex_count(); faces += obj.mesh.face_count(); }
+    for (auto& obj : placed) { auto m = obj.mesh(); verts += m.vertex_count(); faces += m.face_count(); }
 
     auto t1 = std::chrono::steady_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

@@ -106,10 +106,51 @@ struct TraceNode {
     PointField<T> color_fn;
 };
 
+template<Scalar T>
+class Trace;
+
+// One object of a materialized scene.
+//
+// Deliberately NOT a mesh. The whole argument for describing a scene as
+// spaces rather than triangles is that every operation in the library --
+// geodesics, contact, physics, Riemannian optimisation -- works on a
+// scene object for free, because the object *is* a space. Handing back
+// `{mesh, material}` threw that away one step before the renderer: the
+// trace stayed analytic right up to materialize() and then became
+// triangles, which left "why not just load an OBJ" a fair question.
+//
+// So this is a view onto the node instead: it says what the object is,
+// and derives the rest on request. `surface()` is present whenever the
+// node really is a space, with the node's own motion composed into the
+// map, so a caller that can consume an exact surface never pays for a
+// tessellation. `mesh()` builds the triangle view for callers that need
+// one.
+//
+// Lifetime follows `Handle`: this points into the trace and is valid as
+// long as the trace is. `mesh()` builds on every call rather than
+// caching, so bind it once (`auto m = obj.mesh();`) if you need it more
+// than once -- explicit, rather than a hidden cost inside an innocent
+// looking member access.
 template<Scalar T = double>
 struct Placed {
-    mesh::Mesh<Euclidean<3, T>> mesh;
-    Material<T> material;
+    const Trace<T>* trace;
+    std::size_t index;
+    T t;
+
+    // The triangle view, built on demand.
+    mesh::Mesh<Euclidean<3, T>> mesh() const;
+
+    // The analytic description, when there is one. Present for Space and
+    // Offset nodes; absent for Literal (a precomputed mesh with no
+    // (u,v) map), Scatter and Compose (many objects, not one surface).
+    std::optional<ParametricSurface<T>> surface() const;
+
+    bool is_analytic() const;
+
+    // Resolved material. A node's color_fn needs a representative point,
+    // which today means the mesh centroid, so a node that has one pays
+    // for its mesh here; a node with a plain Material does not.
+    Material<T> material() const;
 };
 
 // Orthonormal basis {t1, t2} spanning the plane perpendicular to a unit
@@ -327,6 +368,58 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
     return out;
 }
 
+// ── Placed: what the object is, not what it tessellates into ──
+
+template<Scalar T>
+mesh::Mesh<Euclidean<3, T>> Placed<T>::mesh() const {
+    return materialize_mesh(*trace, index, t);
+}
+
+template<Scalar T>
+bool Placed<T>::is_analytic() const {
+    auto k = trace->node(index).kind;
+    return k == Kind::Space || k == Kind::Offset;
+}
+
+template<Scalar T>
+std::optional<ParametricSurface<T>> Placed<T>::surface() const {
+    if (!is_analytic()) return std::nullopt;
+    auto base = resolve_surface(*trace, index);
+    if (!trace->node(index).transform) return base;
+
+    // The node's motion composed into the map rather than applied to
+    // vertices afterwards, so the result is still a surface and not a
+    // deformed mesh. ParametricSurface derives normals by finite
+    // differences of this map, so a deforming motion is accounted for
+    // without anyone hand-deriving a Jacobian.
+    //
+    // Captures the trace and the index rather than the node itself: the
+    // node's motion slot is a move_only_function, and ParametricSurface
+    // stores its map in a std::function, which demands a copyable
+    // callable. Same lifetime contract as the rest of this type.
+    const Trace<T>* tr = trace;
+    std::size_t i = index;
+    T tt = t;
+    return ParametricSurface<T>(
+        [tr, i, tt, base](T u, T v) -> Vec<T, 3> {
+            auto p = base.evaluate(u, v);
+            const auto& node = tr->node(i);
+            return node.transform ? node.transform(p, tt) : p;
+        },
+        base.domain(), base.periodic_u(), base.periodic_v());
+}
+
+template<Scalar T>
+Material<T> Placed<T>::material() const {
+    const auto& n = trace->node(index);
+    Material<T> mat = n.material;
+    if (n.color_fn) mat.base_color = n.color_fn(mesh().centroid(), t);
+    return mat;
+}
+
+// Walks a Compose node into its leaves. Each leaf comes back as a view
+// onto its own node -- nothing is tessellated here, and a caller that
+// only wants the analytic form never causes a tessellation at all.
 template<Scalar T>
 std::vector<Placed<T>> materialize(const Trace<T>& trace, std::size_t idx, T t) {
     const auto& n = trace.node(idx);
@@ -338,10 +431,7 @@ std::vector<Placed<T>> materialize(const Trace<T>& trace, std::size_t idx, T t) 
         }
         return out;
     }
-    auto m = materialize_mesh(trace, idx, t);
-    Material<T> mat = n.material;
-    if (n.color_fn) mat.base_color = n.color_fn(m.centroid(), t);
-    return {Placed<T>{std::move(m), mat}};
+    return {Placed<T>{&trace, idx, t}};
 }
 
 } // namespace spatium::io::build
