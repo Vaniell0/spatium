@@ -410,6 +410,82 @@ Only the third case needs a rule at all, and `EdgeRule::ZeroThickness` is one an
 - ~~Exercise `mesh/conform.hpp` and `mesh/scatter.hpp` in a real demo~~ — **settled 2026-09-15, and the old entry was wrong in a way worth keeping visible.** It said they "compile and pass their own tests"; they had no tests at all, no caller anywhere, and are not reached by the umbrella header either — so their bodies are templates that had never been instantiated, only parsed. Both now have a test in `tests/test_mesh_ops.cpp` that instantiates them and checks the result, and both headers say in their own first lines that nothing calls them and why. They are kept rather than deleted because they serve the case the analytic path cannot — a target that is only ever a mesh — and they are explicitly **not** getting a demo. That is the whole of the maintenance they are owed.
 - Explicitly not planned for the scene DSL: dependency-tracked reactive recompute (SolidJS/Vue-signals style). If that gets built at all, `gpu/derive_christoffel.py`'s declarative-derivation → auto-codegen pipeline is the intended home for it (GPU rendering section below), not this graph.
 
+## Polynomial solvers: the degenerate leading coefficient
+
+Design settled 2026-09-15, code not written. Pinned as two `[!shouldfail]`
+tests (`tests/test_polynomial.cpp`, `tests/test_ray_surface.cpp`) so it
+cannot be forgotten and cannot quietly stay fixed-but-marked.
+
+**The defect.** `solve_quadratic`, `solve_cubic` and `solve_quartic` all
+divide by the leading coefficient with no guard. `solve_quadratic(0, 2, -1)`
+is a perfectly good equation with the root `0.5` and returns `NaN` and
+`-inf`. Because `NaN` reports `is_real() == true`, the garbage then walks
+through every caller's filter. Concretely: a ray parallel to one of a
+cone's own generators meets the surface exactly once, and the hit is
+silently lost.
+
+**Where the risk actually lives, stated as a boundary rather than a file
+list.** The leading coefficient is dangerous exactly where it is *data*
+and safe exactly where it is *structure*.
+
+- **Data.** A ray's direction is user input and can degenerate — down a
+  cylinder's axis, along a cone's generator. `geometry/ray_surface.hpp`,
+  `geometry/ray_hit.hpp`, `io/scene.hpp`, `physics/mechanics/rigid_contact.hpp`.
+- **Structure.** A characteristic polynomial is `det(A - λI)` by
+  definition; its leading coefficient is 1 as a matter of mathematics and
+  no input can change that. `spaces/spd.hpp`, `algebra/eigen_decomp.hpp`,
+  `core/precision.hpp` are safe not because they were checked but because
+  it could not be otherwise. Those three pass `T{1}` literally.
+
+These are different grades of certainty and the second is the stronger
+one. An `assert(leading != T{0})` at the structural sites is still worth
+its line, but for a different reason than at the data sites: there it
+guards a future refactor changing what gets passed, not an input.
+
+**The return type.** A fixed-capacity container with a count, no
+allocation — it must be able to say "one root" where the degree collapsed.
+
+- `size()` is the count; `capacity()` is 2/3/4. Range-`for` takes its
+  bounds from the count, so every existing `for (auto& r : roots)` call
+  site keeps working unchanged.
+- `operator[]` is **unchecked** — no branch in a hot path — so indexing at
+  or past `size()` is undefined. This has to be said loudly in the
+  docstring, because a reader arriving from `std::array` expects a fixed
+  size where every index is always valid, and that is precisely what
+  stops being true.
+- `at(i)` returns `Result<Complex<T>>` and **never throws**. Checked
+  access signals; unchecked access does not; different contracts, so
+  different return types. Exceptions appear nowhere else in this library
+  and must not appear here.
+- In Debug, slots between `size()` and `capacity()` are poisoned with
+  `NaN`. Zero instructions under `NDEBUG`, and under the Debug CI job it
+  turns reading past the count from undefined into visibly wrong.
+
+**Tests have to cover the case that changed, not the one that already
+worked.** `roots[2]` used to be valid always, by virtue of a fixed-size
+array; now it is valid only when the count reaches 3. So both need
+covering: indexing within the count, and `at()` refusing beyond it.
+Testing only in-range indexing tests the old behaviour.
+
+**The one non-library caller.** `rsc/include/precision_ops.hpp`'s
+`flatten_cubic_roots` takes `const std::array<Complex<double>, 3>&`
+explicitly and copies three roots unconditionally. The registry op above
+it receives `std::span<const double> in` — arbitrary numbers from the
+harness, with `in[0]` as the leading coefficient — so that op is a
+boundary with untrusted input and `Result<T>` is what the convention
+demands there, not an `assert`. One wrinkle the design has to answer
+rather than discover: `Op::Fn` returns `void`, so a `Result` out of the
+flattening helper has nowhere to propagate and the op itself must decide
+what to write for roots that do not exist.
+
+The training checkpoint is **not** affected. `rsc/include/precision_task.hpp`
+builds coefficients from three sampled roots by Vieta and returns
+`{1.0, b, c, d}` — the leading coefficient is literally 1 in every
+sample, the degenerate case never occurs in the task's distribution, and
+`solve_cubic_f64 4 4 6`'s pinned in/out sizes stay exactly right. The
+distribution is not a guarantee, which is why the op still gets the
+check; it is the reason the checkpoint does not have to be retrained.
+
 ## GIS
 
 - **[want]** Ellipsoid (WGS84) as Space — geodesic distance on Earth

@@ -106,6 +106,35 @@ that-can't-happen this project should avoid. It means the convention is
 now named, so a new fallible *boundary* function in either domain has an
 unambiguous answer: `Result<T>`.
 
+## A check needs the thing that runs it, first
+
+Added 2026-09-15, after getting the order right by accident.
+
+An `assert` guarding an invariant is worth nothing until something
+actually executes it. Every job in this repository's CI built Release
+until `Debug build (asserts actually run)` was added, so for the whole
+life of the project an `assert` in library code was decoration in CI —
+and a misuse of Eigen that Eigen itself asserts on rode through green for
+eleven days because of it. Worse than being missed: when someone later
+saw the test pass in Release, `ROADMAP.md` gained a confident wrong
+explanation ("the old failure note went stale"). A check that never runs
+does not read as absent. It reads as passing.
+
+The same shape recurs at every level:
+
+| the mechanism | is decoration without |
+|---|---|
+| `assert` | a build that keeps `NDEBUG` off |
+| poisoning unused slots in Debug | a Debug test run |
+| a `[!shouldfail]` pin on a known bug | a suite that reports it as expected-failed rather than skipping it |
+| an `is_structural()` flag | something that reports the *consequence*, not just the fact |
+
+So the rule: **when adding a mechanism that makes a class of error
+visible, land what executes it first, or in the same change.** Not after.
+The infrastructure is the part that can be silently missing, because a
+mechanism with nothing running it looks exactly like a mechanism that
+passes.
+
 ## `measure()` / `area()` / `length()` / `volume()`
 
 Already stated in `CLAUDE.md`: `measure()` is the dimension-generic name
