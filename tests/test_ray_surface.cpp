@@ -458,6 +458,33 @@ TEST_CASE("BoundedQuadric cylinder: a ray down the axis misses", "[ray_surface]"
     CHECK_FALSE(ray_hit(parallel, c).has_value());
 }
 
+// The other half of the NaN story, and the half still open. Tagged
+// [!shouldfail] so the suite stays green while the defect stays visible;
+// when the solvers stop dividing by a vanishing leading coefficient this
+// starts passing, Catch2 reports that as a failure, and the tag has to
+// come off. See the matching case in test_polynomial.cpp.
+TEST_CASE("BoundedQuadric cone: a ray along a generator keeps its hit",
+          "[ray_surface][!shouldfail]") {
+    // A ray parallel to one of the cone's own generators meets the
+    // surface exactly once -- a genuine, single, forward hit. Because it
+    // is parallel to a generator the t² coefficient is exactly zero, so
+    // solve_quadratic divides by zero and both roots come back NaN. The
+    // leaf now rejects NaN instead of reporting a hit at t = NaN (that
+    // was the false positive, fixed), but rejecting is not finding: the
+    // real intersection is silently gone.
+    auto cone = BoundedQuadric<>::cone_z(-2.0, 2.0);  // straddles the apex
+    double s = 1.0 / std::sqrt(2.0);
+    Ray<3, double> along{Vec<double, 3>{0.0, 0.0, -1.0}, Vec<double, 3>{s, 0.0, s}};
+
+    // By hand, on x² + y² = z²: (ts)² = (ts - 1)² gives t = 1/(2s),
+    // landing at (0.5, 0, -0.5), comfortably inside the clip box.
+    auto h = ray_hit(along, cone);
+    REQUIRE(h.has_value());
+    CHECK_THAT(h->t, WithinAbs(1.0 / (2.0 * s), 1e-9));
+    CHECK_THAT(h->point[0], WithinAbs(0.5, 1e-9));
+    CHECK_THAT(h->point[2], WithinAbs(-0.5, 1e-9));
+}
+
 TEST_CASE("BoundedQuadric cone: the box widens with distance from the apex",
           "[ray_surface]") {
     // x² + y² = z², so the radius at height z is |z|.

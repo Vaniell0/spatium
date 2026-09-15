@@ -3,6 +3,7 @@
 #include <spatium/algebra/polynomial.hpp>
 #include <spatium/core/precision.hpp>
 #include <algorithm>
+#include <cmath>
 
 using namespace spatium;
 using Catch::Matchers::WithinAbs;
@@ -33,6 +34,36 @@ TEST_CASE("Quadratic: complex roots", "[polynomial]") {
     CHECK_THAT(roots[1].re, WithinAbs(0.0, 1e-10));
     CHECK_THAT(roots[1].im, WithinAbs(-1.0, 1e-10));
     CHECK_FALSE(roots[0].is_real());
+}
+
+// Tagged [!shouldfail], deliberately: it asserts the *correct* answer to
+// a known open bug, so the suite stays green while the defect stays
+// visible, and the day the solvers are fixed this starts passing --
+// which Catch2 then reports as a failure, forcing the tag off. A bug
+// recorded as a comment gets skimmed; one recorded as a test that must
+// keep failing cannot be quietly forgotten.
+//
+// Note this is NOT a Debug-versus-Release difference -- that was a
+// separate finding about Eigen's asserts vanishing under NDEBUG. This
+// one is wrong in every build: all three solvers divide by the leading
+// coefficient with no guard, so a degenerate input silently loses its
+// real root. And because NaN reports is_real() == true, the garbage
+// walks straight through every caller's filter.
+TEST_CASE("Quadratic: a vanishing leading coefficient loses the real root",
+          "[polynomial][!shouldfail]") {
+    // 0x² + 2x - 1 = 0 is still a perfectly good equation with the root
+    // x = 0.5. Today this returns NaN and -inf.
+    auto roots = solve_quadratic(0.0, 2.0, -1.0);
+    bool found = false;
+    for (const auto& r : roots)
+        if (r.is_real() && std::abs(r.re - 0.5) < 1e-10) found = true;
+    CHECK(found);
+
+    // The real fix needs a return type that can say "one root" rather
+    // than always exactly two, which is why this is an API change and
+    // not a guard clause.
+    auto reals = real_roots_quadratic(0.0, 2.0, -1.0);
+    CHECK(reals.size() == 1);
 }
 
 TEST_CASE("Quadratic: real_roots_quadratic filters correctly", "[polynomial]") {
