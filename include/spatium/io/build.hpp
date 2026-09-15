@@ -14,6 +14,7 @@
 #  include <initializer_list>
 #  include <optional>
 #  include <stdexcept>
+#  include <string>
 #  include <utility>
 #  include <vector>
 #endif
@@ -70,6 +71,31 @@ using ScalarField = std::function<T(T, T)>;
 
 enum class Kind { Space, Offset, Scatter, Compose, Literal };
 
+inline const char* kind_name(Kind k) {
+    switch (k) {
+        case Kind::Space:   return "Space";
+        case Kind::Offset:  return "Offset";
+        case Kind::Scatter: return "Scatter";
+        case Kind::Compose: return "Compose";
+        case Kind::Literal: return "Literal";
+    }
+    return "?";
+}
+
+// What happens at the rim when a shell is built over a surface that has
+// one. Only a shell needs this: offsetting a closed surface produces a
+// closed surface with no rim to rule on, which is why `offset()` and
+// `offset_shell()` are separate operations rather than one with a flag.
+//
+// `ZeroThickness` is the rim the donut's icing already had, now named
+// rather than improvised: the thickness field is expected to fall to
+// zero before the edge, so the shell meets its base there and closes
+// against it. It is the only rule that carries no data, which is exactly
+// why it is the only one here today -- a round cap carries a radius, and
+// extending to another surface carries a reference to another node.
+// Those want to be fields, and fields are the next piece of work.
+enum class EdgeRule { ZeroThickness };
+
 template<Scalar T = double>
 struct TraceNode {
     Kind kind{};
@@ -83,9 +109,11 @@ struct TraceNode {
     // of the analytic-first path, not the default.
     std::optional<mesh::Mesh<Euclidean<3, T>>> literal_mesh;
 
-    // Offset
+    // Offset -- `edge` is meaningful only for a shell, i.e. when the
+    // base is open. A closed base has no edge and never consults it.
     std::size_t base = 0;
     ScalarField<T> thickness;
+    EdgeRule edge = EdgeRule::ZeroThickness;
 
     // Scatter
     std::size_t item = 0, target = 0;
@@ -224,7 +252,24 @@ public:
         return literal(mesh::box_mesh<T>(half_extents));
     }
 
+    // The parallel surface: every point of a closed base pushed along
+    // its own normal. Closed in, closed out -- no rim anywhere, nothing
+    // to decide at an edge, and the result is a surface in exactly the
+    // sense the base was one.
+    //
+    // A base that is open, or that is not a surface at all, is refused
+    // here, at the call that makes the mistake. That is the whole reason
+    // this is a separate operation from offset_shell(): "offset" used to
+    // mean both this and building a shell over a band, and the second
+    // meaning quietly required an edge rule that nobody was stating.
     Handle<T> offset(Handle<T> base, ScalarField<T> thickness) {
+        require_surface(base.index, "offset");
+        if (!is_closed(resolve_surface(*this, base.index)))
+            throw std::invalid_argument(
+                "offset: the base surface has an edge, so its offset is a shell and "
+                "needs a rule for what happens at that edge -- use offset_shell(base, "
+                "thickness, EdgeRule). offset() is the parallel surface of a closed "
+                "base and produces a closed surface.");
         TraceNode<T> n{};
         n.kind = Kind::Offset;
         n.base = base.index;
@@ -236,7 +281,32 @@ public:
         return offset(base, ScalarField<T>{[thickness](T, T) { return thickness; }});
     }
 
+    // A shell over any base, open or closed, with the rim rule stated.
+    // Same construction as offset() -- the base's own surface pushed
+    // along its own normal -- but the caller has said what the edge
+    // means instead of leaving it to whatever the renderer happened to
+    // do with it.
+    Handle<T> offset_shell(Handle<T> base, ScalarField<T> thickness, EdgeRule edge) {
+        require_surface(base.index, "offset_shell");
+        TraceNode<T> n{};
+        n.kind = Kind::Offset;
+        n.base = base.index;
+        n.thickness = std::move(thickness);
+        n.edge = edge;
+        return push(std::move(n));
+    }
+
+    Handle<T> offset_shell(Handle<T> base, T thickness, EdgeRule edge) {
+        return offset_shell(base, ScalarField<T>{[thickness](T, T) { return thickness; }}, edge);
+    }
+
+    // The target must be a surface, for the same reason and with the
+    // same timing as offset()'s base: scattering is placement *on* a
+    // space, and a Literal mesh or a group is not one. Unlike offset(),
+    // an open target is fine -- sampling a band by its own area element
+    // is well posed, and the rim never comes up.
     Handle<T> scatter(Handle<T> item, Handle<T> target, std::size_t count, std::uint32_t seed = 42) {
+        require_surface(target.index, "scatter");
         TraceNode<T> n{};
         n.kind = Kind::Scatter;
         n.item = item.index;
@@ -260,6 +330,21 @@ public:
     }
 
 private:
+    // Both offset flavours and scatter need their base or target to be a
+    // space. It always was required -- resolve_surface() threw otherwise
+    // -- but it threw from inside materialize(), a long way from the
+    // line that got it wrong, and only if the scene was ever
+    // materialized at all.
+    void require_surface(std::size_t idx, const char* op) const {
+        Kind k = nodes_[idx].kind;
+        if (k == Kind::Space || k == Kind::Offset) return;
+        throw std::invalid_argument(
+            std::string(op) + ": node " + std::to_string(idx) + " is a " + kind_name(k) +
+            ", which is not a surface. Only Space and Offset nodes carry a (u,v) map; a "
+            "Literal is a precomputed mesh and Scatter and Compose are many objects rather "
+            "than one surface.");
+    }
+
     Handle<T> push(TraceNode<T> n) {
         std::size_t idx = nodes_.size();
         nodes_.push_back(std::move(n));

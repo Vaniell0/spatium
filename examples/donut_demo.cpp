@@ -23,7 +23,11 @@
 //         separate shape draped/projected onto the first (that was
 //         tried and was redundant: a surface built to be projected onto
 //         another almost-identical surface teaches nothing offset()
-//         doesn't already do directly).
+//         doesn't already do directly). It goes through offset_shell()
+//         rather than offset(), because real icing covers the top and
+//         stops: its base is a band cut out of the torus, so it has a
+//         rim, and EdgeRule says what happens there. The dough, being a
+//         whole torus with no edge anywhere, uses plain offset().
 // Step 3: the sprinkles are small cylinders, scattered across the icing
 //         by spatium::sample_surface_uniform -- rejection sampling
 //         weighted by the icing's own first-fundamental-form area
@@ -174,17 +178,6 @@ std::vector<std::pair<double, double>> load_boom_points(const std::string& path)
     return pts;
 }
 
-const char* kind_name(bd::Kind k) {
-    switch (k) {
-        case bd::Kind::Space:   return "Space";
-        case bd::Kind::Offset:  return "Offset";
-        case bd::Kind::Scatter: return "Scatter";
-        case bd::Kind::Compose: return "Compose";
-        case bd::Kind::Literal: return "Literal";
-    }
-    return "?";
-}
-
 // Icing guide: the same torus formula make_torus() uses, restricted to a
 // v-band around the tube's "top" (v=pi/2 sits opposite the hole -- see
 // spaces/parametric.hpp's make_torus) -- so offset() only builds icing
@@ -204,7 +197,11 @@ ParametricSurface<double> torus_cap(double major_r, double minor_r) {
         },
         {0.0, 2.0 * pi, pi * 0.02, pi * 0.98}, // wide band; the noisy thickness
                                                // falloff below does the actual
-                                               // edge shaping, not this domain
+                                               // edge shaping, not this domain.
+                                               // Being a band, this is an open
+                                               // surface -- is_closed() says so,
+                                               // and that is why the icing is
+                                               // built with offset_shell()
         /*periodic_u=*/true, /*periodic_v=*/false);
 }
 
@@ -630,8 +627,16 @@ int main(int argc, char* argv[]) {
     // handful of localized drips, gently undulating (glaze pools and
     // settles in broad waves, not fine ripples) rather than a mirror.
     algebra::PerlinNoise icing_noise(3);
-    auto icing_base = scene.offset(scene.space(torus_cap(2.0, 1.0), 160, 64), dough_bump);
-    auto icing = scene.offset(icing_base, bd::ScalarField<double>{[icing_noise](double u, double v) {
+    // offset_shell, not offset: torus_cap is a band with two rims, so
+    // the result has an edge and the rule for it has to be stated. The
+    // rule is the one this demo always used -- the thickness field below
+    // falls to zero before the rim, so the icing meets the dough there
+    // and closes against it -- it just has a name now. (The dough above
+    // is a plain offset(): a whole torus is closed, so there is no rim
+    // to rule on and nothing to state.)
+    auto icing_base = scene.offset_shell(scene.space(torus_cap(2.0, 1.0), 160, 64), dough_bump,
+                                         bd::EdgeRule::ZeroThickness);
+    auto icing = scene.offset_shell(icing_base, bd::ScalarField<double>{[icing_noise](double u, double v) {
                         constexpr double pi = std::numbers::pi;
                         double edge_dist = std::min(v - pi * 0.02, pi * 0.98 - v); // distance to the band's edge
                         double wobble = icing_noise(std::cos(u) * 2.0, std::sin(u) * 2.0, 0.0) * (pi * 0.03);
@@ -640,7 +645,7 @@ int main(int argc, char* argv[]) {
                         falloff = falloff * falloff * (3.0 - 2.0 * falloff); // soft, not torn
                         double pooling = icing_noise(u * 3.0, v * 3.0, 4.0) * 0.045; // broad, gentle waves
                         return (0.10 + pooling) * falloff;
-                    }})
+                    }}, bd::EdgeRule::ZeroThickness)
                      .colored(Material<double>{.base_color = {0.98, 0.55, 0.68}, .roughness = 0.40})
                      .moving(grow_scale);
 
@@ -682,7 +687,7 @@ int main(int argc, char* argv[]) {
 
     std::println("donut_demo: a Trace is real data -- here it is, {} nodes:", scene.size());
     for (std::size_t i = 0; i < scene.size(); ++i)
-        std::println("  [{}] {}", i, kind_name(scene.node(i).kind));
+        std::println("  [{}] {}", i, bd::kind_name(scene.node(i).kind));
 
     auto placed = bd::materialize(scene, lesson.index, t);
     std::size_t verts = 0, faces = 0;
