@@ -98,6 +98,40 @@ inline const char* kind_name(Kind k) {
 // Those want to be fields, and fields are the next piece of work.
 enum class EdgeRule { ZeroThickness };
 
+// How a renderer should turn this node into ray hits. Three levels that
+// answer the same question at three prices, measured on the shape
+// donut_demo actually builds (benchmarks/bench_raycast.cpp):
+//
+//   Exact         closed form -- the real surface, no approximation.
+//                 A torus is 20.9 ns/ray as one BVH leaf.
+//   Tessellated   triangles in a BVH. 40.8 ns/ray, plus 10.8 ms per
+//                 frame to build the 25 600 of them first.
+//   Newton        Newton's method on the (u,v) map. 23 612 ns/ray --
+//                 three orders of magnitude, and the only way to hit a
+//                 general parametric surface exactly.
+//
+// The gap is why this is a choice rather than an implementation detail.
+// But note what the ratio does and does not say: the exact path's
+// advantage grows with the scene, because it replaces *leaves*, not
+// because a leaf test is faster. One torus against 25 600 triangles is
+// 2x; a hundred tori against 2.5M triangles is a difference in traversal
+// depth. Reading 2x as the ceiling is the mistake to avoid.
+//
+// Tessellated is the default even for a node that has a (u,v) map,
+// because Newton is three orders of magnitude dearer and nobody should
+// pay that by accident. Exactness on a general parametric surface is
+// something you ask for.
+enum class RenderLevel { Exact, Tessellated, Newton };
+
+inline const char* render_level_name(RenderLevel l) {
+    switch (l) {
+        case RenderLevel::Exact:       return "Exact";
+        case RenderLevel::Tessellated: return "Tessellated";
+        case RenderLevel::Newton:      return "Newton";
+    }
+    return "?";
+}
+
 template<Scalar T = double>
 struct TraceNode {
     Kind kind{};
@@ -134,6 +168,11 @@ struct TraceNode {
     // is correct for the shape and wrong for the scene, silently, which
     // is the same class of defect as a NaN walking through a filter.
     std::any exact;
+
+    // Unset means "infer from what this node is" -- see
+    // Placed::render_level(). Set by .rendered_as(), which refuses on the
+    // spot a level this node cannot actually serve.
+    std::optional<RenderLevel> level;
 
     // Literal -- a precomputed mesh, for shapes with no natural single
     // (u,v)->R^3 formula (a cube, most obviously). The escape hatch out
@@ -216,6 +255,12 @@ struct Placed {
     bool is_exact() const;
     const std::type_info& exact_type() const;
 
+    // The level a renderer should use for this object: whatever
+    // .rendered_as() asked for, or the inference below when nothing
+    // asked. Resolved rather than raw, so a renderer never has to
+    // reimplement the default and drift from it.
+    RenderLevel render_level() const;
+
     // The exact form itself, when it is the type asked for. Returns null
     // when the node has no exact form or has a different one, so the
     // bucketing loop is a cast attempt rather than a type interrogation
@@ -252,6 +297,7 @@ struct Handle {
     std::size_t index;
 
     Handle colored(Material<T> m) const;
+    Handle rendered_as(RenderLevel level) const;
     Handle colored(PointField<T> color_fn) const;
     Handle moving(PointField<T> f) const;
 };
@@ -419,6 +465,31 @@ Handle<T> Handle<T>::colored(Material<T> m) const {
     return *this;
 }
 
+// Refuses on the spot, in the house pattern offset() established: a
+// level this node cannot serve is a mistake in the line that asked for
+// it, not a surprise for materialize() to raise later or -- worse -- for
+// a renderer to paper over by silently picking something else. Silently
+// picking something else is exactly how a caller ends up paying Newton's
+// three orders of magnitude without ever having asked.
+template<Scalar T>
+Handle<T> Handle<T>::rendered_as(RenderLevel level) const {
+    const auto& n = trace->node(index);
+    auto refuse = [&](const char* why) {
+        throw std::invalid_argument(std::string("rendered_as(") + render_level_name(level) +
+                                     "): node " + std::to_string(index) + " is a " +
+                                     kind_name(n.kind) + " and " + why);
+    };
+    if (level == RenderLevel::Exact && !n.exact.has_value())
+        refuse("has no exact closed form. Only factories that know their shape record "
+               "one -- torus() and cylinder() do, space() cannot, and .moving() drops it.");
+    if (level == RenderLevel::Newton && n.kind != Kind::Space && n.kind != Kind::Offset)
+        refuse("has no (u,v) map for Newton to iterate on.");
+    if (level == RenderLevel::Tessellated && n.kind == Kind::Compose)
+        refuse("is a group of objects rather than one, so it has no single mesh.");
+    trace->node(index).level = level;
+    return *this;
+}
+
 // Last call wins, deliberately: a color is a value a point maps to, and
 // two such maps have no meaningful composition (unlike motion below).
 template<Scalar T>
@@ -547,6 +618,17 @@ template<Scalar T>
 template<class Shape>
 const Shape* Placed<T>::exact_as() const {
     return std::any_cast<Shape>(&trace->node(index).exact);
+}
+
+// Inference, in one place so a renderer cannot drift from it: an exact
+// form is used when there is one, and everything else tessellates.
+// Newton is never inferred -- at 23 612 ns/ray it is something a caller
+// opts into, never something a default hands them.
+template<Scalar T>
+RenderLevel Placed<T>::render_level() const {
+    const auto& n = trace->node(index);
+    if (n.level) return *n.level;
+    return n.exact.has_value() ? RenderLevel::Exact : RenderLevel::Tessellated;
 }
 
 template<Scalar T>

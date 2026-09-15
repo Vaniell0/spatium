@@ -690,6 +690,26 @@ int main(int argc, char* argv[]) {
         std::println("  [{}] {}", i, bd::kind_name(scene.node(i).kind));
 
     auto placed = bd::materialize(scene, lesson.index, t);
+
+    // What level each object actually resolves to, reported rather than
+    // left to be inferred from a frame time. On this scene the answer is
+    // "all of them tessellate", and the reason is worth seeing rather
+    // than hiding: the dough is an Offset carrying a noise bump, so it
+    // stopped being a torus the moment it got bread texture. An exact
+    // form is a promise about the shape, and a bumped torus cannot keep
+    // it. The machinery reporting zero here is the machinery working.
+    {
+        std::size_t exact = 0, tess = 0, newton = 0;
+        for (const auto& obj : placed) {
+            switch (obj.render_level()) {
+                case bd::RenderLevel::Exact:       ++exact;  break;
+                case bd::RenderLevel::Tessellated: ++tess;   break;
+                case bd::RenderLevel::Newton:      ++newton; break;
+            }
+        }
+        std::println("render levels: {} exact, {} tessellated, {} newton",
+                     exact, tess, newton);
+    }
     std::size_t verts = 0, faces = 0;
     for (auto& obj : placed) { auto m = obj.mesh(); verts += m.vertex_count(); faces += m.face_count(); }
 

@@ -459,3 +459,76 @@ TEST_CASE("The exact slot takes copyable shapes, and that is the boundary",
     STATIC_REQUIRE(geometry::Bounded<MoveOnlyShape>);
     STATIC_REQUIRE_FALSE(std::constructible_from<std::any, MoveOnlyShape>);
 }
+
+// ── Which level a renderer should use ────────────────────────────
+
+TEST_CASE("The render level is inferred from what the node is", "[build_dsl]") {
+    bd::Trace<double> scene;
+    auto dough    = scene.torus(2.0, 1.0);
+    auto freeform = scene.space(make_torus<double>(2.0, 1.0));
+    auto block    = scene.cube();
+
+    CHECK(bd::materialize(scene, dough.index)[0].render_level()    == bd::RenderLevel::Exact);
+    CHECK(bd::materialize(scene, freeform.index)[0].render_level() == bd::RenderLevel::Tessellated);
+    CHECK(bd::materialize(scene, block.index)[0].render_level()    == bd::RenderLevel::Tessellated);
+}
+
+TEST_CASE("Newton is never inferred, only asked for", "[build_dsl]") {
+    // At 23 612 ns/ray against a torus's 20.9, a default that reached for
+    // Newton would hand a caller three orders of magnitude they never
+    // requested. Every inference path lands somewhere else.
+    bd::Trace<double> scene;
+    auto dough    = scene.torus(2.0, 1.0);
+    auto freeform = scene.space(make_torus<double>(2.0, 1.0));
+    auto icing    = scene.offset(dough, 0.05);
+    for (auto h : {dough, freeform, icing})
+        CHECK(bd::materialize(scene, h.index)[0].render_level() != bd::RenderLevel::Newton);
+
+    // ...and asking is enough to get it, on a node that has a map.
+    freeform.rendered_as(bd::RenderLevel::Newton);
+    CHECK(bd::materialize(scene, freeform.index)[0].render_level() == bd::RenderLevel::Newton);
+}
+
+TEST_CASE("An explicit level overrides the inference", "[build_dsl]") {
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 1.0);
+    REQUIRE(bd::materialize(scene, dough.index)[0].render_level() == bd::RenderLevel::Exact);
+
+    // A shape that *can* be exact may still be asked to tessellate --
+    // matching a mixed scene's other objects, say.
+    dough.rendered_as(bd::RenderLevel::Tessellated);
+    CHECK(bd::materialize(scene, dough.index)[0].render_level() == bd::RenderLevel::Tessellated);
+    CHECK(bd::materialize(scene, dough.index)[0].is_exact());  // the form is still there
+}
+
+TEST_CASE("rendered_as refuses a level the node cannot serve", "[build_dsl]") {
+    bd::Trace<double> scene;
+
+    // No exact form to be exact with.
+    auto freeform = scene.space(make_torus<double>(2.0, 1.0));
+    CHECK_THROWS_AS(freeform.rendered_as(bd::RenderLevel::Exact), std::invalid_argument);
+
+    // A mesh has no (u,v) map for Newton to iterate on.
+    auto block = scene.cube();
+    CHECK_THROWS_AS(block.rendered_as(bd::RenderLevel::Newton), std::invalid_argument);
+
+    // A group is many objects, so it has no single mesh.
+    auto group = scene.compose({freeform, block});
+    CHECK_THROWS_AS(group.rendered_as(bd::RenderLevel::Tessellated), std::invalid_argument);
+
+    // Refusal leaves the node as it was, rather than half-set.
+    CHECK(bd::materialize(scene, freeform.index)[0].render_level() == bd::RenderLevel::Tessellated);
+}
+
+TEST_CASE("Losing the exact form drops the level back with it", "[build_dsl]") {
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+    auto moving_dough = scene.torus(2.0, 1.0)
+                            .moving([](const V3& p, double t) { return V3{p + V3{0, 0, t}}; });
+    // .moving() cleared the exact form, so the inference has nothing to
+    // reach for and says so rather than promising a closed-form hit that
+    // no longer describes this node.
+    CHECK_FALSE(bd::materialize(scene, moving_dough.index)[0].is_exact());
+    CHECK(bd::materialize(scene, moving_dough.index)[0].render_level()
+          == bd::RenderLevel::Tessellated);
+}
