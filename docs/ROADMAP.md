@@ -418,10 +418,77 @@ is an `Offset` carrying a noise bump, so it stopped being a torus the
 moment it got bread texture. An exact form is a promise about the shape,
 and a bumped torus cannot keep it.
 
+### `Chart`, settled 2026-09-15 — the requirement the operations already had
+
+The DSL was open to new *operations* and closed to new *spaces*, and the
+reason turned out not to be the one written down. It was not that `Kind`
+is a closed enum, and not that the node type is fixed. It was that the
+requirement every DSL operation shares had no name, and travelled through
+the signatures disguised as the concrete type `ParametricSurface<T>`.
+
+The claim is checkable, which is why it settled the design. Reading the
+three operations for what they actually call:
+
+| operation | what it calls |
+|---|---|
+| `offset_surface()` | `evaluate`, `normal_at`, `domain`, `periodic_u/v` |
+| `sample_surface_uniform()` | `area_element`, `domain` |
+| `parametric_mesh()` | `evaluate`, `domain` |
+
+Not one of them calls `project()`, `normal()` or `exp_map()` — so not one
+of them uses the `Surface` concept. Generalizing `resolve_surface` to
+`Surface`, which is how this item was written for a week, would have
+handed the operations methods nobody calls while losing every method they
+need. The right name is `Chart`: a (u,v) parametrization, which is a
+choice of coordinates *on* a space, not a kind of space. It is
+deliberately not part of the `Set → Manifold → Surface` hierarchy — a
+space can carry many charts or none.
+
+`chart_of(space)` is the extension point, found by ADL, the same shape as
+`point_to(p, surf)` in the contact concepts and for the same reason:
+compile-time overload resolution, no runtime registry, no indirect call.
+`ParametricSurface<T>` gets the identity overload and remains the erased
+form every chart converts into, because a trace holds nodes of one type
+and cannot be templated per node.
+
+`Sphere<2, T>` gets its **first** chart here, not a generalization of an
+existing one — as a `RiemannianManifold` it has no `evaluate(u, v)`
+anywhere, which is the real reason it could never enter the DSL. Note
+which sphere: `Sphere<N, T>` is the N-sphere in R^{N+1}, so the ordinary
+sphere in R³ is `Sphere<2, T>`. `Sphere<3, T>` lives in R⁴ and gets no
+overload, which is not an omission — there is no chart of that shape to
+write, and `Chartable<Sphere<3, double>, double>` is `false` on purpose.
+
+The chart's `periodic_v` is `false` and its `v` edges are the two poles:
+the middle row of the chart-edge table above, and the reason `is_closed()`
+reads geometry instead of these flags. The poles are also where the chart
+degenerates — `area_element` is `r² sin v`, zero there, and the
+finite-difference `normal_at` with it. That is a property of the chart,
+not a defect of the sphere.
+
+A sphere node deliberately leaves the `exact` slot empty. That slot means
+"a renderer can hit this without triangles", nothing in the library can do
+that for a `Sphere` today, and filling it would make `render_level()`
+claim `Exact` for a shape no renderer can hit exactly — a picture right
+about the shape and wrong about the scene. A `sphere()` factory recording
+`BoundedQuadric` is available later and is a different change.
+
+**`Kind` stays closed, and adding a space does not go near it.** Its five
+values — Space, Offset, Scatter, Compose, Literal — are *operations*, not
+shapes; a sphere is a new chart on the existing `Space` node.
+`Kind::Literal` already covers shapes with no (u,v) map at all, so the
+shape set was open through the chart or through `Literal` before any of
+this. The single thing that would open `Kind` is **CSG boolean on
+analytic surfaces** — `union(torus, sphere)` as an operation rather than a
+mesh merge, whose result is a new analytic surface not expressible as any
+of the five. It is not planned: `geometry/boolean.hpp` does this for
+polygons, not surfaces, and there is no consumer. Recorded here so the
+question is not reopened from scratch in a month.
+
 ### Open items
 
 - **[course]** Classify what a chart's edge maps to — point, curve, or nothing — per direction, generalizing `is_closed()`'s yes/no. See "Chart versus manifold" above. This is the thing `SurfaceWithBoundary` (`boundary_distance`, `is_on_boundary`, what `exp_map` does past the edge) should be designed on top of, and it is cheap enough to have before there is a second consumer for the concept itself.
-- **[course]** A Debug job in CI. Every job that runs tests builds Release, so `NDEBUG` removes `assert` and a whole class of defect — misusing another library in a way that library catches with an assertion — passes green. This is not hypothetical: it is how the `JacobiSVD` thin-U/V misuse survived, and how "the test passes now" got written down as "the old failure note went stale". One Debug job closes it.
+- ~~**[course]** A Debug job in CI.~~ — **done**, PR #34, 2026-09-15, and the entry stayed listed as open for the rest of that day. The reason it was worth doing, kept because it is the argument and not just the outcome: every job that ran tests built Release, so `NDEBUG` removed `assert` and a whole class of defect — misusing another library in a way that library catches with an assertion — passed green. Not hypothetical; it is how the `JacobiSVD` thin-U/V misuse survived, and how "the test passes now" got written down as "the old failure note went stale". Struck through rather than deleted, same as the `scatter()` orientation entry, because an item that outlives its own completion is the failure worth seeing.
 - **[want]** `EdgeRule::ExtendTo(node)` as a structural node holding a trace index, exactly like `Offset::base` already does — independent of the field work, since a reference to another node is topology rather than a per-instance parameter. `RoundCap(radius)` is the one that genuinely needs a parameter and should not drag `ExtendTo` along with it.
 
 - **[course]** Instancing in the trace — one mesh plus N transforms, instead of N copies of the same mesh. The largest measured cost in `bench_trace.cpp` (~20% of a frame at demo scale, with no motion hook involved at all).

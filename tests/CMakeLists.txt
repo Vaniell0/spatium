@@ -75,6 +75,7 @@ add_executable(spatium_tests
     test_scene.cpp
     test_wav.cpp
     test_build_dsl.cpp
+    test_chart.cpp
 )
 
 target_include_directories(spatium_tests PRIVATE
