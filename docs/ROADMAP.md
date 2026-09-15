@@ -533,6 +533,78 @@ sample, the degenerate case never occurs in the task's distribution, and
 distribution is not a guarantee, which is why the op still gets the
 check; it is the reason the checkpoint does not have to be retrained.
 
+## Copy-constructibility, leaking upward from `std::function`
+
+Named 2026-09-15 as one item, after finding the third instance. Each was
+recorded as a code comment at its own site, which is how a family of
+related constraints reads as three unrelated footnotes.
+
+`std::function` requires its callable to be copy-constructible, and the
+requirement propagates to everything built on top:
+
+| the slot | requires copyable | consequence |
+|---|---|---|
+| `ParametricSurface::ParamFn` | the `(u,v)→R³` map | the root of the chain |
+| `io::build::ScalarField` (thickness) | the thickness callable | a thickness flows into `offset_surface()` and so into a `ParamFn`; it cannot own move-only state |
+| `TraceNode::exact` (`std::any`) | the exact shape | a user shape owning a device handle or a `unique_ptr` cannot be recorded |
+
+`PointField` escaped it by moving to `std::move_only_function` (PR #26),
+which is why the donut demo's 19 800 motion closures can share one
+`PerlinNoise` through a `shared_ptr` instead of copying 9.7 MB of
+identical tables. The others did not, and the reason is the same in each
+case: the type underneath insists on copying what it holds.
+
+Worth stating because it is the obvious wrong turn: **the escape is
+`move_only_function`, not `copyable_function`.** The latter requires a
+copy-constructible target exactly as `std::function` does. Reaching for
+it here would be swapping one copyable erasure for another and changing
+nothing.
+
+Nothing in the tree hits any of these today — surfaces and shapes are
+value types, thickness fields capture numbers. What makes it worth an
+entry rather than three comments is that the failure is always a
+template error from `<functional>` or `<any>` that says nothing about
+this library's design, and that **the same question arrives a fourth
+time with structural fields**: a `Field` whose leaves may own state will
+meet exactly this wall.
+
+- **[want]** Lift `ParametricSurface::ParamFn` off `std::function`. It is
+  the root: fix it and `ScalarField` follows.
+
+  **`std::copyable_function` is not the fix, despite the name.** It
+  requires a copy-constructible target exactly as `std::function` does --
+  that is what "copyable" means there. What it actually repairs is a
+  different hole: `std::function::operator()` is const but happily
+  invokes a non-const target, and it drops the `target()`/RTTI surface.
+  Worth having for those reasons; irrelevant to this one.
+
+  The only type that relaxes the requirement is
+  `std::move_only_function`, which is what `PointField` already uses --
+  so the fix is to make `ParametricSurface` **move-only**, not to swap
+  one copyable erasure for another. That is a real change rather than an
+  `#if`: `offset_surface()` captures its base into a new closure,
+  `Placed::surface()` hands back an `optional<ParametricSurface<T>>`,
+  `resolve_surface()` returns by value, and several tests copy surfaces.
+  All of those work under move, but each is a line that has to change.
+
+  Measured here, GCC 15.3 under `-std=c++26`:
+  `__cpp_lib_move_only_function` is `202110`, while
+  `__cpp_lib_copyable_function` and `__cpp_lib_function_ref` are absent.
+  So the tool this needs has been available all along; what is missing is
+  the work, not the vocabulary.
+
+  Templating `ParametricSurface` on its callable instead is tempting and
+  wrong at this boundary: `resolve_surface()` has to return **one** type
+  for nodes whose maps differ, so erasure there is a requirement rather
+  than laziness.
+
+- **[want]** Decide whether `TraceNode::exact` should accept a move-only
+  shape. `std::any` cannot; a `unique_ptr<void, deleter>` plus a
+  `std::type_index` can, at the cost of hand-rolling what `std::any`
+  gives for free. Worth doing when a shape that needs it exists, not
+  before — but worth *knowing* before someone discovers it as a
+  compiler error.
+
 ## GIS
 
 - **[want]** Ellipsoid (WGS84) as Space — geodesic distance on Earth

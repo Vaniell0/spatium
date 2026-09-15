@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/catch_approx.hpp>
+#include <any>
+#include <concepts>
 #include <memory>
 #include <spatium/algebra/noise.hpp>
+#include <spatium/geometry/concepts.hpp>
 #include <spatium/io/build.hpp>
 #include <spatium/spaces/offset.hpp>
 #include <spatium/spaces/sample.hpp>
@@ -422,4 +425,37 @@ TEST_CASE("A cylinder node's exact form is clipped to the map's extent",
     CHECK_THAT(b.min_corner[2], WithinAbs(0.0, 1e-12));
     CHECK_THAT(b.max_corner[2], WithinAbs(3.0, 1e-12));
     CHECK_THAT(b.max_corner[0], WithinAbs(0.5, 1e-12));
+}
+
+// Where the copy-constructibility wall actually stands. Not a bug and
+// not a [!shouldfail] -- it is a real, currently-unhit limitation, and
+// the point of testing it is that it stops being discovered as a
+// template error out of <any> that says nothing about this design. See
+// ROADMAP's "Copy-constructibility, leaking upward from std::function".
+//
+// The trigger for fixing it is structural fields: a Field leaf owning
+// state meets this wall by construction, which is a named event rather
+// than a hope that someone remembers.
+namespace {
+struct MoveOnlyShape {
+    using ScalarType = double;
+    using PointType = spatium::Vec<double, 3>;
+    static constexpr std::size_t ambient_dimension = 3;
+    std::unique_ptr<int> owned;           // e.g. a device handle, a voxel grid
+    PointType centroid() const { return {}; }
+    spatium::geometry::Box<3, double> bounding_box() const { return {}; }
+};
+} // namespace
+
+TEST_CASE("The exact slot takes copyable shapes, and that is the boundary",
+          "[build_dsl]") {
+    // Why every shape in the tree fits today.
+    STATIC_REQUIRE(std::copy_constructible<geometry::Torus<double>>);
+    STATIC_REQUIRE(std::copy_constructible<geometry::BoundedQuadric<double>>);
+
+    // And where it stops: std::any requires copy-constructibility of what
+    // it stores, so a shape owning move-only state cannot be recorded --
+    // even though it is otherwise a perfectly good Bounded shape.
+    STATIC_REQUIRE(geometry::Bounded<MoveOnlyShape>);
+    STATIC_REQUIRE_FALSE(std::constructible_from<std::any, MoveOnlyShape>);
 }

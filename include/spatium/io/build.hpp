@@ -120,6 +120,14 @@ struct TraceNode {
     // std::any keeps the type tag that makes that possible. Erasure
     // belongs to describing a scene; evaluating one stays monomorphic.
     //
+    // Known constraint, same family as ScalarField's above: std::any
+    // requires the stored type to be copy-constructible, so a shape that
+    // owns move-only state (a device handle, a voxel grid behind a
+    // unique_ptr) cannot go here. Shapes are value types today so
+    // nothing hits it, but the failure would be a std::any error message
+    // that says nothing about this design. Tracked in ROADMAP with the
+    // other copy-constructibility leaks rather than left as a comment.
+    //
     // This is an invariant, not a field. It must agree with `surface`,
     // and any operation that can move them apart is required to clear it
     // -- see Handle::moving(). A stale exact form renders a picture that
