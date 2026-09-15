@@ -538,6 +538,28 @@ Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
 // slot, and that has to agree with what the callable form does here.
 template<Scalar T>
 Handle<T> Handle<T>::moving(PointField<T> f) const {
+    // Refused on a Compose, at the call site, because until now it was
+    // accepted and silently did nothing: materialize() never builds a
+    // Placed for a Compose node -- it flattens to the children's -- so
+    // the motion had nowhere to be read from. A call that returns a
+    // handle and changes nothing is the same defect as a filter that
+    // skips nothing; see conventions.md.
+    //
+    // Refused rather than implemented, and that is the design decision
+    // rather than the cheap way out. Giving a Compose its own transform
+    // would make a node's effective transform the product of its
+    // ancestors' -- a scene graph, walked by following parents, which is
+    // exactly what addressing a flat array by index exists to avoid.
+    // Group motion belongs at the moment operations are expanded into
+    // objects, where it folds into each object's own transform once and
+    // the array stays flat. Until that expansion exists, move the
+    // children.
+    if (trace->node(index).kind == Kind::Compose)
+        throw std::logic_error(
+            "moving() on a Compose node: a Compose is grouping, not an object -- it "
+            "materializes to its children, so a motion here would have nothing to read "
+            "it. Apply .moving() to each child, or compose the moved children.");
+
     // The exact form goes, always. `f` is an arbitrary point map, so in
     // general it does not send a torus to a torus, and a recorded shape
     // that no longer agrees with the map is worse than no recorded shape

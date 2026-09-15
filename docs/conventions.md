@@ -106,6 +106,45 @@ that-can't-happen this project should avoid. It means the convention is
 now named, so a new fallible *boundary* function in either domain has an
 unambiguous answer: `Result<T>`.
 
+## A flat array addressed by index, not a tree of pointers
+
+Named 2026-09-15, at the fourth independent application. The first three
+were each decided on their own merits; naming it here is so the fifth
+decision is quicker rather than re-derived.
+
+| where | what it replaced | what the flatness bought |
+|---|---|---|
+| `Trace` | a tree of `std::function` closures | walkable, dumpable, re-interpretable by a second pass written later |
+| `Field` | a linked expression tree | evaluation in one linear pass, children already computed — the shape a GPU runs |
+| `Cooked` | operations resolved on demand | one expansion of operations into objects, done once |
+| `Runtime` | state owned by each node | the mutable part is small and contiguous, which is what a frame loop wants |
+
+The recurring reason is not cache friendliness, though that comes along.
+It is that **an index is a name that survives**: it can be stored, compared,
+serialized, handed to another pass, and used by code that does not own the
+structure — none of which a pointer into a tree can do. `type_index` does
+not survive serialization and neither does a closure; an index does.
+
+The two obligations that come with it, both learned the hard way:
+
+- **Append-only.** If the array is in dependency order, inserting in the
+  middle breaks that order silently — nothing renumbers, and the first
+  read gets an uncomputed slot. Check the ordering at the append, per
+  element, where it can break; not afterwards over the whole array, which
+  is both more expensive and a weaker statement.
+- **Say who owns the array.** "Append, never mutate" means one thing when
+  each value owns its array and a completely different thing when many
+  values index a shared one. `Field` owns its pool, so its `+=` is
+  ordinary value mutation and there is no aliasing question at all —
+  writing the shared-pool guarantee into its docs would have promised
+  something it does not do. See `io/field.hpp`.
+
+And one thing flatness does not decide: **which array.** An index only
+means something inside one space of indices, so operations and objects
+need separate spaces when one operation can produce many objects — a
+`Scatter` node is one operation and 600 sprinkles, and there is no node
+index that names the 37th.
+
 ## Failure to signal, wearing the costume of an answer
 
 Named 2026-09-15, after finding the third instance and realising the
