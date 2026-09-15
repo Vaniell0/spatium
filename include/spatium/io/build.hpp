@@ -11,6 +11,7 @@
 #  include <spatium/spaces/parametric.hpp>
 #  include <spatium/spaces/sample.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
+#  include <spatium/io/field.hpp>
 #  include <any>
 #  include <cstdint>
 #  include <functional>
@@ -64,13 +65,25 @@ SPATIUM_EXPORT namespace spatium::io::build {
 template<Scalar T = double>
 using PointField = std::move_only_function<Vec<T, 3>(const Vec<T, 3>&, T) const>;
 
-// Deliberately still std::function, unlike PointField: a thickness flows
-// through offset_surface() into a ParametricSurface, whose ParamFn is
-// itself a std::function and therefore requires a copy-constructible
-// callable. The constraint belongs to ParametricSurface, not to the DSL,
-// and moving this slot needs that type to change first.
+// A thickness is a `Field` -- an expression over (u, v) whose leaves may
+// be opaque callables -- rather than a bare std::function. See
+// io/field.hpp for why the leaf, not the whole field, is the unit of
+// opacity.
+//
+// A lambda still converts implicitly, so every existing call site reads
+// the same; what changes is that the conversion is now *visible*. A
+// constant thickness becomes a Const node and reports as structural,
+// where it used to be an opaque one-line lambda indistinguishable from
+// noise. Friction is not what keeps the hatch honest here -- the report
+// is.
+//
+// It still flows through offset_surface() into a ParametricSurface, whose
+// ParamFn is a std::function and therefore wants a copy-constructible
+// callable; Field is one. That boundary makes a copy of the pool per
+// resolve, and the node keeps the Field, so structure stays visible to
+// the report and to lowering even though the evaluation path wraps.
 template<Scalar T = double>
-using ScalarField = std::function<T(T, T)>;
+using ScalarField = Field<T>;
 
 enum class Kind { Space, Offset, Scatter, Compose, Literal };
 
@@ -557,7 +570,14 @@ template<Scalar T>
 ParametricSurface<T> resolve_surface(const Trace<T>& trace, std::size_t idx) {
     const auto& n = trace.node(idx);
     if (n.kind == Kind::Space) return *n.surface;
-    if (n.kind == Kind::Offset) return offset_surface(resolve_surface(trace, n.base), n.thickness);
+    // T cannot be deduced from a Field through offset_surface's
+    // std::function parameter, so the erasure is spelled here. This is
+    // the boundary where the field's structure stops travelling and only
+    // its value continues: the node keeps the Field, so the report and
+    // any lowering pass still see the expression.
+    if (n.kind == Kind::Offset)
+        return offset_surface<T>(resolve_surface(trace, n.base),
+                                 std::function<T(T, T)>{n.thickness});
     throw std::logic_error("resolve_surface: node is not a Space or Offset");
 }
 

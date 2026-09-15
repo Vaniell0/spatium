@@ -179,6 +179,17 @@ public:
         return f;
     }
 
+    // Any callable becomes an opaque leaf. Implicit on purpose: every
+    // place that used to take a std::function still reads the same, and
+    // what makes the opacity visible is the report, not a spelling the
+    // user has to remember. `Field::opaque` stays for when saying it
+    // explicitly is clearer.
+    template<typename F>
+        requires std::is_invocable_r_v<T, const F&, T, T> &&
+                 (!std::is_same_v<std::remove_cvref_t<F>, Field>) &&
+                 (!std::is_convertible_v<F, T>)
+    Field(F fn) : Field(opaque(std::move(fn))) {}   // NOLINT: implicit on purpose
+
     // ── Evaluation: one pass, children already computed ──────────
 
     T operator()(T u, T v) const {
