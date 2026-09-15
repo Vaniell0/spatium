@@ -12,6 +12,17 @@
 
 SPATIUM_EXPORT namespace spatium::mesh {
 
+// Nothing in this tree calls this, deliberately. spaces/sample.hpp's
+// sample_surface_uniform() is preferred whenever the target is a
+// ParametricSurface -- it weights by the first fundamental form's area
+// element and needs no mesh at all. This exists for the case that one
+// cannot serve: a target that is only ever a mesh, where coverage has to
+// come from the mesh graph's own geodesics. Kept, not grown;
+// tests/test_mesh_ops.cpp instantiates it and checks the result, which
+// is the whole of the maintenance it is owed. (Until 2026-09-15 it had
+// no caller *and* no test, so its body had never been instantiated at
+// all -- it only parsed.)
+//
 // scatter_on_surface: place `count` points evenly across a meshed Surface
 // via farthest-point sampling (repeated geodesic_voronoi() -- same
 // technique examples/geodesic_procgen_demo.cpp uses for region seeding,
