@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <spatium/mesh/conform.hpp>
 #include <spatium/mesh/operations.hpp>
 #include <spatium/mesh/primitives.hpp>
+#include <spatium/mesh/scatter.hpp>
 #include <spatium/mesh/subdivision.hpp>
+#include <spatium/spaces/parametric.hpp>
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/euclidean.hpp>
 #include <spatium/io/obj.hpp>
@@ -150,4 +153,62 @@ TEST_CASE("OBJ save and load round-trip", "[obj]") {
 TEST_CASE("OBJ load nonexistent file fails", "[obj]") {
     auto result = io::load_obj("/nonexistent/path.obj");
     CHECK_FALSE(result.has_value());
+}
+
+// ── mesh/conform.hpp and mesh/scatter.hpp ────────────────────────
+//
+// These two had no caller anywhere in the tree -- not a demo, not a
+// test, not even the umbrella header, which does not include them. So
+// their bodies are templates that were never instantiated: they parsed,
+// and nothing more was ever checked. The roadmap claimed they "pass
+// their own tests", which was simply untrue; there were none.
+//
+// Kept rather than deleted (they are a real alternative to the analytic
+// placement path in spaces/sample.hpp, for targets that are a mesh
+// rather than a ParametricSurface), so the cheap half of "keep" is owed:
+// instantiate them once and check the result is the shape it claims.
+// This is not a demo and is not meant to grow into one.
+
+TEST_CASE("conform_to_surface drapes a guide mesh onto a target", "[conform]") {
+    auto torus = make_torus<double>(2.0, 1.0);
+    auto guide = box_mesh<double>(Vec<double, 3>{0.2, 0.2, 0.2});
+
+    auto draped = conform_to_surface(guide, torus, 0.05);
+
+    // Topology carried over unchanged -- it drapes, it does not remesh.
+    CHECK(draped.vertex_count() == guide.vertex_count());
+    CHECK(draped.face_count() == guide.face_count());
+
+    // Every vertex ends up one thickness off the target, measured
+    // against the target's own projection rather than against the
+    // guide's starting position.
+    for (const auto& v : draped.vertices) {
+        auto on_surface = torus.project(v);
+        CHECK_THAT((v - on_surface).norm(), WithinAbs(0.05, 1e-6));
+    }
+}
+
+TEST_CASE("scatter_on_surface spreads points by geodesic distance", "[scatter]") {
+    using S = Sphere<2, double>;
+    S sphere{1.0};
+
+    auto euclidean = uv_sphere_mesh<double>(24, 12, 1.0);
+    Mesh<S> m;
+    m.vertices.assign(euclidean.vertices.begin(), euclidean.vertices.end());
+    m.faces = euclidean.faces;
+
+    auto pts = scatter_on_surface(m, sphere, std::size_t{20});
+    REQUIRE(pts.size() == 20);
+
+    for (const auto& p : pts) {
+        CHECK_THAT(p.position.norm(), WithinAbs(1.0, 1e-9));  // on the sphere
+        CHECK_THAT(p.normal.norm(), WithinAbs(1.0, 1e-9));    // oriented, ready to place an object
+    }
+
+    // Farthest-point sampling, so no two sites coincide -- the property
+    // that distinguishes this from independent random placement, which
+    // clusters and gaps.
+    for (std::size_t i = 0; i < pts.size(); ++i)
+        for (std::size_t j = i + 1; j < pts.size(); ++j)
+            CHECK((pts[i].position - pts[j].position).norm() > 1e-9);
 }

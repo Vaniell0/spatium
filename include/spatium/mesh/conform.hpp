@@ -9,6 +9,16 @@
 
 SPATIUM_EXPORT namespace spatium::mesh {
 
+// Nothing in this tree calls this, deliberately. The analytic path --
+// spaces/offset.hpp's offset_surface() composed with the io::build DSL --
+// is preferred whenever the target is a ParametricSurface, because it
+// stays a surface instead of becoming triangles. This exists for the
+// case that one cannot serve: a target that is only ever a mesh. Kept,
+// not grown; tests/test_mesh_ops.cpp instantiates it and checks the
+// result, which is the whole of the maintenance it is owed. (Until
+// 2026-09-15 it had no caller *and* no test, so its body had never been
+// instantiated at all -- it only parsed.)
+//
 // conform_to_surface: drape a guide mesh onto a target Surface.
 //
 // Every guide vertex is projected onto `target` (target.project()) and
