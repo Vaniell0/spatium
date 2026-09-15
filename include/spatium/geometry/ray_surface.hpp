@@ -392,12 +392,43 @@ ray_quadric_full(const Ray<3, T>& ray, const Quadric<T>& q) {
 // with axis along +Z in the local frame, center at origin.
 // General torus is given by (center, axis); ray is transformed to local frame.
 
+// Unlike a general quadric, a torus is bounded by construction -- R and r
+// are finite by definition, so there is nothing to clip and no wrapper
+// type is needed. It therefore satisfies Shape and Bounded directly, and
+// with its existing ray_hit overload that is everything a BVH asks for:
+// a tree whose leaves are exact tori, rather than the thousands of
+// triangles each one would otherwise be tessellated into.
 template<Scalar T = double>
 struct Torus {
+    using ScalarType = T;
+    using PointType = Vec<T, 3>;
+    static constexpr std::size_t ambient_dimension = 3;
+
     Vec<T, 3> center{};
     Vec<T, 3> axis{T{0}, T{0}, T{1}};   // unit vector along tube axis
     T major_radius{T{1}};               // R: centerline circle radius
     T minor_radius{T{0.25}};            // r: tube radius
+
+    PointType centroid() const { return center; }
+
+    // Exact, not a loose sphere of radius R+r. The support function of a
+    // torus in a unit direction u is R·‖u − (u·w)w‖ + r, i.e. the major
+    // circle's extent in the component of u perpendicular to the axis,
+    // plus the tube. Along a world axis e_i that is R·sqrt(1 − w_i²) + r,
+    // which degenerates correctly at both ends: along the axis itself it
+    // gives just r (the tube's thickness) and perpendicular to it R + r.
+    Box<3, T> bounding_box() const {
+        using std::sqrt, std::max;
+        Vec<T, 3> w = axis;
+        T len = w.norm();
+        if (len > epsilon<T>()) w = Vec<T, 3>{w / len};
+        Vec<T, 3> half{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            T perp2 = max(T{0}, T{1} - w[i] * w[i]);   // clamped: rounding can push it below zero
+            half[i] = major_radius * sqrt(perp2) + minor_radius;
+        }
+        return Box<3, T>{Vec<T, 3>{center - half}, Vec<T, 3>{center + half}};
+    }
 };
 
 // Orthonormal basis (u, v, w=axis) with w given (unit length).

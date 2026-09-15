@@ -4,6 +4,8 @@
 #include <spatium/geometry/ray_surface.hpp>
 #include <spatium/geometry/ray_hit.hpp>
 #include <spatium/geometry/make.hpp>
+#include <spatium/spatial/bvh.hpp>
+#include <vector>
 #include <cmath>
 #include <numbers>
 #include <random>
@@ -533,6 +535,58 @@ TEST_CASE("BoundedQuadric cone: the box widens with distance from the apex",
     // Straddling the apex: the wider end sets the width.
     auto straddling = BoundedQuadric<>::cone_z(-1.0, 4.0);
     CHECK_THAT(straddling.bounding_box().max_corner[0], WithinAbs(4.0, 1e-12));
+}
+
+TEST_CASE("Torus is bounded by construction, so it needs no clip wrapper",
+          "[ray_surface]") {
+    // The point of the type gaining these two members: a quadric needs a
+    // BoundedQuadric wrapper because most quadrics are infinite, but R
+    // and r make a torus finite by definition. So it satisfies Bounded
+    // directly, and with its existing ray_hit overload that is all a BVH
+    // asks for.
+    STATIC_REQUIRE(Bounded<Torus<double>>);
+    STATIC_REQUIRE(RayHittable<Torus<double>, double>);
+
+    Torus<> t{.major_radius = 2.0, .minor_radius = 0.5};
+    auto b = t.bounding_box();
+
+    // Exact, not a loose sphere of radius R+r: perpendicular to the axis
+    // the extent is R + r, but *along* it the torus is only as thick as
+    // the tube.
+    CHECK_THAT(b.max_corner[0], WithinAbs(2.5, 1e-12));
+    CHECK_THAT(b.min_corner[0], WithinAbs(-2.5, 1e-12));
+    CHECK_THAT(b.max_corner[2], WithinAbs(0.5, 1e-12));   // not 2.5
+    CHECK_THAT(b.min_corner[2], WithinAbs(-0.5, 1e-12));
+
+    // A tilted axis interpolates between the two, rather than falling
+    // back to the loose bound.
+    Torus<> tilted{.axis = Vec3{0, 1, 0}, .major_radius = 2.0, .minor_radius = 0.5};
+    auto tb = tilted.bounding_box();
+    CHECK_THAT(tb.max_corner[1], WithinAbs(0.5, 1e-12));  // now y is the thin axis
+    CHECK_THAT(tb.max_corner[2], WithinAbs(2.5, 1e-12));
+}
+
+TEST_CASE("A BVH of exact tori hits them without a single triangle",
+          "[ray_surface]") {
+    std::vector<Torus<double>> tori;
+    for (int i = 0; i < 8; ++i)
+        tori.push_back(Torus<double>{.center = Vec3{i * 6.0, 0, 0},
+                                     .major_radius = 2.0,
+                                     .minor_radius = 0.5});
+
+    auto tree = spatial::BVH<Torus<double>>::build(std::move(tori));
+
+    // Straight at the fifth torus's near wall, along +x through its tube.
+    auto r = unwrap(ray(Vec3{4 * 6.0, -10.0, 0.0}, Vec3{0, 1, 0}));
+    auto hit = tree.ray_cast(r);
+    REQUIRE(hit.has_value());
+    // The tube's outer wall on that side sits at y = -2.5 relative to the
+    // torus centre, so the first surface the ray meets is 7.5 away.
+    CHECK_THAT(hit->t, WithinAbs(7.5, 1e-6));
+
+    // And a ray down the hole of the first one meets nothing at all.
+    auto through = unwrap(ray(Vec3{0, 0, -10.0}, Vec3{0, 0, 1}));
+    CHECK_FALSE(tree.ray_cast(through).has_value());
 }
 
 TEST_CASE("BoundedQuadric satisfies what a BVH demands of a shape", "[ray_surface]") {
