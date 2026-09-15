@@ -249,6 +249,7 @@ Factories (in `spaces/parametric.hpp`): `make_torus`, `make_cylinder`, `make_con
 | Related free function | Header | Description |
 |---|---|---|
 | `area_element(u, v)` | `spaces/parametric.hpp` (member) | sqrt(EG-F²) of the first fundamental form — how much a unit (du,dv) patch stretches into R³ area here |
+| `is_closed(surface)` | `spaces/parametric.hpp` (free) | Whether the surface comes back on itself or ends somewhere. A direction closes by being periodic, or by both its edge curves collapsing to a point (a pole) — so a sphere reads closed despite `periodic_v() == false`. Both directions must close |
 | `offset_surface(base, thickness)` | `spaces/offset.hpp` | Compose a new `ParametricSurface` pushed out along `base`'s own normal — `thickness` a constant or `std::function<T(T,T)>` field. Analytic, no mesh |
 | `sample_surface_uniform(surface, count, seed)` | `spaces/sample.hpp` | Rejection sampling weighted by `area_element` — points even by actual surface area, not by (u,v) or a mesh/Voronoi graph. Returns `SurfaceSample<T>{u, v, position, normal}` |
 
@@ -639,11 +640,20 @@ for (const auto& obj : placed) {
 | `space(surface, u_steps, v_steps)` | `Space` | Wrap any `ParametricSurface<T>` directly |
 | `torus(major_r, minor_r, ...)`, `cylinder(radius, height, ...)` | `Space` | Convenience factories over `space()` |
 | `literal(mesh)`, `cube(half_extents)` | `Literal` | Escape hatch for shapes with no natural (u,v)→R³ formula |
-| `offset(base, thickness)` | `Offset` | `offset_surface(resolve_surface(base), thickness)` — stays analytic |
+| `offset(base, thickness)` | `Offset` | The parallel surface of a **closed** base — closed in, closed out |
+| `offset_shell(base, thickness, edge)` | `Offset` | Same construction over any base, with the rim rule stated |
 | `scatter(item, target, count, seed)` | `Scatter` | `sample_surface_uniform` placement, each instance oriented by the target's normal (`basis_from_normal`) |
 | `compose({...})` | `Compose` | Groups child handles; `materialize()` flattens recursively |
 
-Every node also has `.colored(Material<T>)` and `.moving(fn(point, t) -> point)` — the one motion/mutation slot, taking a constant, a `Morphism` pipe, or a genuine function of time, uniformly. Free functions `resolve_surface(trace, idx)` (Space/Offset only, throws otherwise), `materialize_mesh(trace, idx, t)`, `materialize(trace, idx, t)`.
+**`offset` and `offset_shell` are two operations, not one with a flag.** Offsetting a closed surface produces a closed surface and there is no edge to rule on. Offsetting a surface that *has* an edge — a band cut out of a torus, a tube with open ends — produces a shell, and what happens at the rim is a real choice that the caller has to make. `offset()` refuses an open base and says so, naming `offset_shell()`; `offset_shell()` takes any base and requires an `EdgeRule`.
+
+`EdgeRule` carries `ZeroThickness` today: the thickness field is expected to fall to zero before the rim, so the shell meets its base there and closes against it. It is the rule the donut's icing always used, now named rather than improvised. A round cap, a flat cap, and extending to another surface all carry data (a radius, a reference to another node), which is why they wait for structural fields rather than becoming extra enum values.
+
+Both operations, and `scatter()`'s target, check at the **call site** that they were handed a surface at all: a `Literal` mesh or a group raises `std::invalid_argument` from the line that made the mistake, rather than a `std::logic_error` out of `resolve_surface` during a later `materialize()`.
+
+Closure itself is `is_closed(surface)` in `spaces/parametric.hpp`. A direction closes either by being periodic or by having both its edge curves collapse to a point — the second case is a pole, which is how a sphere closes in `v` while its `v` domain stays a plain interval and its `periodic_v` flag stays false. Both directions have to close for the surface to.
+
+Every node also has `.colored(Material<T>)` and `.moving(fn(point, t) -> point)` — the one motion/mutation slot, taking a constant, a `Morphism` pipe, or a genuine function of time, uniformly. Free functions `resolve_surface(trace, idx)` (Space/Offset only, throws otherwise), `materialize_mesh(trace, idx, t)`, `materialize(trace, idx, t)`, `kind_name(kind)`.
 
 ---
 

@@ -78,6 +78,33 @@ just slightly bigger, and projected it onto the dough. That's redundant —
 two copies of the same formula doing the work of one — and it's the
 mistake `offset()` exists to make impossible.)
 
+### A donut isn't iced all the way round
+
+Real icing covers the top and stops. That "and stops" is a bigger deal
+than it looks: a whole torus has no edge anywhere, but a *band* cut out
+of one has two rims, and a surface with a rim is a different kind of
+object. Its normal isn't defined at the edge, a geodesic walked off it
+doesn't come back, and "inside" stops meaning anything.
+
+So there are two operations, and you pick by whether your base has an
+edge:
+
+```cpp
+scene.offset(dough, 0.035);                        // closed base, closed result
+scene.offset_shell(band, 0.035, bd::EdgeRule::ZeroThickness);  // open base, rim rule stated
+```
+
+`offset()` on a base with an edge doesn't guess — it refuses, and tells
+you to use `offset_shell()` and say what the rim means. `ZeroThickness`
+means the thickness falls to zero before the rim, so the shell comes back
+down and meets its base there. That's what the real demo's icing does;
+it's now something you asked for by name rather than something that
+happened to look right.
+
+The full demo takes the second path, because its icing sits on a band —
+look for `torus_cap` in `examples/donut_demo.cpp`. The simpler version
+here ices the whole donut and takes the first.
+
 ## Step 3: sprinkles scatter across the icing
 
 ```cpp
