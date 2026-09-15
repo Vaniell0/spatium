@@ -170,6 +170,29 @@ The infrastructure is the part that can be silently missing, because a
 mechanism with nothing running it looks exactly like a mechanism that
 passes.
 
+### A baseline is a number *and* the configuration that produced it
+
+Added 2026-09-15, after a false alarm that cost a worktree to settle.
+
+`donut_demo --photo` is compared by hash to prove a change is
+geometrically neutral, and that works — it is how the `offset` /
+`offset_shell` split was shown not to touch a pixel. But a hash carried
+in someone's head, or written down beside a change, is not yet a
+baseline. Reconfiguring a build directory — modules on, Eigen on, a
+different optimization level — moves the hash with no change to a single
+line of geometry, and the mismatch then looks exactly like a regression.
+
+A recorded hash whose configuration is not recorded with it is not
+"stale". It is **not a value at all**, and keeping it leaves a false
+explanation waiting for the next reader. Either record the configuration
+beside it, or do what settles it in minutes: build the baseline commit in
+the *same* configuration — a `git worktree` at `main` costs one command —
+and compare the two renders you just produced, rather than one you
+produced against one you remember.
+
+Same family as the row above it: the comparison is the mechanism, and the
+configuration is the thing that has to run it.
+
 ## `measure()` / `area()` / `length()` / `volume()`
 
 Already stated in `CLAUDE.md`: `measure()` is the dimension-generic name
