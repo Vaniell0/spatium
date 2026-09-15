@@ -608,7 +608,9 @@ auto hit = bvh.ray_cast(ray);   // optional<Hit>
 
 ### Declarative Scene DSL (`io/build.hpp`, namespace `spatium::io::build`)
 
-A `Trace<T>` is a flat, indexable record of operations — not a tree of closures. Each factory method appends one `TraceNode` and returns a `Handle<T>` (a `{trace*, index}` pair); nothing is computed until `materialize()` walks the trace. Space and Offset nodes stay analytic (a real `ParametricSurface`, composed by function, no mesh) until that walk tessellates for display — see [`docs/getting-started-dsl.md`](getting-started-dsl.md) for the full walkthrough.
+A `Trace<T>` is a flat, indexable record of operations — not a tree of closures. Each factory method appends one `TraceNode` and returns a `Handle<T>` (a `{trace*, index}` pair); nothing is computed until `materialize()` walks the trace.
+
+`materialize()` hands back `Placed<T>`, which is a **view onto a node**, not a mesh. That is the point of the whole design: a scene object *is* a space, so every operation in the library works on it directly, and the analytic description survives all the way to whatever consumes it. `surface()` yields the real `ParametricSurface` — with the node's own `.moving()` composed into the map, so a moved object is still a surface rather than a deformed mesh — and `mesh()` builds the triangle view only for callers that need one. `mesh()` builds on every call rather than caching, so bind it once if you use it more than once.
 
 ```cpp
 namespace bd = spatium::io::build;
@@ -617,8 +619,20 @@ auto dough = scene.torus(2.0, 1.0).colored({.base_color = {0.8, 0.55, 0.32}});
 auto icing = scene.offset(dough, 0.035);
 auto sprinkles = scene.scatter(scene.cylinder(0.025, 0.12), icing, 200);
 auto root = scene.compose({dough, icing, sprinkles});
-auto placed = bd::materialize(scene, root.index);  // vector<Placed<T>>{mesh, material}
+auto placed = bd::materialize(scene, root.index);  // vector<Placed<T>>, views onto nodes
+
+for (const auto& obj : placed) {
+    if (auto s = obj.surface()) { /* exact: geodesics, contact, ray_hit ... */ }
+    auto m = obj.mesh();        // triangles, built here and not before
+}
 ```
+
+| `Placed<T>` member | Description |
+|---|---|
+| `surface()` | `optional<ParametricSurface<T>>` — present for `Space`/`Offset`, with the node's motion composed into the map |
+| `is_analytic()` | Whether `surface()` will yield anything |
+| `mesh()` | The triangle view, built on demand, not cached |
+| `material()` | Resolved material; a node with a `color_fn` pays for its mesh here |
 
 | `Trace<T>` method | Kind | Description |
 |---|---|---|
