@@ -11,6 +11,7 @@ add_executable(spatium_bench
     bench_eigen_decomp.cpp
     bench_spherical_boolean.cpp
     bench_trace.cpp
+    bench_field_identity.cpp
 )
 
 target_link_libraries(spatium_bench PRIVATE
