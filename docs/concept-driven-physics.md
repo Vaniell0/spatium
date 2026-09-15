@@ -8,7 +8,7 @@
 
 ## Abstract
 
-This document specifies a concept hierarchy for computational physics on arbitrary smooth manifolds and a dispatch pattern that turns specialisation into a compile-time decision rather than a virtual call. The hierarchy is rooted at `Set → TopologicalSpace → MetricSpace → Manifold → RiemannianManifold → Surface`, extended with physics-specific refinements `SymplecticManifold`, `DiscreteLagrangian`, and `ContactSurface`. We claim that under C++23 concepts, a single generic entry point can dispatch between an analytical closed-form routine (3–25 ns/op on the reference hardware), a parametric Newton solver (µs/op), and a user-supplied specialisation, *all without a single virtual function call, runtime type tag, or branch in the hot path*. The reference implementation — Spatium, ~23 kLOC C++23 — realises this for classical mechanics on SO(3)/SE(3), for discrete exterior calculus on triangulated manifolds, for narrow-phase contact on analytical surfaces, and for variational and Lie-group integrators.
+This document specifies a concept hierarchy for computational physics on arbitrary smooth manifolds and a dispatch pattern that turns specialisation into a compile-time decision rather than a virtual call. The hierarchy is rooted at `Set → TopologicalSpace → MetricSpace → Manifold → RiemannianManifold → Surface`, extended with physics-specific refinements `SymplecticManifold`, `DiscreteLagrangian`, and `ContactSurface`. We claim that under C++23 concepts, a single generic entry point can dispatch between an analytical closed-form routine (3–25 ns/op on the reference hardware), a parametric Newton solver (µs/op), and a user-supplied specialisation, *all without a single virtual function call, runtime type tag, or branch in the hot path*. The reference implementation — Spatium, ~29 kLOC C++23 (`include/` + `src/` + `modules/`) — realises this for classical mechanics on SO(3)/SE(3), for discrete exterior calculus on triangulated manifolds, for narrow-phase contact on analytical surfaces, and for variational and Lie-group integrators.
 
 This is a reference specification of *what concept-driven physics looks like in practice* — the boundaries where it succeeds, and the limitations it still has to answer.
 
@@ -194,13 +194,14 @@ Typical GJK on convex shapes: 100–500 ns/op. The analytical path beats that by
 
 ### 4.2 Test suite coverage
 
-**673 test cases, 6 549 Catch2 assertions, all passing**, running under both the legacy header-only build and the C++23 modules build (GCC 15). Tests that bind the concepts to the implementation:
+**The full suite passes**, under both the legacy header-only build and the C++23 modules build (GCC 15). The case count is configuration-dependent — the optional dependencies bring their own tests, so the same tree reports a different number depending on which are enabled — and is deliberately not reproduced here; `ctest -N` gives it for the configuration you built. Tests that bind the concepts to the implementation:
 
 - `test_concepts.cpp` — static_asserts that the expected types satisfy the expected concepts
 - `test_narrow_phase.cpp` — `ContactSurface` static_asserts, FD-verified `ipc_contact_force = −∂E/∂x`
-- `test_mechanics.cpp`, `test_lie_integrator.cpp`, `test_variational.cpp`, `test_block_b_finish.cpp` — integrator correctness
-- `test_block_c_close.cpp` — LGVI, DEC heat, continuum
-- `test_block_d_start.cpp` — IPC barrier, XPBD
+- `test_mechanics.cpp`, `test_lie_integrator.cpp`, `test_variational.cpp` — integrator correctness
+- `test_geometric_mechanics.cpp` — LGVI, continuum
+- `test_dec.cpp` — discrete exterior calculus
+- `test_contact_xpbd.cpp`, `test_rigid_contact.cpp` — IPC barrier, XPBD
 
 ## 5. Comparison with existing engines
 
@@ -214,7 +215,7 @@ Typical GJK on convex shapes: 100–500 ns/op. The analytical path beats that by
 | Symplectic integrator | Verlet, Yoshida-4, LGVI (1st-cut), RKMK CF4 | optional Verlet | Runge–Kutta | semi-implicit |
 | Non-orientable surfaces | Klein via Bonan–Jennings in parametric | impossible | impossible | impossible |
 | Dispatch | C++23 concepts, ADL overloads | virtual functions | virtual functions | function pointers |
-| LOC (core) | ~23 k | 500 k+ | 1 M+ | 200 k |
+| LOC (core) | ~29 k | 500 k+ | 1 M+ | 200 k |
 
 We are not in their league on throughput or GPU. We are in a different league on generality (`Body<Manifold>`), correctness guarantees (IPC-style), and reference-implementation clarity (concept-driven, header-only path available).
 

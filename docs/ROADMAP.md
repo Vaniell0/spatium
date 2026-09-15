@@ -168,7 +168,11 @@ Closed-form Christoffel symbols were hand-derived for exactly the two metrics th
 
 ## Architecture audit (2026-08-26)
 
-Docs truing-up pass: `architecture.md` concept-hierarchy fix + a new "header-only spine, and three principled exceptions" section, `CHANGELOG.md` deleted (redundant with this file), the "Block A/B/C/D" physics-milestone naming stripped from source comments and — completed in a follow-up pass — from `ROADMAP.md`/`api-reference.md`/`concept-driven-physics.md` as well, `cloth_sphere_probe.cpp` removed (superseded investigation tool, predates several since-changed APIs). `Result<T>`/camera-module dedup deferred.
+Docs truing-up pass: `architecture.md` concept-hierarchy fix + a new "header-only spine, and three principled exceptions" section, `CHANGELOG.md` deleted (redundant with this file), the "Block A/B/C/D" physics-milestone naming stripped from source comments and — completed in a follow-up pass — from `ROADMAP.md`/`api-reference.md`/`concept-driven-physics.md` as well. `Result<T>`/camera-module dedup deferred.
+
+**Corrected 2026-09-15, twice over.** This entry used to end by claiming `cloth_sphere_probe.cpp` had been removed as a superseded investigation tool. It had not: the file is in `examples/`, no commit ever deletes it, and two other places in these docs describe it as live (`concept-driven-physics.md` §6.3, and the intrinsic-cloth entry in Backlog). The audit wrote down an intention as an accomplished fact. The file stays; no removal is planned.
+
+And the naming sweep the same entry reports as complete was not complete either — `concept-driven-physics.md` §4.2 still listed `test_block_b_finish.cpp`, `test_block_c_close.cpp` and `test_block_d_start.cpp` three weeks later, as *file names*, which read as checkable references and were not. Fixed 2026-09-15 along with that document's stale test and LOC counts. The pattern worth keeping: in every one of those cases the document's *ideas* held up unchanged, and only its checkable facts rotted — which is an argument for deriving such facts rather than typing them, not for proofreading harder.
 
 ## Contact physics build dependency (2026-08-28)
 
