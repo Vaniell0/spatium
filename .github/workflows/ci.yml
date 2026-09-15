@@ -82,6 +82,14 @@ jobs:
       - name: Check CLAUDE.md mentions every real include/spatium/ subdirectory
         run: python3 scripts/check_claude_md_layout.py
 
+  doc-file-refs:
+    name: docs name only files that exist
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check every source file named in the docs is in the tree
+        run: python3 scripts/check_doc_file_refs.py
+
   bare-build:
     name: cmake build without Nix (gcc15)
     runs-on: ubuntu-24.04
