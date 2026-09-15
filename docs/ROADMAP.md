@@ -694,6 +694,49 @@ which is why the donut demo's 19 800 motion closures can share one
 identical tables. The others did not, and the reason is the same in each
 case: the type underneath insists on copying what it holds.
 
+**Reformulated 2026-09-15: the goal is sharing, not move-only.** The
+original plan for this item was `ParamFn` -> `move_only_function`, making
+`ParametricSurface` move-only. That is now withdrawn, for two reasons
+that only became visible once fields had a shape.
+
+It aimed at the wrong target. The measured problem was never "a hook
+needs to own a `unique_ptr`" -- nothing in the tree has move-only state
+today. It was 19 800 copies of a 512-byte table, and `move_only_function`
+does not fix that: each closure would still carry its own table, moved
+rather than copied. What fixes it is **sharing the state**, which
+`donut_demo.cpp:545` already does by hand with one
+`std::make_shared<const PerlinNoise>`. The "hand-rolled shared_ptr dance"
+this item feared turns out to be two lines, already written, and working.
+
+And it pulled against the rest of the series. A `Field` owns its pool and
+is copyable, which is what makes `TraceNode` copyable, which is what lets
+`cook()` copy a trace rather than consume it. Making `ParametricSurface`
+move-only would take that back. Worth noticing that the choice is now
+genuinely a choice: "rebuild means a new trace, the old one discarded" is
+today forced by `PointField` being move-only, and after this item it
+becomes a decision to make on its merits rather than a constraint to obey.
+
+So what remains here is:
+
+- **the full `EdgeRule` set** -- `RoundCap(radius)`, `FlatCap`,
+  `ExtendTo(node)`, which need fields that carry data and so depend on
+  the item above;
+- **making heavy shared state easy** -- `PerlinNoise` holding a
+  `shared_ptr<const Table>` so a copy of the noise is a copy of a
+  pointer, 8 bytes rather than 512, shared by construction rather than by
+  the user remembering to. The same pattern for any future heavy payload
+  in a `Field` leaf. Measured already: the report's payload across 19 800
+  leaves is 10 137 600 B by value against 158 400 B by reference.
+- **`ParametricSurface` stays copyable.** Not a compromise: copyable
+  surface and shared heavy state are both right, and they work together.
+
+One thing to know rather than solve, so it is not rediscovered: a
+`shared_ptr<const T>` copy is an atomic refcount. Copying fields in a
+loop over tens of thousands of them would count atomics, and if that ever
+lands in the frame path the answer is a non-atomic intrusive pointer for
+single-threaded use -- which is exactly the hand-rolled work this item
+originally flinched from. Not now; it is not in a hot path today.
+
 Worth stating because it is the obvious wrong turn: **the escape is
 `move_only_function`, not `copyable_function`.** The latter requires a
 copy-constructible target exactly as `std::function` does. Reaching for
