@@ -5,6 +5,7 @@
 #  include <spatium/io/scene.hpp>
 #  include <spatium/mesh/mesh.hpp>
 #  include <spatium/mesh/primitives.hpp>
+#  include <spatium/spaces/chart.hpp>
 #  include <spatium/spaces/euclidean.hpp>
 #  include <spatium/spaces/offset.hpp>
 #  include <spatium/spaces/parametric.hpp>
@@ -325,6 +326,23 @@ public:
         n.u_steps = u_steps;
         n.v_steps = v_steps;
         return push(std::move(n));
+    }
+
+    // The same door, for a space that is not itself a chart but has one.
+    // `chart_of` is found by ADL, so a space defined in a user's own
+    // namespace enters the DSL by having an overload written beside it --
+    // no edit to this header, no registry, no indirect call: the chart is
+    // built once here, at trace-build time, and the node holds the result.
+    //
+    // Note what this does *not* open. `Kind` stays closed, and adding a
+    // space does not go near it: Space/Offset/Scatter/Compose/Literal are
+    // operations, not shapes, and a sphere is a new chart on the existing
+    // Space node rather than a new kind of node. See ROADMAP for the one
+    // thing that would open `Kind`, and why it is not this.
+    template<typename S>
+        requires Chartable<S, T> && (!std::same_as<std::remove_cvref_t<S>, ParametricSurface<T>>)
+    Handle<T> space(const S& s, std::size_t u_steps = 48, std::size_t v_steps = 24) {
+        return space(chart_of(s), u_steps, v_steps);
     }
 
     // The factories that know their shape exactly record it alongside the

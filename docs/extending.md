@@ -127,6 +127,68 @@ auto mesh = tessellate(my_surface, 32, 32);
 
 ParametricSurface auto-computes: `project()`, `normal()`, `exp_map()`, `log_map()`, `metric_at()`, `distance()` via finite differences and Newton iteration (`find_params()` in `spaces/parametric.hpp`).
 
+### Letting your space into the scene DSL: `chart_of`
+
+Satisfying `RiemannianManifold` or `Surface` is not what the scene DSL
+(`io::build`) requires. Its operations — `offset_surface`,
+`sample_surface_uniform`, tessellation — call `evaluate`, `normal_at`,
+`area_element`, `domain` and `periodic_u`/`periodic_v`, and none of them
+calls `project`, `normal` or `exp_map`. That requirement is the `Chart`
+concept, in `spaces/chart.hpp`. It is not part of the
+`Set → Manifold → Surface` hierarchy on purpose: a chart is a choice of
+coordinates *on* a space, and a space can carry many or none.
+
+A space joins the DSL by having a `chart_of` overload written beside it,
+in its own namespace. Nothing in Spatium is edited, and there is no
+registry — the call is resolved by ADL at compile time:
+
+```cpp
+namespace my_lib {
+
+struct Ribbon {
+    using ScalarType = double;   // Chart reads the scalar from here
+    double radius = 1.0, height = 2.0;
+};
+
+spatium::ParametricSurface<double> chart_of(const Ribbon& r) {
+    return spatium::ParametricSurface<double>(
+        [r](double u, double v) -> spatium::Vec<double, 3> {
+            return {r.radius * std::cos(u), r.radius * std::sin(u), v};
+        },
+        {0.0, 2 * std::numbers::pi, 0.0, r.height},
+        /*periodic_u=*/true, /*periodic_v=*/false);
+}
+
+} // namespace my_lib
+
+spatium::io::build::Trace<double> trace;
+auto base  = trace.space(my_lib::Ribbon{.radius = 2.0, .height = 1.0});
+auto shell = trace.offset_shell(base, 0.25, EdgeRule::ZeroThickness);
+auto dots  = trace.scatter(trace.cube(Vec3{0.05, 0.05, 0.05}), base, 32);
+```
+
+Every DSL operation works on it, because entering as a chart is entering
+as the thing those operations were always written against.
+
+`Sphere<2, T>` ships with a `chart_of` — the standard θ/φ chart, which is
+its first parametrization rather than a generalization of an existing
+one. (`Sphere<N, T>` is the N-sphere in R^{N+1}, so the ordinary sphere
+in R³ is `Sphere<2, T>`; `Sphere<3, T>` lives in R⁴ and has no chart of
+this shape, and `Chartable<Sphere<3, double>, double>` is `false`.)
+
+Two things to know when writing one:
+
+- **Where your chart degenerates is your business, and it is normal.**
+  The sphere chart's `v` edges collapse to the poles, where
+  `area_element` (which is `r² sin v`) reaches zero and the
+  finite-difference normal goes with it. `periodic_v()` is `false` there
+  and the surface is still closed — a flag describes the chart, not the
+  topology, which is why `is_closed()` tests geometry instead.
+- **A chart is not an exact analytic form.** Giving a space a chart does
+  not make a renderer able to hit it without triangles; that is the
+  separate `exact` slot on a trace node, and a node with a chart but no
+  exact form tessellates. See `RenderLevel` in `io/build.hpp`.
+
 ### Verification
 
 After defining your space, verify axioms:
