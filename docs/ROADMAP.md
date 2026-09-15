@@ -357,9 +357,29 @@ This is not a novel architecture and should not be designed as though it were. D
 
 So the dominant structural cost is none of the things that looked like the problem: it is that the same 12-vertex mesh is stored and copied per instance, because the trace has no notion of instancing. `std::move_only_function` was still worth adopting, but for what it enables (hooks owning move-only or shared state, const-correct invocation through the `const Trace&` that `materialize()` holds) rather than for speed, and the commit says so.
 
-The order that follows from this: instancing first, because it is the measured cost; then the structural field representation, justified by caching, GPU lowering and hoisting time-invariant subexpressions out of the per-vertex loop — not by call overhead; then opening the node set; then time.
+The order that follows from this: instancing and the structural field representation together, then the full set of edge rules that fields make expressible, then opening the node set, then time. Revised 2026-09-15 — the field work moved ahead of the edge rules, because `EdgeRule`'s remaining values carry data (a cap radius; a reference to another node for "extend to this surface"), so they cannot be enum values and the rule set cannot be completed until fields exist. That argument is worth more than the original one: caching and GPU lowering will be true later, whereas a value with nowhere to put it is true now.
+
+### Chart versus manifold, recorded 2026-09-15
+
+Splitting `offset()` from `offset_shell()` needed a closedness test, and writing it surfaced something larger than the function.
+
+`periodic_u()` / `periodic_v()` describe the **chart**, not the surface. A sphere's chart is the rectangle [0,2π]×[0,π], and as a subset of R² that rectangle has an edge — which is what `periodic_v() == false` honestly reports. But the chart's `v` edges map to the poles: two *points*, not two curves. The surface has no boundary; the chart does. So a closedness test cannot read the flags, because the flags answer a question about the parametrization while the question being asked is topological. `is_closed()` therefore looks at the geometry — a direction closes by being periodic, or by both its edge curves collapsing to a point.
+
+The general form of this, which is what `SurfaceWithBoundary` will actually need, is not "does the chart have an edge" but **what the chart's edge maps to**, and there are three answers:
+
+| the chart's edge maps to | meaning | example |
+|---|---|---|
+| nothing (the map is periodic) | closed, seam only | torus, in both directions |
+| a point | closed, pole — the surface passes through, it does not stop | sphere, in `v` |
+| a curve | a genuine boundary | a band cut from a torus; a tube's open ends |
+
+Only the third case needs a rule at all, and `EdgeRule::ZeroThickness` is one answer to it, not the general one. The first two need no rule and must not be made to ask for one — which is exactly the trap the pre-split `offset()` fell into by having a single operation cover all three.
+
+`is_closed()` today collapses this to a yes/no because that is all `offset()` needs. The three-way classifier is what the boundary concept should be built on, and it should be built before the concept, not after.
 
 ### Open items
+
+- **[course]** Classify what a chart's edge maps to — point, curve, or nothing — per direction, generalizing `is_closed()`'s yes/no. See "Chart versus manifold" above. This is the thing `SurfaceWithBoundary` (`boundary_distance`, `is_on_boundary`, what `exp_map` does past the edge) should be designed on top of, and it is cheap enough to have before there is a second consumer for the concept itself.
 
 - **[course]** Instancing in the trace — one mesh plus N transforms, instead of N copies of the same mesh. The largest measured cost in `bench_trace.cpp` (~20% of a frame at demo scale, with no motion hook involved at all).
 - **[course]** Structural fields — a `Field` that is either an expression tree or an opaque callable, the latter being the same kind of deliberate escape hatch `Kind::Literal` already is for shapes. Buys three things a closure cannot: a structural hash, so `(trace, t)` becomes a cache key; lowering to branchless GPU code, where a `std::function` cannot be lowered at all, making this a question of possibility rather than speed; and hoisting subexpressions that depend only on `t` out of the per-vertex loop, which the compiler cannot do through an opaque call. Composition then becomes substitution of one tree into another's point slot — which is why `.moving()` was made to compose first, so the callable and structural forms agree. The risk to watch is that an expression IR quietly becomes a language users must learn; the escape hatch from a plain lambda has to stay first-class, and the donut demo is the place that failure would show.
