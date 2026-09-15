@@ -431,6 +431,15 @@ and safe exactly where it is *structure*.
 - **Data.** A ray's direction is user input and can degenerate — down a
   cylinder's axis, along a cone's generator. `geometry/ray_surface.hpp`,
   `geometry/ray_hit.hpp`, `io/scene.hpp`, `physics/mechanics/rigid_contact.hpp`.
+  A third live instance sits at `ray_surface.hpp:369` in
+  `ray_quadric_proximity`, and it presents worse than the other two. A ray
+  down a cylinder's axis returns `Result` **success** with
+  `closest_t = NaN`, a `NaN` point, and `miss = 0` — because the NaN root's
+  imaginary part is exactly zero, so `abs()` of it is a perfectly plausible
+  number in the one field a caller is most likely to branch on. The other
+  two hand back NaN, which is at least conspicuous. This one reports a
+  clean grazing hit for a ray that runs down the middle of the tube and
+  never approaches the wall.
 - **Structure.** A characteristic polynomial is `det(A - λI)` by
   definition; its leading coefficient is 1 as a matter of mathematics and
   no input can change that. `spaces/spd.hpp`, `algebra/eigen_decomp.hpp`,
@@ -448,11 +457,22 @@ allocation — it must be able to say "one root" where the degree collapsed.
 - `size()` is the count; `capacity()` is 2/3/4. Range-`for` takes its
   bounds from the count, so every existing `for (auto& r : roots)` call
   site keeps working unchanged.
-- `operator[]` is **unchecked** — no branch in a hot path — so indexing at
-  or past `size()` is undefined. This has to be said loudly in the
-  docstring, because a reader arriving from `std::array` expects a fixed
-  size where every index is always valid, and that is precisely what
-  stops being true.
+- `operator[]` is **unchecked in Release** — no branch in a hot path — so
+  indexing at or past `size()` is undefined there. This has to be said
+  loudly in the docstring, because a reader arriving from `std::array`
+  expects a fixed size where every index is always valid, and that is
+  precisely what stops being true. In Debug it carries
+  `assert(i < size())`.
+
+  That assert was nearly dropped on the theory that it would fire on
+  correct code, `spaces/spd.hpp` indexing `roots[2]` being the worry.
+  Checked instead of assumed — `git grep "roots\["` finds exactly four
+  library sites. The two in `spd.hpp` are monic, so the count is always 3
+  and the assert can never fire there. The other two are both inside
+  `ray_quadric_proximity`, where the count really can fall short — and
+  they are the ones already producing `miss = 0` today. So the assert does
+  not break correct code; the only code it breaks is the code that is
+  already wrong.
 - `at(i)` returns `Result<Complex<T>>` and **never throws**. Checked
   access signals; unchecked access does not; different contracts, so
   different return types. Exceptions appear nowhere else in this library
@@ -467,16 +487,43 @@ array; now it is valid only when the count reaches 3. So both need
 covering: indexing within the count, and `at()` refusing beyond it.
 Testing only in-range indexing tests the old behaviour.
 
-**The one non-library caller.** `rsc/include/precision_ops.hpp`'s
-`flatten_cubic_roots` takes `const std::array<Complex<double>, 3>&`
-explicitly and copies three roots unconditionally. The registry op above
-it receives `std::span<const double> in` — arbitrary numbers from the
-harness, with `in[0]` as the leading coefficient — so that op is a
-boundary with untrusted input and `Result<T>` is what the convention
-demands there, not an `assert`. One wrinkle the design has to answer
-rather than discover: `Op::Fn` returns `void`, so a `Result` out of the
-flattening helper has nowhere to propagate and the op itself must decide
-what to write for roots that do not exist.
+**The one non-library caller, and the convention question it raises.**
+`rsc/include/precision_ops.hpp`'s `flatten_cubic_roots` takes
+`const std::array<Complex<double>, 3>&` explicitly and copies three roots
+unconditionally, so it needs a signature change and a check.
+
+The check is an `assert`, not a `Result`, and the reasoning is worth
+keeping because the first answer here was the wrong one. The registry op
+receives `std::span<const double> in` with `in[0]` as the leading
+coefficient, which *looks* like a boundary with untrusted input. It is
+not. A boundary is where data arrives from outside the process and may be
+anything — `load_obj`, `json::parse`. Here the data comes from a harness
+living in the same binary, generating inputs from a distribution it
+defines itself. That is an internal pipeline invariant, and
+`conventions.md` already answers those: `assert`, the same as
+`physics/mechanics/`, `spaces/` and `mesh/`.
+
+So: `assert(in[0] != T{0} && "harness contract: monic cubic")` in the op,
+`assert(roots.size() == 3)` before the copy, and `flatten_cubic_roots`
+keeps returning `void`. A monic cubic always has three roots with
+multiplicity; if it has two, either the input or the solver is broken,
+and both are bugs rather than failure modes. `Result` here would be
+signalling a refusal that cannot legitimately happen.
+
+**`Op::Fn` returns `void`, deliberately, until something needs otherwise.**
+An op with no failure channel is the right shape for every op the registry
+has, because none of them can legitimately fail. A channel is warranted
+when an op appears that genuinely can — an external solver, a network
+call, a parse, anything with unbounded input — and not before. Recorded
+explicitly so the next reading of "but the convention says `Result`"
+does not have to re-derive that the convention is about boundaries rather
+than about everything.
+
+**NaN poisoning is a debugging aid, not a channel.** Slots between
+`size()` and `capacity()` get NaN under Debug so that reading past the
+count is visible rather than undefined. It is the same category as
+`_GLIBCXX_ASSERTIONS`: a signal while debugging, never part of the
+contract, and zero instructions under `NDEBUG`.
 
 The training checkpoint is **not** affected. `rsc/include/precision_task.hpp`
 builds coefficients from three sampled roots by Vieta and returns
