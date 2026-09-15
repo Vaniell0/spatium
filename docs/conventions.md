@@ -170,6 +170,35 @@ The infrastructure is the part that can be silently missing, because a
 mechanism with nothing running it looks exactly like a mechanism that
 passes.
 
+### `reserve(size() + k)` inside an append is an anti-pattern
+
+Added 2026-09-15, after it cost a factor of 1522.
+
+`reserve` carries two different contracts in most people's heads: "make
+room for exactly this much" and "make room for at least this much, and
+keep growing geometrically". `std::vector::reserve` is the first. Asking
+for exactly `size() + k` therefore sets capacity to exactly that, and the
+*next* append reallocates — so a hand-written append that reserves what
+it needs on every call reallocates on every call, and a linear
+accumulation becomes quadratic.
+
+This is not a subtle case. `push_back` gets it right by doubling
+internally; the moment you write your own append and reach for `reserve`
+to be tidy, you have opted out of that and have to restore it by hand:
+
+```cpp
+const std::size_t need = size() + incoming + 1;
+if (need > v.capacity()) v.reserve(std::max(need, v.capacity() * 2));
+```
+
+Measured in `io/field.hpp`: building a 19 800-term field took **12 514 ms**
+with `reserve(size() + k)` and **7.95 ms** with the guarded geometric
+form. Same algorithm, same asserts, one line apart.
+
+The general rule: **reserving exactly what you need is only right when
+you will not append again.** Once before filling a fresh container, yes.
+Inside the append itself, never.
+
 ### A baseline is a number *and* the configuration that produced it
 
 Added 2026-09-15, after a false alarm that cost a worktree to settle.
