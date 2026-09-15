@@ -530,6 +530,86 @@ question is not reopened from scratch in a month.
 
   **BVH under mutation: build-once, no refit.** `spatial/bvh.hpp` builds by SAH and has no refit or incremental update, which is exactly the weak spot a destructible scene would hit — a voxel grid updates one cell, a BVH has to rebuild the tree. This is not a defect to fix speculatively; it is the shape of the thing, and the interesting angle is ours rather than generic: an exact analytic leaf *replaces* leaves, and rebuild cost scales with leaf count, so the same measurement that showed a 7 000× build-time difference in the DSL row is also the argument that exact leaves make a rebuilding scene cheaper, not just a static one. If a mutating scene is ever a real consumer, refit comes first and exact leaves make refit smaller.
 
+  **`cook()` and `Cooked<T>`, settled 2026-09-15.** The phase boundary the
+  DSL already had in practice and never expressed: a `Trace` is mutated
+  while it is built, then read-only while it is rendered, and nothing in
+  the type system said so. `trace.cook()` names it.
+
+  **A type, not a flag.** A `frozen_` bool would be a value that looks
+  like a guarantee and does not hold one — nothing stops `trace.torus()`
+  after it is set, and no compiler notices. That is the class named in
+  `conventions.md`, applied to our own design. `Cooked<T>` holds the
+  guarantee structurally: it simply has no `torus()`, `offset()`,
+  `scatter()`. Mutation after cooking is not discouraged, it does not
+  compile. Same shape as `Trace` describing and `Placed` evaluating,
+  one level up.
+
+  By value, and no `thaw()`. `Cooked` owns what it holds rather than
+  pointing into a `Trace` that has to outlive it — the lifetime coupling
+  is exactly what the owning-pool decision in `Field` rejected one level
+  down. Going back to an editable trace means editing the source and
+  cooking again, and if that is ever made a method it costs an O(n) copy
+  and should say so, because the alternative is a flag under a new name.
+  Note that "rebuild means a new trace" is *today* forced rather than
+  chosen: `TraceNode` holds a `move_only_function`, so a `Trace` cannot
+  be copied at all. Once motion is a `Field` that owns its pool, the
+  constraint lifts and this becomes a decision on its merits.
+
+  **What cook() does is one thing, and that is the argument for it.**
+  Five loose ends that were being tracked separately turn out to be the
+  same work, all of which can only happen once the whole scene is known:
+  expanding operations into objects; deduplicating shapes (which *is*
+  instancing — "one shape, N transforms" cannot be formed before you know
+  there are N); compacting the pool; the field report, computed once
+  instead of per frame; and AoS→SoA. One well-placed boundary closing
+  several problems is the signal that they were one problem.
+
+  Deduplication is part of the expansion, not an optimisation on top of
+  it — without it there is no instancing at all. SoA and compaction are
+  optimisations; those two are not the same kind of thing and the
+  distinction is worth keeping.
+
+  **Objects need their own index space, and `Scatter` proves it.** A
+  trace node is an *operation*; a scene object is a *result*. One
+  `Scatter` node materialises 600 sprinkles, so no node index names the
+  37th. `Compose` is grouping and not an object at all — it has no
+  `Placed` of its own — which is why `.moving()` on one is refused rather
+  than implemented.
+
+  **One layout, three sources of value.** Instancing and a runtime share
+  a shape: a table of shapes plus N per-instance slots. They are not one
+  mechanism, because the slots are filled three different ways, and
+  collapsing that difference would hide the reason authored motion cannot
+  serve physics:
+
+  | source | when the value is produced | storage |
+  |---|---|---|
+  | instancing | once, in `cook()` | the transform, computed and kept |
+  | authored motion (`.moving()`) | freshly, every frame | none — a pure function of `(p, t)` |
+  | physics | accumulated across steps | the integrator's state |
+
+  A pure function of time and an integrator are different mathematical
+  objects and neither reduces to the other. `.moving()` cannot be
+  extended into physics; physics is a second branch.
+
+  **The consumer for all of this already exists and is not connected.**
+  `examples/ball_pit_demo.cpp`, `tumbling_body_demo.cpp` and
+  `native_collision_demo.cpp` include no `io/build.hpp` at all — the
+  physics in this repository lives entirely outside the DSL. And
+  `ball_pit_demo.cpp:349` is `step_physics(std::vector<SphereBody>&
+  bodies, ...)`: a flat array of objects carrying mass, velocity and
+  position, mutated every substep. That is a runtime, already written,
+  already working, answering questions (1), (2) and (5) above before they
+  were asked.
+
+  So the next piece of work is not "design a runtime" but **express
+  ball_pit's scene through the DSL and record where it breaks**. The
+  breakages are the requirements, found rather than invented, and the
+  demo is a deliverable either way. Questions (3) and (4) will not be
+  answered by it — ball_pit uses a fixed `dt`, no event timers and no
+  metric — and that is correct: a consumer answers the questions it
+  actually has.
+
   **Five architecture questions, open and deliberately unanswered.** `PointField`'s eventual shape depends on them, and none has a consumer yet, so answering them now would be designing blind — the same call as `SurfaceWithBoundary`. Recorded so the questions are not rediscovered as surprises: (1) where mutable state lives, if `Trace` and `Cooked` are both immutable; (2) what the unit of mutation is — rebuilding a trace, or writing into a parallel structure; (3) that "time" today names two different things, an object's local clock and the metric's dilation, which are items 5 and 7 and not the same mechanism; (4) whether a timer is a function of `t` or state, which decides whether an object can wait, pause or start on an event; (5) whether physics bodies live in the trace or beside it.
 
   What follows from them *now* is only this, and it is cheap: a field's input should be a **named environment**, not a bare `t`. Today it holds one thing and behaves exactly as today. Tomorrow a local clock or a solver-written pose is a field added to a struct rather than a change to every signature and every call site. Item 3 taught the same lesson from the other side — the slot was right and what filled it changed.
