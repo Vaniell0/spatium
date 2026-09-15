@@ -124,6 +124,53 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -j
 
+  debug-build:
+    name: Debug build (asserts actually run)
+    runs-on: ubuntu-24.04
+    # Every other job here builds Release, so NDEBUG removes assert() and
+    # a whole class of defect passes CI green: misusing a dependency in a
+    # way that dependency catches with an assertion. That is not
+    # hypothetical. tests/test_svd.cpp asked Eigen::JacobiSVD for thin
+    # U/V on a fixed-size matrix, which Eigen allows only when the column
+    # count is dynamic and otherwise asserts. CI never saw it. Worse, a
+    # local Debug run had seen it abort, and when someone later observed
+    # the test passing in Release the roadmap recorded that as "the old
+    # failure note went stale" -- so the Release-only matrix did not just
+    # hide the bug, it manufactured a wrong explanation for it.
+    #
+    # Eigen on, Boost off: Eigen is the dependency whose asserts we are
+    # here to run, while Boost.Multiprecision's Real50/Real100 tests are
+    # slow enough in an unoptimised build to dominate the job for no
+    # added coverage of this specific class.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev
+
+      - name: Configure
+        env:
+          CC: gcc-15
+          CXX: g++-15
+        run: |
+          cmake -B build-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSPATIUM_BUILD_VIEWER=OFF \
+            -DSPATIUM_BUILD_BENCHMARKS=OFF \
+            -DSPATIUM_BUILD_EXAMPLES=OFF \
+            -DSPATIUM_EIGEN=ON \
+            -DSPATIUM_BOOST=OFF
+
+      - name: Build
+        run: cmake --build build-debug -j
+
+      - name: Test
+        run: ctest --test-dir build-debug --output-on-failure -j
+
   bare-build-no-boost:
     name: cmake build with no optional deps at all (gcc15)
     runs-on: ubuntu-24.04
