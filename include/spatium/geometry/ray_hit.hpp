@@ -72,8 +72,15 @@ inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
     auto [a, b, c] = detail::quadric_coeffs(ray, bq.surface);
     std::optional<RayHit3<T>> best;
     for (const auto& root : solve_quadratic(a, b, c)) {
-        if (!root.is_real() || root.re < T{0}) continue;
-        if (best && root.re >= best->t) continue;
+        // Phrased as "keep only t >= 0" rather than "skip t < 0" on
+        // purpose: solve_quadratic divides by 2a with no guard, so a ray
+        // whose direction lies in the quadric's null direction (down a
+        // cylinder's axis, along a cone's generator) comes back NaN. Every
+        // comparison against NaN is false, so the two phrasings disagree
+        // exactly there -- the negated form admits it and reports a hit on
+        // a surface the ray never touches.
+        if (!root.is_real() || !(root.re >= T{0})) continue;
+        if (best && !(root.re < best->t)) continue;
         Vec<T, 3> pt{ray.origin + ray.direction * root.re};
         if (!bq.within_clip(pt)) continue;
         best = RayHit3<T>{root.re, pt, bq.surface.normal(pt), T{0}, T{0}};
