@@ -259,6 +259,69 @@ mesh::Mesh<ParametricSurface<T>> tessellate(const ParametricSurface<T>& surf,
     return m;
 }
 
+// ── Closure: does the surface end anywhere? ───────────────────
+
+// A parameter direction closes up either because the map is periodic
+// there -- the torus, in both u and v -- or because both of its edge
+// curves collapse to a single point. The second case is a pole: a place
+// the surface passes through, not one it ends at, which is how a sphere
+// closes in v while its v domain [0, pi] stays a plain interval. A
+// direction that does neither has a real edge, like the open ends of a
+// cylinder's tube or the two rims of a band cut out of a torus.
+//
+// Both directions have to close for the surface to: half a sphere is
+// periodic in nothing and poles in nothing, and its u edges are a rim.
+//
+// Periodicity is a flag the caller sets and we trust -- tessellation
+// already trusts it. Poles are not recorded anywhere, so this looks
+// instead of asking. Sampling an edge curve can only be fooled by a
+// parametrization that returns the same point at all eight samples and
+// wanders off between them, which is not a thing anyone writes.
+template<Scalar T>
+bool is_closed(const ParametricSurface<T>& surf) {
+    constexpr std::size_t samples = 8;
+    const auto dom = surf.domain();
+    const T du = dom.u_max - dom.u_min, dv = dom.v_max - dom.v_min;
+
+    // Tolerance relative to how big the surface is, and measured as a
+    // coordinate spread so it does not depend on where the origin sits.
+    Vec<T, 3> lo = surf.evaluate(dom.u_min, dom.v_min), hi = lo;
+    for (std::size_t i = 0; i <= 4; ++i)
+        for (std::size_t j = 0; j <= 4; ++j) {
+            auto p = surf.evaluate(dom.u_min + du * static_cast<T>(i) / T{4},
+                                   dom.v_min + dv * static_cast<T>(j) / T{4});
+            for (std::size_t k = 0; k < 3; ++k) {
+                using std::min, std::max;
+                lo[k] = min(lo[k], p[k]);
+                hi[k] = max(hi[k], p[k]);
+            }
+        }
+    T extent{0};
+    for (std::size_t k = 0; k < 3; ++k) { using std::max; extent = max(extent, hi[k] - lo[k]); }
+    const T tol = extent * epsilon<T>() * T{64} + epsilon<T>();
+
+    // Is the edge at the fixed end of one axis a single point? `vary_u`
+    // says which axis runs along the edge: the v = v_min edge is a curve
+    // in u, and vice versa.
+    auto edge_is_point = [&](bool vary_u, T fixed) {
+        auto at = [&](std::size_t k) {
+            T s = static_cast<T>(k) / static_cast<T>(samples - 1);
+            return vary_u ? surf.evaluate(dom.u_min + du * s, fixed)
+                          : surf.evaluate(fixed, dom.v_min + dv * s);
+        };
+        auto p0 = at(0);
+        for (std::size_t k = 1; k < samples; ++k)
+            if (Vec<T, 3>{at(k) - p0}.norm() > tol) return false;
+        return true;
+    };
+
+    bool u_closed = surf.periodic_u() ||
+                    (edge_is_point(false, dom.u_min) && edge_is_point(false, dom.u_max));
+    bool v_closed = surf.periodic_v() ||
+                    (edge_is_point(true, dom.v_min) && edge_is_point(true, dom.v_max));
+    return u_closed && v_closed;
+}
+
 // ── Convenience factories ─────────────────────────────────────
 
 template<Scalar T = double>

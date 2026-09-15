@@ -7,6 +7,8 @@
 #include <spatium/spaces/offset.hpp>
 #include <spatium/spaces/sample.hpp>
 #include <cmath>
+#include <numbers>
+#include <stdexcept>
 
 using namespace spatium;
 using Catch::Matchers::WithinAbs;
@@ -187,6 +189,84 @@ TEST_CASE("resolve_surface throws for a non-Space/Offset node", "[build_dsl]") {
     bd::Trace<double> scene;
     auto cube = scene.cube();
     CHECK_THROWS_AS(bd::resolve_surface(scene, cube.index), std::logic_error);
+}
+
+// ── Closure, and the two operations it separates ─────────────────
+
+TEST_CASE("is_closed separates a surface that ends from one that comes back",
+          "[parametric]") {
+    constexpr double pi = std::numbers::pi;
+
+    CHECK(is_closed(make_torus<double>(2.0, 1.0)));           // periodic both ways
+    CHECK_FALSE(is_closed(make_cylinder<double>(1.0, 2.0)));  // two open rims
+    CHECK_FALSE(is_closed(make_cone<double>(1.0, 2.0)));      // apex closes one end, the base rim does not
+
+    // The sphere is the case the periodicity flags alone get wrong: v
+    // runs over a plain interval and is not periodic, yet both of its
+    // edges are poles -- single points the surface passes through rather
+    // than rims where it stops.
+    auto sphere_fn = [](double u, double v) -> Vec<double, 3> {
+        return {std::sin(v) * std::cos(u), std::sin(v) * std::sin(u), std::cos(v)};
+    };
+    auto sphere = ParametricSurface<double>(sphere_fn, {0.0, 2 * pi, 0.0, pi}, true, false);
+    CHECK_FALSE(sphere.periodic_v());  // the flags would have said "open"
+    CHECK(is_closed(sphere));          // the geometry says otherwise, and is right
+
+    // Half of it: the poles are still poles, but the u edges are now a
+    // genuine rim, so the surface as a whole is not closed.
+    auto half = ParametricSurface<double>(sphere_fn, {0.0, pi, 0.0, pi}, false, false);
+    CHECK_FALSE(is_closed(half));
+}
+
+TEST_CASE("offset() refuses a base that is not a surface at all", "[build_dsl]") {
+    bd::Trace<double> scene;
+    auto cube = scene.cube();
+    // Used to be a std::logic_error out of resolve_surface, raised from
+    // inside materialize() and only if the scene was ever materialized.
+    CHECK_THROWS_AS(scene.offset(cube, 0.1), std::invalid_argument);
+    CHECK(scene.size() == 1);  // and no half-built node was left behind
+}
+
+TEST_CASE("offset() refuses an open base; offset_shell() takes it", "[build_dsl]") {
+    bd::Trace<double> scene;
+    auto tube = scene.cylinder(1.0, 2.0);  // a tube with two open rims
+    CHECK_THROWS_AS(scene.offset(tube, 0.1), std::invalid_argument);
+    CHECK(scene.size() == 1);
+
+    // The same base is fine once the caller has said what the rim means.
+    auto shell = scene.offset_shell(tube, 0.1, bd::EdgeRule::ZeroThickness);
+    CHECK(scene.node(shell.index).kind == bd::Kind::Offset);
+    CHECK(scene.node(shell.index).edge == bd::EdgeRule::ZeroThickness);
+}
+
+TEST_CASE("offset() and offset_shell() agree wherever both are legal", "[build_dsl]") {
+    // The split names two operations apart; it does not change either.
+    // Given a base with no rim, there is nothing for the rule to do and
+    // the two must produce identical geometry.
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 1.0);
+    auto plain = scene.offset(dough, 0.05);
+    auto shell = scene.offset_shell(dough, 0.05, bd::EdgeRule::ZeroThickness);
+
+    auto a = bd::materialize_mesh(scene, plain.index);
+    auto b = bd::materialize_mesh(scene, shell.index);
+    REQUIRE(a.vertex_count() == b.vertex_count());
+    REQUIRE(a.vertex_count() > 0);
+    for (std::size_t i = 0; i < a.vertex_count(); ++i)
+        CHECK_THAT((a.vertices[i] - b.vertices[i]).norm(), WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("scatter() refuses a target that is not a surface", "[build_dsl]") {
+    // Same hole, same fix: placement happens *on* a space, and a
+    // precomputed mesh is not one. An open target stays legal, though --
+    // sampling a band by its own area element is well posed.
+    bd::Trace<double> scene;
+    auto item = scene.cylinder(0.02, 0.1);
+    auto slab = scene.cube();
+    CHECK_THROWS_AS(scene.scatter(item, slab, 10), std::invalid_argument);
+
+    auto band = scene.cylinder(1.0, 2.0);
+    CHECK_NOTHROW(scene.scatter(item, band, 10));
 }
 
 TEST_CASE("moving() composes instead of replacing the previous motion", "[build_dsl]") {
