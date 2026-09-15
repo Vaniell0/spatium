@@ -113,11 +113,48 @@ TEST_CASE("Trace records node kinds and materializes the right shapes", "[build_
 
     auto placed = bd::materialize(scene, root.index);
     REQUIRE(placed.size() == 3);
-    CHECK(placed[0].mesh.vertex_count() > 0);
-    CHECK(placed[1].mesh.vertex_count() == placed[0].mesh.vertex_count()); // icing shares dough's UV grid
+    CHECK(placed[0].mesh().vertex_count() > 0);
+    CHECK(placed[1].mesh().vertex_count() == placed[0].mesh().vertex_count()); // icing shares dough's UV grid
 
     auto one_sprinkle = bd::materialize_mesh(scene, sprinkle.index);
-    CHECK(placed[2].mesh.vertex_count() == 30 * one_sprinkle.vertex_count()); // 30 instances of the same item mesh
+    CHECK(placed[2].mesh().vertex_count() == 30 * one_sprinkle.vertex_count()); // 30 instances of the same item mesh
+
+    // The point of the type: a materialized dough/icing object still
+    // knows it is a surface, so nothing downstream is forced through
+    // triangles.
+    CHECK(placed[0].is_analytic());
+    CHECK(placed[1].is_analytic());
+    CHECK_FALSE(placed[2].is_analytic()); // Scatter is many objects, not one surface
+    REQUIRE(placed[0].surface().has_value());
+    auto s = *placed[0].surface();
+    auto p = s.evaluate(0.3, 0.7);
+    auto q = scene.node(dough.index).surface->evaluate(0.3, 0.7);
+    CHECK_THAT((p - q).norm(), WithinAbs(0.0, 1e-12)); // same map, not a re-derivation
+}
+
+TEST_CASE("Placed::surface() carries the node's motion inside the map", "[build_dsl]") {
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+    auto ring = scene.torus(2.0, 1.0).moving(
+        [](const V3& p, double time) { return V3{p + V3{0.0, 0.0, 10.0 * time}}; });
+
+    auto at0 = bd::materialize(scene, ring.index, 0.0);
+    auto at1 = bd::materialize(scene, ring.index, 1.0);
+    REQUIRE(at0[0].surface().has_value());
+    REQUIRE(at1[0].surface().has_value());
+
+    auto p0 = at0[0].surface()->evaluate(0.5, 0.5);
+    auto p1 = at1[0].surface()->evaluate(0.5, 0.5);
+    // Composed into the map rather than applied to vertices afterwards,
+    // so the moved object is still a surface and not a deformed mesh.
+    CHECK_THAT(p1[2] - p0[2], WithinAbs(10.0, 1e-9));
+
+    // ...and the surface agrees with what the triangle path produces.
+    auto m1 = at1[0].mesh();
+    bool any_close = false;
+    for (const auto& v : m1.vertices)
+        if ((v - p1).norm() < 0.15) any_close = true;
+    CHECK(any_close);
 }
 
 TEST_CASE("Trace::literal + cube() gives an escape hatch out of the analytic path", "[build_dsl]") {

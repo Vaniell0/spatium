@@ -126,11 +126,27 @@ staying declarative this long. When you actually want pixels:
 auto placed = bd::materialize(scene, donut.index);
 ```
 
-`placed` is a list of real, triangulated meshes — this is the one place
-in the whole pipeline where triangles appear, and only because a screen
-needs them. `examples/donut_demo.cpp` feeds `placed` into the same
-CPU raytracer every offline demo in this repository uses. Build and run
-it yourself:
+`placed` is a list of scene objects — and they are still objects, not
+meshes. Each one can tell you what it *is*:
+
+```cpp
+for (const auto& obj : placed) {
+    if (auto s = obj.surface()) {
+        // a real ParametricSurface: geodesics, contact, exact ray hits
+    }
+    auto m = obj.mesh();   // triangles, built right here and not before
+}
+```
+
+Triangles appear in exactly one place, `mesh()`, and only because a
+screen needs them — ask for `surface()` instead and none are ever built.
+That is the difference between describing a scene and describing a pile
+of triangles: everything the library can do to a space, it can do to
+your scene objects.
+
+`examples/donut_demo.cpp` takes the triangle path, feeding `placed` into
+the same CPU raytracer every offline demo here uses. Build and run it
+yourself:
 
 ```bash
 ./build/examples/donut_demo              # prints the trace, no picture
