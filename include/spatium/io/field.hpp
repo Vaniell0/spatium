@@ -449,7 +449,8 @@ enum class VecOp : std::uint8_t {
     Point,     // the environment's p
     Const,     // a literal vector
     Add, Sub,
-    Opaque,
+    Scale,     // child a, times a scalar read from the environment
+    Opaque,    // a callable leaf; `reads_point` says whether it uses p
 };
 
 inline const char* vec_op_name(VecOp o) {
@@ -458,6 +459,7 @@ inline const char* vec_op_name(VecOp o) {
         case VecOp::Const:  return "Const";
         case VecOp::Add:    return "Add";
         case VecOp::Sub:    return "Sub";
+        case VecOp::Scale:  return "Scale";
         case VecOp::Opaque: return "Opaque";
     }
     return "?";
@@ -486,6 +488,29 @@ struct VecFieldOp {
     // can be asked. The report's blind spot was never move_only_function's
     // missing target_type() -- it was that the type did not belong to us.
     std::move_only_function<Vec<T, 3>(const MotionEnv<T>&) const> fn;
+
+    // The scalar a Scale multiplies by. Read from the environment, never
+    // from the point -- a Scale whose factor depended on the point would
+    // be a deformation again.
+    std::move_only_function<T(const MotionEnv<T>&) const> scale_fn;
+
+    // **The distinction that decides whether a motion can be instanced**,
+    // and it is not "structural versus opaque". A leaf may be as opaque as
+    // it likes -- the donut's particle position is Perlin noise and always
+    // will be -- as long as it does not read the *point*.
+    //
+    // Cost is per vertex. A term that ignores p is evaluated once per
+    // object per frame; a term that reads p is evaluated once per vertex.
+    // So a motion of the form A(t) + p * s(t), with A and s opaque but
+    // p-blind, still places a shared geometry with a transform: A and s
+    // are 19 800 evaluations, not 19 800 x 8. Requiring A and s to be
+    // *structural* would have meant making PerlinNoise an expression,
+    // which is both enormous and unnecessary.
+    //
+    // Defaults to true, because assuming a leaf ignores p when it does not
+    // would silently collapse a deformation onto one shape. Saying it
+    // ignores p is a promise the author makes, via `opaque_of_time`.
+    bool reads_point = true;
     std::type_index type = std::type_index(typeid(void));
     std::size_t payload = 0;
     bool stateless = false;
@@ -519,6 +544,46 @@ public:
     // this one.
     static VecField translation(const Vec<T, 3>& by) {
         return point() + constant(by);
+    }
+
+    // An opaque leaf that promises not to read the point. The promise is
+    // the whole content of this factory -- the callable takes an
+    // environment and cannot reach a point through it, so the signature
+    // enforces what the comment on `reads_point` describes.
+    template<typename F>
+        requires std::is_invocable_r_v<Vec<T, 3>, const F&, T>
+    static VecField opaque_of_time(F fn) {
+        VecField f;
+        f.ops_.clear();
+        VecFieldOp<T> n{};
+        n.op          = VecOp::Opaque;
+        n.type        = std::type_index(typeid(F));
+        n.payload     = sizeof(F);
+        n.stateless   = std::is_empty_v<F>;
+        n.reads_point = false;
+        n.fn = [fn = std::move(fn)](const MotionEnv<T>& e) { return fn(e.t); };
+        f.ops_.push_back(std::move(n));
+        f.structural_ = false;
+        return f;
+    }
+
+    // `field * s(t)`. The factor reads time, never the point: a factor
+    // that varied per vertex would make this a deformation again, which
+    // is the thing the whole distinction exists to keep out.
+    //
+    // Consumes the field rather than copying it, because a pool of
+    // move-only leaves cannot be copied -- the same reason `operator+`
+    // takes its left operand by value.
+    template<typename S>
+        requires std::is_invocable_r_v<T, const S&, T>
+    friend VecField scaled(VecField x, S s) {
+        VecFieldOp<T> n{};
+        n.op       = VecOp::Scale;
+        n.a        = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(e.t); };
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+        return x;
     }
 
     // A callable leaf. Accepts either shape: a function of the whole
@@ -566,6 +631,54 @@ public:
         return ops_.size() == 1 && ops_[0].op == VecOp::Point;
     }
 
+    // ── Placement: what makes a motion instanceable ──────────────
+    //
+    // Does this op's value depend on the point being moved? Derived by
+    // walking, not declared -- the same call as `is_structural()`, and for
+    // the same reason: a flag kept in sync by hand goes stale.
+    bool reads_point(std::size_t i) const {
+        const auto& n = ops_[i];
+        switch (n.op) {
+            case VecOp::Point:  return true;
+            case VecOp::Const:  return false;
+            case VecOp::Opaque: return n.reads_point;
+            case VecOp::Scale:  return reads_point(n.a);
+            case VecOp::Add:
+            case VecOp::Sub:    return reads_point(n.a) || reads_point(n.b);
+        }
+        return true;
+    }
+
+    // A *placement* is a motion that is affine in the point: it moves the
+    // whole object without changing its shape, so N instances can share
+    // one geometry and differ only by a transform. Anything else is a
+    // deformation, and instances that deform differently have nothing to
+    // share.
+    //
+    // The test is structural and cheap: exactly one path through the
+    // expression reaches the Point, and along it the Point is either bare
+    // or under Scale factors -- never under an Opaque that reads it, and
+    // never on both sides of one operator. Everything else in the tree may
+    // be as opaque as it likes, because it does not touch the point and so
+    // is evaluated once per object rather than once per vertex.
+    bool is_placement() const { return affine_in_point(ops_.size() - 1); }
+
+    // The transform this placement is, at one moment. Translation is the
+    // whole motion evaluated with the point at the origin; scale is the
+    // product of the Scale factors on the path to the Point. Exact for the
+    // affine form, and meaningless otherwise -- hence the precondition.
+    struct Placement {
+        Vec<T, 3> translation{};
+        T scale = T{1};
+    };
+
+    Placement placement_at(const MotionEnv<T>& env) const {
+        assert(is_placement() && "placement_at: this motion is a deformation");
+        MotionEnv<T> at_origin = env;
+        at_origin.p = Vec<T, 3>{};
+        return Placement{(*this)(at_origin), scale_on_path(ops_.size() - 1, env)};
+    }
+
     // "Is there a motion here" -- what `if (node.transform)` meant when
     // the slot was an erased function that could be empty. A VecField is
     // never empty: the default *is* the identity, and saying so
@@ -577,10 +690,15 @@ public:
     std::size_t size() const { return ops_.size(); }
     const VecFieldOp<T>& op(std::size_t i) const { return ops_[i]; }
 
-    friend VecField operator+(VecField x, const VecField& y) { x.append(VecOp::Add, y); return x; }
-    friend VecField operator-(VecField x, const VecField& y) { x.append(VecOp::Sub, y); return x; }
-    VecField& operator+=(const VecField& y) { append(VecOp::Add, y); return *this; }
-    VecField& operator-=(const VecField& y) { append(VecOp::Sub, y); return *this; }
+    // Both operands are consumed. A pool of move-only leaves cannot be
+    // copied, so `c = a + b` leaving `a` and `b` usable is not available
+    // here -- unlike the scalar Field, whose leaves are copyable. This is
+    // the price of letting a motion hook own move-only state, and it is
+    // stated rather than discovered: composition takes rvalues.
+    friend VecField operator+(VecField x, VecField y) { x.append(VecOp::Add, y); return x; }
+    friend VecField operator-(VecField x, VecField y) { x.append(VecOp::Sub, y); return x; }
+    VecField& operator+=(VecField y) { append(VecOp::Add, y); return *this; }
+    VecField& operator-=(VecField y) { append(VecOp::Sub, y); return *this; }
 
     bool topologically_ordered() const {
         for (std::size_t i = 0; i < ops_.size(); ++i) {
@@ -593,6 +711,44 @@ public:
 private:
     std::vector<VecFieldOp<T>> ops_;
     bool structural_ = true;
+
+    // Affine in the point: the Point is reached along exactly one branch,
+    // through Add/Sub/Scale only. An Opaque that reads the point fails
+    // here even though it might in truth be affine -- we cannot ask a
+    // closure what it does, which is the whole reason the structural form
+    // exists.
+    bool affine_in_point(std::size_t i) const {
+        const auto& n = ops_[i];
+        switch (n.op) {
+            case VecOp::Point:  return true;
+            case VecOp::Const:  return true;
+            case VecOp::Opaque: return !n.reads_point;
+            case VecOp::Scale:  return affine_in_point(n.a);
+            case VecOp::Add:
+            case VecOp::Sub:
+                // Both sides affine, and at most one of them touching the
+                // point: p + p would be affine arithmetically but is not a
+                // rigid placement of one geometry.
+                if (!affine_in_point(n.a) || !affine_in_point(n.b)) return false;
+                return !(reads_point(n.a) && reads_point(n.b));
+        }
+        return false;
+    }
+
+    T scale_on_path(std::size_t i, const MotionEnv<T>& env) const {
+        const auto& n = ops_[i];
+        switch (n.op) {
+            case VecOp::Point:  return T{1};
+            case VecOp::Scale:  return n.scale_fn(env) * scale_on_path(n.a, env);
+            case VecOp::Add:
+            case VecOp::Sub:
+                if (reads_point(n.a)) return scale_on_path(n.a, env);
+                if (reads_point(n.b))
+                    return (n.op == VecOp::Sub ? T{-1} : T{1}) * scale_on_path(n.b, env);
+                return T{0};   // the point does not appear: the shape collapses
+            default: return T{0};
+        }
+    }
 
     void push(VecOp o) {
         VecFieldOp<T> n{};
@@ -629,6 +785,7 @@ private:
                 case VecOp::Const:  s[i] = n.value; break;
                 case VecOp::Add:    s[i] = Vec<T, 3>{s[n.a] + s[n.b]}; break;
                 case VecOp::Sub:    s[i] = Vec<T, 3>{s[n.a] - s[n.b]}; break;
+                case VecOp::Scale:  s[i] = Vec<T, 3>{s[n.a] * n.scale_fn(env)}; break;
                 case VecOp::Opaque: s[i] = n.fn(env); break;
             }
         }
@@ -637,17 +794,21 @@ private:
 
     // Same rule and the same reason as Field::append -- see there for why
     // reserving exactly what is needed on every append is quadratic.
-    void append(VecOp o, const VecField& y) {
+    void append(VecOp o, VecField& y) {
         const auto shift  = static_cast<std::uint32_t>(ops_.size());
         const auto x_root = shift - 1;
         const std::size_t need = ops_.size() + y.ops_.size() + 1;
         if (need > ops_.capacity())
             ops_.reserve(std::max(need, ops_.capacity() * 2));
 
-        for (const auto& n : y.ops_) {
-            VecFieldOp<T> c = n;
-            if (is_binary(c.op)) { c.a += shift; c.b += shift; }
-            assert((!is_binary(c.op) || (c.a < ops_.size() && c.b < ops_.size())) &&
+        for (auto& n : y.ops_) {
+            VecFieldOp<T> c = std::move(n);
+            if (is_binary(c.op) || c.op == VecOp::Scale) {
+                c.a += shift;
+                if (is_binary(c.op)) c.b += shift;
+            }
+            assert((!(is_binary(c.op) || c.op == VecOp::Scale) ||
+                    (c.a < ops_.size() && (!is_binary(c.op) || c.b < ops_.size()))) &&
                    "VecField: a child must precede its parent");
             ops_.push_back(std::move(c));
         }
