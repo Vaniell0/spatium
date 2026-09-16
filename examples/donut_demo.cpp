@@ -707,6 +707,13 @@ int main(int argc, char* argv[]) {
                 case bd::RenderLevel::Newton:      ++newton; break;
             }
         }
+        auto fs = bd::field_report(scene);
+        std::println("fields: {} total, {} structural, {} opaque; leaves {} "
+                     "({} recognized, {} unknown), {} distinct types, {} B captured [{}]",
+                     fs.fields, fs.structural_fields, fs.opaque_fields,
+                     fs.opaque_leaves, fs.recognized_leaves, fs.unknown_leaves,
+                     fs.distinct_types, fs.payload_bytes,
+                     bd::payload_verdict(fs.payload_bytes));
         std::println("render levels: {} exact, {} tessellated, {} newton",
                      exact, tess, newton);
     }

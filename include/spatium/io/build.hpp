@@ -46,42 +46,32 @@ SPATIUM_EXPORT namespace spatium::io::build {
 
 // ── Field slots ───────────────────────────────────────────────────
 //
-// A node's motion/thickness/color hooks are std::move_only_function,
-// not std::function, for two reasons that are about capability rather
-// than speed (the indirect call itself measures ~3.3 ns/vertex, ~4% of
-// a realistic motion callee -- see benchmarks/bench_trace.cpp):
+// A node's motion and thickness are `Field`s -- expressions whose leaves
+// may be opaque callables -- not bare erased functions. See io/field.hpp
+// for why the leaf rather than the whole field is the unit of opacity.
 //
-//   - std::function requires its callable to be copy-constructible, so
-//     anything a hook wants to own has to be copyable too. That makes
-//     capturing heavy state by value the path of least resistance:
-//     donut_demo captured a 512-byte PerlinNoise into each of 19 800
-//     closures, ~9.7 MB of identical tables, because sharing it would
-//     have needed a hand-rolled shared_ptr dance. move_only_function
-//     accepts move-only state directly.
-//   - The signatures are const-qualified, so a hook is callable through
-//     the `const Trace&` materialize() actually holds. std::function's
-//     operator() is const but happily calls a non-const callable, a
-//     known hole this type closes.
+// The motion slot used to be a `std::move_only_function`, chosen so a
+// hook could own move-only state and so the signature could be const.
+// Both of those were about capability, and the second one still holds
+// (the field's call operator is const). The first turned out to aim at a
+// problem nobody had: nothing in the tree owns move-only state, while the
+// problem that *was* measured -- 19 800 closures each copying a 512-byte
+// noise table -- is fixed by sharing the table, which the demo already
+// does. Meanwhile move-only cost something real: it made a `TraceNode`
+// uncopyable, so a `Trace` could not be copied, so `cook()` could only
+// consume a trace rather than copy it, and `std::move_only_function`
+// exposes no `target_type()`, so a motion could not even be counted by
+// type. A field that owns its pool gives back all three.
+//
+// A lambda of the historical `(point, t)` shape still converts
+// implicitly, so every scene reads unchanged. What it gains is that the
+// conversion is now visible: an identity motion is a `Point` node and a
+// constant shift is `Point + Const`, both structural and both reported as
+// such, where they used to be opaque one-line lambdas indistinguishable
+// from a noise field.
 template<Scalar T = double>
-using PointField = std::move_only_function<Vec<T, 3>(const Vec<T, 3>&, T) const>;
+using PointField = VecField<T>;
 
-// A thickness is a `Field` -- an expression over (u, v) whose leaves may
-// be opaque callables -- rather than a bare std::function. See
-// io/field.hpp for why the leaf, not the whole field, is the unit of
-// opacity.
-//
-// A lambda still converts implicitly, so every existing call site reads
-// the same; what changes is that the conversion is now *visible*. A
-// constant thickness becomes a Const node and reports as structural,
-// where it used to be an opaque one-line lambda indistinguishable from
-// noise. Friction is not what keeps the hatch honest here -- the report
-// is.
-//
-// It still flows through offset_surface() into a ParametricSurface, whose
-// ParamFn is a std::function and therefore wants a copy-constructible
-// callable; Field is one. That boundary makes a copy of the pool per
-// resolve, and the node keeps the Field, so structure stays visible to
-// the report and to lowering even though the evaluation path wraps.
 template<Scalar T = double>
 using ScalarField = Field<T>;
 
@@ -748,6 +738,32 @@ std::vector<Placed<T>> materialize(const Trace<T>& trace, std::size_t idx, T t) 
         return out;
     }
     return {Placed<T>{&trace, idx, t}};
+}
+
+// ── The field report ─────────────────────────────────────────────
+//
+// What the trace's fields actually are, walked once. Cheap enough to call
+// per frame -- measured at 2.8-5.1 ns per field, so 112-204 us across the
+// donut demo's ~39 600 against an 80 ms frame -- which is why there is no
+// cache here and no need for one. Note that this is a property of the
+// trace being immutable once built: if a scene ever mutates between
+// frames, computing it once at that boundary is the obvious move.
+//
+// Reports recognized and unknown separately, and prints unknown even when
+// it is zero. A single "distinct types" number cannot distinguish "they
+// really are all one closure" from "they all fell into one bucket nothing
+// could classify", and that is the defect class conventions.md names.
+template<Scalar T>
+FieldStats field_report(const Trace<T>& trace) {
+    FieldStats stats{};
+    std::vector<std::type_index> seen;
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+        const auto& n = trace.node(i);
+        if (n.kind == Kind::Offset) accumulate(stats, n.thickness, seen);
+        accumulate(stats, n.transform, seen);
+        accumulate(stats, n.color_fn, seen);
+    }
+    return stats;
 }
 
 } // namespace spatium::io::build

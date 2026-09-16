@@ -3,6 +3,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
+#  include <spatium/algebra/vector.hpp>
 #  include <cassert>
 #  include <algorithm>
 #  include <cstddef>
@@ -410,6 +411,277 @@ void accumulate(FieldStats& stats, const Field<T>& f,
             ++stats.unknown_leaves;
             continue;
         }
+        ++stats.recognized_leaves;
+        stats.payload_bytes += n.payload;
+        if (std::find(seen.begin(), seen.end(), n.type) == seen.end())
+            seen.push_back(n.type);
+    }
+    stats.distinct_types = seen.size();
+}
+
+// ── A field over points, and the environment it reads ────────────
+//
+// The same design as Field one dimension up: a flat pool, children before
+// parents, an opaque callable as a leaf rather than as an alternative to
+// the expression.
+//
+// What differs is the input, and that difference is the point. A motion
+// today is a function of a point and a time, and writing `(p, t)` into
+// every signature would mean that giving an object its own clock, or
+// letting a solver write its pose, changes every signature and every call
+// site in every scene anyone has written. So the input is a **named
+// environment**. Today it carries exactly what it carried before and
+// behaves identically; tomorrow a field is added to this struct and
+// nothing else moves.
+//
+// That is the cheapest possible hedge against questions that are open on
+// purpose -- where mutable state lives, whether a timer is a function or
+// a state, whether physics bodies live in the trace or beside it. None of
+// them has a consumer yet, so none is being answered here. This costs
+// nothing and stops the answers from being expensive.
+template<Scalar T = double>
+struct MotionEnv {
+    Vec<T, 3> p{};   // the point being moved
+    T t{};           // scene time
+};
+
+enum class VecOp : std::uint8_t {
+    Point,     // the environment's p
+    Const,     // a literal vector
+    Add, Sub,
+    Opaque,
+};
+
+inline const char* vec_op_name(VecOp o) {
+    switch (o) {
+        case VecOp::Point:  return "Point";
+        case VecOp::Const:  return "Const";
+        case VecOp::Add:    return "Add";
+        case VecOp::Sub:    return "Sub";
+        case VecOp::Opaque: return "Opaque";
+    }
+    return "?";
+}
+
+inline bool is_binary(VecOp o) { return o == VecOp::Add || o == VecOp::Sub; }
+
+template<Scalar T = double>
+struct VecFieldOp {
+    VecOp op = VecOp::Point;
+    Vec<T, 3> value{};
+    std::uint32_t a = 0, b = 0;
+
+    // move_only_function, not std::function, and deliberately not the
+    // same choice the scalar field makes. A motion hook is allowed to own
+    // move-only state -- tests/test_build_dsl.cpp has one owning a
+    // unique_ptr -- and that capability was added on purpose in PR #26.
+    // A thickness cannot make the same choice, because it flows into
+    // ParametricSurface's ParamFn, which is a std::function.
+    //
+    // This costs copyability: a VecField is move-only, so a TraceNode and
+    // a Trace are too, so cook() consumes a trace rather than copying it.
+    // That is the status quo and it is fine. What it does NOT cost is the
+    // report: identity is captured as typeid(F) at construction, below, so
+    // a motion is classifiable whether or not the erasure that holds it
+    // can be asked. The report's blind spot was never move_only_function's
+    // missing target_type() -- it was that the type did not belong to us.
+    std::move_only_function<Vec<T, 3>(const MotionEnv<T>&) const> fn;
+    std::type_index type = std::type_index(typeid(void));
+    std::size_t payload = 0;
+    bool stateless = false;
+};
+
+template<Scalar T = double>
+class VecField {
+public:
+    // Default is the identity motion, structurally: not an opaque lambda
+    // that happens to return its argument, but a Point node a reader can
+    // see is the identity.
+    VecField() { push(VecOp::Point); }
+
+    static VecField point() { return VecField{}; }
+
+    static VecField constant(const Vec<T, 3>& v) {
+        VecField f;
+        f.ops_.clear();
+        VecFieldOp<T> n{};
+        n.op = VecOp::Const;
+        n.value = v;
+        f.ops_.push_back(std::move(n));
+        return f;
+    }
+
+    // A pure translation, structurally -- the case that matters most,
+    // because a translation is an isometry and so a node carrying one
+    // could in principle keep its exact analytic form instead of dropping
+    // it. Recognising that is what an opaque callable can never support
+    // and this representation can; the check itself is the next step, not
+    // this one.
+    static VecField translation(const Vec<T, 3>& by) {
+        return point() + constant(by);
+    }
+
+    // A callable leaf. Accepts either shape: a function of the whole
+    // environment, or the historical (p, t) -- the latter wrapped, so
+    // every scene written against the old signature still compiles while
+    // new code can read whatever the environment grows.
+    template<typename F>
+        requires std::is_invocable_r_v<Vec<T, 3>, const F&, const MotionEnv<T>&>
+    static VecField opaque(F fn) {
+        return make_opaque<F>(std::move(fn));
+    }
+
+    template<typename F>
+        requires (!std::is_invocable_r_v<Vec<T, 3>, const F&, const MotionEnv<T>&>) &&
+                 std::is_invocable_r_v<Vec<T, 3>, const F&, const Vec<T, 3>&, T>
+    static VecField opaque(F fn) {
+        return make_opaque<F>(
+            [fn = std::move(fn)](const MotionEnv<T>& e) { return fn(e.p, e.t); },
+            sizeof(F), std::type_index(typeid(F)), std::is_empty_v<F>);
+    }
+
+    template<typename F>
+        requires (!std::is_same_v<std::remove_cvref_t<F>, VecField>) &&
+                 (std::is_invocable_r_v<Vec<T, 3>, const F&, const MotionEnv<T>&> ||
+                  std::is_invocable_r_v<Vec<T, 3>, const F&, const Vec<T, 3>&, T>)
+    VecField(F fn) : VecField(opaque(std::move(fn))) {}   // NOLINT: implicit on purpose
+
+    Vec<T, 3> operator()(const MotionEnv<T>& env) const {
+        constexpr std::size_t kInline = 32;
+        if (ops_.size() <= kInline) {
+            Vec<T, 3> scratch[kInline];
+            return eval_into(scratch, env);
+        }
+        std::vector<Vec<T, 3>> scratch(ops_.size());
+        return eval_into(scratch.data(), env);
+    }
+
+    // The historical call shape, kept so call sites read unchanged.
+    Vec<T, 3> operator()(const Vec<T, 3>& p, T t) const {
+        return (*this)(MotionEnv<T>{p, t});
+    }
+
+    bool is_structural() const { return structural_; }
+    bool is_identity() const {
+        return ops_.size() == 1 && ops_[0].op == VecOp::Point;
+    }
+
+    // "Is there a motion here" -- what `if (node.transform)` meant when
+    // the slot was an erased function that could be empty. A VecField is
+    // never empty: the default *is* the identity, and saying so
+    // structurally is the improvement. So the question becomes whether it
+    // is anything other than the identity, and it is answered by looking
+    // at one op rather than by a null check.
+    explicit operator bool() const { return !is_identity(); }
+
+    std::size_t size() const { return ops_.size(); }
+    const VecFieldOp<T>& op(std::size_t i) const { return ops_[i]; }
+
+    friend VecField operator+(VecField x, const VecField& y) { x.append(VecOp::Add, y); return x; }
+    friend VecField operator-(VecField x, const VecField& y) { x.append(VecOp::Sub, y); return x; }
+    VecField& operator+=(const VecField& y) { append(VecOp::Add, y); return *this; }
+    VecField& operator-=(const VecField& y) { append(VecOp::Sub, y); return *this; }
+
+    bool topologically_ordered() const {
+        for (std::size_t i = 0; i < ops_.size(); ++i) {
+            if (!is_binary(ops_[i].op)) continue;
+            if (ops_[i].a >= i || ops_[i].b >= i) return false;
+        }
+        return true;
+    }
+
+private:
+    std::vector<VecFieldOp<T>> ops_;
+    bool structural_ = true;
+
+    void push(VecOp o) {
+        VecFieldOp<T> n{};
+        n.op = o;
+        ops_.push_back(std::move(n));
+    }
+
+    template<typename F, typename Fn>
+    static VecField make_opaque(Fn fn, std::size_t payload, std::type_index type, bool stateless) {
+        VecField f;
+        f.ops_.clear();
+        VecFieldOp<T> n{};
+        n.op = VecOp::Opaque;
+        n.type = type;
+        n.payload = payload;
+        n.stateless = stateless;
+        n.fn = std::move(fn);
+        f.ops_.push_back(std::move(n));
+        f.structural_ = false;
+        return f;
+    }
+
+    template<typename F>
+    static VecField make_opaque(F fn) {
+        return make_opaque<F>(std::move(fn), sizeof(F),
+                              std::type_index(typeid(F)), std::is_empty_v<F>);
+    }
+
+    Vec<T, 3> eval_into(Vec<T, 3>* s, const MotionEnv<T>& env) const {
+        for (std::size_t i = 0; i < ops_.size(); ++i) {
+            const auto& n = ops_[i];
+            switch (n.op) {
+                case VecOp::Point:  s[i] = env.p; break;
+                case VecOp::Const:  s[i] = n.value; break;
+                case VecOp::Add:    s[i] = Vec<T, 3>{s[n.a] + s[n.b]}; break;
+                case VecOp::Sub:    s[i] = Vec<T, 3>{s[n.a] - s[n.b]}; break;
+                case VecOp::Opaque: s[i] = n.fn(env); break;
+            }
+        }
+        return s[ops_.size() - 1];
+    }
+
+    // Same rule and the same reason as Field::append -- see there for why
+    // reserving exactly what is needed on every append is quadratic.
+    void append(VecOp o, const VecField& y) {
+        const auto shift  = static_cast<std::uint32_t>(ops_.size());
+        const auto x_root = shift - 1;
+        const std::size_t need = ops_.size() + y.ops_.size() + 1;
+        if (need > ops_.capacity())
+            ops_.reserve(std::max(need, ops_.capacity() * 2));
+
+        for (const auto& n : y.ops_) {
+            VecFieldOp<T> c = n;
+            if (is_binary(c.op)) { c.a += shift; c.b += shift; }
+            assert((!is_binary(c.op) || (c.a < ops_.size() && c.b < ops_.size())) &&
+                   "VecField: a child must precede its parent");
+            ops_.push_back(std::move(c));
+        }
+
+        VecFieldOp<T> parent{};
+        parent.op = o;
+        parent.a  = x_root;
+        parent.b  = static_cast<std::uint32_t>(ops_.size() - 1);
+        assert(parent.a < ops_.size() && parent.b < ops_.size() &&
+               "VecField: a child must precede its parent");
+        ops_.push_back(std::move(parent));
+
+        structural_ = structural_ && y.structural_;
+    }
+};
+
+// A point field counts into the same report. Before this existed, a
+// motion slot could not be classified at all -- std::move_only_function
+// has no target_type() -- so a report covering only thicknesses would say
+// "unknown = 0" while every motion in the scene sat in a slot it could
+// not see. An honest zero and an invisible population are exactly the two
+// states a single number cannot distinguish.
+template<Scalar T>
+void accumulate(FieldStats& stats, const VecField<T>& f,
+                std::vector<std::type_index>& seen) {
+    ++stats.fields;
+    if (f.is_structural()) ++stats.structural_fields;
+    else                   ++stats.opaque_fields;
+
+    for (std::size_t i = 0; i < f.size(); ++i) {
+        const auto& n = f.op(i);
+        if (n.op != VecOp::Opaque) continue;
+        ++stats.opaque_leaves;
+        if (n.type == std::type_index(typeid(void))) { ++stats.unknown_leaves; continue; }
         ++stats.recognized_leaves;
         stats.payload_bytes += n.payload;
         if (std::find(seen.begin(), seen.end(), n.type) == seen.end())
