@@ -18,6 +18,7 @@
 #  include <initializer_list>
 #  include <optional>
 #  include <stdexcept>
+#  include <unordered_map>
 #  include <string>
 #  include <utility>
 #  include <vector>
@@ -310,7 +311,7 @@ template<Scalar T>
 ParametricSurface<T> resolve_surface(const Trace<T>& trace, std::size_t idx);
 
 template<Scalar T>
-mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t idx, T t = T{0});
+mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t idx, T t = T{0}, bool placed = true);
 
 template<Scalar T>
 std::vector<Placed<T>> materialize(const Trace<T>& trace, std::size_t idx, T t = T{0});
@@ -596,7 +597,7 @@ ParametricSurface<T> resolve_surface(const Trace<T>& trace, std::size_t idx) {
 // ── Materialization: the one place a mesh gets built, for display ──
 
 template<Scalar T>
-mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t idx, T t) {
+mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t idx, T t, bool placed) {
     const auto& n = trace.node(idx);
     mesh::Mesh<Euclidean<3, T>> out;
 
@@ -642,7 +643,14 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         throw std::logic_error("materialize_mesh: Compose has no single mesh, use materialize()");
     }
 
-    if (n.transform)
+    // `placed = false` gives the *rest* geometry -- the shape before this
+    // node's own motion moves it. That is what cook() has to hash and
+    // share: two dust specks are the same little cube and become two
+    // different meshes only because each has been moved somewhere else.
+    // Hashing the placed form would make every instance unique by
+    // construction, which is exactly the way the first version of cook()
+    // silently found 19 801 shapes for 19 801 objects.
+    if (placed && n.transform)
         for (auto& v : out.vertices) v = n.transform(v, t);
     return out;
 }
@@ -764,6 +772,260 @@ FieldStats field_report(const Trace<T>& trace) {
         accumulate(stats, n.color_fn, seen);
     }
     return stats;
+}
+
+// ── cook(): operations become objects, once ──────────────────────
+//
+// A `Trace` is mutated while it is built and read-only while it is
+// rendered. The DSL had that boundary in practice and never said so.
+// `cook()` says it.
+//
+// **A type, not a flag.** A `frozen_` bool would be a value that looks
+// like a guarantee and holds none: nothing stops `trace.torus()` after it
+// is set, and no compiler notices. `Cooked<T>` holds the guarantee
+// structurally -- it has no `torus()`, no `offset()`, no `scatter()`.
+// Mutation after cooking is not discouraged; it does not compile.
+//
+// **Five things that were being tracked separately are one piece of
+// work**, because each of them needs the whole scene to be known:
+// expanding operations into objects, deduplicating shapes, folding a
+// group's transform into its members, computing the field report once,
+// and (later) compaction and AoS->SoA. One well-placed boundary closing
+// several problems is the sign that they were one problem.
+//
+// Deduplication is *part of the expansion*, not an optimisation on top of
+// it: without it there is no "one shape, N transforms" and so no
+// instancing at all. Compaction and layout are the optimisations, and
+// they are a different kind of thing.
+//
+// **`materialize()` is deliberately left alone.** It answers "what is at
+// this node" and returns one `Placed` per node, which is what the demos,
+// the benchmarks and a dozen tests rely on -- a `Scatter` is one `Placed`
+// holding a merged mesh. Cooking answers a different question, "what
+// objects are in this scene", and a `Scatter` is N of them. Two
+// questions, two answers, neither pretending to be the other.
+
+// One instance in a cooked scene: which shape, where, and what it looks
+// like. The shape is an index into the shape table, so N instances of one
+// speck cost N transforms and one geometry.
+template<Scalar T = double>
+struct Object {
+    std::size_t shape = 0;        // index into Cooked::shapes()
+    std::size_t source_node = 0;  // the trace node it came from, for reporting
+    Vec<T, 3> translation{};      // folded from ancestors and from the node
+    Material<T> material{};
+};
+
+// The shape table: one entry per distinct geometry in the scene.
+template<Scalar T = double>
+struct Shape {
+    mesh::Mesh<Euclidean<3, T>> geometry;
+    std::size_t instances = 0;    // how many objects point here
+};
+
+template<Scalar T = double>
+class Cooked {
+public:
+    const std::vector<Object<T>>& objects() const { return objects_; }
+    const std::vector<Shape<T>>& shapes() const { return shapes_; }
+    const FieldStats& fields() const { return fields_; }
+
+    std::size_t object_count() const { return objects_.size(); }
+    std::size_t shape_count() const { return shapes_.size(); }
+
+    // Two counters, because one would lie in the same way a single
+    // "distinct types" number lied: an object that could not be instanced
+    // because its motion is opaque, and an object that was never a
+    // candidate because its shape is unique, are different facts. Rolled
+    // into one "not instanced" they read identically, and the honest
+    // reading -- "the mechanism works, the scene simply has nothing to
+    // share" -- becomes indistinguishable from "the mechanism is
+    // refusing everything".
+    //
+    // They do not sum to object_count(), and that is correct: an object
+    // can be unique *and* structural, which is neither.
+    std::size_t shared_objects() const { return shared_; }
+    std::size_t opaque_refused() const { return refused_; }
+
+    // The nodes that were refused, so the report can point at them rather
+    // than state a number nobody can act on.
+    const std::vector<std::size_t>& refused_nodes() const { return refused_nodes_; }
+
+    // The vertices a renderer would build if every object carried its own
+    // copy, against what the shape table actually holds. The ratio is the
+    // whole point of the pass, and it is reported rather than assumed.
+    std::size_t vertices_without_instancing() const {
+        std::size_t n = 0;
+        for (const auto& o : objects_) n += shapes_[o.shape].geometry.vertex_count();
+        return n;
+    }
+    std::size_t vertices_stored() const {
+        std::size_t n = 0;
+        for (const auto& s : shapes_) n += s.geometry.vertex_count();
+        return n;
+    }
+
+private:
+    template<Scalar U> friend Cooked<U> cook(Trace<U>&&, std::size_t, U);
+    std::vector<Object<T>> objects_;
+    std::vector<Shape<T>> shapes_;
+    FieldStats fields_{};
+    std::size_t shared_ = 0, refused_ = 0;
+    std::vector<std::size_t> refused_nodes_;
+};
+
+// The key two nodes must share to be the same shape. Node identity is not
+// enough: the donut's dust is 19 800 separate Literal nodes all holding
+// the result of the same `dust_speck(0.014)` call -- equal without being
+// the same object.
+//
+// Three kinds of node, three different keys, and they cost different
+// things:
+//
+//   Literal   the mesh's own content. O(vertices) per node, which is the
+//             expensive one -- ~158 000 vertices hashed across the
+//             donut's dust. Acceptable because cook() runs once per
+//             scene; if it ever runs per frame, this is the line to look
+//             at first.
+//   Space     the exact analytic form's *type* plus the chart sampled at
+//             fixed (u,v), plus the tessellation steps. Sampling the
+//             chart rather than reading parameters back out of the node
+//             is deliberate: it hashes what the geometry will actually
+//             be, so it cannot drift away from what gets tessellated the
+//             way a reconstructed parameter list could. The exact form's
+//             type is folded in so two nodes with the same chart but
+//             different closed forms never merge.
+//   Offset    the base's key, plus the thickness field sampled the same
+//             way. An offset of the same base by the same thickness is
+//             the same shape.
+template<Scalar T>
+inline std::size_t content_hash(const Trace<T>& trace, std::size_t idx) {
+    std::size_t h = 1469598103934665603ull;
+    auto mix = [&h](std::size_t v) { h = (h ^ v) * 1099511628211ull; };
+    auto mix_scalar = [&](T v) { mix(std::hash<double>{}(static_cast<double>(v))); };
+
+    const auto& n = trace.node(idx);
+    mix(static_cast<std::size_t>(n.kind));
+    mix(n.u_steps);
+    mix(n.v_steps);
+
+    if (n.kind == Kind::Literal) {
+        const auto& m = *n.literal_mesh;
+        mix(m.vertex_count());
+        mix(m.face_count());
+        for (const auto& v : m.vertices)
+            for (std::size_t i = 0; i < 3; ++i) mix_scalar(v[i]);
+        return h;
+    }
+
+    if (n.kind == Kind::Offset) {
+        mix(content_hash(trace, n.base));
+        for (int i = 0; i <= 4; ++i)
+            for (int j = 0; j <= 4; ++j)
+                mix_scalar(n.thickness(T(i) * T{0.25}, T(j) * T{0.25}));
+        return h;
+    }
+
+    if (n.kind == Kind::Space) {
+        if (n.exact.has_value()) mix(n.exact.type().hash_code());
+        const auto& s = *n.surface;
+        auto [u0, u1, v0, v1] = s.domain();
+        mix_scalar(u0); mix_scalar(u1); mix_scalar(v0); mix_scalar(v1);
+        for (int i = 0; i <= 3; ++i)
+            for (int j = 0; j <= 3; ++j) {
+                auto p = s.evaluate(u0 + (u1 - u0) * T(i) / T{3}, v0 + (v1 - v0) * T(j) / T{3});
+                for (std::size_t k = 0; k < 3; ++k) mix_scalar(p[k]);
+            }
+        return h;
+    }
+
+    // Scatter: keyed by its item, since that is the geometry being
+    // repeated; the placements are what differ and they live on objects.
+    mix(content_hash(trace, n.item));
+    mix(n.count);
+    mix(n.seed);
+    return h;
+}
+
+template<Scalar T = double>
+Cooked<T> cook(Trace<T>&& trace, std::size_t root, T t = T{0}) {
+    Cooked<T> out;
+    std::unordered_map<std::size_t, std::size_t> shape_of_key;
+
+    // A group's transform is folded into its members here, which is why
+    // `Compose` never needs one of its own at render time and why the
+    // result stays a flat array: the accumulator lives in the walk, not
+    // in the output. Nothing downstream has to follow a parent pointer.
+    auto walk = [&](auto&& self, std::size_t idx, const Vec<T, 3>& carried) -> void {
+        const auto& n = trace.node(idx);
+
+        if (n.kind == Kind::Compose) {
+            for (auto c : n.children) self(self, c, carried);
+            return;
+        }
+
+        // How many instances this operation is, and where each one sits.
+        std::vector<Vec<T, 3>> placements;
+        std::size_t geometry_node = idx;
+
+        if (n.kind == Kind::Scatter) {
+            auto target = resolve_surface(trace, n.target);
+            auto sites = sample_surface_uniform(target, n.count, n.seed);
+            placements.reserve(sites.size());
+            for (const auto& s : sites) placements.push_back(Vec<T, 3>{s.position});
+            geometry_node = n.item;
+        } else {
+            placements.push_back(Vec<T, 3>{});
+        }
+
+        const auto key = content_hash(trace, geometry_node);
+        auto it = shape_of_key.find(key);
+        std::size_t shape_index;
+        if (it == shape_of_key.end()) {
+            shape_index = out.shapes_.size();
+            // Rest geometry, not placed: the shape before this node's own
+            // motion moved it. Sharing is only possible between shapes
+            // that have not yet been put anywhere.
+            out.shapes_.push_back(
+                Shape<T>{materialize_mesh(trace, geometry_node, t, /*placed=*/false), 0});
+            shape_of_key.emplace(key, shape_index);
+        } else {
+            shape_index = it->second;
+        }
+
+        for (const auto& p : placements) {
+            out.objects_.push_back(Object<T>{
+                .shape = shape_index,
+                .source_node = idx,
+                .translation = Vec<T, 3>{carried + p},
+                .material = n.material});
+            ++out.shapes_[shape_index].instances;
+        }
+
+        // A renderer can only instance this object -- draw one geometry N
+        // times with a transform -- if the node's motion is a *placement*.
+        // A structural motion can be read; an opaque one is a per-vertex
+        // point map that may deform, and sharing geometry across
+        // differently-deformed instances is not sound. Counted rather than
+        // silently handled, because the count is what says whether reading
+        // placements out of structural motions is worth building.
+        if (!n.transform.is_structural()) {
+            out.refused_ += placements.size();
+            out.refused_nodes_.push_back(idx);
+        }
+    };
+
+    walk(walk, root, Vec<T, 3>{});
+
+    // Counted after the walk, because "shared" is a property of the
+    // finished grouping: an object is shared if the shape it points at
+    // ended up with more than one instance, which is not knowable while
+    // the group is still being filled.
+    for (const auto& o : out.objects_)
+        if (out.shapes_[o.shape].instances > 1) ++out.shared_;
+
+    out.fields_ = field_report(trace);
+    return out;
 }
 
 } // namespace spatium::io::build

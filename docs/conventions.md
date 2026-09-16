@@ -106,6 +106,34 @@ that-can't-happen this project should avoid. It means the convention is
 now named, so a new fallible *boundary* function in either domain has an
 unambiguous answer: `Result<T>`.
 
+## One name serving two contracts
+
+Named 2026-09-16, at the second instance. Once is a case; twice is a
+pattern worth catching before the third.
+
+**The class: one operation's name covers two contracts that differ in what
+the caller is promising, and code written against the wrong one works —
+quietly doing something else.** It is not a bug that shows up as a wrong
+answer; it shows up as a capability that mysteriously cannot be built.
+
+| the name | contract A | contract B | how it surfaced |
+|---|---|---|---|
+| `offset(base, thickness)` | a closed surface offset into a closed surface | a shell over a surface *with a rim*, where the rim needs a rule | the rule "the base must be closed" was true for A and impossible for B, and the demo did B |
+| `.moving(f)` | a **placement**: this whole object goes there | a **deformation**: every vertex maps somewhere | instancing needs A and can never be built on B; `cook()` measured 19 800 of 19 801 objects blocked, all of them meaning A |
+
+Both were resolved the same way and it is the resolution worth
+remembering: **not by forbidding the second meaning, but by naming the
+two operations separately.** `offset` / `offset_shell` was the first. The
+motion slot is the second, and the distinction is load-bearing: a
+placement can be read, shared and turned into one geometry plus N
+transforms; a point map cannot, because instances that deform differently
+have nothing to share.
+
+The tell, in both cases: a capability that "should obviously work" keeps
+failing to be implementable, and the reason is never the missing feature —
+it is that the name already promised something weaker. When that happens,
+ask what two things the name is covering before adding the feature.
+
 ## A flat array addressed by index, not a tree of pointers
 
 Named 2026-09-15, at the fourth independent application. The first three
