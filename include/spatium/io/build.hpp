@@ -813,6 +813,8 @@ struct Object {
     std::size_t shape = 0;        // index into Cooked::shapes()
     std::size_t source_node = 0;  // the trace node it came from, for reporting
     Vec<T, 3> translation{};      // folded from ancestors and from the node
+    T scale = T{1};               // uniform, from the node's placement
+    bool instanceable = true;     // false when the motion deforms per vertex
     Material<T> material{};
 };
 
@@ -993,23 +995,34 @@ Cooked<T> cook(Trace<T>&& trace, std::size_t root, T t = T{0}) {
             shape_index = it->second;
         }
 
+        // A renderer can instance this object -- draw one geometry many
+        // times, each with its own transform -- exactly when the node's
+        // motion is a *placement*: affine in the point, so it moves the
+        // object without reshaping it.
+        //
+        // Note what the test is not. It is not "is the motion structural".
+        // The donut's dust is Perlin noise and will always be opaque, yet
+        // it is a placement, because the noise decides *where the particle
+        // is* and never reads the vertex. Opacity and point-dependence are
+        // different questions, and only the second one costs anything:
+        // a term that ignores the point is evaluated once per object, a
+        // term that reads it once per vertex.
+        const bool placeable = n.transform.is_placement();
+        typename VecField<T>::Placement pl{};
+        if (placeable) pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
+
         for (const auto& p : placements) {
             out.objects_.push_back(Object<T>{
                 .shape = shape_index,
                 .source_node = idx,
-                .translation = Vec<T, 3>{carried + p},
+                .translation = Vec<T, 3>{carried + p + pl.translation},
+                .scale = pl.scale,
+                .instanceable = placeable,
                 .material = n.material});
             ++out.shapes_[shape_index].instances;
         }
 
-        // A renderer can only instance this object -- draw one geometry N
-        // times with a transform -- if the node's motion is a *placement*.
-        // A structural motion can be read; an opaque one is a per-vertex
-        // point map that may deform, and sharing geometry across
-        // differently-deformed instances is not sound. Counted rather than
-        // silently handled, because the count is what says whether reading
-        // placements out of structural motions is worth building.
-        if (!n.transform.is_structural()) {
+        if (!placeable) {
             out.refused_ += placements.size();
             out.refused_nodes_.push_back(idx);
         }
