@@ -160,14 +160,28 @@ Vec<double, 3> dust_core(double t, const Vec<double, 3>& burst_dir, double burst
     return Vec<double, 3>{approach + splat * (0.22 * arriving * settle * pull_strength)};
 }
 
+// How big a speck is at time t: full size until the hold ends, then
+// shrinking to nothing through the dissolve. Split out from the motion so
+// that "where the particle is" and "how big it is" are separately
+// expressible -- which is what lets the motion be written as a placement
+// rather than as an opaque map over vertices.
+double dust_shrink(double t) {
+    if (t < T_HOLD) return 1.0;
+    return 1.0 - smoothstep01((t - T_HOLD) / (T_DISSOLVE - T_HOLD));
+}
+
+// The two halves together, as one point map. Kept because it is the
+// clearest statement of what the motion *is* -- and it is exactly the
+// form that cannot be instanced, since a reader cannot tell a rigid
+// placement from a deformation through a closure. The scene builds the
+// split form instead; this stays as the reference the split is checked
+// against.
 Vec<double, 3> particle_motion(const Vec<double, 3>& local_p, double t,
                                 const Vec<double, 3>& burst_dir, double burst_dist,
                                 const Vec<double, 3>& target, double pull_strength, double swirl_seed,
                                 const algebra::PerlinNoise& swirl) {
     Vec<double, 3> pos = dust_core(t, burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl);
-    double scale = 1.0;
-    if (t >= T_HOLD) scale = 1.0 - smoothstep01((t - T_HOLD) / (T_DISSOLVE - T_HOLD));
-    return Vec<double, 3>{pos + local_p * scale};
+    return Vec<double, 3>{pos + local_p * dust_shrink(t)};
 }
 
 std::vector<std::pair<double, double>> load_boom_points(const std::string& path) {
@@ -593,10 +607,31 @@ int main(int argc, char* argv[]) {
             scene.literal(dust_speck(0.014))
                 .colored(bd::PointField<double>{
                     [target, dust_color](const Vec<double, 3>& p, double) { return dust_color(p, target); }})
-                .moving([burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl_noise](
-                            const Vec<double, 3>& p, double time) {
-                    return particle_motion(p, time, burst_dir, burst_dist, target, pull_strength, swirl_seed, *swirl_noise);
-                }));
+                // Written as a *placement*, not as a point map, and the
+                // difference is not stylistic. Both forms produce exactly
+                // the same picture -- the particle flies where dust_core
+                // says and shrinks by dust_shrink -- but only this one
+                // says so in a way a later pass can read.
+                //
+                // A single lambda over (p, t) is opaque: nothing can tell
+                // whether it moves the speck or reshapes it, so every one
+                // of these 19 800 objects has to be tessellated
+                // separately even though they are all the same little
+                // cube. Split into "where it is" (which never looks at p)
+                // and "how big" (a scalar on the point), and cook()
+                // reports 19 800 instanceable objects instead of 19 800
+                // refusals -- measured, both ways, on this scene.
+                //
+                // The noise stays noise. opaque_of_time is opaque; what it
+                // promises is only that it does not read the vertex, which
+                // is the property that costs per-vertex work.
+                .moving(bd::VecField<double>::opaque_of_time(
+                            [burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl_noise](double time) {
+                                return dust_core(time, burst_dir, burst_dist, target, pull_strength,
+                                                 swirl_seed, *swirl_noise);
+                            })
+                        + scaled(bd::VecField<double>::point(),
+                                 [](double time) { return dust_shrink(time); })));
     }
 
     // Step 1 -- the dough is a torus, offset by a fine noise bump so it
@@ -707,6 +742,19 @@ int main(int argc, char* argv[]) {
                 case bd::RenderLevel::Newton:      ++newton; break;
             }
         }
+        // What cook() would find, asked directly so the scene survives to
+        // be rendered. A node whose motion is a placement can share one
+        // geometry with every other node of the same shape; one whose
+        // motion is an opaque point map cannot, because nothing can tell
+        // whether it moves the object or reshapes it.
+        std::size_t placeable = 0, deforming = 0;
+        for (std::size_t i = 0; i < scene.size(); ++i) {
+            if (scene.node(i).kind == bd::Kind::Compose) continue;
+            (scene.node(i).transform.is_placement() ? placeable : deforming)++;
+        }
+        std::println("motions: {} placements (shareable geometry), {} deformations (not)",
+                     placeable, deforming);
+
         auto fs = bd::field_report(scene);
         std::println("fields: {} total, {} structural, {} opaque; leaves {} "
                      "({} recognized, {} unknown), {} distinct types, {} B captured [{}]",
