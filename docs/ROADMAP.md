@@ -518,6 +518,102 @@ question is not reopened from scratch in a month.
 
   **Why `typeid` has to be captured by `Field` itself.** `PointField` is today a bare alias for `std::move_only_function`, which unlike `std::function` exposes no `target_type()` — so a motion field in the current tree cannot be counted by type, let alone deduplicated. That is a fact about an alias we do not own, not a property that blocks anything: the fix is `typeid(F)` captured in `Field`'s constructor, one line, and it works because a closure type is one type for every instance of one lambda (see the identity measurement above). It is recorded here rather than done because there is no `Field` constructor yet to put it in — this item is what creates one.
 
+  **Ownership, settled 2026-09-15 and worth stating because the obvious phrase is wrong.** `Field` owns its pool: it is a value type, copies are deep, and `+=` appends into its own vector where nothing else can observe it. "Append, never mutate" is the right phrase for a *shared* pool — a `Field` that is a `(shared_ptr<Pool>, range)` and must keep other fields' ranges valid — and carrying it over to the owning version describes a guarantee the code neither needs nor gives. Here append-only protects exactly one thing, topological order, because a node can only name indices that already exist. If substitution across many fields later wants the shared form, the aliasing guarantee has to be added and proved, not inherited from the phrase.
+
+  **Two cracks, known and not being solved now.**
+
+  `typeid` gives one type per lambda *expression*, not per lambda body. Three `[noise]` lambdas written inside one loop are one type; three written in three places with identical bodies are three. That is correct for deduplication — different sites are different closures — but a report saying `types=3` cannot say *why* there are three, and the person asking "why did deduplication not fire on my scene" needs the report to answer rather than a person. Same seam as `unknown`.
+
+  Layout. Once the threshold is payload against L3, the next question is arrangement: `FieldOp` carries a `std::function`, a `type_index` and a payload size inline, so walking a pool to evaluate it drags the opaque-leaf metadata through cache along with the arithmetic. Splitting the pool into arithmetic and leaf-metadata arrays (SoA) is the natural continuation of the same threshold, and it is not worth doing before there is a lowering pass that walks the arithmetic alone.
+
+  **Scrubbing time backwards already works, and is a property rather than a feature.** `materialize(trace, idx, t)` is a pure function of `t`: a motion field takes `(p, t)` and the trace never stores a previous frame. So rewinding is passing a smaller `t`, with no history buffer and nothing to record — the thing games with time control build machinery for falls out of the trace being a description rather than a state. Worth writing down because it is easy to lose: it holds *exactly as long as motion stays a pure function of time*. The moment a solver writes a pose that depends on the previous one, rewind needs history again. That is the strongest practical argument for keeping fields pure and putting any statefulness somewhere it can be named, and it is an argument that costs nothing today.
+
+  **BVH under mutation: build-once, no refit.** `spatial/bvh.hpp` builds by SAH and has no refit or incremental update, which is exactly the weak spot a destructible scene would hit — a voxel grid updates one cell, a BVH has to rebuild the tree. This is not a defect to fix speculatively; it is the shape of the thing, and the interesting angle is ours rather than generic: an exact analytic leaf *replaces* leaves, and rebuild cost scales with leaf count, so the same measurement that showed a 7 000× build-time difference in the DSL row is also the argument that exact leaves make a rebuilding scene cheaper, not just a static one. If a mutating scene is ever a real consumer, refit comes first and exact leaves make refit smaller.
+
+  **`cook()` and `Cooked<T>`, settled 2026-09-15.** The phase boundary the
+  DSL already had in practice and never expressed: a `Trace` is mutated
+  while it is built, then read-only while it is rendered, and nothing in
+  the type system said so. `trace.cook()` names it.
+
+  **A type, not a flag.** A `frozen_` bool would be a value that looks
+  like a guarantee and does not hold one — nothing stops `trace.torus()`
+  after it is set, and no compiler notices. That is the class named in
+  `conventions.md`, applied to our own design. `Cooked<T>` holds the
+  guarantee structurally: it simply has no `torus()`, `offset()`,
+  `scatter()`. Mutation after cooking is not discouraged, it does not
+  compile. Same shape as `Trace` describing and `Placed` evaluating,
+  one level up.
+
+  By value, and no `thaw()`. `Cooked` owns what it holds rather than
+  pointing into a `Trace` that has to outlive it — the lifetime coupling
+  is exactly what the owning-pool decision in `Field` rejected one level
+  down. Going back to an editable trace means editing the source and
+  cooking again, and if that is ever made a method it costs an O(n) copy
+  and should say so, because the alternative is a flag under a new name.
+  Note that "rebuild means a new trace" is *today* forced rather than
+  chosen: `TraceNode` holds a `move_only_function`, so a `Trace` cannot
+  be copied at all. Once motion is a `Field` that owns its pool, the
+  constraint lifts and this becomes a decision on its merits.
+
+  **What cook() does is one thing, and that is the argument for it.**
+  Five loose ends that were being tracked separately turn out to be the
+  same work, all of which can only happen once the whole scene is known:
+  expanding operations into objects; deduplicating shapes (which *is*
+  instancing — "one shape, N transforms" cannot be formed before you know
+  there are N); compacting the pool; the field report, computed once
+  instead of per frame; and AoS→SoA. One well-placed boundary closing
+  several problems is the signal that they were one problem.
+
+  Deduplication is part of the expansion, not an optimisation on top of
+  it — without it there is no instancing at all. SoA and compaction are
+  optimisations; those two are not the same kind of thing and the
+  distinction is worth keeping.
+
+  **Objects need their own index space, and `Scatter` proves it.** A
+  trace node is an *operation*; a scene object is a *result*. One
+  `Scatter` node materialises 600 sprinkles, so no node index names the
+  37th. `Compose` is grouping and not an object at all — it has no
+  `Placed` of its own — which is why `.moving()` on one is refused rather
+  than implemented.
+
+  **One layout, three sources of value.** Instancing and a runtime share
+  a shape: a table of shapes plus N per-instance slots. They are not one
+  mechanism, because the slots are filled three different ways, and
+  collapsing that difference would hide the reason authored motion cannot
+  serve physics:
+
+  | source | when the value is produced | storage |
+  |---|---|---|
+  | instancing | once, in `cook()` | the transform, computed and kept |
+  | authored motion (`.moving()`) | freshly, every frame | none — a pure function of `(p, t)` |
+  | physics | accumulated across steps | the integrator's state |
+
+  A pure function of time and an integrator are different mathematical
+  objects and neither reduces to the other. `.moving()` cannot be
+  extended into physics; physics is a second branch.
+
+  **The consumer for all of this already exists and is not connected.**
+  `examples/ball_pit_demo.cpp`, `tumbling_body_demo.cpp` and
+  `native_collision_demo.cpp` include no `io/build.hpp` at all — the
+  physics in this repository lives entirely outside the DSL. And
+  `ball_pit_demo.cpp:349` is `step_physics(std::vector<SphereBody>&
+  bodies, ...)`: a flat array of objects carrying mass, velocity and
+  position, mutated every substep. That is a runtime, already written,
+  already working, answering questions (1), (2) and (5) above before they
+  were asked.
+
+  So the next piece of work is not "design a runtime" but **express
+  ball_pit's scene through the DSL and record where it breaks**. The
+  breakages are the requirements, found rather than invented, and the
+  demo is a deliverable either way. Questions (3) and (4) will not be
+  answered by it — ball_pit uses a fixed `dt`, no event timers and no
+  metric — and that is correct: a consumer answers the questions it
+  actually has.
+
+  **Five architecture questions, open and deliberately unanswered.** `PointField`'s eventual shape depends on them, and none has a consumer yet, so answering them now would be designing blind — the same call as `SurfaceWithBoundary`. Recorded so the questions are not rediscovered as surprises: (1) where mutable state lives, if `Trace` and `Cooked` are both immutable; (2) what the unit of mutation is — rebuilding a trace, or writing into a parallel structure; (3) that "time" today names two different things, an object's local clock and the metric's dilation, which are items 5 and 7 and not the same mechanism; (4) whether a timer is a function of `t` or state, which decides whether an object can wait, pause or start on an event; (5) whether physics bodies live in the trace or beside it.
+
+  What follows from them *now* is only this, and it is cheap: a field's input should be a **named environment**, not a bare `t`. Today it holds one thing and behaves exactly as today. Tomorrow a local clock or a solver-written pose is a field added to a struct rather than a change to every signature and every call site. Item 3 taught the same lesson from the other side — the slot was right and what filled it changed.
+
   **The next crack, unsolved on purpose.** Two different `particle_motion`-shaped functions in one trace with different parameter counts — one takes three, the other five. Either the shorter pads with empties, or two genuinely different functions end up sharing a name. No answer yet, and it does not block the work, but it is the same seam and worth expecting.
 
   Justification is **not** call overhead, and not hoisting either: the indirect call measures ~3.3 ns/vertex (~4% of a realistic callee), so even eliminating it entirely is within noise. Hoisting `t`-only subexpressions is worth well under 1% on today's demo — `grow_scale`'s one `smoothstep` per vertex — and only becomes material when the hoisted subexpression is expensive, which is the local-time item below. What fields actually buy is the parameter table and deduplication above. Selling them on hoisting would be a fourth refuted hypothesis in this series. The one thing a closure genuinely cannot do at all, rather than merely more slowly, is lower to branchless GPU code.
@@ -677,6 +773,49 @@ which is why the donut demo's 19 800 motion closures can share one
 `PerlinNoise` through a `shared_ptr` instead of copying 9.7 MB of
 identical tables. The others did not, and the reason is the same in each
 case: the type underneath insists on copying what it holds.
+
+**Reformulated 2026-09-15: the goal is sharing, not move-only.** The
+original plan for this item was `ParamFn` -> `move_only_function`, making
+`ParametricSurface` move-only. That is now withdrawn, for two reasons
+that only became visible once fields had a shape.
+
+It aimed at the wrong target. The measured problem was never "a hook
+needs to own a `unique_ptr`" -- nothing in the tree has move-only state
+today. It was 19 800 copies of a 512-byte table, and `move_only_function`
+does not fix that: each closure would still carry its own table, moved
+rather than copied. What fixes it is **sharing the state**, which
+`donut_demo.cpp:545` already does by hand with one
+`std::make_shared<const PerlinNoise>`. The "hand-rolled shared_ptr dance"
+this item feared turns out to be two lines, already written, and working.
+
+And it pulled against the rest of the series. A `Field` owns its pool and
+is copyable, which is what makes `TraceNode` copyable, which is what lets
+`cook()` copy a trace rather than consume it. Making `ParametricSurface`
+move-only would take that back. Worth noticing that the choice is now
+genuinely a choice: "rebuild means a new trace, the old one discarded" is
+today forced by `PointField` being move-only, and after this item it
+becomes a decision to make on its merits rather than a constraint to obey.
+
+So what remains here is:
+
+- **the full `EdgeRule` set** -- `RoundCap(radius)`, `FlatCap`,
+  `ExtendTo(node)`, which need fields that carry data and so depend on
+  the item above;
+- **making heavy shared state easy** -- `PerlinNoise` holding a
+  `shared_ptr<const Table>` so a copy of the noise is a copy of a
+  pointer, 8 bytes rather than 512, shared by construction rather than by
+  the user remembering to. The same pattern for any future heavy payload
+  in a `Field` leaf. Measured already: the report's payload across 19 800
+  leaves is 10 137 600 B by value against 158 400 B by reference.
+- **`ParametricSurface` stays copyable.** Not a compromise: copyable
+  surface and shared heavy state are both right, and they work together.
+
+One thing to know rather than solve, so it is not rediscovered: a
+`shared_ptr<const T>` copy is an atomic refcount. Copying fields in a
+loop over tens of thousands of them would count atomics, and if that ever
+lands in the frame path the answer is a non-atomic intrusive pointer for
+single-threaded use -- which is exactly the hand-rolled work this item
+originally flinched from. Not now; it is not in a hot path today.
 
 Worth stating because it is the obvious wrong turn: **the escape is
 `move_only_function`, not `copyable_function`.** The latter requires a

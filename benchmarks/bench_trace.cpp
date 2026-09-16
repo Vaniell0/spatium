@@ -77,13 +77,27 @@ struct SwirlMotion {
     }
 };
 
-// Same swirl, but owning its PerlinNoise by value instead of pointing
-// at a shared one -- which is what examples/donut_demo.cpp:578 actually
-// does, capturing `swirl_noise` by value into every one of its 19 800
-// closures. sizeof(PerlinNoise) is 512 bytes (a 512-entry permutation
-// table), so that is ~9.7 MB of identical tables against a 12 MB L3.
-// std::function requires its callable to be copy-constructible, which
-// is what makes capture-by-value the path of least resistance here.
+// Same swirl, but owning its PerlinNoise by value instead of pointing at
+// a shared one. sizeof(PerlinNoise) is 512 bytes (a 512-entry
+// permutation table), so across the demo's 19 800 closures that is
+// ~9.7 MB of identical tables against a 12 MB L3 -- the cache, not the
+// megabytes, is why it costs ~3% of a frame.
+//
+// **This is a counterfactual, not the demo.** Corrected 2026-09-15: this
+// comment used to say the by-value form "is what examples/donut_demo.cpp:578
+// actually does". It is not, and has not been since PR #26 made
+// `PointField` a `std::move_only_function`: donut_demo.cpp:545 builds one
+// `std::make_shared<const PerlinNoise>` and line 596 captures that shared
+// pointer, 8 bytes per closure. Line 578 is an unrelated `double roll`.
+// The benchmark keeps the owning version precisely because the demo no
+// longer uses it -- it is what measures the cost of the style that was
+// abandoned, and the stale comment turned that into an apparent live
+// defect, complete with a line number that made it look checked.
+//
+// The constraint the comment was reaching for is real and still applies
+// one slot over: `std::function` requires a copy-constructible callable,
+// which is what makes capture-by-value the path of least resistance
+// wherever the escape has not been made easy.
 struct SwirlMotionOwned {
     algebra::PerlinNoise noise{3};
     V3 dir;

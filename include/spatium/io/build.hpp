@@ -11,6 +11,7 @@
 #  include <spatium/spaces/parametric.hpp>
 #  include <spatium/spaces/sample.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
+#  include <spatium/io/field.hpp>
 #  include <any>
 #  include <cstdint>
 #  include <functional>
@@ -45,32 +46,34 @@ SPATIUM_EXPORT namespace spatium::io::build {
 
 // ── Field slots ───────────────────────────────────────────────────
 //
-// A node's motion/thickness/color hooks are std::move_only_function,
-// not std::function, for two reasons that are about capability rather
-// than speed (the indirect call itself measures ~3.3 ns/vertex, ~4% of
-// a realistic motion callee -- see benchmarks/bench_trace.cpp):
+// A node's motion and thickness are `Field`s -- expressions whose leaves
+// may be opaque callables -- not bare erased functions. See io/field.hpp
+// for why the leaf rather than the whole field is the unit of opacity.
 //
-//   - std::function requires its callable to be copy-constructible, so
-//     anything a hook wants to own has to be copyable too. That makes
-//     capturing heavy state by value the path of least resistance:
-//     donut_demo captured a 512-byte PerlinNoise into each of 19 800
-//     closures, ~9.7 MB of identical tables, because sharing it would
-//     have needed a hand-rolled shared_ptr dance. move_only_function
-//     accepts move-only state directly.
-//   - The signatures are const-qualified, so a hook is callable through
-//     the `const Trace&` materialize() actually holds. std::function's
-//     operator() is const but happily calls a non-const callable, a
-//     known hole this type closes.
+// The motion slot used to be a `std::move_only_function`, chosen so a
+// hook could own move-only state and so the signature could be const.
+// Both of those were about capability, and the second one still holds
+// (the field's call operator is const). The first turned out to aim at a
+// problem nobody had: nothing in the tree owns move-only state, while the
+// problem that *was* measured -- 19 800 closures each copying a 512-byte
+// noise table -- is fixed by sharing the table, which the demo already
+// does. Meanwhile move-only cost something real: it made a `TraceNode`
+// uncopyable, so a `Trace` could not be copied, so `cook()` could only
+// consume a trace rather than copy it, and `std::move_only_function`
+// exposes no `target_type()`, so a motion could not even be counted by
+// type. A field that owns its pool gives back all three.
+//
+// A lambda of the historical `(point, t)` shape still converts
+// implicitly, so every scene reads unchanged. What it gains is that the
+// conversion is now visible: an identity motion is a `Point` node and a
+// constant shift is `Point + Const`, both structural and both reported as
+// such, where they used to be opaque one-line lambdas indistinguishable
+// from a noise field.
 template<Scalar T = double>
-using PointField = std::move_only_function<Vec<T, 3>(const Vec<T, 3>&, T) const>;
+using PointField = VecField<T>;
 
-// Deliberately still std::function, unlike PointField: a thickness flows
-// through offset_surface() into a ParametricSurface, whose ParamFn is
-// itself a std::function and therefore requires a copy-constructible
-// callable. The constraint belongs to ParametricSurface, not to the DSL,
-// and moving this slot needs that type to change first.
 template<Scalar T = double>
-using ScalarField = std::function<T(T, T)>;
+using ScalarField = Field<T>;
 
 enum class Kind { Space, Offset, Scatter, Compose, Literal };
 
@@ -525,6 +528,28 @@ Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
 // slot, and that has to agree with what the callable form does here.
 template<Scalar T>
 Handle<T> Handle<T>::moving(PointField<T> f) const {
+    // Refused on a Compose, at the call site, because until now it was
+    // accepted and silently did nothing: materialize() never builds a
+    // Placed for a Compose node -- it flattens to the children's -- so
+    // the motion had nowhere to be read from. A call that returns a
+    // handle and changes nothing is the same defect as a filter that
+    // skips nothing; see conventions.md.
+    //
+    // Refused rather than implemented, and that is the design decision
+    // rather than the cheap way out. Giving a Compose its own transform
+    // would make a node's effective transform the product of its
+    // ancestors' -- a scene graph, walked by following parents, which is
+    // exactly what addressing a flat array by index exists to avoid.
+    // Group motion belongs at the moment operations are expanded into
+    // objects, where it folds into each object's own transform once and
+    // the array stays flat. Until that expansion exists, move the
+    // children.
+    if (trace->node(index).kind == Kind::Compose)
+        throw std::logic_error(
+            "moving() on a Compose node: a Compose is grouping, not an object -- it "
+            "materializes to its children, so a motion here would have nothing to read "
+            "it. Apply .moving() to each child, or compose the moved children.");
+
     // The exact form goes, always. `f` is an arbitrary point map, so in
     // general it does not send a torus to a torus, and a recorded shape
     // that no longer agrees with the map is worse than no recorded shape
@@ -557,7 +582,14 @@ template<Scalar T>
 ParametricSurface<T> resolve_surface(const Trace<T>& trace, std::size_t idx) {
     const auto& n = trace.node(idx);
     if (n.kind == Kind::Space) return *n.surface;
-    if (n.kind == Kind::Offset) return offset_surface(resolve_surface(trace, n.base), n.thickness);
+    // T cannot be deduced from a Field through offset_surface's
+    // std::function parameter, so the erasure is spelled here. This is
+    // the boundary where the field's structure stops travelling and only
+    // its value continues: the node keeps the Field, so the report and
+    // any lowering pass still see the expression.
+    if (n.kind == Kind::Offset)
+        return offset_surface<T>(resolve_surface(trace, n.base),
+                                 std::function<T(T, T)>{n.thickness});
     throw std::logic_error("resolve_surface: node is not a Space or Offset");
 }
 
@@ -706,6 +738,32 @@ std::vector<Placed<T>> materialize(const Trace<T>& trace, std::size_t idx, T t) 
         return out;
     }
     return {Placed<T>{&trace, idx, t}};
+}
+
+// ── The field report ─────────────────────────────────────────────
+//
+// What the trace's fields actually are, walked once. Cheap enough to call
+// per frame -- measured at 2.8-5.1 ns per field, so 112-204 us across the
+// donut demo's ~39 600 against an 80 ms frame -- which is why there is no
+// cache here and no need for one. Note that this is a property of the
+// trace being immutable once built: if a scene ever mutates between
+// frames, computing it once at that boundary is the obvious move.
+//
+// Reports recognized and unknown separately, and prints unknown even when
+// it is zero. A single "distinct types" number cannot distinguish "they
+// really are all one closure" from "they all fell into one bucket nothing
+// could classify", and that is the defect class conventions.md names.
+template<Scalar T>
+FieldStats field_report(const Trace<T>& trace) {
+    FieldStats stats{};
+    std::vector<std::type_index> seen;
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+        const auto& n = trace.node(i);
+        if (n.kind == Kind::Offset) accumulate(stats, n.thickness, seen);
+        accumulate(stats, n.transform, seen);
+        accumulate(stats, n.color_fn, seen);
+    }
+    return stats;
 }
 
 } // namespace spatium::io::build
