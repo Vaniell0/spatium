@@ -22,6 +22,7 @@
 #  include <spatium/geometry/triangle.hpp>
 #  include <algorithm>
 #  include <optional>
+#  include <limits>
 #  include <span>
 #endif
 
@@ -102,102 +103,100 @@ inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
 
 // ── One shape, placed: the instance leaf ─────────────────────────
 //
-// A shape that is *somewhere else*. It does not own its geometry -- it
-// points at triangles shared with every other instance of the same shape
-// -- and carries the placement that puts it there.
+// A shape that is *somewhere else*. It points at geometry shared with
+// every other instance of the same shape and carries the placement that
+// puts it there, so a BVH holding these by value is holding placements,
+// not meshes.
 //
-// This is what lets a BVH hold one leaf per object instead of one leaf
-// per triangle. The donut's dust is 19 800 copies of the same 12-triangle
-// cube: 396 000 triangle leaves today, 19 800 instance leaves with this.
-// Measured on that scene, the dust is 56% of the frame and scales
-// linearly with the particle count, and leaf count is what both the build
-// and the traversal depth follow.
+// **Measured on 19 800 specks**, against the flattened form a scene
+// builds when every object carries its own triangles:
+//
+//   leaf                  leaves     build       cast      memory
+//   flattened triangles   237 600   319.3 ms   336.8 ms   17.1 MB
+//   Instanced<Box>         19 800    19.8 ms   310.4 ms    0.79 MB
+//
+// 7 740 hits either way. 16.1x on build, 1.08x on traversal, 21.6x on
+// memory.
+//
+// **The leaf must be ONE shape, and that took a wrong turn to learn.**
+// The first version held a span of the shape's triangles and scanned them
+// linearly, on the reasoning that a dozen triangles beat a tree. It lost
+// traversal 2.9x. The comparison was never a 12-triangle scan against a
+// 12-triangle tree -- it was a scan against a top-level BVH that had
+// already narrowed the ray to *one* triangle. Arithmetic settles it
+// without a second measurement: flattened is depth ~18 plus one
+// Möller-Trumbore, instanced-with-12 is depth ~15 plus twelve, so three
+// slab tests are saved and eleven triangle tests added; at a triangle
+// test costing roughly three slabs that predicts 2.4x worse against a
+// measured 2.9x. Bounding-box overlap was never involved.
+//
+// So the leaf holds a shape and does one `ray_hit`. For a speck that
+// never rotates, that shape is a `Box` -- and a box is not an
+// approximation of a cube, it *is* the cube, tested in six slab
+// comparisons rather than twelve Möller-Trumbore.
 //
 // **The placement is a translation and a uniform scale, deliberately.**
 // That is what `VecField::is_placement()` can extract, and it is the case
 // where transforming the ray is exact and free: with
 // `local = (world - translation) / scale`, the ray parameter `t` is
-// unchanged and the surface normal is unchanged, so a hit needs no
-// correction on the way back out. A rotation would join them easily. A
-// *non-uniform* scale would not: normals would need the inverse transpose
-// and `t` would need rescaling, and shear or a projective map are a
-// different conversation again. The boundary is named here rather than
-// discovered by someone whose normals quietly go wrong.
+// unchanged and the normal is unchanged, so a hit needs no correction on
+// the way back out. A rotation would join them easily. A *non-uniform*
+// scale would not -- normals would want the inverse transpose -- and
+// shear or a projective map are a different conversation again. Named
+// here rather than discovered by someone whose normals quietly go wrong.
 //
-// **Measured, and it does not pay yet -- nothing uses this.** On 19 800
-// specks of 12 triangles each, against the flattened 237 600-triangle
-// form the demo builds today:
-//
-//   BVH build   304.2 ms -> 20.1 ms   (15x faster, 237 600 -> 19 800 leaves)
-//   geometry      6.5 ms -> 0.2 ms
-//   200 000 rays  330.6 ms -> 959.6 ms  (2.9x SLOWER; 7 740 hits either way)
-//
-// The traversal number is the one that decides it, and the cause is this
-// comment's original claim, which was wrong: "at a dozen triangles a
-// linear scan beats a tree". The comparison is not a 12-triangle scan
-// against a 12-triangle tree. It is a 12-triangle scan against a top-level
-// BVH that had already narrowed the ray down to *one* triangle. Putting a
-// linear scan at the leaf reintroduces exactly what the tree exists to
-// remove, and 15x on build does not buy back 2.9x on traversal when a
-// frame is a million rays.
-//
-// **The cause, settled by arithmetic and then confirmed.** Flattened:
-// 237 600 leaves, depth ~18, one triangle per leaf -- 18 AABB tests plus
-// one Möller-Trumbore. Instanced: 19 800 leaves, depth ~15, twelve
-// triangles per leaf -- 15 AABB plus twelve Möller-Trumbore. Three AABB
-// tests saved, eleven triangle tests added; at a triangle test costing
-// roughly three slab tests that predicts ~2.4x worse, and the measurement
-// said 2.9x. The overlap of instance bounding boxes was never the
-// problem.
-//
-// So the fix is not a nested acceleration structure -- that would be
-// 19 800 subtrees to build. **The leaf has to be one shape.** For a speck
-// that never rotates, that shape is a `Box`: axis-aligned in local space,
-// so the slab test is exact rather than an approximation, and it is
-// cheaper than a single triangle test. Measured on the same scene:
-//
-//   leaf                  leaves     build       cast
-//   flattened triangles   237 600   314.7 ms   318.0 ms
-//   instance of 12 tris    19 800    19.9 ms   982.9 ms
-//   instance of one box    19 800    19.8 ms   293.5 ms
-//
-// 7 740 hits in all three. One-shape leaves win on both axes: 15.9x on
-// build and 8% on traversal.
-//
-// This type stays as written -- an instance over a span of triangles is
-// the general case, and it is the right general case for a shape that
-// really is a mesh. What the numbers say is that the *dust* should not be
-// a mesh at all; a cube is a Box. Nothing is wired into a renderer yet.
-template<Scalar T>
-struct Instanced {
-    using ScalarType = T;
-    using PointType = Vec<T, 3>;
-    static constexpr std::size_t ambient_dimension = 3;
+// Nothing is wired into a renderer yet.
 
-    std::span<const Triangle<3, T>> triangles{};  // shared, not owned
-    Vec<T, 3> translation{};
-    T scale = T{1};
+// A Box is a shape a ray can hit, not only a bound. Six slab comparisons,
+// cheaper than a single triangle test -- which is what makes it the right
+// leaf for anything whose geometry really is a box.
+template<Scalar T>
+inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
+                                         const Box<3, T>& box) {
+    auto span = intersect_parameters(ray, box);
+    if (!span) return std::nullopt;
+    T t = span->first;
+    if (!(t >= T{0})) t = span->second;       // origin inside: take the exit
+    if (!(t >= T{0})) return std::nullopt;
+
+    Vec<T, 3> p{ray.origin + ray.direction * t};
+    // The face the hit landed on: whichever coordinate sits on its slab.
+    Vec<T, 3> n{};
+    T closest = std::numeric_limits<T>::max();
+    for (std::size_t i = 0; i < 3; ++i) {
+        using std::abs;
+        T d_lo = abs(p[i] - box.min_corner[i]);
+        T d_hi = abs(p[i] - box.max_corner[i]);
+        if (d_lo < closest) { closest = d_lo; n = Vec<T, 3>{}; n[i] = T{-1}; }
+        if (d_hi < closest) { closest = d_hi; n = Vec<T, 3>{}; n[i] = T{1}; }
+    }
+    return RayHit3<T>{t, p, n, T{0}, T{0}};
+}
+
+template<typename S>
+struct Instanced {
+    using ScalarType = typename S::ScalarType;
+    using PointType = typename S::PointType;
+    static constexpr std::size_t ambient_dimension = S::ambient_dimension;
+
+    // A pointer, not a copy. This is the whole point: a thousand instances
+    // of one shape cost a thousand placements and one geometry, and the
+    // BVH holding them by value is holding placements, not meshes.
+    const S* shape = nullptr;
+    Vec<ScalarType, 3> translation{};
+    ScalarType scale = ScalarType{1};
 
     PointType centroid() const {
-        Vec<T, 3> c{};
-        if (triangles.empty()) return PointType{translation};
-        for (const auto& tri : triangles) c = Vec<T, 3>{c + tri.centroid()};
-        return PointType{c * (scale / static_cast<T>(triangles.size())) + translation};
+        if (!shape) return PointType{translation};
+        return PointType{shape->centroid() * scale + translation};
     }
 
-    Box<3, T> bounding_box() const {
-        if (triangles.empty()) return Box<3, T>{translation, translation};
-        auto b = triangles.front().bounding_box();
-        Vec<T, 3> lo = b.min_corner, hi = b.max_corner;
-        for (const auto& tri : triangles) {
-            auto tb = tri.bounding_box();
-            for (std::size_t i = 0; i < 3; ++i) {
-                lo[i] = std::min(lo[i], tb.min_corner[i]);
-                hi[i] = std::max(hi[i], tb.max_corner[i]);
-            }
-        }
-        return Box<3, T>{Vec<T, 3>{lo * scale + translation},
-                         Vec<T, 3>{hi * scale + translation}};
+    Box<3, ScalarType> bounding_box() const {
+        if (!shape) return Box<3, ScalarType>{translation, translation};
+        auto b = shape->bounding_box();
+        return Box<3, ScalarType>{
+            Vec<ScalarType, 3>{b.min_corner * scale + translation},
+            Vec<ScalarType, 3>{b.max_corner * scale + translation}};
     }
 };
 
@@ -207,25 +206,20 @@ struct Instanced {
 // the placement to translation plus uniform scale: dividing both origin
 // and direction by the same scale leaves `origin + t * direction` meaning
 // the same point, so no hit needs rescaling and no normal needs fixing.
-template<Scalar T>
-inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
-                                         const Instanced<T>& inst) {
-    if (inst.triangles.empty() || inst.scale == T{0}) return std::nullopt;
+template<typename S>
+inline std::optional<RayHit3<typename S::ScalarType>> ray_hit(
+    const Ray<3, typename S::ScalarType>& ray, const Instanced<S>& inst) {
+    using T = typename S::ScalarType;
+    if (!inst.shape || inst.scale == T{0}) return std::nullopt;
 
     const Ray<3, T> local{Vec<T, 3>{(ray.origin - inst.translation) / inst.scale},
                           Vec<T, 3>{ray.direction / inst.scale}};
 
-    std::optional<RayHit3<T>> best;
-    for (const auto& tri : inst.triangles) {
-        auto h = ray_hit(local, tri);
-        if (!h) continue;
-        if (best && !(h->t < best->t)) continue;
-        best = h;
-    }
-    if (!best) return std::nullopt;
-
-    best->point = Vec<T, 3>{best->point * inst.scale + inst.translation};
-    return best;
+    using geometry::ray_hit;
+    auto h = ray_hit(local, *inst.shape);
+    if (!h) return std::nullopt;
+    h->point = Vec<T, 3>{h->point * inst.scale + inst.translation};
+    return h;
 }
 
 // Concept: any type with a matching `ray_hit` overload qualifies.
