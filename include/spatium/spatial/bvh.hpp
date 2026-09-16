@@ -105,7 +105,18 @@ struct BVH {
                 for (std::uint32_t i = 0; i < node.count; ++i) {
                     auto idx = prim_indices_[node.first + i];
                     if constexpr (has_ray_hit) {
-                        auto h = geometry::ray_hit(ray, shapes_[idx]);
+                        // Unqualified, after pulling the library's own
+                        // overloads into scope: this is the two-step that
+                        // makes the extension point in ray_hit.hpp true.
+                        // A qualified `geometry::ray_hit` finds only what
+                        // lives in that namespace, so a user shape with
+                        // its own overload beside it satisfied
+                        // `RayHittable` -- which looks the name up
+                        // unqualified and finds theirs by ADL -- while
+                        // `BVH<TheirShape>` failed to compile. The concept
+                        // said yes and the use said no.
+                        using geometry::ray_hit;
+                        auto h = ray_hit(ray, shapes_[idx]);
                         if (h && h->t >= T{0} && h->t < best_t) {
                             best_t = h->t;
                             best = Hit{idx, h->t, h->point,

@@ -141,17 +141,33 @@ inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
 // remove, and 15x on build does not buy back 2.9x on traversal when a
 // frame is a million rays.
 //
-// Two candidates for why, untested and deliberately not guessed between:
-// the leaf's linear scan itself, or the instance bounding boxes of a
-// scattered cloud overlapping so heavily that the top-level tree cannot
-// separate them and visits many instances per ray. The fix is a nested
-// acceleration structure inside the instance, or a leaf that is one shape
-// rather than a dozen triangles -- but which one follows from which cause,
-// so the cause gets measured first.
+// **The cause, settled by arithmetic and then confirmed.** Flattened:
+// 237 600 leaves, depth ~18, one triangle per leaf -- 18 AABB tests plus
+// one Möller-Trumbore. Instanced: 19 800 leaves, depth ~15, twelve
+// triangles per leaf -- 15 AABB plus twelve Möller-Trumbore. Three AABB
+// tests saved, eleven triangle tests added; at a triangle test costing
+// roughly three slab tests that predicts ~2.4x worse, and the measurement
+// said 2.9x. The overlap of instance bounding boxes was never the
+// problem.
 //
-// Kept, not deleted, because the build-side numbers are real and the type
-// is the right shape for the placement extraction that feeds it. It is
-// not wired into any renderer.
+// So the fix is not a nested acceleration structure -- that would be
+// 19 800 subtrees to build. **The leaf has to be one shape.** For a speck
+// that never rotates, that shape is a `Box`: axis-aligned in local space,
+// so the slab test is exact rather than an approximation, and it is
+// cheaper than a single triangle test. Measured on the same scene:
+//
+//   leaf                  leaves     build       cast
+//   flattened triangles   237 600   314.7 ms   318.0 ms
+//   instance of 12 tris    19 800    19.9 ms   982.9 ms
+//   instance of one box    19 800    19.8 ms   293.5 ms
+//
+// 7 740 hits in all three. One-shape leaves win on both axes: 15.9x on
+// build and 8% on traversal.
+//
+// This type stays as written -- an instance over a span of triangles is
+// the general case, and it is the right general case for a shape that
+// really is a mesh. What the numbers say is that the *dust* should not be
+// a mesh at all; a cube is a Box. Nothing is wired into a renderer yet.
 template<Scalar T>
 struct Instanced {
     using ScalarType = T;
