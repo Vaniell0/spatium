@@ -20,7 +20,9 @@
 #  include <spatium/geometry/line.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
 #  include <spatium/geometry/triangle.hpp>
+#  include <algorithm>
 #  include <optional>
+#  include <span>
 #endif
 
 SPATIUM_EXPORT namespace spatium::geometry {
@@ -96,6 +98,118 @@ inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
     if (hits.empty()) return std::nullopt;
     auto& h = hits.front();
     return RayHit3<T>{h.t, h.point, h.normal, T{0}, T{0}};
+}
+
+// ── One shape, placed: the instance leaf ─────────────────────────
+//
+// A shape that is *somewhere else*. It does not own its geometry -- it
+// points at triangles shared with every other instance of the same shape
+// -- and carries the placement that puts it there.
+//
+// This is what lets a BVH hold one leaf per object instead of one leaf
+// per triangle. The donut's dust is 19 800 copies of the same 12-triangle
+// cube: 396 000 triangle leaves today, 19 800 instance leaves with this.
+// Measured on that scene, the dust is 56% of the frame and scales
+// linearly with the particle count, and leaf count is what both the build
+// and the traversal depth follow.
+//
+// **The placement is a translation and a uniform scale, deliberately.**
+// That is what `VecField::is_placement()` can extract, and it is the case
+// where transforming the ray is exact and free: with
+// `local = (world - translation) / scale`, the ray parameter `t` is
+// unchanged and the surface normal is unchanged, so a hit needs no
+// correction on the way back out. A rotation would join them easily. A
+// *non-uniform* scale would not: normals would need the inverse transpose
+// and `t` would need rescaling, and shear or a projective map are a
+// different conversation again. The boundary is named here rather than
+// discovered by someone whose normals quietly go wrong.
+//
+// **Measured, and it does not pay yet -- nothing uses this.** On 19 800
+// specks of 12 triangles each, against the flattened 237 600-triangle
+// form the demo builds today:
+//
+//   BVH build   304.2 ms -> 20.1 ms   (15x faster, 237 600 -> 19 800 leaves)
+//   geometry      6.5 ms -> 0.2 ms
+//   200 000 rays  330.6 ms -> 959.6 ms  (2.9x SLOWER; 7 740 hits either way)
+//
+// The traversal number is the one that decides it, and the cause is this
+// comment's original claim, which was wrong: "at a dozen triangles a
+// linear scan beats a tree". The comparison is not a 12-triangle scan
+// against a 12-triangle tree. It is a 12-triangle scan against a top-level
+// BVH that had already narrowed the ray down to *one* triangle. Putting a
+// linear scan at the leaf reintroduces exactly what the tree exists to
+// remove, and 15x on build does not buy back 2.9x on traversal when a
+// frame is a million rays.
+//
+// Two candidates for why, untested and deliberately not guessed between:
+// the leaf's linear scan itself, or the instance bounding boxes of a
+// scattered cloud overlapping so heavily that the top-level tree cannot
+// separate them and visits many instances per ray. The fix is a nested
+// acceleration structure inside the instance, or a leaf that is one shape
+// rather than a dozen triangles -- but which one follows from which cause,
+// so the cause gets measured first.
+//
+// Kept, not deleted, because the build-side numbers are real and the type
+// is the right shape for the placement extraction that feeds it. It is
+// not wired into any renderer.
+template<Scalar T>
+struct Instanced {
+    using ScalarType = T;
+    using PointType = Vec<T, 3>;
+    static constexpr std::size_t ambient_dimension = 3;
+
+    std::span<const Triangle<3, T>> triangles{};  // shared, not owned
+    Vec<T, 3> translation{};
+    T scale = T{1};
+
+    PointType centroid() const {
+        Vec<T, 3> c{};
+        if (triangles.empty()) return PointType{translation};
+        for (const auto& tri : triangles) c = Vec<T, 3>{c + tri.centroid()};
+        return PointType{c * (scale / static_cast<T>(triangles.size())) + translation};
+    }
+
+    Box<3, T> bounding_box() const {
+        if (triangles.empty()) return Box<3, T>{translation, translation};
+        auto b = triangles.front().bounding_box();
+        Vec<T, 3> lo = b.min_corner, hi = b.max_corner;
+        for (const auto& tri : triangles) {
+            auto tb = tri.bounding_box();
+            for (std::size_t i = 0; i < 3; ++i) {
+                lo[i] = std::min(lo[i], tb.min_corner[i]);
+                hi[i] = std::max(hi[i], tb.max_corner[i]);
+            }
+        }
+        return Box<3, T>{Vec<T, 3>{lo * scale + translation},
+                         Vec<T, 3>{hi * scale + translation}};
+    }
+};
+
+// The ray goes into the object's own space; the hit comes back out.
+//
+// `t` survives the round trip untouched, which is the reason to restrict
+// the placement to translation plus uniform scale: dividing both origin
+// and direction by the same scale leaves `origin + t * direction` meaning
+// the same point, so no hit needs rescaling and no normal needs fixing.
+template<Scalar T>
+inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
+                                         const Instanced<T>& inst) {
+    if (inst.triangles.empty() || inst.scale == T{0}) return std::nullopt;
+
+    const Ray<3, T> local{Vec<T, 3>{(ray.origin - inst.translation) / inst.scale},
+                          Vec<T, 3>{ray.direction / inst.scale}};
+
+    std::optional<RayHit3<T>> best;
+    for (const auto& tri : inst.triangles) {
+        auto h = ray_hit(local, tri);
+        if (!h) continue;
+        if (best && !(h->t < best->t)) continue;
+        best = h;
+    }
+    if (!best) return std::nullopt;
+
+    best->point = Vec<T, 3>{best->point * inst.scale + inst.translation};
+    return best;
 }
 
 // Concept: any type with a matching `ray_hit` overload qualifies.
