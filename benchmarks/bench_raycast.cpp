@@ -103,6 +103,24 @@ static void BM_RayQuadric_Sphere(benchmark::State& state) {
 }
 BENCHMARK(BM_RayQuadric_Sphere);
 
+// The same call, but with every ray actually hitting. The default spread
+// of 0.6 rad against a unit sphere seen from 5.2 away is mostly *misses*,
+// which measures the cheap path and hides the expensive one: a hit is
+// where the result container has to hold something. Measuring only the
+// miss path is how "the allocation is the cost" stays unfalsified.
+// 0.1 rad keeps the worst-case lateral offset inside the radius, so this
+// is 100% hits by construction rather than by luck.
+static void BM_RayQuadric_SphereAllHit(benchmark::State& state) {
+    auto q = Quadric<double>::sphere(1.0);
+    auto rays = make_rays(256, 0.1);
+    std::size_t i = 0;
+    for (auto _ : state) {
+        auto hits = ray_quadric(rays[i++ & 255], q);
+        benchmark::DoNotOptimize(hits);
+    }
+}
+BENCHMARK(BM_RayQuadric_SphereAllHit);
+
 static void BM_RayQuadric_Ellipsoid(benchmark::State& state) {
     auto q = Quadric<double>::ellipsoid(1.0, 0.5, 0.3);
     auto rays = make_rays(256);

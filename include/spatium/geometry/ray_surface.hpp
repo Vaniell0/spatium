@@ -360,12 +360,17 @@ inline QuadricCoeffs<T> quadric_coeffs(const Ray<3, T>& ray, const Quadric<T>& q
 
 } // namespace detail
 
+// At most two hits, and now the return type says so. This used to be a
+// std::vector, which meant a heap allocation on every call that hit
+// anything in order to hold two elements at most -- see core/up_to.hpp
+// for why this is the same container the root solvers return, rather
+// than a second one shaped like it.
 template<Scalar T>
-std::vector<RayHit<T>> ray_quadric(const Ray<3, T>& ray, const Quadric<T>& q) {
+UpTo<RayHit<T>, 2> ray_quadric(const Ray<3, T>& ray, const Quadric<T>& q) {
     auto [a_coeff, b_coeff, c_coeff] = detail::quadric_coeffs(ray, q);
     auto roots = solve_quadratic(a_coeff, b_coeff, c_coeff);
 
-    std::vector<RayHit<T>> hits;
+    UpTo<RayHit<T>, 2> hits;
     for (auto& root : roots) {
         if (root.is_real() && root.re >= T{0}) {
             auto pt = ray.origin + ray.direction * root.re;
@@ -373,7 +378,7 @@ std::vector<RayHit<T>> ray_quadric(const Ray<3, T>& ray, const Quadric<T>& q) {
         }
     }
 
-    std::sort(hits.begin(), hits.end(), [](auto& a, auto& b) { return a.t < b.t; });
+    hits.sort([](const auto& a, const auto& b) { return a.t < b.t; });
     return hits;
 }
 
@@ -420,7 +425,7 @@ Result<RayProximity<T>> ray_quadric_proximity(const Ray<3, T>& ray, const Quadri
 
 // Unified: returns either hits or proximity
 template<Scalar T>
-std::variant<std::vector<RayHit<T>>, RayProximity<T>>
+std::variant<UpTo<RayHit<T>, 2>, RayProximity<T>>
 ray_quadric_full(const Ray<3, T>& ray, const Quadric<T>& q) {
     auto hits = ray_quadric(ray, q);
     if (!hits.empty()) return hits;
@@ -429,7 +434,7 @@ ray_quadric_full(const Ray<3, T>& ray, const Quadric<T>& q) {
     if (prox) return *prox;
 
     // Fallback: no hits, no proximity (degenerate case)
-    return std::vector<RayHit<T>>{};
+    return UpTo<RayHit<T>, 2>{};
 }
 
 // ── Torus ─────────────────────────────────────────────────────
@@ -535,8 +540,11 @@ inline TorusQuartic<T> torus_quartic_coeffs(const Vec<T, 3>& o, const Vec<T, 3>&
 } // namespace detail
 
 // Ray-torus hits, sorted by t ascending. Non-unit ray.direction supported.
+// At most four hits -- a quartic surface -- and the same reasoning as
+// ray_quadric above: the answer's size is bounded, so the return type
+// should say so rather than reach for the heap to hold four things.
 template<Scalar T>
-std::vector<RayHit<T>> ray_torus(const Ray<3, T>& ray, const Torus<T>& torus) {
+UpTo<RayHit<T>, 4> ray_torus(const Ray<3, T>& ray, const Torus<T>& torus) {
     auto loc = detail::torus_local_ray(ray, torus);
     Vec<T, 3> w = torus.axis;
     Vec<T, 3> u = loc.u, v = loc.v, o = loc.o, d = loc.d;
@@ -546,8 +554,7 @@ std::vector<RayHit<T>> ray_torus(const Ray<3, T>& ray, const Torus<T>& torus) {
     auto k = detail::torus_quartic_coeffs(o, d, R, r);
     auto roots = solve_quartic(k.c4, k.c3, k.c2, k.c1, k.c0);
 
-    std::vector<RayHit<T>> hits;
-    hits.reserve(4);
+    UpTo<RayHit<T>, 4> hits;
     for (auto& root : roots) {
         if (!root.is_real()) continue;
         T t = root.re;
@@ -571,7 +578,7 @@ std::vector<RayHit<T>> ray_torus(const Ray<3, T>& ray, const Torus<T>& torus) {
         hits.push_back({t, p_world, n});
     }
 
-    std::sort(hits.begin(), hits.end(), [](auto& a, auto& b) { return a.t < b.t; });
+    hits.sort([](const auto& a, const auto& b) { return a.t < b.t; });
     return hits;
 }
 
