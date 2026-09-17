@@ -16,6 +16,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/algebra/vector.hpp>
+#  include <spatium/algebra/matrix.hpp>
 #  include <spatium/geometry/intersection.hpp>
 #  include <spatium/geometry/line.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
@@ -186,39 +187,79 @@ struct Instanced {
     Vec<ScalarType, 3> translation{};
     ScalarType scale = ScalarType{1};
 
-    PointType centroid() const {
-        if (!shape) return PointType{translation};
-        return PointType{shape->centroid() * scale + translation};
+    // Orthonormal, and that is a requirement rather than a description:
+    // the ray test below relies on the inverse being the transpose, and
+    // on lengths surviving the trip, to leave `t` and the normal alone.
+    // A general linear map here would silently break both.
+    Matrix<ScalarType, 3, 3> rotation = Matrix<ScalarType, 3, 3>::identity();
+
+    Vec<ScalarType, 3> to_world(const Vec<ScalarType, 3>& local) const {
+        return Vec<ScalarType, 3>{rotation * Vec<ScalarType, 3>{local * scale} + translation};
     }
 
+    PointType centroid() const {
+        if (!shape) return PointType{translation};
+        return PointType{to_world(Vec<ScalarType, 3>{shape->centroid()})};
+    }
+
+    // The AABB of a rotated box, which is not the rotated AABB. Taking
+    // the local box's corners through the transform and bounding those is
+    // the whole content: |R| applied to the half-extent gives the rotated
+    // extent, because each world axis picks up |r_ij| of each local one.
+    // Getting this wrong does not produce a visibly wrong picture -- it
+    // produces a box that fails to contain its own shape, and then rays
+    // that should hit are culled before the leaf test ever runs.
     Box<3, ScalarType> bounding_box() const {
-        if (!shape) return Box<3, ScalarType>{translation, translation};
+        using T = ScalarType;
+        using std::abs;
+        if (!shape) return Box<3, T>{translation, translation};
+
         auto b = shape->bounding_box();
-        return Box<3, ScalarType>{
-            Vec<ScalarType, 3>{b.min_corner * scale + translation},
-            Vec<ScalarType, 3>{b.max_corner * scale + translation}};
+        Vec<T, 3> local_center{(b.min_corner + b.max_corner) * T{0.5}};
+        Vec<T, 3> local_half{(b.max_corner - b.min_corner) * T{0.5}};
+
+        Vec<T, 3> center = to_world(local_center);
+        Vec<T, 3> half{};
+        const T s = abs(scale);
+        for (std::size_t i = 0; i < 3; ++i) {
+            T e{};
+            for (std::size_t j = 0; j < 3; ++j) e += abs(rotation(i, j)) * local_half[j];
+            half[i] = e * s;
+        }
+        return Box<3, T>{Vec<T, 3>{center - half}, Vec<T, 3>{center + half}};
     }
 };
 
 // The ray goes into the object's own space; the hit comes back out.
 //
-// `t` survives the round trip untouched, which is the reason to restrict
-// the placement to translation plus uniform scale: dividing both origin
-// and direction by the same scale leaves `origin + t * direction` meaning
-// the same point, so no hit needs rescaling and no normal needs fixing.
+// `t` survives the round trip untouched, and that is the reason the
+// placement is restricted to a rotation, a uniform scale and a
+// translation rather than an arbitrary affine map. Dividing both origin
+// and direction by the same scale, and turning both by the same
+// orthonormal R, leaves `origin + t * direction` meaning the same point
+// -- so no hit needs rescaling.
+//
+// The normal is the one thing that does not simply ride along. It
+// transforms by the inverse transpose, which for R*s is R/s -- and since
+// direction and magnitude are all a normal is, the scale divides out and
+// `R * n` is the answer. Under a non-uniform scale that shortcut is
+// false, which is the concrete cost of widening this transform later.
 template<typename S>
 inline std::optional<RayHit3<typename S::ScalarType>> ray_hit(
     const Ray<3, typename S::ScalarType>& ray, const Instanced<S>& inst) {
     using T = typename S::ScalarType;
     if (!inst.shape || inst.scale == T{0}) return std::nullopt;
 
-    const Ray<3, T> local{Vec<T, 3>{(ray.origin - inst.translation) / inst.scale},
-                          Vec<T, 3>{ray.direction / inst.scale}};
+    const auto inv = inst.rotation.transpose();
+    const Ray<3, T> local{
+        Vec<T, 3>{inv * Vec<T, 3>{(ray.origin - inst.translation) / inst.scale}},
+        Vec<T, 3>{inv * Vec<T, 3>{ray.direction / inst.scale}}};
 
     using geometry::ray_hit;
     auto h = ray_hit(local, *inst.shape);
     if (!h) return std::nullopt;
-    h->point = Vec<T, 3>{h->point * inst.scale + inst.translation};
+    h->point  = inst.to_world(h->point);
+    h->normal = Vec<T, 3>{inst.rotation * h->normal};
     return h;
 }
 

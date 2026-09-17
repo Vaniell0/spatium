@@ -532,3 +532,103 @@ TEST_CASE("Losing the exact form drops the level back with it", "[build_dsl]") {
     CHECK(bd::materialize(scene, moving_dough.index)[0].render_level()
           == bd::RenderLevel::Tessellated);
 }
+
+// ── Rotation in a placement ───────────────────────────────────────
+
+TEST_CASE("rotated() stays a placement and placement_at recovers the turn",
+          "[build_dsl]") {
+    using V3 = spatium::Vec<double, 3>;
+    const double quarter = std::numbers::pi / 2;
+
+    // Axis-angle overload: pi/2 about z. R maps x -> y.
+    auto f = rotated(bd::PointField<double>::point(),
+                     [quarter](double) { return V3{0.0, 0.0, quarter}; });
+
+    // A rotation is affine in the point, exactly like a scale, so it does
+    // not cost the node its instanceability.
+    CHECK(f.is_placement());
+
+    auto pl = f.placement_at(bd::MotionEnv<double>{V3{}, 0.0});
+    V3 turned{pl.rotation * V3{1.0, 0.0, 0.0}};
+    CHECK_THAT(turned[0], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(turned[1], WithinAbs(1.0, 1e-12));
+    CHECK_THAT(turned[2], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(pl.scale, WithinAbs(1.0, 1e-12));
+}
+
+TEST_CASE("A translation below a rotation is itself rotated", "[build_dsl]") {
+    // The claim Placement's comment makes: translation needed no change
+    // when rotation arrived, because "evaluate the motion at p = 0"
+    // already reports where the origin ends up -- through every rotation
+    // on the way out. Worth pinning, because the plausible-looking
+    // alternative (translation as a separate additive term) is wrong here
+    // and wrong silently.
+    using V3 = spatium::Vec<double, 3>;
+    const double quarter = std::numbers::pi / 2;
+
+    auto inner = bd::PointField<double>::point() +
+                 bd::PointField<double>::constant(V3{1.0, 0.0, 0.0});
+    auto f = rotated(std::move(inner),
+                     [quarter](double) { return V3{0.0, 0.0, quarter}; });
+
+    REQUIRE(f.is_placement());
+    auto pl = f.placement_at(bd::MotionEnv<double>{V3{}, 0.0});
+
+    // R * (0 + x_hat) = y_hat, not x_hat.
+    CHECK_THAT(pl.translation[0], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(pl.translation[1], WithinAbs(1.0, 1e-12));
+    CHECK_THAT(pl.translation[2], WithinAbs(0.0, 1e-12));
+
+    // And the placement as a whole still agrees with evaluating the field
+    // directly, which is the property everything downstream relies on.
+    V3 p{0.3, -0.7, 0.2};
+    V3 direct = f(p, 0.0);
+    V3 via_placement{pl.rotation * V3{p * pl.scale} + pl.translation};
+    for (std::size_t i = 0; i < 3; ++i)
+        CHECK_THAT(via_placement[i], WithinAbs(direct[i], 1e-12));
+}
+
+TEST_CASE("cook() puts a scattered item exactly where materialize_mesh draws it",
+          "[build_dsl]") {
+    // The agreement that had no test, and the bug that cost. cook() used
+    // to keep only site.position and drop the site's {t1, t2, normal}
+    // frame, so every scattered object was placed unrotated while
+    // materialize_mesh baked the frame into its vertices. Two renderings
+    // of one scene, disagreeing -- invisible only because nothing
+    // consumed the cooked one yet.
+    //
+    // The node also carries a placement with all three parts, so the
+    // composition order is pinned too: the site position has to pass
+    // through the node's scale and rotation, not be added outside them.
+    using V3 = spatium::Vec<double, 3>;
+    const double quarter = std::numbers::pi / 2;
+    const double t = 0.0;
+
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 1.0);
+    auto sprinkle = scene.cylinder(0.02, 0.1, 6, 2);
+    auto motion = rotated(bd::PointField<double>::point(),
+                          [quarter](double) { return V3{quarter, 0.0, 0.0}; });
+    motion = scaled(std::move(motion), [](double) { return 0.5; });
+    motion += bd::PointField<double>::constant(V3{0.0, 3.0, 0.0});
+    auto sprinkles = scene.scatter(sprinkle, dough, 8).moving(std::move(motion));
+
+    auto baked  = bd::materialize_mesh(scene, sprinkles.index, t);
+    auto cooked = bd::cook(scene, sprinkles.index, t);
+
+    REQUIRE(cooked.object_count() == 8);
+    REQUIRE(cooked.shape_count() == 1);          // one geometry, eight placements
+    const auto& rest = cooked.shapes()[cooked.objects()[0].shape].geometry;
+    REQUIRE(baked.vertex_count() == 8 * rest.vertex_count());
+
+    for (std::size_t o = 0; o < cooked.objects().size(); ++o) {
+        const auto& obj = cooked.objects()[o];
+        REQUIRE(obj.instanceable);
+        for (std::size_t v = 0; v < rest.vertex_count(); ++v) {
+            V3 world{obj.rotation * V3{rest.vertices[v] * obj.scale} + obj.translation};
+            const auto& want = baked.vertices[o * rest.vertex_count() + v];
+            for (std::size_t k = 0; k < 3; ++k)
+                CHECK_THAT(world[k], WithinAbs(want[k], 1e-9));
+        }
+    }
+}

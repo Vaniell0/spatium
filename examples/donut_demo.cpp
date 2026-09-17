@@ -380,7 +380,7 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         auto place = obj.placement();
         if (q && place) {
             shapes.push_back(*q);
-            insts.push_back({nullptr, place->translation, place->scale});
+            insts.push_back({nullptr, place->translation, place->scale, place->rotation});
             inst_info.push_back({mat.base_color, mat.roughness});
             continue;
         }
@@ -679,6 +679,19 @@ int main(int argc, char* argv[]) {
         // the "just gets colored flying past" part without needing an
         // explicit pull to manufacture it.
         double pull_strength = roll < 0.3 ? (0.85 + 0.15 * unit01(burst_rng)) : 0.0; // ~30% land firmly
+
+        // Which way this flake faces, and how it tumbles. Without it all
+        // 19 800 flakes share one orientation, which was invisible while
+        // a speck was a ball and is impossible to miss now that it has a
+        // side: a cloud of identically-tilted chips reads as a lattice,
+        // not as dust. The axis is a random direction, the phase is a
+        // random offset so they do not turn in unison, and the rate is
+        // small -- a flake drifting on air turns slowly.
+        Vec<double, 3> spin_axis = Vec<double, 3>{
+            Vec<double, 3>{unit(burst_rng), unit(burst_rng), unit(burst_rng)}.normalized()};
+        double spin_phase = unit01(burst_rng) * 6.283185307179586;
+        double spin_rate  = 0.5 + 1.5 * unit01(burst_rng);
+
         auto [u, v] = boom_uv[i % boom_uv.size()];
         Vec<double, 3> target = Vec<double, 3>{
             text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)};
@@ -723,8 +736,21 @@ int main(int argc, char* argv[]) {
                                 return dust_core(time, burst_dir, burst_dist, target, pull_strength,
                                                  swirl_seed, *swirl_noise);
                             })
-                        + scaled(bd::VecField<double>::point(),
-                                 [](double time) { return dust_shrink(time); })));
+                        // The turn wraps the point, not the whole motion:
+                        // it orients the flake about its own centre
+                        // rather than swinging it around the origin. That
+                        // it can be written at all is the point of the op
+                        // -- a rotation is affine in the point, so the
+                        // node stays a placement and keeps its exact
+                        // form. Compare `.moving()` with a lambda that
+                        // rotates: identical picture, and every flake
+                        // falls back to triangles.
+                        + rotated(scaled(bd::VecField<double>::point(),
+                                         [](double time) { return dust_shrink(time); }),
+                                  [spin_axis, spin_phase, spin_rate](double time) {
+                                      return Vec<double, 3>{
+                                          spin_axis * (spin_phase + spin_rate * time)};
+                                  })));
     }
 
     // Step 1 -- the dough is a torus, offset by a fine noise bump so it

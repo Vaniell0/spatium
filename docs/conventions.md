@@ -230,12 +230,29 @@ The same shape recurs at every level:
 | poisoning unused slots in Debug | a Debug test run |
 | a `[!shouldfail]` pin on a known bug | a suite that reports it as expected-failed rather than skipping it |
 | an `is_structural()` flag | something that reports the *consequence*, not just the fact |
+| two code paths that must give the same answer | a test comparing them **to each other**, not each to itself |
 
 So the rule: **when adding a mechanism that makes a class of error
 visible, land what executes it first, or in the same change.** Not after.
 The infrastructure is the part that can be silently missing, because a
 mechanism with nothing running it looks exactly like a mechanism that
 passes.
+
+**The last row earned its place 2026-09-17.** `materialize_mesh()` bakes a
+scattered item's site frame into its vertices; `cook()` hands the same
+item to a renderer as a transform. Two answers to one question, and
+`cook()` dropped the frame entirely — so every scattered object was
+oriented in one path and not in the other. Nothing caught it, for a
+reason worth saying plainly: **`cook()` and `Instanced` shipped with no
+tests at all.** The bug was not subtle and did not need a clever test; it
+needed any test that put the two paths side by side. The one that exists
+now fails 432 of its 443 assertions against the old code, which is what a
+missing test costs measured after the fact.
+
+The general form: when a second way to compute something is added — a
+fast path, a cached form, a lowered one — the test that matters compares
+it against the first. Testing each against hand-written expectations
+leaves exactly the space where they can disagree.
 
 ### `reserve(size() + k)` inside an append is an anti-pattern
 

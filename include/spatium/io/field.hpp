@@ -4,6 +4,8 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/algebra/vector.hpp>
+#  include <spatium/algebra/matrix.hpp>
+#  include <spatium/algebra/groups/so3.hpp>
 #  include <cassert>
 #  include <algorithm>
 #  include <cstddef>
@@ -450,6 +452,7 @@ enum class VecOp : std::uint8_t {
     Const,     // a literal vector
     Add, Sub,
     Scale,     // child a, times a scalar read from the environment
+    Rotate,    // child a, turned by a rotation read from the environment
     Opaque,    // a callable leaf; `reads_point` says whether it uses p
 };
 
@@ -460,12 +463,19 @@ inline const char* vec_op_name(VecOp o) {
         case VecOp::Add:    return "Add";
         case VecOp::Sub:    return "Sub";
         case VecOp::Scale:  return "Scale";
+        case VecOp::Rotate: return "Rotate";
         case VecOp::Opaque: return "Opaque";
     }
     return "?";
 }
 
 inline bool is_binary(VecOp o) { return o == VecOp::Add || o == VecOp::Sub; }
+
+// One child, named once rather than spelled out at each of the four
+// places that shift indices, test affinity or walk a path. Adding a
+// second unary op is then one entry here instead of four edits that must
+// agree.
+inline bool is_unary(VecOp o) { return o == VecOp::Scale || o == VecOp::Rotate; }
 
 template<Scalar T = double>
 struct VecFieldOp {
@@ -493,6 +503,18 @@ struct VecFieldOp {
     // from the point -- a Scale whose factor depended on the point would
     // be a deformation again.
     std::move_only_function<T(const MotionEnv<T>&) const> scale_fn;
+
+    // The rotation a Rotate turns by, under exactly the same rule: read
+    // from the environment, never from the point. A rotation that varied
+    // per vertex would bend the object rather than orient it.
+    //
+    // Stored as the matrix rather than as an axis-angle vector, because
+    // this is the form both consumers want -- evaluation multiplies a
+    // point by it, and a placement hands it to a ray test that needs the
+    // transpose. Callers who think in axis-angle get the `rotated()`
+    // overload that exponentiates through SO3, so nothing is lost at the
+    // authoring end and no exp() runs per vertex.
+    std::move_only_function<Matrix<T, 3, 3>(const MotionEnv<T>&) const> rot_fn;
 
     // **The distinction that decides whether a motion can be instanced**,
     // and it is not "structural versus opaque". A leaf may be as opaque as
@@ -586,6 +608,40 @@ public:
         return x;
     }
 
+    // `R(t) * field`. The companion to `scaled`, and the op that turns a
+    // placement from "somewhere else" into "somewhere else, facing
+    // somewhere else" -- without it every instance of a shared geometry
+    // is not merely in the same pose but in the *same orientation*, which
+    // is invisible on a sphere and impossible to miss on anything with a
+    // side.
+    //
+    // Two overloads, because the two ways of saying a rotation are both
+    // natural and neither should have to be converted by hand. This one
+    // takes the matrix; the next takes an axis-angle vector and
+    // exponentiates it through SO3, which is what a constant orientation
+    // (`[o](T) { return o; }`) and a spin (`[w](T t) { return w * t; }`)
+    // both want to write.
+    template<typename R>
+        requires std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>
+    friend VecField rotated(VecField x, R r) {
+        VecFieldOp<T> n{};
+        n.op     = VecOp::Rotate;
+        n.a      = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        n.rot_fn = [r = std::move(r)](const MotionEnv<T>& e) { return r(e.t); };
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+        return x;
+    }
+
+    template<typename R>
+        requires (!std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>) &&
+                 std::is_invocable_r_v<Vec<T, 3>, const R&, T>
+    friend VecField rotated(VecField x, R r) {
+        return rotated(std::move(x), [r = std::move(r)](T t) {
+            return algebra::SO3<T>{}.exp(r(t));
+        });
+    }
+
     // A callable leaf. Accepts either shape: a function of the whole
     // environment, or the historical (p, t) -- the latter wrapped, so
     // every scene written against the old signature still compiles while
@@ -642,7 +698,8 @@ public:
             case VecOp::Point:  return true;
             case VecOp::Const:  return false;
             case VecOp::Opaque: return n.reads_point;
-            case VecOp::Scale:  return reads_point(n.a);
+            case VecOp::Scale:
+            case VecOp::Rotate: return reads_point(n.a);
             case VecOp::Add:
             case VecOp::Sub:    return reads_point(n.a) || reads_point(n.b);
         }
@@ -663,12 +720,28 @@ public:
     // is evaluated once per object rather than once per vertex.
     bool is_placement() const { return affine_in_point(ops_.size() - 1); }
 
-    // The transform this placement is, at one moment. Translation is the
-    // whole motion evaluated with the point at the origin; scale is the
-    // product of the Scale factors on the path to the Point. Exact for the
-    // affine form, and meaningless otherwise -- hence the precondition.
+    // The transform this placement is, at one moment: `p -> R*s*p + b`.
+    //
+    // Translation is the whole motion evaluated with the point at the
+    // origin, and that definition needed no change when rotation arrived,
+    // which is worth saying because the obvious worry is the opposite. A
+    // translation introduced *below* a rotation on the path is itself
+    // rotated, and evaluating at p = 0 already reports where the origin
+    // ends up -- through every rotation on the way out. Only the linear
+    // part had to learn anything new.
+    //
+    // Rotation and scale are the product of the Rotate and Scale factors
+    // along the path to the Point. Order matters for the matrices and does
+    // not for the scalars, and the two separate cleanly for exactly that
+    // reason: R1*s1*R2*s2 == (R1*R2)*(s1*s2), because a scalar commutes
+    // with everything. So the pair stays a pair rather than collapsing
+    // into one general 3x3 -- and that is not a saving, it is the
+    // contract: an orthonormal R and a uniform s are what let a ray test
+    // transform into local space without rescaling `t` or fixing up a
+    // normal. A general linear map would lose both.
     struct Placement {
         Vec<T, 3> translation{};
+        Matrix<T, 3, 3> rotation = Matrix<T, 3, 3>::identity();
         T scale = T{1};
     };
 
@@ -676,7 +749,8 @@ public:
         assert(is_placement() && "placement_at: this motion is a deformation");
         MotionEnv<T> at_origin = env;
         at_origin.p = Vec<T, 3>{};
-        return Placement{(*this)(at_origin), scale_on_path(ops_.size() - 1, env)};
+        auto [rotation, scale] = linear_on_path(ops_.size() - 1, env);
+        return Placement{(*this)(at_origin), rotation, scale};
     }
 
     // "Is there a motion here" -- what `if (node.transform)` meant when
@@ -723,7 +797,8 @@ private:
             case VecOp::Point:  return true;
             case VecOp::Const:  return true;
             case VecOp::Opaque: return !n.reads_point;
-            case VecOp::Scale:  return affine_in_point(n.a);
+            case VecOp::Scale:
+            case VecOp::Rotate: return affine_in_point(n.a);
             case VecOp::Add:
             case VecOp::Sub:
                 // Both sides affine, and at most one of them touching the
@@ -735,18 +810,49 @@ private:
         return false;
     }
 
-    T scale_on_path(std::size_t i, const MotionEnv<T>& env) const {
+    // The linear part of the placement, walked along the one path that
+    // reaches the Point. Returns the pair rather than a single matrix so
+    // that the orthonormal factor and the uniform factor stay
+    // distinguishable at the far end -- see `Placement` for why that
+    // distinction is the contract and not an optimization.
+    //
+    // A `Sub` whose point-bearing side is the right one contributes -1 to
+    // the *scale*, not to the rotation: a negated uniform scale is a
+    // reflection and has no place in SO(3), while as a scale it is the
+    // behaviour that was already there and already correct -- a ray test
+    // dividing origin and direction by the same negative number still
+    // describes the same points.
+    struct Linear {
+        Matrix<T, 3, 3> rotation = Matrix<T, 3, 3>::identity();
+        T scale = T{1};
+    };
+
+    Linear linear_on_path(std::size_t i, const MotionEnv<T>& env) const {
         const auto& n = ops_[i];
         switch (n.op) {
-            case VecOp::Point:  return T{1};
-            case VecOp::Scale:  return n.scale_fn(env) * scale_on_path(n.a, env);
+            case VecOp::Point:  return Linear{};
+            case VecOp::Scale: {
+                auto below = linear_on_path(n.a, env);
+                below.scale *= n.scale_fn(env);
+                return below;
+            }
+            case VecOp::Rotate: {
+                auto below = linear_on_path(n.a, env);
+                below.rotation = n.rot_fn(env) * below.rotation;
+                return below;
+            }
             case VecOp::Add:
-            case VecOp::Sub:
-                if (reads_point(n.a)) return scale_on_path(n.a, env);
-                if (reads_point(n.b))
-                    return (n.op == VecOp::Sub ? T{-1} : T{1}) * scale_on_path(n.b, env);
-                return T{0};   // the point does not appear: the shape collapses
-            default: return T{0};
+            case VecOp::Sub: {
+                if (reads_point(n.a)) return linear_on_path(n.a, env);
+                if (reads_point(n.b)) {
+                    auto below = linear_on_path(n.b, env);
+                    if (n.op == VecOp::Sub) below.scale = -below.scale;
+                    return below;
+                }
+                // The point does not appear: the shape collapses.
+                return Linear{Matrix<T, 3, 3>::identity(), T{0}};
+            }
+            default: return Linear{Matrix<T, 3, 3>::identity(), T{0}};
         }
     }
 
@@ -786,6 +892,7 @@ private:
                 case VecOp::Add:    s[i] = Vec<T, 3>{s[n.a] + s[n.b]}; break;
                 case VecOp::Sub:    s[i] = Vec<T, 3>{s[n.a] - s[n.b]}; break;
                 case VecOp::Scale:  s[i] = Vec<T, 3>{s[n.a] * n.scale_fn(env)}; break;
+                case VecOp::Rotate: s[i] = Vec<T, 3>{n.rot_fn(env) * s[n.a]}; break;
                 case VecOp::Opaque: s[i] = n.fn(env); break;
             }
         }
@@ -803,11 +910,11 @@ private:
 
         for (auto& n : y.ops_) {
             VecFieldOp<T> c = std::move(n);
-            if (is_binary(c.op) || c.op == VecOp::Scale) {
+            if (is_binary(c.op) || is_unary(c.op)) {
                 c.a += shift;
                 if (is_binary(c.op)) c.b += shift;
             }
-            assert((!(is_binary(c.op) || c.op == VecOp::Scale) ||
+            assert((!(is_binary(c.op) || is_unary(c.op)) ||
                     (c.a < ops_.size() && (!is_binary(c.op) || c.b < ops_.size()))) &&
                    "VecField: a child must precede its parent");
             ops_.push_back(std::move(c));

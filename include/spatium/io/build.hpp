@@ -313,6 +313,48 @@ std::pair<Vec<T, 3>, Vec<T, 3>> basis_from_normal(const Vec<T, 3>& n) {
     return {t1, t2};
 }
 
+// The full orientation of one scattered item: the site's tangent frame,
+// turned in-plane by an angle that is a pure function of (seed, index).
+//
+// Without the in-plane turn every item at every site shares the same
+// {t1, t2} up to the smooth drift `basis_from_normal` has with the
+// surface's own curvature, which reads as "all facing the same way" -- a
+// real complaint about the donut's sprinkles, and the reason this angle
+// exists at all.
+//
+// It is a named function rather than a loop body because there are two
+// consumers that must agree to the last bit: `materialize_mesh()` bakes
+// this frame into vertices, and `cook()` hands it to an instance as a
+// transform. They are two renderings of the same object and any drift
+// between them is a disagreement no test would phrase as such -- it would
+// surface as a picture that changes when a node's render level changes.
+// Deterministic per (seed, index): same trace, same t, same result.
+//
+// The columns are {r1, r2, normal}, so `frame * v` maps an item's local
+// (x, y, z) onto (in-plane, in-plane, along the normal) exactly as
+// scattering means it.
+template<Scalar T>
+Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
+                              std::size_t index) {
+    auto [t1, t2] = basis_from_normal(normal);
+
+    std::uint32_t h = seed * 2654435761u + static_cast<std::uint32_t>(index) * 40503u;
+    h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
+    T theta = (static_cast<T>(h % 360000) / T{100000}) * T{6.283185307179586};
+
+    using std::cos, std::sin;
+    Vec<T, 3> r1{Vec<T, 3>{t1 * cos(theta) + t2 * sin(theta)}};
+    Vec<T, 3> r2{Vec<T, 3>{t2 * cos(theta) - t1 * sin(theta)}};
+
+    Matrix<T, 3, 3> f{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        f(i, 0) = r1[i];
+        f(i, 1) = r2[i];
+        f(i, 2) = normal[i];
+    }
+    return f;
+}
+
 template<Scalar T = double>
 class Trace;
 
@@ -695,25 +737,15 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         out.faces.reserve(item_mesh.face_count() * sites.size());
         for (std::size_t i = 0; i < sites.size(); ++i) {
             const auto& site = sites[i];
-            auto [t1, t2] = basis_from_normal(site.normal);
 
-            // Per-instance in-plane rotation about the normal -- without
-            // it every item at every site shares the same {t1,t2} up to
-            // the smooth drift basis_from_normal has with the surface's
-            // own curvature, which reads as "all facing the same way"
-            // (a real complaint on the donut's sprinkles). Deterministic
-            // per (seed, site index) -- same trace, same t, same result.
-            std::uint32_t h = n.seed * 2654435761u + static_cast<std::uint32_t>(i) * 40503u;
-            h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
-            T theta = (static_cast<T>(h % 360000) / T{100000}) * T{6.283185307179586};
-            using std::cos, std::sin;
-            Vec<T, 3> r1{Vec<T, 3>{t1 * cos(theta) + t2 * sin(theta)}};
-            Vec<T, 3> r2{Vec<T, 3>{t2 * cos(theta) - t1 * sin(theta)}};
+            // The same frame cook() gives the instance, from the same
+            // function, so the baked picture and the instanced one cannot
+            // drift apart. See scatter_frame().
+            auto frame = scatter_frame<T>(site.normal, n.seed, i);
 
             uint32_t base_idx = static_cast<uint32_t>(out.vertices.size());
             for (const auto& iv : item_mesh.vertices)
-                out.vertices.push_back(Vec<T, 3>{
-                    site.position + r1 * iv[0] + r2 * iv[1] + site.normal * iv[2]});
+                out.vertices.push_back(Vec<T, 3>{site.position + frame * iv});
             for (const auto& f : item_mesh.faces)
                 out.faces.push_back({f[0] + base_idx, f[1] + base_idx, f[2] + base_idx});
         }
@@ -898,6 +930,21 @@ struct Object {
     std::size_t source_node = 0;  // the trace node it came from, for reporting
     Vec<T, 3> translation{};      // folded from ancestors and from the node
     T scale = T{1};               // uniform, from the node's placement
+
+    // Orientation, and it is not decoration. `materialize_mesh()` has
+    // oriented scattered items since the sprinkles complaint -- each site
+    // gets the {t1, t2, normal} frame plus a deterministic in-plane turn
+    // -- while cooking kept only `site.position` and dropped the frame on
+    // the floor. So the two answers to "where is this item" disagreed for
+    // every scattered object, and the disagreement was invisible because
+    // no renderer consumed the cooked one yet.
+    //
+    // Orthonormal, and paired with a *uniform* scale rather than folded
+    // into one general 3x3, for the reason `VecField::Placement` records:
+    // that pair is what lets a ray test go into local space without
+    // rescaling `t` or repairing a normal.
+    Matrix<T, 3, 3> rotation = Matrix<T, 3, 3>::identity();
+
     bool instanceable = true;     // false when the motion deforms per vertex
     Material<T> material{};
 };
@@ -1050,18 +1097,27 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             return;
         }
 
-        // How many instances this operation is, and where each one sits.
-        std::vector<Vec<T, 3>> placements;
+        // How many instances this operation is, where each one sits, and
+        // which way each one faces. The frame is carried rather than
+        // recomputed later because it belongs to the site, and dropping
+        // it here is exactly the bug this field fixes.
+        struct Site {
+            Vec<T, 3> position{};
+            Matrix<T, 3, 3> frame = Matrix<T, 3, 3>::identity();
+        };
+        std::vector<Site> placements;
         std::size_t geometry_node = idx;
 
         if (n.kind == Kind::Scatter) {
             auto target = resolve_surface(trace, n.target);
             auto sites = sample_surface_uniform(target, n.count, n.seed);
             placements.reserve(sites.size());
-            for (const auto& s : sites) placements.push_back(Vec<T, 3>{s.position});
+            for (std::size_t i = 0; i < sites.size(); ++i)
+                placements.push_back(Site{Vec<T, 3>{sites[i].position},
+                                          scatter_frame<T>(sites[i].normal, n.seed, i)});
             geometry_node = n.item;
         } else {
-            placements.push_back(Vec<T, 3>{});
+            placements.push_back(Site{});
         }
 
         const auto key = content_hash(trace, geometry_node);
@@ -1095,12 +1151,26 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         typename VecField<T>::Placement pl{};
         if (placeable) pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
 
+        // Composing the two transforms, written out because getting the
+        // order wrong is silent. A vertex `v` of the rest item becomes
+        //
+        //     carried + b + R*s*(site + F*v)
+        //             = [carried + b + R*(s*site)] + (R*F)*(s*v)
+        //
+        // which is where each line below comes from. Note the `s*site`:
+        // the old form added the site position *outside* the node's
+        // scale, so a scattered node whose motion also scaled placed its
+        // items at the wrong distance -- invisible until now only because
+        // nothing consumed the cooked scene and every scattering scene so
+        // far had scale 1.
         for (const auto& p : placements) {
             out.objects_.push_back(Object<T>{
                 .shape = shape_index,
                 .source_node = idx,
-                .translation = Vec<T, 3>{carried + p + pl.translation},
+                .translation = Vec<T, 3>{carried + pl.translation +
+                                         pl.rotation * Vec<T, 3>{p.position * pl.scale}},
                 .scale = pl.scale,
+                .rotation = pl.rotation * p.frame,
                 .instanceable = placeable,
                 .material = n.material});
             ++out.shapes_[shape_index].instances;
