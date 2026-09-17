@@ -10,6 +10,7 @@
 #  include <spatium/spaces/offset.hpp>
 #  include <spatium/spaces/parametric.hpp>
 #  include <spatium/spaces/sample.hpp>
+#  include <spatium/algebra/quaternion.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
 #  include <spatium/io/field.hpp>
 #  include <any>
@@ -1108,6 +1109,24 @@ struct Object {
     // rescaling `t` or repairing a normal.
     Matrix<T, 3, 3> rotation = Matrix<T, 3, 3>::identity();
 
+    // The same rotation, compactly -- 32 bytes against the matrix's 72,
+    // which is 80 MB at two million objects.
+    //
+    // **The matrix is authoritative while both are here.** Everything
+    // downstream reads `rotation`; this is carried and compared, and
+    // nothing decides anything by it. Two live sources of truth for one
+    // quantity is how they drift apart in silence, so one of them is
+    // explicitly not a source.
+    //
+    // That is also what makes this step checkable. The renderer's output
+    // cannot move, because the thing it draws with has not changed -- so a
+    // frame that is not byte-identical means the plumbing broke, and
+    // nothing subtler. The round trip's own error arrives in the *next*
+    // step, when the matrix goes and this becomes the source; measured at
+    // about 8 ulp, with zero of four thousand rotations surviving
+    // bit-exact (tests/test_build_dsl.cpp).
+    Quaternion<T> rotation_q{};
+
     bool instanceable = true;     // false when the motion deforms per vertex
     Material<T> material{};
 };
@@ -1355,6 +1374,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
                                              .translation = carried,
                                              .scale = T{1},
                                              .rotation = Matrix<T, 3, 3>::identity(),
+                                             .rotation_q = Quaternion<T>{},
                                              .instanceable = false,
                                              .material = resolve_material(n, at, t)});
             out.refused_ += placements.size();
@@ -1405,8 +1425,10 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
                                                  pl.rotation * Vec<T, 3>{p.position * pl.scale}},
                         .scale = pl.scale,
                         .rotation = pl.rotation * p.frame,
+                        .rotation_q = {},
                         .instanceable = true,
                         .material = {}};
+            o.rotation_q = Quaternion<T>::from_matrix(o.rotation);
             // Resolved where this object actually ends up, and computed
             // from the rest centroid rather than by building the placed
             // mesh -- which is the same point, and is the point

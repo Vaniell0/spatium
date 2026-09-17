@@ -277,6 +277,38 @@ apart from rotations, so a ray touches only what it needs) or shrinking
 the element after all — and either only makes sense against a
 measurement showing the stall. Not before.
 
+### A plausible explanation is worse than none, because nobody asks it for a number
+
+Named 2026-09-17, after producing two of them in a row about the same
+observation.
+
+A frame hash was expected to move. First explanation: the picture shifts,
+because the rotations change. Given a number, that died — the worst
+vertex displacement is 1.8e-14 against a pixel of 5.4e-3, eleven orders
+below one. Second explanation, offered immediately: the picture does not
+shift, but exact ties at a silhouette fall the other way. That one
+*sounded* like a mechanism, which is exactly why it went unchallenged for
+longer. Given a number it died too: the band in which a tie could flip is
+3.3e-12 of a pixel, so across a whole frame the expected count of flips
+is about 5e-7.
+
+"I do not know why" invites a measurement. "Ties flip at the silhouette"
+invites a nod. The second is worse *because* it is more specific — it
+occupies the space where the question would otherwise sit, and it is
+cheap to produce, since any true-sounding mechanism can be attached to
+any observation after the fact.
+
+So the rule: **an explanation offered for a measurement is not finished
+until it predicts a number, and the number is checked against the
+observation.** An explanation that cannot be made to predict anything is
+not a weak explanation, it is an absence of one wearing its clothes.
+
+This is the same rule as "a test on a boundary must prove it reached the
+boundary", one level up: there, an assertion that never reaches the thing
+it names passes and means nothing; here, a story that never commits to a
+quantity convinces and means nothing. Both are checked the same way —
+make it produce the positive claim first, with a value attached.
+
 ### A test on a boundary must prove it reached the boundary
 
 Named 2026-09-17, after writing the same test wrong twice in a row.
@@ -319,6 +351,12 @@ The same shape as `field_report`'s payload, which is meaningless as a
 byte count and meaningful against L3; and as a frame hash, which is not a
 baseline without the configuration that produced it. In each case the
 number is fine and the reader cannot use it.
+
+Three instances now, and they share a formula rather than a topic:
+`payload_verdict`'s byte count against L3, a frame hash against the
+configuration that produced it, and an error in ulp against the radius it
+multiplies. **A number without its anchor is read wrongly even when it is
+computed correctly** — and being correct is what makes it convincing.
 
 So: **when reporting a relative, dimensionless or normalised quantity,
 print the quantity it is relative to in the same breath.** A reader

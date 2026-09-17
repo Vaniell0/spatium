@@ -930,6 +930,18 @@ TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
     auto cooked = bd::cook(tr, spun.index, 1.0);
     REQUIRE(cooked.object_count() == 512);
 
+    // Every object's carried quaternion really is its own rotation, and
+    // not a default that happens to sit next to one. At N = 1 those look
+    // alike -- an identity quaternion beside an identity matrix agrees
+    // perfectly -- which is why the scatter below has hundreds of
+    // instances at genuinely different orientations.
+    for (const auto& o : cooked.objects()) {
+        auto from_stored = o.rotation_q.to_matrix();
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                CHECK_THAT(from_stored(i, j), WithinAbs(o.rotation(i, j), 1e-13));
+    }
+
     // Two quantities, and the second is the one that matters. A matrix
     // element error is dimensionless; what actually moves is a vertex,
     // and it moves by that error times the object's own world radius. A
