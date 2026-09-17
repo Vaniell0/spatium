@@ -1085,6 +1085,21 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
     Cooked<T> out;
     std::unordered_map<std::size_t, std::size_t> shape_of_key;
 
+    // Where one instance of an operation sits and which way it faces. The
+    // frame is carried alongside the position rather than recomputed
+    // later, because it belongs to the site -- dropping it is exactly the
+    // bug this pair fixes.
+    //
+    // Declared here rather than inside the walk below: a local class
+    // written in a *generic* lambda's body resolves `T` against the
+    // lambda's own invented parameter list under clang, which reports
+    // `Matrix<T, 3, 3>` with T deduced as the lambda type itself. gcc
+    // accepts it. The construct buys nothing, so it is simply not used.
+    struct Spot {
+        Vec<T, 3> position{};
+        Matrix<T, 3, 3> frame = Matrix<T, 3, 3>::identity();
+    };
+
     // A group's transform is folded into its members here, which is why
     // `Compose` never needs one of its own at render time and why the
     // result stays a flat array: the accumulator lives in the walk, not
@@ -1097,15 +1112,8 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             return;
         }
 
-        // How many instances this operation is, where each one sits, and
-        // which way each one faces. The frame is carried rather than
-        // recomputed later because it belongs to the site, and dropping
-        // it here is exactly the bug this field fixes.
-        struct Site {
-            Vec<T, 3> position{};
-            Matrix<T, 3, 3> frame = Matrix<T, 3, 3>::identity();
-        };
-        std::vector<Site> placements;
+        // How many instances this operation is -- see Spot above.
+        std::vector<Spot> placements;
         std::size_t geometry_node = idx;
 
         if (n.kind == Kind::Scatter) {
@@ -1113,11 +1121,11 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             auto sites = sample_surface_uniform(target, n.count, n.seed);
             placements.reserve(sites.size());
             for (std::size_t i = 0; i < sites.size(); ++i)
-                placements.push_back(Site{Vec<T, 3>{sites[i].position},
+                placements.push_back(Spot{Vec<T, 3>{sites[i].position},
                                           scatter_frame<T>(sites[i].normal, n.seed, i)});
             geometry_node = n.item;
         } else {
-            placements.push_back(Site{});
+            placements.push_back(Spot{});
         }
 
         const auto key = content_hash(trace, geometry_node);
