@@ -94,7 +94,7 @@ using spatium::render::Camera;
 using spatium::render::make_camera_basis;
 using spatium::render::camera_ray_dir;
 using spatium::render::parallel_for_rows;
-using spatium::render::supersample_pixel;
+using spatium::render::supersample_pixel_hdr;
 using spatium::render::write_png_rgb;
 
 namespace {
@@ -384,7 +384,65 @@ struct DustInstance {
     double opacity;
 };
 
+// The halo around something that emits, which is what actually reads as
+// light. Brightness alone does not: a clamped hot core and a merely
+// bright one arrive at the same pixel value, and the eye reads both as
+// paint. What separates them is that light spreads past the silhouette
+// of the thing emitting it, and nothing else in a frame does that.
+//
+// The source is the emission buffer, never the colour buffer, so this is
+// a mask and not a threshold -- see `Traced` in render_frame for the
+// measurements that ruled a threshold out. The blur is separable, two
+// passes of a 1D Gaussian instead of one 2D pass, which is the
+// difference between 2*r and r*r samples per pixel; at sigma 7 that is
+// 43 against 441. Even so it costs nothing worth measuring next to the
+// ray casting that produced the buffer.
+void add_bloom(std::vector<Vec<double, 3>>& hdr, const std::vector<Vec<double, 3>>& emission,
+               int W, int H) {
+    constexpr double kSigma = 7.0;       // halo width in pixels at 960x720
+    constexpr double kStrength = 1.25;   // how much of the halo is added back
+    const int radius = static_cast<int>(std::ceil(3.0 * kSigma));
 
+    std::vector<double> kernel(static_cast<std::size_t>(radius) + 1);
+    double norm = 0.0;
+    for (int i = 0; i <= radius; ++i) {
+        kernel[static_cast<std::size_t>(i)] = std::exp(-0.5 * (i * i) / (kSigma * kSigma));
+        norm += (i == 0 ? 1.0 : 2.0) * kernel[static_cast<std::size_t>(i)];
+    }
+    for (auto& k : kernel) k /= norm;
+
+    const auto at = [W](int x, int y) {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(W) +
+               static_cast<std::size_t>(x);
+    };
+    std::vector<Vec<double, 3>> tmp(emission.size()), blurred(emission.size());
+
+    parallel_for_rows(H, [&](int y) {
+        for (int x = 0; x < W; ++x) {
+            Vec<double, 3> acc{};
+            for (int d = -radius; d <= radius; ++d) {
+                const int xx = std::clamp(x + d, 0, W - 1);
+                acc = Vec<double, 3>{acc + emission[at(xx, y)] *
+                                               kernel[static_cast<std::size_t>(std::abs(d))]};
+            }
+            tmp[at(x, y)] = acc;
+        }
+    });
+    parallel_for_rows(H, [&](int y) {
+        for (int x = 0; x < W; ++x) {
+            Vec<double, 3> acc{};
+            for (int d = -radius; d <= radius; ++d) {
+                const int yy = std::clamp(y + d, 0, H - 1);
+                acc = Vec<double, 3>{acc + tmp[at(x, yy)] *
+                                               kernel[static_cast<std::size_t>(std::abs(d))]};
+            }
+            blurred[at(x, y)] = acc;
+        }
+    });
+
+    for (std::size_t i = 0; i < hdr.size(); ++i)
+        hdr[i] = Vec<double, 3>{hdr[i] + blurred[i] * kStrength};
+}
 
 std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
                                         const bd::Cooked<double>& cooked,
@@ -578,6 +636,31 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         std::println("");
     }
 
+    // The last step stays a clamp, and that is a measured decision rather
+    // than the one this started as.
+    //
+    // The complaint it began with was right: the emission maxes out above
+    // 1 and clamping flattens every hot particle onto the same orange, so
+    // it reads as pigment. The obvious repair -- a tone curve compressing
+    // what is above 1 instead of cutting it -- was written, and then it
+    // was checked the only way that means anything: render with the
+    // emission switched off, before and after. It moved.
+    //
+    // The reason it moved is that this frame has no headroom. A curve that
+    // asymptotes to 1 must put its knee below 1, and the scene's own
+    // shading reaches 1.263 -- the icing's specular once the donut is
+    // fully grown. So every knee sits inside the range the scene actually
+    // occupies, and there is no neutral tone curve for this image at all,
+    // only curves that darken the icing by a little or by a lot.
+    //
+    // Which turned out not to matter, because brightness was never what
+    // was missing. What separates a light from a paint is that light
+    // spreads past the silhouette of what emits it, and that is add_bloom
+    // above, working off the emission buffer rather than off any pixel
+    // value. With the halo there, the flattening of the few brightest
+    // cores costs nothing visible, and the rest of the frame is left
+    // exactly as it was -- byte for byte, which is asserted by rendering
+    // a frame with no emission in it and comparing.
     const Vec<double, 3> background{0.55, 0.75, 0.92}; // plain light blue, no starfield
     const auto basis = make_camera_basis(cam);
     // Two lights, and the split is the whole reason the shadow reads.
@@ -621,11 +704,36 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         return static_cast<bool>(inst_bvh.ray_cast(shadow));
     };
 
+    // What a ray saw, kept as two values rather than one: the colour to
+    // show, and the part of that colour which came from something
+    // emitting.
+    //
+    // The split is what lets the bloom below be selective, and it exists
+    // because the obvious alternative was measured and does not work. A
+    // brightness threshold cannot separate fire from highlight here: the
+    // specular term is bounded by (1 - roughness) * 0.6, so a white
+    // sprinkle at roughness 0.35 is bounded at 0.98 + 0.39 = 1.37, and
+    // the icing at roughness 0.40 mixes in 0.168 of whatever it reflects,
+    // which reaches ~1.48 when what it reflects is the fire. The fire's
+    // own range starts around 1.63. Those overlap, so every threshold
+    // that catches the fire also catches a highlight -- and even if one
+    // did fit, it would be a number that silently stops working the next
+    // time a material, a light or the camera moves.
+    //
+    // Carrying the emission instead makes the question structural rather
+    // than numeric: a surface whose material has no emissive term
+    // contributes exactly zero to it, at any brightness, under any light,
+    // for ever. Nothing has to be re-measured when the scene changes.
+    struct Traced {
+        Vec<double, 3> color{};
+        Vec<double, 3> emission{};
+    };
+
     // trace_ray returns linear [0,1] color throughout -- the single
     // conversion back to [0,255] happens exactly once, at the very end
-    // of ray_color below, so reflection blending stays on one scale.
-    std::function<Vec<double, 3>(const Ray<3, double>&, int)> trace_ray =
-        [&](const Ray<3, double>& ray, int depth) -> Vec<double, 3> {
+    // of render_frame below, so reflection blending stays on one scale.
+    std::function<Traced(const Ray<3, double>&, int)> trace_ray =
+        [&](const Ray<3, double>& ray, int depth) -> Traced {
         // Both trees, nearer hit wins. Two structures rather than one
         // because the two kinds of object want different leaves, not
         // because the renderer is special-casing the dust: each tree is
@@ -641,7 +749,7 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         double opacity = 1.0;
 
         const bool dust_won = dhit && (!hit || dhit->t < hit->t);
-        if (!hit && !dhit) return background;
+        if (!hit && !dhit) return Traced{background, Vec<double, 3>{}};
 
         if (dust_won) {
             // The quadric's own normal at the hit, exact rather than
@@ -701,14 +809,22 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         // them fall into the donut's shadow.
         color = Vec<double, 3>{color + emissive};
 
+        // The emitted part travels alongside the colour through every
+        // blend below, with the same weights, so that a reflection of
+        // the fire stays recognisable as fire and a reflection of the
+        // table stays recognisable as not-fire. Blending it any other
+        // way would make the two disagree about the same pixel.
+        Vec<double, 3> emitted = emissive;
+
         // A real reflected ray for glossy materials, not just a
         // highlight -- what actually earns the word "raytracing" here.
         if (roughness < 0.6 && depth < MAX_DEPTH) {
             Vec<double, 3> refl_dir = Vec<double, 3>{ray.direction - n * (2.0 * ray.direction.dot(n))};
             Vec<double, 3> refl_origin = Vec<double, 3>{hit_point + n * 1e-4};
-            Vec<double, 3> refl_color = trace_ray(Ray<3, double>{refl_origin, refl_dir}, depth + 1);
+            Traced refl = trace_ray(Ray<3, double>{refl_origin, refl_dir}, depth + 1);
             double reflectivity = (1.0 - roughness) * 0.28;
-            color = Vec<double, 3>{color * (1.0 - reflectivity) + refl_color * reflectivity};
+            color = Vec<double, 3>{color * (1.0 - reflectivity) + refl.color * reflectivity};
+            emitted = Vec<double, 3>{emitted * (1.0 - reflectivity) + refl.emission * reflectivity};
         }
         // Seen through, not bent through. The continuation carries on in
         // the ray's own direction, so a flake tints what is behind it
@@ -717,28 +833,59 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         if (opacity < 1.0 && depth < MAX_DEPTH) {
             Ray<3, double> through{Vec<double, 3>{hit_point + ray.direction * 1e-4},
                                    ray.direction};
-            Vec<double, 3> behind = trace_ray(through, depth + 1);
-            color = Vec<double, 3>{color * opacity + behind * (1.0 - opacity)};
+            Traced behind = trace_ray(through, depth + 1);
+            color = Vec<double, 3>{color * opacity + behind.color * (1.0 - opacity)};
+            emitted = Vec<double, 3>{emitted * opacity + behind.emission * (1.0 - opacity)};
         }
-        return color;
+        return Traced{color, emitted};
     };
 
-    std::vector<std::uint8_t> img(3 * static_cast<std::size_t>(W) * H, 0);
+    // Two linear buffers rather than bytes straight out of the sampler,
+    // because the bloom below is a whole-image operation and cannot be
+    // done one pixel at a time.
+    const std::size_t npix = static_cast<std::size_t>(W) * static_cast<std::size_t>(H);
+    std::vector<Vec<double, 3>> hdr(npix), emission(npix);
     parallel_for_rows(H, [&](int y) {
         for (int x = 0; x < W; ++x) {
-            std::uint8_t* px = &img[3 * (static_cast<std::size_t>(y) * W + x)];
+            // The emitted part is accumulated here and divided by the
+            // number of samples actually taken, rather than by the AA
+            // factor: the two averages then cannot disagree even if the
+            // sampler's default changes underneath this call.
+            Vec<double, 3> emis_accum{};
+            int taken = 0;
             auto ray_color = [&](double sx, double sy) -> Vec<double, 3> {
                 Vec<double, 3> dir = camera_ray_dir(basis, sx, sy);
-                Vec<double, 3> c = trace_ray(Ray<3, double>{cam.position, dir}, 0);
-                return Vec<double, 3>{
-                    std::clamp(c[0], 0.0, 1.0) * 255.0,
-                    std::clamp(c[1], 0.0, 1.0) * 255.0,
-                    std::clamp(c[2], 0.0, 1.0) * 255.0};
+                Traced tr = trace_ray(Ray<3, double>{cam.position, dir}, 0);
+                emis_accum = Vec<double, 3>{emis_accum + tr.emission};
+                ++taken;
+                // Clamped per sample, before the average, which is where
+                // this has always done it. Averaging first and clamping
+                // after is the more defensible order -- it is the one
+                // that antialiases an overbright edge correctly -- but it
+                // is a different picture, and changing it here would ride
+                // in on the back of the bloom and be indistinguishable
+                // from it. It can be its own change, with its own before
+                // and after.
+                return Vec<double, 3>{std::clamp(tr.color[0], 0.0, 1.0),
+                                      std::clamp(tr.color[1], 0.0, 1.0),
+                                      std::clamp(tr.color[2], 0.0, 1.0)};
             };
-            supersample_pixel(x, y, W, H, basis.tan_half,
-                              static_cast<double>(W) / H, ray_color, px);
+            const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(W) +
+                                  static_cast<std::size_t>(x);
+            hdr[i] = supersample_pixel_hdr(x, y, W, H, basis.tan_half,
+                                           static_cast<double>(W) / H, ray_color);
+            emission[i] = Vec<double, 3>{emis_accum * (1.0 / std::max(taken, 1))};
         }
     });
+
+    add_bloom(hdr, emission, W, H);
+
+    std::vector<std::uint8_t> img(3 * npix, 0);
+    for (std::size_t i = 0; i < npix; ++i) {
+        for (int ch = 0; ch < 3; ++ch)
+            img[3 * i + static_cast<std::size_t>(ch)] =
+                static_cast<std::uint8_t>(std::clamp(hdr[i][ch], 0.0, 1.0) * 255.0);
+    }
     return img;
 }
 
