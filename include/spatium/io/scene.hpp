@@ -75,6 +75,19 @@ struct Material {
     // by it, and saying so here is cheaper than having someone discover
     // it from a render.
     Vec<T, 3> emissive{};
+
+    // 1 = opaque, 0 = invisible. A straight alpha blend with whatever is
+    // behind, **not** refraction: the ray continues in the direction it
+    // was already going rather than bending at the surface.
+    //
+    // That is the honest model for something thin. A dust flake is three
+    // thousandths across; the lateral displacement a real refraction
+    // would produce across it is far below a pixel, so bending the ray
+    // would cost a second intersection and buy an effect nothing can
+    // see. Refraction earns its keep on something with depth -- a glass
+    // marble, a thick glaze -- and that is a separate feature with a
+    // separate cost, named in ROADMAP rather than smuggled in here.
+    T opacity{T{1}};
 };
 
 // ── Scene object ─────────────────────────────────────────────────

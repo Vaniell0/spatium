@@ -990,6 +990,20 @@ The goal was never to remove dependencies. It is to have a working default for e
 - **[course]** Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
 - **[want]** `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
 
+- **[want]** **The C ABI for the DSL — and a correction to what gates it.** `docs/gpu-abi-design.md` says the WASM/JS boundary is gated behind RSC "working in genuinely sufficient volume". Reviewed 2026-09-17: that is wrong, and it is wrong in the direction that costs the most, because it points at something unrelated and so nothing about it ever gets closer.
+
+  **What actually gates it is how much of a scene is structural**, and that is already measured on every run of the donut demo:
+
+  ```
+  fields: 39 631 total, 19 structural, 39 612 opaque
+  ```
+
+  A `Trace` is a flat array of tagged ops addressed by index — the exact shape a C ABI wants, and `gpu/geodesic_kernel.cu`'s own boundary comment ("flat arrays only across this boundary — no structs/STL") says the same thing from the other side. So the *structure* crosses trivially. What never crosses is an opaque leaf, because it is a C++ closure. A binding built today would therefore export a scene that is 99.95% closures: a door into an empty room.
+
+  What moves it is the field work — series item 6, and the separately-recorded "an IR evaluable in `Dual<T>`" — not RSC. As long as a particle's motion is `PerlinNoise` inside a lambda, no ABI can carry it anywhere.
+
+  Two further things `gpu-abi-design.md` predates and would be written differently now. Its "fusing a chain" section treats trace-once/fuse/cache-by-concrete-shape as a model to borrow from JAX/XLA and TVM some day; half of it shipped, because `Trace` *is* that trace and `cook()` is the compile-at-known-values step — the reason recorded for the representation was "a topologically ordered array evaluates in one linear pass, which is the shape a GPU can run". And its manifest sketch is much less speculative for the scene path than it sounds: `Cooked<T>` is already flat POD arrays of objects and shapes, so one entry point taking a cooked scene covers a renderer. The document needs rewriting rather than patching; its centre of gravity moved.
+
 ## RSC as search, not classification
 
 Recorded 2026-09-15. Untested, but the pieces it needs already exist and were checked before writing this down.
