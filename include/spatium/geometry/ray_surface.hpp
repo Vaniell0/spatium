@@ -253,6 +253,31 @@ struct BoundedQuadric {
                 Box<3, T>{center - r, center + r}};
     }
 
+    // A flake: a sphere clipped to a thin slab, which is a curved shell
+    // piece rather than a ball -- the shape a speck of dust or ash
+    // actually has, and the shape a crisp has.
+    //
+    // **The box sets the size, not the sphere.** `half` is the flake's
+    // extent, and the sphere is only slightly larger than it, so the
+    // surviving cap is shallow: curvature without volume. A sphere much
+    // larger than its clip would give a nearly flat patch with a huge
+    // bounding box, which is the wrong trade in a tree — the box is what
+    // the traversal sees, so it has to be the flake, tightly.
+    //
+    // Still one quadric test at a BVH leaf, so it instances exactly like
+    // a sphere does; what changes is only which surface the ray meets.
+    static BoundedQuadric flake(const Vec<T, 3>& half, T bulge = T{1.35}) {
+        using std::max;
+        // Curvature comes from the sphere being wider than the slab it is
+        // cut by; `bulge` is that ratio in the flake's widest direction.
+        T radius = bulge * max(half[0], max(half[1], half[2]));
+        // Centred below the slab so the cap that survives is the top of
+        // the sphere: one curved sheet, not a lens with two faces.
+        Vec<T, 3> centre{T{0}, T{0}, half[2] - radius};
+        return {Quadric<T>::sphere(centre, radius),
+                Box<3, T>{Vec<T, 3>{-half}, Vec<T, 3>{half}}};
+    }
+
     static BoundedQuadric ellipsoid(T a, T b, T c) {
         PointType r{a, b, c};
         return {Quadric<T>::ellipsoid(a, b, c), Box<3, T>{PointType{} - r, r}};

@@ -70,6 +70,7 @@
 #include <fstream>
 #include <functional>
 #include <numbers>
+#include <optional>
 #include <memory>
 #include <random>
 #include <utility>
@@ -83,6 +84,8 @@ namespace bd = spatium::io::build;
 using spatium::io::Material;
 using spatium::geometry::Ray;
 using spatium::geometry::Triangle3;
+using spatium::geometry::Box;
+using spatium::geometry::Instanced;
 using spatium::spatial::BVH;
 using spatium::render::Camera;
 using spatium::render::make_camera_basis;
@@ -330,15 +333,60 @@ struct Prim {
     double roughness;
 };
 
+// One instanced object: which shared shape, where, and what colour.
+struct DustInstance {
+    Vec<double, 3> color;
+    double roughness;
+};
+
+
+
 std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& scene, const Camera<double>& cam,
                                         int W, int H) {
+    // Two trees, because the scene has two kinds of object in it.
+    //
+    // Most of it is ordinary geometry: a torus, a shell, sprinkles --
+    // each a handful of triangles, each different, and a triangle tree is
+    // the right home for them.
+    //
+    // The dust is not that. It is thousands of copies of one little cube,
+    // and flattening it puts a quarter of a million identical triangles
+    // into the tree, where every one of them costs a leaf. An instance
+    // holds a *reference* to the one shape plus where this copy sits, so
+    // the tree holds thousands of leaves instead of hundreds of
+    // thousands -- and for a cube that never rotates the shape is a `Box`,
+    // which is not an approximation of it but literally it, tested in six
+    // slab comparisons rather than twelve Möller-Trumbore.
+    //
+    // What makes an object eligible is not that it looks small. It is
+    // that its motion is a *placement* -- affine in the point, so it moves
+    // the object without reshaping it (see VecField::is_placement). A
+    // motion that deforms per vertex cannot share geometry with anything,
+    // and those objects go through the triangle path unchanged.
     std::vector<Triangle3> tris;
     std::vector<Prim> prims;
+    std::vector<geometry::BoundedQuadric<double>> shapes;   // one entry per distinct shape
+    std::vector<Instanced<geometry::BoundedQuadric<double>>> insts;
+    std::vector<DustInstance> inst_info;
+
     for (const auto& obj : scene) {
+        auto mat = obj.material();
+        // Two conditions, and neither is a guess about what the object
+        // looks like. The node must have recorded an exact analytic form
+        // -- which torus(), cylinder() and sphere() do and space() cannot
+        // -- and its motion must be a placement, so copies differ only by
+        // where they are rather than by shape.
+        const auto* q = obj.template exact_as<geometry::BoundedQuadric<double>>();
+        auto place = obj.placement();
+        if (q && place) {
+            shapes.push_back(*q);
+            insts.push_back({nullptr, place->translation, place->scale});
+            inst_info.push_back({mat.base_color, mat.roughness});
+            continue;
+        }
         // Bound once: Placed::mesh() builds on each call rather than
         // caching, so the triangle view is taken here and reused.
         auto m = obj.mesh();
-        auto mat = obj.material();
         auto vn = smooth_normals(m);
         for (const auto& f : m.faces) {
             Triangle3 t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
@@ -346,7 +394,12 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
             prims.push_back(Prim{t, {vn[f[0]], vn[f[1]], vn[f[2]]}, mat.base_color, mat.roughness});
         }
     }
+    // Shapes are stored first and pointed at second: the vector has to
+    // stop reallocating before any instance holds its address.
+    for (std::size_t i = 0; i < insts.size(); ++i) insts[i].shape = &shapes[i];
+
     auto bvh = BVH<Triangle3>::build(tris);
+    auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(insts);
 
     const Vec<double, 3> background{0.55, 0.75, 0.92}; // plain light blue, no starfield
     const auto basis = make_camera_basis(cam);
@@ -358,34 +411,61 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
     // of ray_color below, so reflection blending stays on one scale.
     std::function<Vec<double, 3>(const Ray<3, double>&, int)> trace_ray =
         [&](const Ray<3, double>& ray, int depth) -> Vec<double, 3> {
+        // Both trees, nearer hit wins. Two structures rather than one
+        // because the two kinds of object want different leaves, not
+        // because the renderer is special-casing the dust: each tree is
+        // asked the same question and the answers are compared by `t`.
         auto hit = bvh.ray_cast(ray);
-        if (!hit) return background;
+        auto dhit = inst_bvh.ray_cast(ray);
 
-        const auto& prim = prims[hit->index];
-        // Interpolate the smooth vertex normals via the hit's own
-        // barycentric weights, not the triangle's single flat normal.
-        double w0 = double{1} - hit->u - hit->v, w1 = hit->u, w2 = hit->v;
-        Vec<double, 3> n{Vec<double, 3>{prim.vertex_normals[0] * w0 + prim.vertex_normals[1] * w1 +
-                                         prim.vertex_normals[2] * w2}
-                              .normalized()};
+        Vec<double, 3> n{};
+        Vec<double, 3> base_color{};
+        double roughness = 1.0;
+        Vec<double, 3> hit_point{};
+
+        const bool dust_won = dhit && (!hit || dhit->t < hit->t);
+        if (!hit && !dhit) return background;
+
+        if (dust_won) {
+            // The quadric's own normal at the hit, exact rather than
+            // interpolated across a facet -- and the instance transform
+            // is a translation and a uniform scale, so it comes back
+            // needing no correction.
+            n = dhit->normal;
+            const auto& info = inst_info[dhit->index];
+            base_color = info.color;
+            roughness = info.roughness;
+            hit_point = dhit->point;
+        } else {
+            const auto& prim = prims[hit->index];
+            // Interpolate the smooth vertex normals via the hit's own
+            // barycentric weights, not the triangle's single flat normal.
+            double w0 = double{1} - hit->u - hit->v, w1 = hit->u, w2 = hit->v;
+            n = Vec<double, 3>{Vec<double, 3>{prim.vertex_normals[0] * w0 + prim.vertex_normals[1] * w1 +
+                                              prim.vertex_normals[2] * w2}
+                                   .normalized()};
+            base_color = prim.color;
+            roughness = prim.roughness;
+            hit_point = hit->point;
+        }
         if (n.dot(ray.direction) > 0.0) n = Vec<double, 3>{-n};
 
         double diff = std::max(0.0, n.dot(light));
-        double roughness = std::clamp(prim.roughness, 0.0, 1.0);
+        roughness = std::clamp(roughness, 0.0, 1.0);
 
         Vec<double, 3> view = Vec<double, 3>{-ray.direction};
         Vec<double, 3> half = Vec<double, 3>{Vec<double, 3>{view + light}.normalized()};
         double shininess = 4.0 + 90.0 * (1.0 - roughness); // rough: broad/dull, glossy: tight/bright
         double spec = std::pow(std::max(0.0, n.dot(half)), shininess) * (1.0 - roughness) * 0.6;
 
-        Vec<double, 3> local = Vec<double, 3>{prim.color * (0.22 + 0.78 * diff)};
+        Vec<double, 3> local = Vec<double, 3>{base_color * (0.22 + 0.78 * diff)};
         Vec<double, 3> color = Vec<double, 3>{local + Vec<double, 3>{1.0, 1.0, 1.0} * spec};
 
         // A real reflected ray for glossy materials, not just a
         // highlight -- what actually earns the word "raytracing" here.
         if (roughness < 0.6 && depth < MAX_DEPTH) {
             Vec<double, 3> refl_dir = Vec<double, 3>{ray.direction - n * (2.0 * ray.direction.dot(n))};
-            Vec<double, 3> refl_origin = Vec<double, 3>{hit->point + n * 1e-4};
+            Vec<double, 3> refl_origin = Vec<double, 3>{hit_point + n * 1e-4};
             Vec<double, 3> refl_color = trace_ray(Ray<3, double>{refl_origin, refl_dir}, depth + 1);
             double reflectivity = (1.0 - roughness) * 0.28;
             color = Vec<double, 3>{color * (1.0 - reflectivity) + refl_color * reflectivity};
@@ -604,7 +684,20 @@ int main(int argc, char* argv[]) {
             text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)};
 
         dust.push_back(
-            scene.literal(dust_speck(0.014))
+            // A flake, not a ball and not an icosahedron. The speck used
+            // to be `literal(dust_speck(0.014))` -- a 20-face mesh built
+            // from `icosahedron(Sphere<2>{radius})`, an approximation of
+            // exactly the shape the library can hit exactly. Dust is not
+            // a ball either: it is a curved sheet, so this is a shallow
+            // spherical cap clipped to a thin slab, and the slab is the
+            // speck's own size. That matters at scale, because the clip
+            // box is what a tree traverses.
+            //
+            // Through flake() the node records a BoundedQuadric, so the
+            // renderer instances one shared analytic surface for all of
+            // them rather than putting hundreds of thousands of triangles
+            // in a tree, and every silhouette is a real curve.
+            scene.flake(Vec<double, 3>{0.010, 0.010, 0.003})
                 .colored(bd::PointField<double>{
                     [target, dust_color](const Vec<double, 3>& p, double) { return dust_color(p, target); }})
                 // Written as a *placement*, not as a point map, and the

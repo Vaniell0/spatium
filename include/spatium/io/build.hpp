@@ -243,6 +243,26 @@ struct Placed {
     // The triangle view, built on demand.
     mesh::Mesh<Euclidean<3, T>> mesh() const;
 
+    // The shape before this object's own motion moved it. Two copies of
+    // one speck differ only in where they were put, so this is the form
+    // they can share; `mesh()` is this with the placement already applied
+    // and is therefore unique per object by construction.
+    mesh::Mesh<Euclidean<3, T>> rest_mesh() const {
+        return materialize_mesh(*trace, index, t, /*placed=*/false);
+    }
+
+    // The transform this object's motion is, if it is one. Present when
+    // the motion is affine in the point -- a placement, which moves the
+    // object without reshaping it -- and absent when it deforms per
+    // vertex, because then there is no transform to name and nothing to
+    // share. A renderer uses this to decide whether an object can be an
+    // instance of a shared shape or has to be its own triangles.
+    std::optional<typename VecField<T>::Placement> placement() const {
+        const auto& n = trace->node(index);
+        if (!n.transform.is_placement()) return std::nullopt;
+        return n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
+    }
+
     // The analytic description, when there is one. Present for Space and
     // Offset nodes; absent for Literal (a precomputed mesh with no
     // (u,v) map), Scatter and Compose (many objects, not one surface).
@@ -365,6 +385,56 @@ public:
         // make_cylinder puts v in [0, height], so the clip matches the map.
         node(h.index).exact =
             geometry::BoundedQuadric<T>::cylinder_z(radius, T{0}, height);
+        return h;
+    }
+
+    // A sphere, entering through its own chart (chart_of(Sphere<2,T>))
+    // and recording the exact form a renderer can hit directly.
+    //
+    // Worth having as a factory rather than as `space(chart_of(...))`,
+    // for the same reason `torus()` and `cylinder()` are: `space()` cannot
+    // know what it was handed. A chart is a (u,v) map and nothing more,
+    // so a sphere that arrives that way is a surface with no closed form
+    // recorded, and every renderer downstream has to tessellate it. The
+    // factory knows, so it says.
+    Handle<T> sphere(T radius, std::size_t u_steps = 24, std::size_t v_steps = 12) {
+        auto h = space(chart_of(Sphere<2, T>{radius}), u_steps, v_steps);
+        node(h.index).exact = geometry::BoundedQuadric<T>::sphere(radius);
+        return h;
+    }
+
+    // A flake: a shallow spherical cap, clipped to a thin slab. What a
+    // speck of dust or ash actually is -- a curved sheet, not a ball --
+    // and the shape to reach for when there will be millions of them,
+    // because the clip box *is* the speck's size and the box is what a
+    // tree traverses.
+    //
+    // The chart and the exact form are built from the same three numbers
+    // here, which is the point of it being a factory: they cannot drift.
+    // `half` is the flake's own extent; `bulge` is how much wider the
+    // sphere is than the slab it is cut by, and so how curved the sheet
+    // is. Keep it near 1 — a sphere much larger than its clip is a nearly
+    // flat patch wearing a huge bounding box.
+    Handle<T> flake(const Vec<T, 3>& half, T bulge = T{1.35},
+                    std::size_t u_steps = 8, std::size_t v_steps = 3) {
+        using std::acos, std::sqrt, std::sin, std::cos, std::min, std::max;
+        const T r = bulge * max(half[0], max(half[1], half[2]));
+        const Vec<T, 3> centre{T{0}, T{0}, half[2] - r};
+        // How far down the sphere the slab still admits: the polar angle
+        // at which the cap's radius reaches the slab's half-width.
+        const T rim = min(half[0], half[1]);
+        const T v_max = acos(max(T{-1}, min(T{1}, sqrt(max(T{0}, r * r - rim * rim)) / r)));
+
+        auto h = space(ParametricSurface<T>(
+                           [r, centre](T u, T v) -> Vec<T, 3> {
+                               return {centre[0] + r * sin(v) * cos(u),
+                                       centre[1] + r * sin(v) * sin(u),
+                                       centre[2] + r * cos(v)};
+                           },
+                           {T{0}, T{2} * acos(T{-1}), T{0}, v_max},
+                           /*periodic_u=*/true, /*periodic_v=*/false),
+                       u_steps, v_steps);
+        node(h.index).exact = geometry::BoundedQuadric<T>::flake(half, bulge);
         return h;
     }
 
@@ -551,19 +621,27 @@ Handle<T> Handle<T>::moving(PointField<T> f) const {
             "materializes to its children, so a motion here would have nothing to read "
             "it. Apply .moving() to each child, or compose the moved children.");
 
-    // The exact form goes, always. `f` is an arbitrary point map, so in
-    // general it does not send a torus to a torus, and a recorded shape
-    // that no longer agrees with the map is worse than no recorded shape
-    // at all: the render would be correct for the shape and wrong for
-    // the scene, with nothing to notice.
+    // The exact form survives a *placement* and not a deformation, and
+    // this is the question that used to be unanswerable.
     //
-    // Always, not "unless f is an isometry", on purpose. Recognising an
-    // isometry means asking an opaque callable what it does, which is
-    // exactly the question a callable cannot answer -- it becomes
-    // answerable once motion has a structural form, and that is where it
-    // belongs. Until then this costs the exact path on a moving node and
-    // keeps the invariant true, which is the cheaper of the two mistakes.
-    trace->node(index).exact.reset();
+    // The rule was "clear it, always", with the reason written here: an
+    // arbitrary point map does not in general send a torus to a torus, so
+    // a recorded shape that no longer agrees with the map is worse than
+    // no recorded shape -- the render would be right about the shape and
+    // wrong about the scene. And recognising an isometry meant asking an
+    // opaque callable what it does, which a callable cannot answer. The
+    // note ended: *it becomes answerable once motion has a structural
+    // form, and that is where it belongs.*
+    //
+    // It has one. `is_placement()` is derived by walking, not asked of a
+    // closure: the motion is affine in the point, so it translates and
+    // uniformly scales and nothing else. That sends a sphere to a sphere
+    // and a torus to a torus. The recorded form stays the *rest* shape --
+    // where the object is belongs to the placement, which a renderer reads
+    // separately -- so the two cannot drift apart.
+    //
+    // A deformation still clears it, for the original reason, unchanged.
+    if (!f.is_placement()) trace->node(index).exact.reset();
 
     auto& slot = trace->node(index).transform;
     if (!slot) {
@@ -780,6 +858,12 @@ FieldStats field_report(const Trace<T>& trace) {
 // rendered. The DSL had that boundary in practice and never said so.
 // `cook()` says it.
 //
+// **Takes the trace by const reference, not by value.** `Cooked` holds
+// objects, shapes and the report -- it never keeps the trace -- so
+// consuming one bought nothing and cost the caller the scene they still
+// need to render. Expressing "the build phase is over" is the job of
+// `Cooked` having no builders, not of destroying the input.
+//
 // **A type, not a flag.** A `frozen_` bool would be a value that looks
 // like a guarantee and holds none: nothing stops `trace.torus()` after it
 // is set, and no compiler notices. `Cooked<T>` holds the guarantee
@@ -868,7 +952,7 @@ public:
     }
 
 private:
-    template<Scalar U> friend Cooked<U> cook(Trace<U>&&, std::size_t, U);
+    template<Scalar U> friend Cooked<U> cook(const Trace<U>&, std::size_t, U);
     std::vector<Object<T>> objects_;
     std::vector<Shape<T>> shapes_;
     FieldStats fields_{};
@@ -950,7 +1034,7 @@ inline std::size_t content_hash(const Trace<T>& trace, std::size_t idx) {
 }
 
 template<Scalar T = double>
-Cooked<T> cook(Trace<T>&& trace, std::size_t root, T t = T{0}) {
+Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
     Cooked<T> out;
     std::unordered_map<std::size_t, std::size_t> shape_of_key;
 
