@@ -20,11 +20,28 @@
 #include <spatium/algebra/polynomial.hpp>
 #include <spatium/core/precision.hpp>
 #include <array>
+#include <cassert>
 
 namespace rsc {
 
-inline void flatten_cubic_roots(const std::array<spatium::Complex<double>, 3>& roots,
+// The registry's pinned out_size is 6 -- three roots, re and im each --
+// so this copies exactly three and asserts it has three to copy.
+//
+// An assert rather than a Result, and the reasoning is worth keeping
+// because the first answer was the wrong one. The op receives
+// `std::span<const double> in` with `in[0]` as the leading coefficient,
+// which *looks* like a boundary with untrusted input. It is not. A
+// boundary is where data arrives from outside the process and may be
+// anything -- load_obj, json::parse. Here it comes from a harness living
+// in the same binary, generating inputs from a distribution it defines
+// itself. That is an internal pipeline invariant, and conventions.md
+// answers those with an assert, the same as physics/mechanics/, spaces/
+// and mesh/. A monic cubic always has three roots with multiplicity; if
+// it has two, either the input or the solver is broken, and both are
+// bugs rather than failure modes.
+inline void flatten_cubic_roots(const spatium::UpTo<spatium::Complex<double>, 3>& roots,
                                  std::span<double> out) {
+    assert(roots.size() == 3 && "flatten_cubic_roots: a monic cubic has three roots");
     for (int i = 0; i < 3; ++i) {
         out[2 * i] = roots[i].re;
         out[2 * i + 1] = roots[i].im;
@@ -41,6 +58,7 @@ inline Registry build_precision_registry() {
              .input_names = {"a", "b", "c", "d"},
              .output_names = {"re0", "im0", "re1", "im1", "re2", "im2"}},
             [](std::span<const double> in, std::span<double> out) {
+                assert(in[0] != 0.0 && "harness contract: monic cubic");
                 auto roots = spatium::solve_cubic<double>(in[0], in[1], in[2], in[3]);
                 flatten_cubic_roots(roots, out);
             });
@@ -53,13 +71,14 @@ inline Registry build_precision_registry() {
              .output_names = {"re0", "im0", "re1", "im1", "re2", "im2"}},
             [](std::span<const double> in, std::span<double> out) {
                 using spatium::Real50;
+                assert(in[0] != 0.0 && "harness contract: monic cubic");
                 auto roots = spatium::solve_cubic<Real50>(Real50(in[0]), Real50(in[1]),
                                                             Real50(in[2]), Real50(in[3]));
-                std::array<spatium::Complex<double>, 3> narrowed;
-                for (int i = 0; i < 3; ++i) {
-                    narrowed[i].re = roots[i].re.convert_to<double>();
-                    narrowed[i].im = roots[i].im.convert_to<double>();
-                }
+                spatium::UpTo<spatium::Complex<double>, 3> narrowed;
+                for (std::size_t i = 0; i < roots.size(); ++i)
+                    narrowed.push_back(spatium::Complex<double>{
+                        roots[i].re.template convert_to<double>(),
+                        roots[i].im.template convert_to<double>()});
                 flatten_cubic_roots(narrowed, out);
             });
 

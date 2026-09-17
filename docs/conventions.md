@@ -232,6 +232,17 @@ The same shape recurs at every level:
 | an `is_structural()` flag | something that reports the *consequence*, not just the fact |
 | two code paths that must give the same answer | a test comparing them **to each other**, not each to itself |
 
+**The `[!shouldfail]` row completed its round trip 2026-09-17**, which is
+worth recording because it is the half of the mechanism nobody tests. All
+three pins on the degenerate leading coefficient started passing the day
+the solvers were fixed, Catch2 reported *that* as a failure, and the tags
+could not be left on. The pin does not only keep a known bug visible — it
+refuses to stay attached to a bug that is gone, which is the property
+that stops a repository accumulating tests marked broken that quietly
+work. `poisoning unused slots in Debug` became real in the same change:
+`UpTo` (core/up_to.hpp) fills the slots past its count with NaN under
+Debug, so reading past the count is visibly wrong rather than undefined.
+
 So the rule: **when adding a mechanism that makes a class of error
 visible, land what executes it first, or in the same change.** Not after.
 The infrastructure is the part that can be silently missing, because a

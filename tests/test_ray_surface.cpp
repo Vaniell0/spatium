@@ -120,22 +120,18 @@ TEST_CASE("ray_quadric_full: hit returns vector", "[ray_surface]") {
 }
 
 // The third instance of the degenerate-leading-coefficient defect, and
-// the worst-presenting of them. Tagged [!shouldfail] like the other two
-// (see test_polynomial.cpp and the cone-generator case below): the suite
-// stays green while the defect stays visible, and fixing the solvers
-// makes this pass, which Catch2 reports as a failure and forces the tag
-// off.
+// the worst-presenting of them. Closed 2026-09-17 with the other two.
 //
-// Why this one is worse than a NaN. ray_quadric_proximity indexes
-// roots[0] directly rather than iterating, so it reads a root that a
-// degenerate quadratic does not have. The NaN it gets back has an
+// Why this one was worse than a NaN. ray_quadric_proximity indexes
+// roots[0] directly rather than iterating, so it read a root that a
+// degenerate quadratic does not have. The NaN it got back had an
 // imaginary part of exactly zero, and `miss` is abs() of that -- so the
-// function returns Result *success* reporting a clean grazing hit, for a
-// ray running down the middle of the tube that never approaches the
-// wall. closest_t and the point are NaN and conspicuous; `miss` is 0.0
-// and looks like an answer, in the one field a caller branches on.
+// function returned Result *success* reporting a clean grazing hit, for
+// a ray running down the middle of the tube that never approaches the
+// wall. closest_t and the point were NaN and conspicuous; `miss` was 0.0
+// and looked like an answer, in the one field a caller branches on.
 TEST_CASE("ray_quadric_proximity: a ray down the axis is not a grazing hit",
-          "[ray_surface][!shouldfail]") {
+          "[ray_surface]") {
     Quadric<double> cylinder{};
     cylinder.Q = {};
     cylinder.Q(0, 0) = 1.0;
@@ -148,10 +144,19 @@ TEST_CASE("ray_quadric_proximity: a ray down the axis is not a grazing hit",
     // The right answer is a refusal, not a better number. This function's
     // whole model -- "re is the closest approach, |im| is the miss" --
     // assumes a genuine near-miss, and a ray inside the tube parallel to
-    // its axis is not one: it never approaches and never recedes. So the
-    // fix is a degeneracy check on the t^2 coefficient *before*
-    // solve_quadratic, not a bounds check after it. Catching it at
-    // roots[0] would catch the symptom and leave the semantics wrong.
+    // its axis is not one: it never approaches and never recedes.
+    //
+    // This comment used to predict the fix would be a degeneracy check on
+    // the t² coefficient *before* solve_quadratic, on the grounds that
+    // checking after would catch the symptom and leave the semantics
+    // wrong. The prediction was made when the return type could not say
+    // "fewer roots", and it is superseded rather than merely unmet. The
+    // check that shipped asks the *answer* -- fewer than two roots means
+    // no conjugate pair to read a miss from -- and that is better than
+    // re-deriving the degeneracy condition here, because it leaves one
+    // place that decides what "degenerate" means. A coefficient test at
+    // the call site would be a second copy of the solver's own rule, free
+    // to drift from it.
     CHECK_FALSE(prox.has_value());
     if (!prox) CHECK(prox.error().code == ErrorCode::DegenerateInput);
 }
@@ -497,20 +502,22 @@ TEST_CASE("BoundedQuadric cylinder: a ray down the axis misses", "[ray_surface]"
     CHECK_FALSE(ray_hit(parallel, c).has_value());
 }
 
-// The other half of the NaN story, and the half still open. Tagged
-// [!shouldfail] so the suite stays green while the defect stays visible;
-// when the solvers stop dividing by a vanishing leading coefficient this
-// starts passing, Catch2 reports that as a failure, and the tag has to
-// come off. See the matching case in test_polynomial.cpp.
+// The other half of the NaN story, closed 2026-09-17. Was tagged
+// [!shouldfail] so the suite stayed green while the defect stayed
+// visible; when the solvers stopped dividing by a vanishing leading
+// coefficient it started passing, Catch2 reported that as a failure, and
+// the tag came off. See the matching case in test_polynomial.cpp.
 TEST_CASE("BoundedQuadric cone: a ray along a generator keeps its hit",
-          "[ray_surface][!shouldfail]") {
+          "[ray_surface]") {
     // A ray parallel to one of the cone's own generators meets the
     // surface exactly once -- a genuine, single, forward hit. Because it
-    // is parallel to a generator the t² coefficient is exactly zero, so
-    // solve_quadratic divides by zero and both roots come back NaN. The
-    // leaf now rejects NaN instead of reporting a hit at t = NaN (that
-    // was the false positive, fixed), but rejecting is not finding: the
-    // real intersection is silently gone.
+    // is parallel to a generator the t² coefficient is exactly zero: one
+    // quantity minus itself, zero to the bit, which is why an exact
+    // comparison against zero is the right guard rather than a tolerance.
+    // solve_quadratic used to divide by that zero and hand back two NaNs.
+    // The leaf rejected them instead of reporting a hit at t = NaN (that
+    // was the false positive, fixed earlier), but rejecting is not
+    // finding, and the real intersection was silently gone.
     auto cone = BoundedQuadric<>::cone_z(-2.0, 2.0);  // straddles the apex
     double s = 1.0 / std::sqrt(2.0);
     Ray<3, double> along{Vec<double, 3>{0.0, 0.0, -1.0}, Vec<double, 3>{s, 0.0, s}};

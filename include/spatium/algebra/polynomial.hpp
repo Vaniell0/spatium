@@ -4,6 +4,7 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/algebra/complex.hpp>
 #  include <spatium/core/epsilon.hpp>
+#  include <spatium/core/up_to.hpp>
 #  include <array>
 #  include <cmath>
 #  include <numbers>
@@ -13,12 +14,62 @@
 SPATIUM_EXPORT namespace spatium {
 inline namespace algebra {
 
+// ── The degenerate leading coefficient ────────────────────────
+//
+// All three solvers divide by their leading coefficient. When it
+// vanishes the equation does not stop having roots — it stops being of
+// that degree. `solve_quadratic(0, 2, -1)` is `2x - 1 = 0`, root `0.5`,
+// and it used to return NaN and -inf. Worse than being wrong: `NaN`
+// reports `is_real() == true`, so the garbage walked straight through
+// every caller's filter, and a ray parallel to one of a cone's own
+// generators silently lost its single genuine hit.
+//
+// So each solver collapses to the next one down, and says so by
+// returning fewer roots. `UpTo<Complex<T>, N>` is what makes "fewer" a
+// thing the return type can express at all (core/up_to.hpp).
+//
+// **The test is exact equality with zero, and that is deliberate.** A
+// relative test — "a is negligible beside b and c" — catches more cases
+// and is the wrong trade here: it would turn a genuine, merely
+// ill-conditioned quadratic into a linear one and drop a real root that
+// is large but honest, replacing one silent wrong answer with another.
+// Exact zero is the only threshold that says *this is not a quadratic*
+// rather than *this quadratic is awkward*. It is also exactly what the
+// geometry produces: for a ray along a cone's generator the `t²`
+// coefficient is one quantity minus itself, which is zero to the bit.
+//
+// What this does NOT address, recorded so it is not mistaken for
+// covered: catastrophic cancellation for a leading coefficient that is
+// tiny but nonzero, where `(-b ± sqrt(disc)) / 2a` loses precision in
+// the root near zero. That is a separate defect with a separate fix (the
+// numerically stable form, `q = -(b + sign(b)·sqrt(disc))/2` then
+// `x₁ = q/a`, `x₂ = c/q`), and bundling it here would have made one
+// change two.
+
+// ── Linear solver ─────────────────────────────────────────────
+// bx + c = 0. Not exported as an API of its own -- it exists because a
+// degenerate quadratic is exactly this, and writing it out once keeps
+// the collapse readable.
+//
+// `b == 0` yields no roots in both of its sub-cases, and they are
+// genuinely different: `0 = c` with c nonzero has none, while `0 = 0`
+// has every number. An empty *root list* is the honest answer to both,
+// because a list cannot represent "all of them" -- and a caller
+// iterating roots does the right thing either way.
+template<Scalar T>
+UpTo<Complex<T>, 2> solve_linear(T b, T c) {
+    if (b == T{0}) return {};
+    return {Complex<T>{-c / b}};
+}
+
 // ── Quadratic solver ──────────────────────────────────────────
-// ax² + bx + c = 0 → 2 roots (possibly complex)
+// ax² + bx + c = 0 → up to 2 roots (possibly complex)
 
 template<Scalar T>
-std::array<Complex<T>, 2> solve_quadratic(T a, T b, T c) {
+UpTo<Complex<T>, 2> solve_quadratic(T a, T b, T c) {
     using std::sqrt; // ADL: lets non-std Scalar T (e.g. Real50) provide its own sqrt
+    if (a == T{0}) return solve_linear(b, c);
+
     auto disc = b * b - T{4} * a * c;
 
     if (disc >= T{0}) {
@@ -44,12 +95,19 @@ std::vector<T> real_roots_quadratic(T a, T b, T c, T eps = epsilon<T>()) {
 }
 
 // ── Cubic solver (Cardano) ────────────────────────────────────
-// ax³ + bx² + cx + d = 0 → 3 roots
+// ax³ + bx² + cx + d = 0 → up to 3 roots
 
 template<Scalar T>
-std::array<Complex<T>, 3> solve_cubic(T a, T b, T c, T d) {
+UpTo<Complex<T>, 3> solve_cubic(T a, T b, T c, T d) {
     // ADL: lets non-std Scalar T (e.g. Real50) provide its own overloads.
     using std::sqrt, std::cbrt, std::abs, std::acos, std::cos, std::atan;
+
+    if (a == T{0}) {
+        auto lower = solve_quadratic(b, c, d);
+        UpTo<Complex<T>, 3> out;
+        for (const auto& r : lower) out.push_back(r);
+        return out;
+    }
 
     // Normalize: x³ + px² + qx + r = 0
     auto p = b / a;
@@ -113,11 +171,19 @@ std::array<Complex<T>, 3> solve_cubic(T a, T b, T c, T d) {
 }
 
 // ── Quartic solver (Ferrari) ──────────────────────────────────
-// ax⁴ + bx³ + cx² + dx + e = 0 → 4 roots
+// ax⁴ + bx³ + cx² + dx + e = 0 → up to 4 roots
 
 template<Scalar T>
-std::array<Complex<T>, 4> solve_quartic(T a, T b, T c, T d, T e) {
+UpTo<Complex<T>, 4> solve_quartic(T a, T b, T c, T d, T e) {
     using std::abs, std::sqrt; // ADL: lets non-std Scalar T (e.g. Real50) provide these
+
+    if (a == T{0}) {
+        auto lower = solve_cubic(b, c, d, e);
+        UpTo<Complex<T>, 4> out;
+        for (const auto& r : lower) out.push_back(r);
+        return out;
+    }
+
     // Normalize: x⁴ + px³ + qx² + rx + s = 0
     auto p = b / a;
     auto q = c / a;

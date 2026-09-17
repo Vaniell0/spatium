@@ -390,6 +390,26 @@ Result<RayProximity<T>> ray_quadric_proximity(const Ray<3, T>& ray, const Quadri
             return std::unexpected(Error{ErrorCode::DegenerateInput, "ray intersects surface"});
     }
 
+    // A refusal, not a better number. This function's whole model — "re is
+    // the closest approach, |im| is the miss" — assumes a genuine near-miss
+    // between a ray and a surface it passes beside. A degenerate quadratic
+    // has no such pair of complex-conjugate roots to read, and there is no
+    // sensible proximity to report from a ray running down a cylinder's own
+    // axis: it is not approaching the wall at all.
+    //
+    // Before the solvers collapsed the degree this branch was the
+    // worst-presenting instance of the NaN bug in the tree, and worth
+    // keeping described. `roots[0]` was read from a quadratic that had no
+    // roots; the NaN that came back had an imaginary part of exactly zero,
+    // so `miss` — `abs()` of it — was 0.0, and the function returned
+    // Result *success* reporting a clean grazing hit. `closest_t` and the
+    // point were NaN and conspicuous. `miss` was the one field a caller
+    // branches on, and it looked like an answer.
+    if (roots.size() < 2)
+        return std::unexpected(Error{ErrorCode::DegenerateInput,
+                                     "ray is parallel to the quadric's own direction: "
+                                     "no closest approach to report"});
+
     // Complex roots: real part = closest approach t, |imag| = miss metric
     auto closest_t = std::max(roots[0].re, T{0});
     auto miss = std::abs(roots[0].im);
