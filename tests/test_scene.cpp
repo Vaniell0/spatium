@@ -272,7 +272,7 @@ Result<ResolvedShape<double>> make_toy_disc(const SceneObject<double>& obj) {
     Vec<double, 3> center = obj.position;
     ResolvedShape<double> shape;
     shape.ray_hits = [center, radius](const geometry::Ray<3, double>& ray) {
-        std::vector<geometry::RayHit<double>> hits;
+        UpTo<geometry::RayHit<double>, ResolvedShape<double>::max_hits> hits;
         // Intersect with the z = center.z plane, then check the radius.
         if (std::abs(ray.direction[2]) < 1e-12) return hits;
         double t = (center[2] - ray.origin[2]) / ray.direction[2];

@@ -115,8 +115,8 @@ TEST_CASE("ray_quadric_full: hit returns vector", "[ray_surface]") {
     auto r = unwrap(ray(Vec3{-10, 0, 0}, Vec3{1, 0, 0}));
     auto q = Quadric<>::sphere(3.0);
     auto result = ray_quadric_full(r, q);
-    CHECK(std::holds_alternative<std::vector<RayHit<double>>>(result));
-    CHECK(std::get<std::vector<RayHit<double>>>(result).size() == 2);
+    CHECK(std::holds_alternative<UpTo<RayHit<double>, 2>>(result));
+    CHECK(std::get<UpTo<RayHit<double>, 2>>(result).size() == 2);
 }
 
 // The third instance of the degenerate-leading-coefficient defect, and
