@@ -6,6 +6,23 @@ are templated on a `Scalar` parameter and on space concepts, so new
 contributions should follow the same pattern instead of hard-coding `double`
 or Euclidean assumptions.
 
+## Where to start
+
+`docs/ROADMAP.md`'s Backlog is the honest list, including about what is
+deliberately *not* going to happen and why. Entries marked `[want]` are
+things that would be good to have and that nobody is working on; several
+are described in enough detail to implement directly.
+
+Two kinds of contribution are worth more than their size suggests:
+
+- **A number that disagrees with one of ours.** Most of this repository's
+  interesting history is plausible claims that did not survive being run.
+  If a benchmark on your machine says something different, that is a
+  finding, not a complaint.
+- **Arguing with a ROADMAP entry.** Several changed after someone pushed
+  back on the reasoning. "This is listed as impossible and here is why it
+  is not" is a welcome issue.
+
 ## Building
 
 ```bash
@@ -78,6 +95,29 @@ Each example under `examples/` is a stand-alone reproducer for a feature
 
 ## Reporting issues
 
-Please include the GCC/Clang version, OS and CMake invocation.  For
-numerical or geometric bugs, the smallest reproducer (a few lines + the
-expected vs. actual output) is far more useful than a screenshot.
+The issue templates ask for what a maintainer would otherwise have to
+come back and ask you for: compiler and version, the CMake invocation,
+and the smallest reproducer. For a numerical or geometric bug, the
+expected value *and where it comes from* — a closed form, a reference
+implementation, a paper — is far more useful than a screenshot.
+
+One thing that catches people out and is worth stating here: several
+capabilities are absent rather than broken without their optional
+dependency. The heat method, DEC and geodesics need `SPATIUM_EIGEN=ON`;
+`Real50`/`Real100` need `SPATIUM_BOOST=ON`. A default build genuinely
+does not have them, and that is a documented state rather than a bug.
+
+## What review will ask
+
+Not a gate, just the questions that come up every time, so you can answer
+them in the PR and save a round trip:
+
+- **Does the test fail without the fix?** A regression test that passes
+  either way is not testing anything. The same standard applies to a new
+  feature's test against the behaviour before it.
+- **Did anything get measured, and what did the measurement say?**
+  Including when it said the opposite of what was expected.
+- **Is anything in the docs now untrue?** Three CI scripts check that
+  documentation names files that exist, that `CLAUDE.md` covers every
+  directory, and that the dependency graph matches the real includes —
+  but none of them can tell that a sentence became wrong.
