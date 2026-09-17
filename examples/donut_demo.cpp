@@ -71,6 +71,7 @@
 #include <functional>
 #include <numbers>
 #include <optional>
+#include <map>
 #include <memory>
 #include <random>
 #include <utility>
@@ -383,7 +384,8 @@ struct DustInstance {
 
 
 
-std::vector<std::uint8_t> render_frame(const bd::Cooked<double>& cooked,
+std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
+                                        const bd::Cooked<double>& cooked,
                                         const std::vector<bd::Placed<double>>& gizmos,
                                         const Camera<double>& cam, int W, int H) {
     // Two trees, because the scene has two kinds of object in it.
@@ -507,6 +509,17 @@ std::vector<std::uint8_t> render_frame(const bd::Cooked<double>& cooked,
                      ? 0.0
                      : static_cast<double>(cooked.vertices_without_instancing()) /
                            static_cast<double>(cooked.vertices_stored()));
+    {
+        // Which nodes were refused, by kind -- because "21 deformations"
+        // is a number nobody can act on, and because a claim about what
+        // they are has already been wrong once in this repository.
+        std::map<std::string, int> by_kind;
+        for (auto i : cooked.refused_nodes())
+            ++by_kind[bd::kind_name(trace.node(i).kind)];
+        std::print("  refused nodes:");
+        for (const auto& [k, n] : by_kind) std::print(" {}x{}", n, k);
+        std::println("");
+    }
 
     const Vec<double, 3> background{0.55, 0.75, 0.92}; // plain light blue, no starfield
     const auto basis = make_camera_basis(cam);
@@ -679,10 +692,10 @@ Camera<double> hero_camera() {
 // No gizmos here, and that is the whole difference between the still and
 // the sequence: --photo is the render, the build-up frames are the
 // viewport. Blender's own arc, and nothing had to be written to say so.
-void render_photo(const bd::Cooked<double>& cooked,
+void render_photo(const bd::Trace<double>& trace, const bd::Cooked<double>& cooked,
                    const std::string& out_path, bool force) {
     constexpr int W = 960, H = 720;
-    auto img = render_frame(cooked, {}, hero_camera(), W, H);
+    auto img = render_frame(trace, cooked, {}, hero_camera(), W, H);
     if (spatium::examples::confirm_overwrite(out_path, force))
         write_png_rgb(out_path, W, H, img);
     std::println("  -> {}", out_path);
@@ -709,7 +722,7 @@ void render_video(const bd::Trace<double>& scene, std::size_t lesson_idx, const 
         std::string path = std::format("{}/frame_{:04d}.png", dir, frame);
         if (spatium::examples::confirm_overwrite(path, force))
             write_png_rgb(path, W, H,
-                          render_frame(ck, gizmos, c, W, H));
+                          render_frame(scene, ck, gizmos, c, W, H));
         ++frame;
     };
 
@@ -779,9 +792,20 @@ int main(int argc, char* argv[]) {
     // dissolve), so the donut visibly *replaces* the dust rather than
     // simply being present the whole time -- still one closed-form
     // function of (point, t), no simulation loop.
-    auto grow_scale = [](const Vec<double, 3>& p, double time) -> Vec<double, 3> {
-        double e = smoothstep01((time - T_DONUT_START) / (T_DONUT_END - T_DONUT_START));
-        return Vec<double, 3>{p * e};
+    // Written as an expression, not as a lambda, and the difference is not
+    // style: `p * e(t)` is a uniform scale either way, but only the
+    // expression form can be *seen* to be one. An opaque leaf that touches
+    // the point sets reads_point, is_placement() answers "deformation",
+    // and the node loses instancing -- for how it was spelled rather than
+    // for what it does. This one line was costing the dough, the icing and
+    // eighteen scatter nodes their instancing.
+    //
+    // A field is move-only, so each node gets its own rather than sharing
+    // one; the closure is stateless, so that costs nothing worth naming.
+    auto grow_scale = [] {
+        return scaled(bd::VecField<double>::point(), [](double time) {
+            return smoothstep01((time - T_DONUT_START) / (T_DONUT_END - T_DONUT_START));
+        });
     };
 
     // Step 0 -- the default cube. Visible briefly, static, then it's
@@ -789,9 +813,10 @@ int main(int argc, char* argv[]) {
     // dust field below (`dust`), not this node's own motion.
     auto cube = scene.cube({0.9, 0.9, 0.9})
                     .colored(Material<double>{.base_color = {0.55, 0.55, 0.58}})
-                    .moving([](const Vec<double, 3>& p, double time) -> Vec<double, 3> {
-                        return Vec<double, 3>{p * (time < 0.12 ? 1.0 : 0.0)};
-                    });
+                    // Same reason as grow_scale: a uniform scale, spelled so
+                    // that it can be recognised as one.
+                    .moving(scaled(bd::VecField<double>::point(),
+                                   [](double time) { return time < 0.12 ? 1.0 : 0.0; }));
 
     // Step 0.5 -- delete the cube by *exploding* it: not a shrink this
     // time, real dust -- ~220 tiny cubes flying from the cube's own
@@ -1010,7 +1035,7 @@ int main(int argc, char* argv[]) {
     auto dough_base = scene.torus(2.0, 1.0, 240, 120);
     auto dough = scene.offset(dough_base, dough_surface)
                      .colored(Material<double>{.base_color = {0.87, 0.58, 0.27}, .roughness = 0.92})
-                     .moving(grow_scale);
+                     .moving(grow_scale());
 
     // Step 2 -- the icing is the dough's own surface, offset outward --
     // over almost the whole top (torus_cap), clean-edged except for a
@@ -1073,7 +1098,7 @@ int main(int argc, char* argv[]) {
                         return (0.10 + pooling) * falloff;
                     }}, bd::EdgeRule::ZeroThickness)
                      .colored(Material<double>{.base_color = {0.98, 0.55, 0.68}, .roughness = 0.40})
-                     .moving(grow_scale);
+                     .moving(grow_scale());
 
     // Step 3 -- sprinkles scatter across the icing, area-weighted, in
     // several colors -- one scatter() call per color (each its own
@@ -1090,17 +1115,21 @@ int main(int argc, char* argv[]) {
     // (x,y,z) -> (z,x,y) so the length axis becomes x (a tangent
     // direction instead), then nudge down slightly so it sits sunk into
     // the icing rather than merely resting exactly half-in.
-    // Much smaller than they were, and many more of them: a real
-    // sprinkle is a fleck, and 600 fat ones read as gravel. The nudge
-    // that used to follow this line (`v[1] - 0.024`, with a comment about
-    // sinking them into the icing) is gone because it had stopped doing
-    // anything -- scatter_lift() derives the rise from the item's own
-    // lowest point, so lowering every vertex raises the lift by the same
-    // amount and the two cancel. Sinking is now said out loud, as
-    // scatter()'s `seat`.
-    auto sprinkle_mesh = solid_cylinder(0.011, 0.062, 8);
-    for (auto& v : sprinkle_mesh.vertices) v = Vec<double, 3>{v[2], v[0], v[1]};
-    auto sprinkle = scene.literal(sprinkle_mesh);
+    // A real cylinder now, not a hand-built mesh with its axes permuted.
+    //
+    // The permutation was there because scatter() could only stand an item
+    // *up* on the normal, and a sprinkle lies down -- so the only way to
+    // say so was to rotate the vertices, which a closed form cannot
+    // follow. cylinder() records a BoundedQuadric about z; permute the
+    // mesh and the exact form no longer describes it, so the node had to
+    // be a Literal, and a Literal cannot be instanced. SeatAxis::X says
+    // "this item's local x points along the normal" instead, which leaves
+    // its z -- the cylinder's own axis -- lying in the surface, and the
+    // closed form intact.
+    //
+    // Much smaller than they were and many more of them: a real sprinkle
+    // is a fleck, and 600 fat ones read as gravel.
+    auto sprinkle = scene.cylinder(0.011, 0.062, 8, 2);
     std::vector<Vec<double, 3>> sprinkle_colors{
         {0.95, 0.20, 0.25}, {0.98, 0.75, 0.15}, {0.25, 0.65, 0.35},
         {0.30, 0.45, 0.90}, {0.85, 0.30, 0.75}, {0.98, 0.98, 0.95}};
@@ -1148,9 +1177,10 @@ int main(int argc, char* argv[]) {
             // sites, and it is deliberately not in this release.
             sprinkle_groups.push_back(
                 scene.scatter(sprinkle, target, count,
-                              static_cast<std::uint32_t>(g * 97 + salt), 0.45)
+                              static_cast<std::uint32_t>(g * 97 + salt), 0.45,
+                              bd::SeatAxis::X)
                     .colored(mat)
-                    .moving(grow_scale)); // scatter() places against the icing's *analytic*,
+                    .moving(grow_scale())); // scatter() places against the icing's *analytic*,
                                           // always-full-size surface (resolve_surface() does not
                                           // see .moving()) -- which is what keeps sprinkles in
                                           // sync with the growing donut
@@ -1247,7 +1277,7 @@ int main(int argc, char* argv[]) {
     std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles -> {} vertices, {} triangles, {:.1f} ms",
                  t, sprinkle_count, verts, faces, ms);
 
-    if (photo) render_photo(bd::cook(scene, lesson.index, t), out_path, force);
+    if (photo) render_photo(scene, bd::cook(scene, lesson.index, t), out_path, force);
     if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames);
     return 0;
 }

@@ -547,7 +547,17 @@ question is not reopened from scratch in a month.
 
   ~~`19804 placements, 9 deformations`, with the nine being the exploding cube's fragments, which genuinely deform.~~ — **both halves wrong, corrected 2026-09-17.** The counts rotted, which is routine. The explanation was wrong when it was written, which is not: there are no cube fragments. The cube is a single node whose motion is `p * (time < 0.12 ? 1 : 0)` — a uniform scale to nothing — and the explosion is the *dust*, which is separate `flake()` nodes with their own motions. Nothing about the cube deforms.
 
-  What the 21 actually are: eighteen sprinkle `Scatter` nodes, plus the cube, the dough and the icing — every one of them refused because its motion is written as a plain lambda rather than as an expression, not because it deforms. So the sentence named the right number for the wrong reason and then kept the reason after the number moved. A number going stale is caught by re-running; a reason going stale is caught by nothing, which is what the "say which half" rule in the Backlog index is for.
+  What the 21 actually are, printed by the demo rather than asserted here, because a claim about this has already been wrong once:
+
+  ```
+  refused nodes: 1xLiteral 2xOffset 18xScatter
+  ```
+
+  The `Literal` is the cube, the two `Offset`s are the dough and the icing, the eighteen `Scatter`s are the sprinkle groups. The table is a `Literal` too and is *not* refused, because its motion is written structurally. Every refusal is over spelling, not over deformation.
+
+  That also reconstructs the historical nine exactly: six `Scatter` (one per colour, before the bands were split three ways) plus two `Offset` plus one `Literal`. **The number was right and the explanation was wrong from the day it was written** — there were never any cube fragments; the cube is one node and the explosion is the dust.
+
+  A number going stale is caught by re-running. A *reason* going stale is caught by nothing.
 
   ~~**Still open, and it is the part that moves a number:** no renderer consumes any of it.~~ — **wired 2026-09-16.** `donut_demo` builds a `BVH<Instanced<BoundedQuadric>>` beside its triangle tree and takes the nearer hit; `.moving()` stopped dropping the exact form for a *placement* (a deformation still drops it), which is what made the dust eligible at all. Measured on the same scene with only the render path toggled, at `t=1.5` where there is dust to see: **1.95 s instanced against 2.82 s tessellated, 1.44×, 31% of the frame.** The demo's own line now reads `render levels: 19800 exact, 9 tessellated`, where it had read `0 exact, 19809 tessellated` since it was written.
 

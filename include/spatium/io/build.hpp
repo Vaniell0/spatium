@@ -103,6 +103,28 @@ inline const char* kind_name(Kind k) {
 // Those want to be fields, and fields are the next piece of work.
 enum class EdgeRule { ZeroThickness };
 
+// Which of a scattered item's own axes points along the target's normal.
+//
+// `Z` is the default and the only behaviour there used to be: an item is
+// modelled standing up, and scattering stands it on the surface. That is
+// right for a bristle, a blade of grass, a tree -- anything whose
+// interesting direction *is* the normal.
+//
+// It is wrong for anything that lies *across* a surface, and the donut
+// demo is the proof: a sprinkle is a small cylinder lying down, and with
+// only `Z` available the only way to express that was to permute the
+// item's mesh vertices by hand -- which a closed form cannot follow,
+// since `cylinder()`'s exact `BoundedQuadric` is a cylinder about z and
+// stays one. So the sprinkle had to be a `Literal`, and a `Literal` has
+// no closed form, and an object with no closed form cannot be instanced.
+// One missing enum cost 11 000 objects their instancing.
+//
+// The frame's columns are cyclically permuted rather than swapped, which
+// keeps the basis right-handed: a cyclic permutation leaves a
+// determinant alone, a swap negates it, and a left-handed frame would
+// mirror every item placed through it.
+enum class SeatAxis { X, Y, Z };
+
 // How a renderer should turn this node into ray hits. Three levels that
 // answer the same question at three prices, measured on the shape
 // donut_demo actually builds (benchmarks/bench_raycast.cpp):
@@ -194,6 +216,7 @@ struct TraceNode {
     std::size_t item = 0, target = 0;
     std::size_t count = 0;
     std::uint32_t seed = 42;
+    SeatAxis seat_axis = SeatAxis::Z;
 
     // How deep a scattered item sits. 1 rests it on the surface (its
     // lowest point touching), 0 puts its own origin there -- half sunk,
@@ -370,15 +393,19 @@ std::pair<Vec<T, 3>, Vec<T, 3>> basis_from_normal(const Vec<T, 3>& n) {
 // parameter: the caller already said how big the item is by building it,
 // and asking twice is how the two answers drift apart.
 template<Scalar T>
-T scatter_lift(const mesh::Mesh<Euclidean<3, T>>& item) {
+T scatter_lift(const mesh::Mesh<Euclidean<3, T>>& item, SeatAxis axis = SeatAxis::Z) {
+    // Measured along whichever axis this item stands on -- the same one
+    // `scatter_frame` sends to the normal. Measuring z regardless would
+    // seat a lying cylinder by its length instead of its radius.
+    const std::size_t a = axis == SeatAxis::X ? 0 : axis == SeatAxis::Y ? 1 : 2;
     T lowest{};
-    for (const auto& v : item.vertices) lowest = std::min(lowest, v[2]);
+    for (const auto& v : item.vertices) lowest = std::min(lowest, v[a]);
     return -lowest;
 }
 
 template<Scalar T>
 Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
-                              std::size_t index) {
+                              std::size_t index, SeatAxis axis = SeatAxis::Z) {
     auto [t1, t2] = basis_from_normal(normal);
 
     std::uint32_t h = seed * 2654435761u + static_cast<std::uint32_t>(index) * 40503u;
@@ -389,11 +416,20 @@ Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
     Vec<T, 3> r1{Vec<T, 3>{t1 * cos(theta) + t2 * sin(theta)}};
     Vec<T, 3> r2{Vec<T, 3>{t2 * cos(theta) - t1 * sin(theta)}};
 
+    // Cyclic, not a swap. [r1 r2 n] is right-handed, and a cyclic
+    // permutation of columns leaves the determinant alone while a swap
+    // negates it -- a left-handed frame would mirror every item placed
+    // through it, which is the kind of thing that looks like a modelling
+    // mistake rather than a sign error.
+    Vec<T, 3> c0 = r1, c1 = r2, c2 = normal;
+    if (axis == SeatAxis::X) { c0 = normal; c1 = r1; c2 = r2; }   // local x -> n
+    else if (axis == SeatAxis::Y) { c0 = r2; c1 = normal; c2 = r1; }   // local y -> n
+
     Matrix<T, 3, 3> f{};
     for (std::size_t i = 0; i < 3; ++i) {
-        f(i, 0) = r1[i];
-        f(i, 1) = r2[i];
-        f(i, 2) = normal[i];
+        f(i, 0) = c0[i];
+        f(i, 1) = c1[i];
+        f(i, 2) = c2[i];
     }
     return f;
 }
@@ -613,7 +649,8 @@ public:
     // an open target is fine -- sampling a band by its own area element
     // is well posed, and the rim never comes up.
     Handle<T> scatter(Handle<T> item, Handle<T> target, std::size_t count,
-                      std::uint32_t seed = 42, T seat = T{1}) {
+                      std::uint32_t seed = 42, T seat = T{1},
+                      SeatAxis axis = SeatAxis::Z) {
         require_surface(target.index, "scatter");
         TraceNode<T> n{};
         n.kind = Kind::Scatter;
@@ -622,6 +659,7 @@ public:
         n.count = count;
         n.seed = seed;
         n.seat = seat;
+        n.seat_axis = axis;
         return push(std::move(n));
     }
 
@@ -814,7 +852,7 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         auto target_surface = resolve_surface(trace, n.target);
         auto sites = sample_surface_uniform(target_surface, n.count, n.seed);
         auto item_mesh = materialize_mesh(trace, n.item, t, /*placed=*/false);
-        const T lift = scatter_lift<T>(item_mesh) * n.seat;
+        const T lift = scatter_lift<T>(item_mesh, n.seat_axis) * n.seat;
 
         out.vertices.reserve(item_mesh.vertex_count() * sites.size());
         out.faces.reserve(item_mesh.face_count() * sites.size());
@@ -824,7 +862,7 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
             // The same frame cook() gives the instance, from the same
             // function, so the baked picture and the instanced one cannot
             // drift apart. See scatter_frame().
-            auto frame = scatter_frame<T>(site.normal, n.seed, i);
+            auto frame = scatter_frame<T>(site.normal, n.seed, i, n.seat_axis);
 
             uint32_t base_idx = static_cast<uint32_t>(out.vertices.size());
             Vec<T, 3> seat{site.position + site.normal * lift};
@@ -1238,12 +1276,13 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             auto target = resolve_surface(trace, n.target);
             auto sites = sample_surface_uniform(target, n.count, n.seed);
             const T lift =
-                scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false)) * n.seat;
+                scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false), n.seat_axis) *
+                n.seat;
             placements.reserve(sites.size());
             for (std::size_t i = 0; i < sites.size(); ++i)
                 placements.push_back(
                     Spot{Vec<T, 3>{sites[i].position + sites[i].normal * lift},
-                         scatter_frame<T>(sites[i].normal, n.seed, i)});
+                         scatter_frame<T>(sites[i].normal, n.seed, i, n.seat_axis)});
             geometry_node = n.item;
         } else {
             placements.push_back(Spot{});

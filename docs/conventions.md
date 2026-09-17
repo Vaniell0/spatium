@@ -208,6 +208,42 @@ where the model stops applying rather than patching the value it
 produced; and prefer a type that can say "no answer" over a sentinel that
 has to be recognised.
 
+### A "why" rots faster than a "what", and nothing catches it
+
+Named 2026-09-17, on the third instance of a documented claim that was
+wrong in its explanation rather than in its number.
+
+A sentence in `ROADMAP.md` read: *"the donut now reports 19804
+placements, 9 deformations, with the nine being the exploding cube's
+fragments, which genuinely deform."* Both halves were wrong, and they
+were wrong in different ways:
+
+- **The counts rotted.** 19804/9 became 35209/21 as the scene grew. This
+  is routine, it is caught the moment anyone re-runs the demo, and it is
+  what the three freshness scripts in CI exist for.
+- **The explanation was wrong when it was written.** There are no cube
+  fragments. The cube is a single node whose motion scales it to nothing,
+  and the explosion is separate `flake()` nodes. The nine were six
+  scatter nodes, two offsets and one literal — every one refused over how
+  its motion was *spelled*, not because anything deformed.
+
+The asymmetry is the point. A stated fact carries its own test: re-run
+the thing and the number either matches or does not. A stated *reason*
+carries none — it can be wrong on the day it is written and stay wrong
+indefinitely, because nothing re-derives it and the number next to it
+keeps looking plausible. Worse, a correct number lends the wrong reason
+its credibility.
+
+So: **when writing down why something is the way it is, write down what
+you checked.** Not the conclusion alone — the observation that produced
+it, in a form someone can repeat. The corrected entry above prints the
+refused nodes by kind from the demo itself rather than asserting what
+they are, which is the difference between a claim that can rot silently
+and one that cannot.
+
+This is the third instance of the "say which half" family, and the
+sharpest, because the other two were incomplete rather than false.
+
 ### The variant where the value is honest and the *name* is not
 
 Found 2026-09-17, and it belongs to this section by its consequence
