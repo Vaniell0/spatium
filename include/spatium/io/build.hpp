@@ -10,6 +10,7 @@
 #  include <spatium/spaces/offset.hpp>
 #  include <spatium/spaces/parametric.hpp>
 #  include <spatium/spaces/sample.hpp>
+#  include <spatium/algebra/quaternion.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
 #  include <spatium/io/field.hpp>
 #  include <any>
@@ -103,6 +104,28 @@ inline const char* kind_name(Kind k) {
 // Those want to be fields, and fields are the next piece of work.
 enum class EdgeRule { ZeroThickness };
 
+// Which of a scattered item's own axes points along the target's normal.
+//
+// `Z` is the default and the only behaviour there used to be: an item is
+// modelled standing up, and scattering stands it on the surface. That is
+// right for a bristle, a blade of grass, a tree -- anything whose
+// interesting direction *is* the normal.
+//
+// It is wrong for anything that lies *across* a surface, and the donut
+// demo is the proof: a sprinkle is a small cylinder lying down, and with
+// only `Z` available the only way to express that was to permute the
+// item's mesh vertices by hand -- which a closed form cannot follow,
+// since `cylinder()`'s exact `BoundedQuadric` is a cylinder about z and
+// stays one. So the sprinkle had to be a `Literal`, and a `Literal` has
+// no closed form, and an object with no closed form cannot be instanced.
+// One missing enum cost 11 000 objects their instancing.
+//
+// The frame's columns are cyclically permuted rather than swapped, which
+// keeps the basis right-handed: a cyclic permutation leaves a
+// determinant alone, a swap negates it, and a left-handed frame would
+// mirror every item placed through it.
+enum class SeatAxis { X, Y, Z };
+
 // How a renderer should turn this node into ray hits. Three levels that
 // answer the same question at three prices, measured on the shape
 // donut_demo actually builds (benchmarks/bench_raycast.cpp):
@@ -194,6 +217,7 @@ struct TraceNode {
     std::size_t item = 0, target = 0;
     std::size_t count = 0;
     std::uint32_t seed = 42;
+    SeatAxis seat_axis = SeatAxis::Z;
 
     // How deep a scattered item sits. 1 rests it on the surface (its
     // lowest point touching), 0 puts its own origin there -- half sunk,
@@ -370,15 +394,19 @@ std::pair<Vec<T, 3>, Vec<T, 3>> basis_from_normal(const Vec<T, 3>& n) {
 // parameter: the caller already said how big the item is by building it,
 // and asking twice is how the two answers drift apart.
 template<Scalar T>
-T scatter_lift(const mesh::Mesh<Euclidean<3, T>>& item) {
+T scatter_lift(const mesh::Mesh<Euclidean<3, T>>& item, SeatAxis axis = SeatAxis::Z) {
+    // Measured along whichever axis this item stands on -- the same one
+    // `scatter_frame` sends to the normal. Measuring z regardless would
+    // seat a lying cylinder by its length instead of its radius.
+    const std::size_t a = axis == SeatAxis::X ? 0 : axis == SeatAxis::Y ? 1 : 2;
     T lowest{};
-    for (const auto& v : item.vertices) lowest = std::min(lowest, v[2]);
+    for (const auto& v : item.vertices) lowest = std::min(lowest, v[a]);
     return -lowest;
 }
 
 template<Scalar T>
 Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
-                              std::size_t index) {
+                              std::size_t index, SeatAxis axis = SeatAxis::Z) {
     auto [t1, t2] = basis_from_normal(normal);
 
     std::uint32_t h = seed * 2654435761u + static_cast<std::uint32_t>(index) * 40503u;
@@ -389,11 +417,20 @@ Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
     Vec<T, 3> r1{Vec<T, 3>{t1 * cos(theta) + t2 * sin(theta)}};
     Vec<T, 3> r2{Vec<T, 3>{t2 * cos(theta) - t1 * sin(theta)}};
 
+    // Cyclic, not a swap. [r1 r2 n] is right-handed, and a cyclic
+    // permutation of columns leaves the determinant alone while a swap
+    // negates it -- a left-handed frame would mirror every item placed
+    // through it, which is the kind of thing that looks like a modelling
+    // mistake rather than a sign error.
+    Vec<T, 3> c0 = r1, c1 = r2, c2 = normal;
+    if (axis == SeatAxis::X) { c0 = normal; c1 = r1; c2 = r2; }   // local x -> n
+    else if (axis == SeatAxis::Y) { c0 = r2; c1 = normal; c2 = r1; }   // local y -> n
+
     Matrix<T, 3, 3> f{};
     for (std::size_t i = 0; i < 3; ++i) {
-        f(i, 0) = r1[i];
-        f(i, 1) = r2[i];
-        f(i, 2) = normal[i];
+        f(i, 0) = c0[i];
+        f(i, 1) = c1[i];
+        f(i, 2) = c2[i];
     }
     return f;
 }
@@ -613,7 +650,8 @@ public:
     // an open target is fine -- sampling a band by its own area element
     // is well posed, and the rim never comes up.
     Handle<T> scatter(Handle<T> item, Handle<T> target, std::size_t count,
-                      std::uint32_t seed = 42, T seat = T{1}) {
+                      std::uint32_t seed = 42, T seat = T{1},
+                      SeatAxis axis = SeatAxis::Z) {
         require_surface(target.index, "scatter");
         TraceNode<T> n{};
         n.kind = Kind::Scatter;
@@ -622,6 +660,7 @@ public:
         n.count = count;
         n.seed = seed;
         n.seat = seat;
+        n.seat_axis = axis;
         return push(std::move(n));
     }
 
@@ -802,6 +841,7 @@ template<Scalar T>
 mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t idx, T t, bool placed) {
     const auto& n = trace.node(idx);
     mesh::Mesh<Euclidean<3, T>> out;
+    std::vector<Vec<T, 3>> scatter_seats;   // one per site, for the per-instance origin below
 
     if (n.kind == Kind::Space || n.kind == Kind::Offset) {
         auto surface = resolve_surface(trace, idx);
@@ -814,7 +854,8 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         auto target_surface = resolve_surface(trace, n.target);
         auto sites = sample_surface_uniform(target_surface, n.count, n.seed);
         auto item_mesh = materialize_mesh(trace, n.item, t, /*placed=*/false);
-        const T lift = scatter_lift<T>(item_mesh) * n.seat;
+        const T lift = scatter_lift<T>(item_mesh, n.seat_axis) * n.seat;
+        scatter_seats.reserve(sites.size());
 
         out.vertices.reserve(item_mesh.vertex_count() * sites.size());
         out.faces.reserve(item_mesh.face_count() * sites.size());
@@ -824,10 +865,11 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
             // The same frame cook() gives the instance, from the same
             // function, so the baked picture and the instanced one cannot
             // drift apart. See scatter_frame().
-            auto frame = scatter_frame<T>(site.normal, n.seed, i);
+            auto frame = scatter_frame<T>(site.normal, n.seed, i, n.seat_axis);
 
             uint32_t base_idx = static_cast<uint32_t>(out.vertices.size());
             Vec<T, 3> seat{site.position + site.normal * lift};
+            scatter_seats.push_back(seat);
             for (const auto& iv : item_mesh.vertices)
                 out.vertices.push_back(Vec<T, 3>{seat + frame * iv});
             for (const auto& f : item_mesh.faces)
@@ -835,6 +877,25 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         }
     } else {
         throw std::logic_error("materialize_mesh: Compose has no single mesh, use materialize()");
+    }
+
+    // A Scatter applies its motion per site, with that site's seat as the
+    // instance origin -- so a field reading `origin` can send every
+    // instance somewhere different while staying affine in the point.
+    // Vertices were appended per site with a fixed stride above, so the
+    // split is arithmetic rather than bookkeeping.
+    //
+    // This has to agree, site for site, with what cook() computes for the
+    // same node; the vertex-for-vertex test between the two paths is what
+    // says it does.
+    if (placed && n.transform && n.kind == Kind::Scatter && !scatter_seats.empty()) {
+        const std::size_t per = out.vertices.size() / scatter_seats.size();
+        for (std::size_t i = 0; i < scatter_seats.size(); ++i)
+            for (std::size_t k = 0; k < per; ++k) {
+                auto& v = out.vertices[i * per + k];
+                v = n.transform(MotionEnv<T>{v, t, scatter_seats[i]});
+            }
+        return out;
     }
 
     // `placed = false` gives the *rest* geometry -- the shape before this
@@ -917,19 +978,38 @@ std::optional<ParametricSurface<T>> Placed<T>::surface() const {
         base.domain(), base.periodic_u(), base.periodic_v());
 }
 
+// A node's material, with its colour and emission fields evaluated at one
+// representative point.
+//
+// A free function rather than a method because there are two callers that
+// must not disagree: `Placed::material()`, which answers for a whole node,
+// and `cook()`, which answers per object. They differ only in *which*
+// point is representative -- a node's placed centroid, or one instance's
+// -- and keeping the rest in one place is what stops that difference from
+// quietly growing into two different materials.
+template<Scalar T>
+Material<T> resolve_material(const TraceNode<T>& n, const Vec<T, 3>& at, T t,
+                             const Vec<T, 3>& origin = {}) {
+    // The origin travels with the point for the same reason it travels
+    // with a motion: a colour that must differ between the instances of
+    // one node has nothing else to differ by. A scatter's colour field
+    // reads `origin`; a node that is its own object passes zero and is
+    // unaffected.
+    Material<T> mat = n.material;
+    MotionEnv<T> env{at, t, origin};
+    if (n.color_fn)    mat.base_color = n.color_fn(env);
+    if (n.emissive_fn) mat.emissive   = n.emissive_fn(env);
+    return mat;
+}
+
 template<Scalar T>
 Material<T> Placed<T>::material() const {
     const auto& n = trace->node(index);
-    Material<T> mat = n.material;
-    // One centroid, not two: mesh() rebuilds on every call, so asking it
-    // twice would tessellate the node twice to answer one question about
-    // where it is.
-    if (n.color_fn || n.emissive_fn) {
-        auto at = mesh().centroid();
-        if (n.color_fn) mat.base_color = n.color_fn(at, t);
-        if (n.emissive_fn) mat.emissive = n.emissive_fn(at, t);
-    }
-    return mat;
+    // The early out is not a micro-optimisation: mesh() rebuilds on every
+    // call, so a node with no fields would otherwise tessellate itself to
+    // answer a question whose answer does not depend on the geometry.
+    if (!n.color_fn && !n.emissive_fn) return n.material;
+    return resolve_material(n, Vec<T, 3>{mesh().centroid()}, t);
 }
 
 // Walks a Compose node into its leaves. Each leaf comes back as a view
@@ -1034,7 +1114,24 @@ struct Object {
     // into one general 3x3, for the reason `VecField::Placement` records:
     // that pair is what lets a ray test go into local space without
     // rescaling `t` or repairing a normal.
-    Matrix<T, 3, 3> rotation = Matrix<T, 3, 3>::identity();
+    // 32 bytes, where the matrix it replaced was 72 -- 80 MB of the ~1 GB
+    // two million objects would otherwise cost.
+    //
+    // **Expand it once per object, never per vertex.** A quaternion is
+    // the cheaper thing to *store* and the dearer thing to *apply*, so
+    // the compaction pays only while the expansion stays in the cold
+    // part: a caller that writes `o.rotation_q.to_matrix()` inside a loop
+    // over vertices has spent the memory and bought nothing. See
+    // `docs/conventions.md`, "compact the cold storage; leave the hot path
+    // in the shape that computes" -- this member is the seam that rule
+    // exists for.
+    //
+    // The round trip is not bit-exact: about 8 ulp, with zero of four
+    // thousand real rotations surviving unchanged, which is what
+    // tests/test_build_dsl.cpp pins. Against this scene's worst object
+    // radius of 10.3 world units that is a vertex displacement of 1.8e-14
+    // -- eleven orders below a pixel.
+    Quaternion<T> rotation_q{};
 
     bool instanceable = true;     // false when the motion deforms per vertex
     Material<T> material{};
@@ -1226,15 +1323,68 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             auto target = resolve_surface(trace, n.target);
             auto sites = sample_surface_uniform(target, n.count, n.seed);
             const T lift =
-                scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false)) * n.seat;
+                scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false), n.seat_axis) *
+                n.seat;
             placements.reserve(sites.size());
             for (std::size_t i = 0; i < sites.size(); ++i)
                 placements.push_back(
                     Spot{Vec<T, 3>{sites[i].position + sites[i].normal * lift},
-                         scatter_frame<T>(sites[i].normal, n.seed, i)});
+                         scatter_frame<T>(sites[i].normal, n.seed, i, n.seat_axis)});
             geometry_node = n.item;
         } else {
             placements.push_back(Spot{});
+        }
+
+        // A renderer can instance this object -- draw one geometry many
+        // times, each with its own transform -- exactly when the node's
+        // motion is a *placement*: affine in the point, so it moves the
+        // object without reshaping it.
+        //
+        // Note what the test is not. It is not "is the motion structural".
+        // The donut's dust is Perlin noise and will always be opaque, yet
+        // it is a placement, because the noise decides *where the particle
+        // is* and never reads the vertex. Opacity and point-dependence are
+        // different questions, and only the second one costs anything:
+        // a term that ignores the point is evaluated once per object, a
+        // term that reads it once per vertex.
+        const bool placeable = n.transform.is_placement();
+
+        // ── The refused path, which used to hand back unusable geometry ──
+        //
+        // A deformation cannot be decomposed into per-instance transforms
+        // -- that is what makes it a deformation -- so there is nothing to
+        // instance and nothing to share. The geometry *is* the answer, and
+        // it has to be the **placed** geometry: storing the rest shape here
+        // left a consumer with a mesh and no way to recover the motion that
+        // moved it, which would have drawn the donut demo's exploding cube
+        // unexploded. Nothing noticed for as long as nothing consumed a
+        // cooked scene.
+        //
+        // No deduplication either, and that is not a shortcut: a placed
+        // shape is unique by construction, which the comment on the shared
+        // path below has always said. Hashing it would find no matches and
+        // cost a full pass over the vertices to find none.
+        //
+        // And one object, not N: a refused `Scatter` is a single merged
+        // mesh, exactly the answer `materialize()` gives for it. The
+        // refusal *count* still adds the instances, because the number
+        // answers "how much sharing was lost", which is a question about
+        // instances rather than about objects.
+        if (!placeable) {
+            const std::size_t shape_index = out.shapes_.size();
+            auto placed_mesh = materialize_mesh(trace, idx, t, /*placed=*/true);
+            auto at = placed_mesh.centroid();
+            out.shapes_.push_back(Shape<T>{std::move(placed_mesh), 1, std::any{}});
+            out.objects_.push_back(Object<T>{.shape = shape_index,
+                                             .source_node = idx,
+                                             .translation = carried,
+                                             .scale = T{1},
+                                             .rotation_q = Quaternion<T>{},
+                                             .instanceable = false,
+                                             .material = resolve_material(n, at, t)});
+            out.refused_ += placements.size();
+            out.refused_nodes_.push_back(idx);
+            return;
         }
 
         const auto key = content_hash(trace, geometry_node);
@@ -1252,22 +1402,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         } else {
             shape_index = it->second;
         }
-
-        // A renderer can instance this object -- draw one geometry many
-        // times, each with its own transform -- exactly when the node's
-        // motion is a *placement*: affine in the point, so it moves the
-        // object without reshaping it.
-        //
-        // Note what the test is not. It is not "is the motion structural".
-        // The donut's dust is Perlin noise and will always be opaque, yet
-        // it is a placement, because the noise decides *where the particle
-        // is* and never reads the vertex. Opacity and point-dependence are
-        // different questions, and only the second one costs anything:
-        // a term that ignores the point is evaluated once per object, a
-        // term that reads it once per vertex.
-        const bool placeable = n.transform.is_placement();
-        typename VecField<T>::Placement pl{};
-        if (placeable) pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
+        const auto rest_centroid = Vec<T, 3>{out.shapes_[shape_index].geometry.centroid()};
 
         // Composing the two transforms, written out because getting the
         // order wrong is silent. A vertex `v` of the rest item becomes
@@ -1282,21 +1417,36 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         // nothing consumed the cooked scene and every scattering scene so
         // far had scale 1.
         for (const auto& p : placements) {
-            out.objects_.push_back(Object<T>{
-                .shape = shape_index,
-                .source_node = idx,
-                .translation = Vec<T, 3>{carried + pl.translation +
-                                         pl.rotation * Vec<T, 3>{p.position * pl.scale}},
-                .scale = pl.scale,
-                .rotation = pl.rotation * p.frame,
-                .instanceable = placeable,
-                .material = n.material});
-            ++out.shapes_[shape_index].instances;
-        }
+            // Resolved per instance, with that instance's seat as its
+            // origin -- which is what lets one motion field send every
+            // scattered item somewhere different while staying a
+            // placement. For a node that is its own object the seat is
+            // the origin and this reduces to what it was.
+            const auto pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t, p.position});
 
-        if (!placeable) {
-            out.refused_ += placements.size();
-            out.refused_nodes_.push_back(idx);
+            Object<T> o{.shape = shape_index,
+                        .source_node = idx,
+                        .translation = Vec<T, 3>{carried + pl.translation +
+                                                 pl.rotation * Vec<T, 3>{p.position * pl.scale}},
+                        .scale = pl.scale,
+                        .rotation_q = {},
+                        .instanceable = true,
+                        .material = {}};
+            // Composed as a matrix -- the site frame and the placement
+            // rotation are both matrices, so there is nowhere earlier to
+            // put the conversion -- and stored once, compactly.
+            const Matrix<T, 3, 3> world_rotation = pl.rotation * p.frame;
+            o.rotation_q = Quaternion<T>::from_matrix(world_rotation);
+            // Resolved where this object actually ends up, and computed
+            // from the rest centroid rather than by building the placed
+            // mesh -- which is the same point, and is the point
+            // `Placed::material()` uses, so the two paths cannot answer
+            // differently.
+            o.material = resolve_material(
+                n, Vec<T, 3>{world_rotation * Vec<T, 3>{rest_centroid * o.scale} + o.translation},
+                t, p.position);
+            out.objects_.push_back(std::move(o));
+            ++out.shapes_[shape_index].instances;
         }
     };
 

@@ -3,6 +3,8 @@
 #include <spatium/spatial/bvh.hpp>
 #include <spatium/geometry/triangle.hpp>
 #include <spatium/geometry/line.hpp>
+#include <spatium/geometry/ray_surface.hpp>
+#include <cmath>
 
 using namespace spatium;
 using namespace spatium::geometry;
@@ -199,4 +201,97 @@ TEST_CASE("BVH ray_cast Triangle3 Hit barycentric + normal", "[bvh]") {
     REQUIRE(h2);
     CHECK_THAT(h2->u, WithinAbs(0.0, 1e-9));
     CHECK_THAT(h2->v, WithinAbs(1.0, 1e-9));
+}
+
+// ── Rays that graze a bound exactly ───────────────────────────
+//
+// Seventeen tests above and not one of them touches a bound. That is the
+// gap this closes, and it is worth closing *before* anything narrows the
+// bounds rather than after.
+//
+// A BVH box is an accelerator, so its only obligation is to be
+// conservative: it may be looser than the shape and must never be
+// tighter. A box that has shrunk by one ulp rejects a ray before the leaf
+// test ever runs, and the shape then has a hole in it that looks like a
+// shading bug rather than like a rejected ray -- the same shape of
+// failure as `miss = 0.0`, a value that reads as an answer and means
+// something else.
+//
+// The cases below all sit exactly on a bound, where "exactly" is
+// representable: integers and halves, so the arithmetic is not itself in
+// question.
+
+TEST_CASE("BVH: a ray in the plane of a bound's face still reaches the shape",
+          "[bvh]") {
+    // A unit sphere at the origin bounds to [-1, 1]^3. A ray along +x at
+    // y = 1 lies in the plane of the box's own face and is tangent to the
+    // sphere: a genuine, single, touching hit. Narrow the bound inward by
+    // any amount and the slab test discards the ray before the sphere is
+    // ever asked.
+    std::vector<BoundedQuadric<double>> shapes{BoundedQuadric<double>::sphere(1.0)};
+    auto bvh = BVH<BoundedQuadric<double>>::build(shapes);
+
+    Ray<3, double> grazing{Vec<double, 3>{-4.0, 1.0, 0.0}, Vec<double, 3>{1.0, 0.0, 0.0}};
+    auto hit = bvh.ray_cast(grazing);
+    REQUIRE(hit.has_value());
+    CHECK_THAT(hit->point[1], WithinAbs(1.0, 1e-9));
+
+    // And one ulp outside really does miss, so the case above is not
+    // passing because everything passes.
+    Ray<3, double> just_past{Vec<double, 3>{-4.0, std::nextafter(1.0, 2.0), 0.0},
+                             Vec<double, 3>{1.0, 0.0, 0.0}};
+    CHECK_FALSE(bvh.ray_cast(just_past).has_value());
+}
+
+TEST_CASE("BVH: a ray aimed at a bound's corner still reaches the shape", "[bvh]") {
+    // The corner is the worst case for a narrowed bound, because all three
+    // slabs are on their limit at once. This triangle's AABB corner is its
+    // own vertex, so hitting the corner is hitting the shape.
+    std::vector<Triangle3> tris{Triangle3({0, 0, 0}, {2, 0, 0}, {0, 2, 0})};
+    auto bvh = BVH<Triangle3>::build(tris);
+
+    Ray<3, double> at_corner{Vec<double, 3>{0.0, 0.0, 5.0}, Vec<double, 3>{0.0, 0.0, -1.0}};
+    auto hit = bvh.ray_cast(at_corner);
+    REQUIRE(hit.has_value());
+    CHECK_THAT(hit->point[0], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(hit->point[1], WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("BVH: a flat shape has a zero-thickness bound and is still found", "[bvh]") {
+    // Every triangle in a plane gives an AABB with no extent in one axis,
+    // so the slab test on that axis is entirely a question of whether the
+    // comparison is inclusive. This is the degenerate bound that any
+    // change to how bounds are stored will meet first.
+    auto tris = make_grid_triangles(4, 4);
+    auto bvh = BVH<Triangle3>::build(tris);
+
+    Ray<3, double> down{Vec<double, 3>{1.25, 1.25, 3.0}, Vec<double, 3>{0.0, 0.0, -1.0}};
+    auto hit = bvh.ray_cast(down);
+    REQUIRE(hit.has_value());
+    CHECK_THAT(hit->point[2], WithinAbs(0.0, 1e-12));
+
+    // A ray *in* the plane is refused, and by the leaf rather than by the
+    // box. Asserted the other way round first, which was wrong: a
+    // coplanar ray meets a triangle in nothing or in a segment, never in
+    // a point, so Möller-Trumbore's vanishing determinant is the correct
+    // answer and not a numerical accident. Pinned because it was
+    // untested, and because the next person to narrow a bound will want
+    // to know that this `false` is the leaf's and not the tree's.
+    Ray<3, double> along{Vec<double, 3>{-1.0, 1.0, 0.0}, Vec<double, 3>{1.0, 0.0, 0.0}};
+    CHECK_FALSE(bvh.ray_test(along));
+
+    // What the zero-width slab must not do is reject a ray that arrives
+    // at a shallow angle and genuinely crosses the plane. "Shallow" has
+    // to mean shallow-but-real: a first attempt used a slope of 1e-9,
+    // which puts Möller-Trumbore's determinant under its own epsilon, so
+    // the leaf refused it as parallel and the test was measuring the leaf
+    // again rather than the box. Worth recording, because that is two
+    // ways in a row for a "grazing" test to accidentally examine the
+    // wrong half.
+    //
+    // This one crosses z = 0 at (1, 1.25), well inside a triangle rather
+    // than on a vertex, with a determinant around 5e-3.
+    Ray<3, double> shallow{Vec<double, 3>{-1.0, 1.25, 0.01},
+                           Vec<double, 3>{1.0, 0.0, -0.005}};
+    CHECK(bvh.ray_test(shallow));
 }

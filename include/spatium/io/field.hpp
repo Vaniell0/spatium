@@ -445,6 +445,30 @@ template<Scalar T = double>
 struct MotionEnv {
     Vec<T, 3> p{};   // the point being moved
     T t{};           // scene time
+
+    // Where this *instance* sits at rest -- one value per object, not one
+    // per vertex, and that difference is the whole reason it can be here
+    // at all.
+    //
+    // A motion that tells instances apart has to read something that
+    // differs between them. Before this the only such thing was `p`, and
+    // reading `p` makes a motion a deformation: the affine test refuses
+    // it, correctly, because a term that varies per vertex cannot be a
+    // shared transform. So a `Scatter` had one motion for all its
+    // instances and they all flew the same way.
+    //
+    // An origin varies per object and is constant across an object's
+    // vertices, so a field reading it stays affine in the point and stays
+    // instanceable. The particle's trajectory comes from where it
+    // started; its shape does not move.
+    //
+    // This is also what a plain radial burst needs, which is less obvious.
+    // A placement is `b + R*s*p` applied to every vertex, and a scattered
+    // vertex is `seat + F*local` -- so one scalar `s` scales the distance
+    // flown *and* the speck, and expanding the cloud inflates every fleck
+    // with it. `seat` and `local` arrive already summed into `p`;
+    // separating them is exactly this field.
+    Vec<T, 3> origin{};
 };
 
 enum class VecOp : std::uint8_t {
@@ -568,6 +592,30 @@ public:
         return point() + constant(by);
     }
 
+    // An opaque leaf reading where this instance started, and the time.
+    //
+    // Same promise as `opaque_of_time` and kept the same way: the callable
+    // is handed an origin and a `t` and has no route to the point, so the
+    // *signature* enforces what a comment could only ask for. That is what
+    // lets `reads_point` stay false and the motion stay a placement while
+    // every instance still flies its own way.
+    template<typename F>
+        requires std::is_invocable_r_v<Vec<T, 3>, const F&, const Vec<T, 3>&, T>
+    static VecField opaque_per_instance(F fn) {
+        VecField f;
+        f.ops_.clear();
+        VecFieldOp<T> n{};
+        n.op          = VecOp::Opaque;
+        n.type        = std::type_index(typeid(F));
+        n.payload     = sizeof(F);
+        n.stateless   = std::is_empty_v<F>;
+        n.reads_point = false;
+        n.fn = [fn = std::move(fn)](const MotionEnv<T>& e) { return fn(e.origin, e.t); };
+        f.ops_.push_back(std::move(n));
+        f.structural_ = false;
+        return f;
+    }
+
     // An opaque leaf that promises not to read the point. The promise is
     // the whole content of this factory -- the callable takes an
     // environment and cannot reach a point through it, so the signature
@@ -596,6 +644,22 @@ public:
     // Consumes the field rather than copying it, because a pool of
     // move-only leaves cannot be copied -- the same reason `operator+`
     // takes its left operand by value.
+    // A factor that varies per instance: same rule as the motion itself,
+    // reading the origin rather than the point, so a scale can differ
+    // between instances without becoming a deformation.
+    template<typename S>
+        requires (!std::is_invocable_r_v<T, const S&, T>) &&
+                 std::is_invocable_r_v<T, const S&, const Vec<T, 3>&, T>
+    friend VecField scaled(VecField x, S s) {
+        VecFieldOp<T> n{};
+        n.op       = VecOp::Scale;
+        n.a        = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(e.origin, e.t); };
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+        return x;
+    }
+
     template<typename S>
         requires std::is_invocable_r_v<T, const S&, T>
     friend VecField scaled(VecField x, S s) {
@@ -621,6 +685,33 @@ public:
     // exponentiates it through SO3, which is what a constant orientation
     // (`[o](T) { return o; }`) and a spin (`[w](T t) { return w * t; }`)
     // both want to write.
+    // Per-instance turns, for the same reason `scaled` has them: a
+    // scatter has one motion field, so anything that must differ between
+    // its instances has to read the origin. Without this every flake in a
+    // cloud tumbles in lockstep.
+    template<typename R>
+        requires (!std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>) &&
+                 (!std::is_invocable_r_v<Vec<T, 3>, const R&, T>) &&
+                 std::is_invocable_r_v<Vec<T, 3>, const R&, const Vec<T, 3>&, T>
+    friend VecField rotated(VecField x, R r) {
+        return rotated(std::move(x), [r = std::move(r)](const Vec<T, 3>& o, T t) {
+            return algebra::SO3<T>{}.exp(r(o, t));
+        });
+    }
+
+    template<typename R>
+        requires (!std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>) &&
+                 std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, const Vec<T, 3>&, T>
+    friend VecField rotated(VecField x, R r) {
+        VecFieldOp<T> n{};
+        n.op     = VecOp::Rotate;
+        n.a      = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        n.rot_fn = [r = std::move(r)](const MotionEnv<T>& e) { return r(e.origin, e.t); };
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+        return x;
+    }
+
     template<typename R>
         requires std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>
     friend VecField rotated(VecField x, R r) {

@@ -208,6 +208,317 @@ where the model stops applying rather than patching the value it
 produced; and prefer a type that can say "no answer" over a sentinel that
 has to be recognised.
 
+### A "why" rots faster than a "what", and nothing catches it
+
+Named 2026-09-17, on the third instance of a documented claim that was
+wrong in its explanation rather than in its number.
+
+A sentence in `ROADMAP.md` read: *"the donut now reports 19804
+placements, 9 deformations, with the nine being the exploding cube's
+fragments, which genuinely deform."* Both halves were wrong, and they
+were wrong in different ways:
+
+- **The counts rotted.** 19804/9 became 35209/21 as the scene grew. This
+  is routine, it is caught the moment anyone re-runs the demo, and it is
+  what the three freshness scripts in CI exist for.
+- **The explanation was wrong when it was written.** There are no cube
+  fragments. The cube is a single node whose motion scales it to nothing,
+  and the explosion is separate `flake()` nodes. The nine were six
+  scatter nodes, two offsets and one literal — every one refused over how
+  its motion was *spelled*, not because anything deformed.
+
+The asymmetry is the point. A stated fact carries its own test: re-run
+the thing and the number either matches or does not. A stated *reason*
+carries none — it can be wrong on the day it is written and stay wrong
+indefinitely, because nothing re-derives it and the number next to it
+keeps looking plausible. Worse, a correct number lends the wrong reason
+its credibility.
+
+So: **when writing down why something is the way it is, write down what
+you checked.** Not the conclusion alone — the observation that produced
+it, in a form someone can repeat. The corrected entry above prints the
+refused nodes by kind from the demo itself rather than asserting what
+they are, which is the difference between a claim that can rot silently
+and one that cannot.
+
+This is the third instance of the "say which half" family, and the
+sharpest, because the other two were incomplete rather than false.
+
+### Compact the cold storage; leave the hot path in the shape that computes
+
+Named 2026-09-17, before the first compaction rather than after the first
+regression.
+
+The same quantity can want two different representations depending on
+how it is reached. A rotation stored once per object and read once per
+frame wants to be small. The *same* rotation, applied at every
+ray-against-leaf test, wants to be whatever multiplies a vector fastest.
+A quaternion is 32 bytes against a matrix's 72 and costs more arithmetic
+to apply; which of those matters is entirely a question of how often the
+thing is touched.
+
+So `Object<T>`, which is cold — two million of them, walked once a frame
+to build the tree — takes the quaternion. `Instanced<S>`, which is hot —
+the same two million, but its rotation is applied on every leaf test the
+traversal reaches — keeps the matrix, expanded once while the tree is
+built. The saving is the same; the traversal is not touched.
+
+Stated as a principle because the alternative is a specific, repeatable
+mistake: compacting everything uniformly, watching traversal get slower,
+and then not knowing which of six changes did it. **A memory
+optimisation that reaches the hot path is a trade, not a saving, and has
+to be measured as one.**
+
+**When the hot form should be revisited, and the trigger rather than the
+guess:** two million `Instanced` at 112 bytes is 214 MB walked by the
+traversal, which no cache holds. If traversal at that scale turns out to
+be memory-bound, *then* the choices are splitting the array (positions
+apart from rotations, so a ray touches only what it needs) or shrinking
+the element after all — and either only makes sense against a
+measurement showing the stall. Not before.
+
+### A plausible explanation is worse than none, because nobody asks it for a number
+
+Named 2026-09-17, after producing two of them in a row about the same
+observation.
+
+A frame hash was expected to move. First explanation: the picture shifts,
+because the rotations change. Given a number, that died — the worst
+vertex displacement is 1.8e-14 against a pixel of 5.4e-3, eleven orders
+below one. Second explanation, offered immediately: the picture does not
+shift, but exact ties at a silhouette fall the other way. That one
+*sounded* like a mechanism, which is exactly why it went unchallenged for
+longer. Given a number it died too: the band in which a tie could flip is
+3.3e-12 of a pixel, so across a whole frame the expected count of flips
+is about 5e-7.
+
+"I do not know why" invites a measurement. "Ties flip at the silhouette"
+invites a nod. The second is worse *because* it is more specific — it
+occupies the space where the question would otherwise sit, and it is
+cheap to produce, since any true-sounding mechanism can be attached to
+any observation after the fact.
+
+So the rule: **an explanation offered for a measurement is not finished
+until it predicts a number, and the number is checked against the
+observation.** An explanation that cannot be made to predict anything is
+not a weak explanation, it is an absence of one wearing its clothes.
+
+This is the same rule as "a test on a boundary must prove it reached the
+boundary", one level up: there, an assertion that never reaches the thing
+it names passes and means nothing; here, a story that never commits to a
+quantity convinces and means nothing. Both are checked the same way —
+make it produce the positive claim first, with a value attached.
+
+### A test on a boundary must prove it reached the boundary
+
+Named 2026-09-17, after writing the same test wrong twice in a row.
+
+A BVH bound only has to be conservative, so before narrowing one it is
+worth having tests that a *tighter* bound would fail. Three were written.
+Two of them passed and proved nothing, because they never got as far as
+the bound: the leaf refused them first.
+
+- A ray lying **in** the plane of a flat shape is refused by
+  Möller-Trumbore, correctly — a coplanar ray meets a triangle in
+  nothing or in a segment, never in a point. The box may well have
+  admitted it; the assertion could not tell.
+- A ray tilted out of that plane by `1e-9` is refused for the same
+  reason: the determinant lands under the leaf's own epsilon, so it is
+  still "parallel" as far as the algorithm is concerned.
+
+Both read as boundary tests. Both measured the leaf. The surviving
+version crosses at a real angle and well inside a face, where the leaf
+has no objection and only the bound can reject it.
+
+So the rule: **a test aimed at one stage must establish that the earlier
+stages let it through.** Concretely, assert the positive case first — the
+thing does get found — and only then assert the negative, so a refusal
+one layer up cannot masquerade as the behaviour under test. The negative
+alone is indistinguishable from a test that never arrived.
+
+### A dimensionless number is printed next to the scale it multiplies
+
+Named 2026-09-17, on the third occasion the same omission made a figure
+unreadable.
+
+"The rotation round trip loses 8 ulp" says nothing on its own. What moves
+is a vertex, by that error times the object's own world radius — so the
+same 8 ulp is 1.8e-14 in this scene and 1.8e-11 in one built a thousand
+times larger, and only one of those is worth a second thought. The demo
+therefore prints the worst object radius beside it.
+
+The same shape as `field_report`'s payload, which is meaningless as a
+byte count and meaningful against L3; and as a frame hash, which is not a
+baseline without the configuration that produced it. In each case the
+number is fine and the reader cannot use it.
+
+Three instances now, and they share a formula rather than a topic:
+`payload_verdict`'s byte count against L3, a frame hash against the
+configuration that produced it, and an error in ulp against the radius it
+multiplies. **A number without its anchor is read wrongly even when it is
+computed correctly** — and being correct is what makes it convincing.
+
+So: **when reporting a relative, dimensionless or normalised quantity,
+print the quantity it is relative to in the same breath.** A reader
+should not have to go and find the denominator, because the usual outcome
+is that they do not, and a figure that cannot be misread is worth more
+than one that is merely correct.
+
+### A memory figure is a number *and* the layout it was taken in
+
+Added 2026-09-17, alongside the same rule for frame hashes ("a baseline
+is a number and the configuration that produced it").
+
+`sizeof(Object<double>) == 192` is not a fact about the program, it is a
+fact about one arrangement of six members. Shrink the rotation and it is
+152; narrow two indices and it is 144. Quoting 192 later, against a tree
+where one of those has happened, produces a discrepancy with no cause —
+and someone will go looking for the cause.
+
+So every recorded memory number carries the layout: which members, which
+widths, and what the total rounds to. The ROADMAP entry that said "two
+million costs roughly 350 MB" did not, and it was wrong by a factor of
+three — it had silently omitted a whole array and a duplicated one.
+
+The same applies to the thing people reach for first. **Reordering
+members to reclaim padding is usually not free, and whether it is can
+only be measured.** `Object<double>`'s members sum to 185 bytes with 7
+of padding, and no permutation recovers them: 185 rounds to 192 under
+8-byte alignment whatever the order. The padding is only reclaimable by
+making a member smaller, which is a different change with different
+consequences.
+
+### A per-instance field has to be tested with at least two instances
+
+Named 2026-09-17, on adding `MotionEnv::origin`.
+
+At N = 1, **"the value was read" and "the value was stored and never
+read" are indistinguishable.** The single instance's origin is the origin,
+so a field that ignores it and a field that uses it return the same
+answer. The plumbing can carry the value the whole way, every existing
+test can pass, and nothing anywhere notices that the expression never
+saw it.
+
+So: any field whose whole purpose is to differ between instances is
+tested with **two instances, one `t`, and nothing differing but the
+instance**. Verified by breaking it — substituting a zero origin at the
+leaf fails 3 assertions at the field and 16 through a real `Scatter`,
+and passes everything else.
+
+**And the two rendering paths are compared at N ≥ 2 as well.**
+`materialize_mesh` and `cook()` answer the same question about the same
+node, and their agreement is only interesting where they can disagree —
+which is per instance. That pair has already drifted once, when `cook()`
+dropped the site frame and nothing compared them; a per-instance motion
+is a second way for them to part company, so the agreement test runs
+with one in play. A frame hash is not a substitute: it says the picture
+did not change, not that the two descriptions of it agree.
+
+### A `make_*` factory's box is the clip region, not a bound on the result
+
+One line, because the next person to write a factory will otherwise
+assume the size they passed in is the size they get.
+
+`BoundedQuadric`'s box is where the surface is **cut**, not a promise
+about what the cut leaves behind. Those coincide for a sphere or a
+truncated cylinder, and they did not for `flake`, whose box was the slab
+the caller asked for while the surface inside it was a smaller cap. A
+box wider than its own surface is not a harmless overestimate: it made
+the exact form and the chart beside it describe different sets, and the
+renderer that picked the exact form drew a shape the tessellation did
+not have.
+
+So a factory's job is to return the tightest box that still cuts where it
+means to cut. `flake` now derives its box from the cap it actually
+produces rather than from the caller's request — which means the caller's
+`half` is an upper bound on the flake, not its size. That is the correct
+reading of a clip and it needed saying out loud.
+
+**Three of four factories already did this correctly.** `torus`,
+`cylinder` and `sphere` agree with their charts to the bit; `flake` was
+the single exception. Worth recording so that nobody goes looking for a
+systemic cause: the clip logic is sound, and one factory was written
+against a different idea of what its box meant.
+
+### A small number with a plausible story stops being checked
+
+Named 2026-09-17, after the same nine survived three separate readings
+with the same wrong explanation attached.
+
+`ROADMAP.md` said the donut reported nine deformations and that they were
+"the exploding cube's fragments, which genuinely deform". The nine were
+six scatter nodes, two offsets and one literal — every one refused over
+how its motion was spelled, and the cube has no fragments at all. The
+sentence was read, quoted and built upon three times without anyone
+recomputing it, including by the person who wrote it.
+
+Two properties together did that, and neither alone would have:
+
+- **The number is small enough to feel accounted for.** Nine invites a
+  glance rather than a count. A thousand would have been re-derived,
+  because nobody believes a thousand of anything without checking.
+- **The story is plausible enough to close the question.** "Fragments of
+  an exploding cube genuinely deform" is exactly what a deformation
+  sounds like. A reader who knows what the words mean has no reason to
+  look further, and a *correct* number sitting next to it lends it
+  credibility it did not earn.
+
+So the rule is narrow and mechanical: **when a small count comes with an
+explanation, print the breakdown, not the total.** The corrected entry
+does — the demo emits `1xLiteral 2xOffset 18xScatter` and the claim is
+now whatever that line says. A breakdown cannot carry a wrong story,
+because the story is the breakdown.
+
+Sits next to "a *why* rots faster than a *what*" above: that one is about
+reasons going unchecked over time, this one is about a reason never being
+checked at all, because the number beside it looked settled.
+
+### The variant where the value is honest and the *name* is not
+
+Found 2026-09-17, and it belongs to this section by its consequence
+while differing from every row above by its cause — which matters,
+because it changes the fix.
+
+`VecField::is_placement()` returns `false` for
+
+```cpp
+[](const Vec<double, 3>& p, double t) { return Vec<double, 3>{p * e(t)}; }
+```
+
+which is a uniform scale, i.e. a placement by any definition. Spelled
+`scaled(point(), e)` the identical motion returns `true`.
+
+Nothing here is a stale zero or an uninitialised field. The function
+answers truthfully about what it can see: an opaque leaf touched `p`, and
+a closure cannot be asked what it does with it. **The lie is in the
+name.** `is_placement()` reads as a question about the motion — a
+mathematical property — and computes a question about the *spelling*.
+A caller who reads `false` concludes "my motion deforms", and that
+conclusion is wrong.
+
+The consequence is the same as every row above: a value read as an answer
+that means something else. The remedy is not, because the other five were
+fixed by making the value truthful and there is no truthful value to
+produce here. Three fixes are available and they are not exclusive:
+
+- **Rename to what it computes.** `is_recognisably_a_placement()` is ugly
+  and honest; the ugliness is the point, since it makes the caller ask
+  "recognisably by whom?".
+- **Make the refusal explain itself.** Distinguish "refused because an
+  opaque leaf reads the point" from "refused because the expression
+  genuinely is not affine" — `VecField` can tell those apart — and say
+  the first one with the remedy attached. A number nobody can act on is
+  the thing `Cooked::refused_nodes()` already exists to avoid.
+- **Make the structural spelling the obvious one.** `.moving()` advertises
+  `(point, t) -> point`, so the lambda is what a reader reaches for first
+  and the expression form is undiscoverable. That is an API problem, not
+  a documentation one.
+
+The general shape, worth carrying past this instance: **when a predicate
+can only see a syntactic property, its name must not promise a semantic
+one.** Otherwise the caller is told "no" to a question they did not ask,
+and there is no value you can return that fixes it.
+
 ## A check needs the thing that runs it, first
 
 Added 2026-09-15, after getting the order right by accident.
@@ -229,6 +540,7 @@ The same shape recurs at every level:
 | `assert` | a build that keeps `NDEBUG` off |
 | poisoning unused slots in Debug | a Debug test run |
 | a `[!shouldfail]` pin on a known bug | a suite that reports it as expected-failed rather than skipping it |
+| a count printed from a container | that container not having been moved from before the print |
 | an `is_structural()` flag | something that reports the *consequence*, not just the fact |
 | two code paths that must give the same answer | a test comparing them **to each other**, not each to itself |
 
@@ -248,6 +560,21 @@ visible, land what executes it first, or in the same change.** Not after.
 The infrastructure is the part that can be silently missing, because a
 mechanism with nothing running it looks exactly like a mechanism that
 passes.
+
+**The count row is the cheapest of these to cause, found 2026-09-17.**
+`BVH::build` keeps its shapes by value, so handing it an lvalue leaves
+the array alive twice — 214 MB at two million instances, spent on
+nothing. `std::move` fixes that, and the report line two statements later
+counts `insts.size()`. A moved-from vector is empty, so the line would
+have printed **0 instances**, which reads perfectly as "this scene has no
+instances" and not at all as "someone moved the vector". A plausible zero
+again, in a place a reader trusts.
+
+Caught by asking what still reads the vector after the move rather than
+by assuming nothing did. The general form is this section's own: when a
+number is read out of a container, ask what that container holds when
+nothing was put into it — and whether that is distinguishable from
+someone having taken it away.
 
 **The last row earned its place 2026-09-17.** `materialize_mesh()` bakes a
 scattered item's site frame into its vertices; `cook()` hands the same

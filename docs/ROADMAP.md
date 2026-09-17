@@ -309,6 +309,10 @@ So: the items we are actually steering by, with their state. Everything below th
 |---|---|---|---|
 | Renderer consuming `cook()` | **in flight** | — | Declarative scene DSL |
 | Per-instance parameters (`MotionEnv::origin`) | **next** | the row above | Declarative scene DSL |
+| Scatter's fixed axis binding (local z to the normal) | **next** | nothing; a fix, and one of two preconditions for instancing scattered items | Object model as manifold substrate |
+| Structural motions in the demo (`grow_scale` and friends) | **next** | nothing; the other precondition, and a matter of spelling | Object model as manifold substrate |
+| A refusal that explains itself (and `is_placement()`'s name) | **next** | nothing; rewriting the demo fixes one user, not the trap | Object model as manifold substrate |
+| Scatter's arbitrary in-plane directions | parked | a consumer — "follows the flow" is its own design, not this fix | Object model as manifold substrate |
 | One object deforming another | parked | an index over the `(u,v)` domain — and a decision about the cycle it introduces, below | Object model as manifold substrate |
 | `ball_pit_demo` cleanup | parked | nothing; it is just work | Object model as manifold substrate |
 | Offset self-intersection, in the library | parked | nothing; a thickness check against the base's minimum radius of curvature | Analytical rendering |
@@ -539,7 +543,21 @@ question is not reopened from scratch in a month.
 
   `Field`/`VecField` are flat pools of tagged ops with an opaque callable as a *leaf*; `cook()` turns a `Trace` into objects with deduplicated shapes; `Instanced<S>` is a reference to a shape plus a placement, so a BVH leaf is one test rather than N. Measured: 2 shapes for 19 801 objects and 138× fewer vertices held; 16.1× BVH build, 21.6× memory, 1.08× traversal.
 
-  **What decides instanceability is not opacity but whether a motion reads the point.** `A(t) + p·s(t)` with both terms opaque is still a placement, because cost is per vertex and those terms are per object — so `PerlinNoise` never had to become an expression. The donut now reports `19804 placements, 9 deformations`, with the nine being the exploding cube's fragments, which genuinely deform.
+  **What decides instanceability is not opacity but whether a motion reads the point.** `A(t) + p·s(t)` with both terms opaque is still a placement, because cost is per vertex and those terms are per object — so `PerlinNoise` never had to become an expression. The donut now reports `35209 placements, 21 deformations`.
+
+  ~~`19804 placements, 9 deformations`, with the nine being the exploding cube's fragments, which genuinely deform.~~ — **both halves wrong, corrected 2026-09-17.** The counts rotted, which is routine. The explanation was wrong when it was written, which is not: there are no cube fragments. The cube is a single node whose motion is `p * (time < 0.12 ? 1 : 0)` — a uniform scale to nothing — and the explosion is the *dust*, which is separate `flake()` nodes with their own motions. Nothing about the cube deforms.
+
+  What the 21 actually are, printed by the demo rather than asserted here, because a claim about this has already been wrong once:
+
+  ```
+  refused nodes: 1xLiteral 2xOffset 18xScatter
+  ```
+
+  The `Literal` is the cube, the two `Offset`s are the dough and the icing, the eighteen `Scatter`s are the sprinkle groups. The table is a `Literal` too and is *not* refused, because its motion is written structurally. Every refusal is over spelling, not over deformation.
+
+  That also reconstructs the historical nine exactly: six `Scatter` (one per colour, before the bands were split three ways) plus two `Offset` plus one `Literal`. **The number was right and the explanation was wrong from the day it was written** — there were never any cube fragments; the cube is one node and the explosion is the dust.
+
+  A number going stale is caught by re-running. A *reason* going stale is caught by nothing.
 
   ~~**Still open, and it is the part that moves a number:** no renderer consumes any of it.~~ — **wired 2026-09-16.** `donut_demo` builds a `BVH<Instanced<BoundedQuadric>>` beside its triangle tree and takes the nearer hit; `.moving()` stopped dropping the exact form for a *placement* (a deformation still drops it), which is what made the dust eligible at all. Measured on the same scene with only the render path toggled, at `t=1.5` where there is dust to see: **1.95 s instanced against 2.82 s tessellated, 1.44×, 31% of the frame.** The demo's own line now reads `render levels: 19800 exact, 9 tessellated`, where it had read `0 exact, 19809 tessellated` since it was written.
 
@@ -689,6 +707,80 @@ question is not reopened from scratch in a month.
 - **[course]** Vulkan live display — CPU raytraces (`donut_demo.cpp`'s `--photo` engine, extended), a small new Vulkan path just presents the frame (swapchain + one texture, uploaded and blitted every frame), not `viewer::App`'s mesh/point-cloud rasterizer. Real new plumbing (no sampled-texture descriptor/pipeline exists today), deliberately deferred rather than landed blind against a deadline.
 - **[want]** Texture/UV mapping — `io::Material` currently has only `base_color`/`roughness`, no texture at all. Flagged back on 2026-09-07 alongside conform-to-surface (now shipped as `offset_surface`) as one of two primitives needed before the DSL; still open.
 
+- **[course]** **A motion written as a plain lambda cannot be seen into, so almost every node in the donut demo is refused as a deformation when it is nothing of the kind.** Found 2026-09-17 by asking what the demo's 22 tessellated objects actually were.
+
+  ```
+  scene: 35222 objects -> 35200 instances + 429848 triangles;
+         10995 refused (motion deforms), 35200 shared
+  ```
+
+  The 22 are eighteen sprinkle `Scatter` nodes (six colours times three bands, one merged object each), plus the cube, the dough and the icing, plus the table — which *is* a placement and goes to triangles only because it carries no closed form. The 10 995 counts refused *instances* rather than objects: 10 992 sprinkles and three whole nodes.
+
+  The cause is not that those motions deform. It is that they are written as plain `(p, t)` lambdas:
+
+  ```cpp
+  auto grow_scale = [](const Vec<double, 3>& p, double time) {
+      return Vec<double, 3>{p * e};        // a textbook placement
+  };
+  ```
+
+  An opaque leaf that touches `p` sets `reads_point`, and `is_placement()` then answers "deformation" — correctly, since it cannot ask a closure what it does. Written structurally as `scaled(point(), e)` the very same motion is a placement. The donut's dust was rewritten that way when instancing landed; **nothing else was**, so everything but the dust is refused for a reason that is a matter of spelling.
+
+  So sprinkle instancing has **two** preconditions, not one: the axis binding above, and structural motions here. Both are fixes rather than features, and they land together.
+
+  **And rewriting the demo's motions does not close this**, which is the part worth separating. The demo is one user; the trap is in the API. Someone who writes `p * e(t)` as a lambda — the shape `.moving()` itself advertises, `(point, t) -> point` — gets a silent refusal, no instancing, and no way to find out why. `docs/conventions.md` records the general form under "the variant where the value is honest and the *name* is not": a predicate that can only see a syntactic property must not carry a name promising a semantic one. Three fixes, not exclusive:
+
+  - **The refusal explains itself.** `VecField` can distinguish "refused because an opaque leaf reads the point" from "refused because the expression genuinely is not affine", and the first should say so with the remedy attached. `Cooked::refused_nodes()` already exists precisely so a report can point at nodes rather than state a number nobody can act on; it should also point at *why*.
+  - **`is_placement()` is renamed to what it computes.** `is_recognisably_a_placement()` is ugly, and the ugliness is the point: it makes a caller ask "recognisably by whom?".
+  - **The structural spelling becomes the obvious one.** `scaled(point(), e)` is already shorter than the lambda; it is simply undiscoverable, because the slot advertises a callable. That is an API problem and not a documentation one.
+
+- ~~**[want]** Does collapsing the dust into one node remove `content_hash`'s O(vertices) cost?~~ — **measured 2026-09-17, and the answer is that the cost was never there.** The premise was wrong twice over. The dust is not a `Literal`: `flake()` builds a `Space` node, hashed by its exact form's type plus sixteen chart samples, so the O(vertices) path touches exactly two nodes in the whole scene (the cube and the table). The "158 000 vertices hashed across the dust" figure was inherited from when a speck was `literal(dust_speck(...))` and never re-derived.
+
+  And the measurement settles it regardless of the premise:
+
+  ```
+  trace nodes   35 231 -> 34
+  cook()         114.6 -> 105.6 ms
+  ```
+
+  A thousandfold fewer nodes and **8% less time**. So neither "proportional to the node count" nor "stronger than that" — hashing was not the cost at all. What dominates is per-*object* work, which the collapse does not reduce: 46 196 objects still each evaluate a placement and resolve a material through two opaque fields. The first line to look at, if cooking ever needs to be faster, is that — not the hash.
+
+  The real win is the one the entry was not looking for: the trace went from 35 231 × 456 B ≈ **16 MB** to 34 × 456 B ≈ **15 KB**, which is what makes two million reachable at all.
+
+- **[course]** **An exact form that does not agree with its own chart, created that way by the factory.** `docs/api-reference.md` already states the invariant — *"the exact form must agree with the map, so any operation that can move them apart clears it"* — and `.moving()` honours it. A factory can violate it at the moment of creation, and one does.
+
+  | factory | exact form | chart it is recorded beside | agree |
+  |---|---|---|---|
+  | `torus(R, r)` | `Torus{R, r}` | `make_torus` | yes |
+  | `cylinder(r, h)` | `BoundedQuadric::cylinder_z(r, 0, h)` | `make_cylinder` — lateral surface, no caps | yes |
+  | `sphere(r)` | `BoundedQuadric::sphere(r)` | `chart_of(Sphere<2,T>)` | yes |
+  | `flake(half, bulge)` | a sphere clipped to `Box{-half, half}` | a spherical cap out to `v_max`, derived from `rim = min(hx, hy)` | **no** |
+
+  `flake`'s chart is the disc *inscribed* in the clip box; the exact form keeps the box's corners. For the donut's `flake({0.010, 0.010, 0.003})` the square's corner reaches 0.0141 against the disc's 0.010 — so the exact form is a rounded square and the tessellation is a circle. The exact form covers **more**, which is the opposite direction from the guess that prompted this entry.
+
+  **Fixed 2026-09-17, and the measurement corrected the diagnosis twice on the way.** The disagreement is not in the corners — sampling both shows x and y agreeing to the bit — it is in **z**: the chart spans `[-0.001431, 0.003]` and the old clip claimed `[-0.003, 0.003]`. Below where the cap ends the sphere keeps widening past the slab's half-width and is cut by its sides, so the exact form carried a skirt the tessellation had never heard of.
+
+  Making the chart match was not available: `ParametricSurface`'s domain is a rectangle in `(u, v)` and "sphere ∩ box" is not one. Making the clip match was, and is exactly right — clip to `rim` and to the height where the cap reaches it, and then at any `z` above that the sphere's radius is at most `rim`, the sides never cut, and the bottom cuts precisely where the cap ends. Sphere ∩ box is then *equal* to the cap. The clip stops describing the size the caller asked for and starts describing the region the surface occupies, which is what a clip is for.
+
+  **The visual consequence, decided rather than absorbed.** Removing the skirt makes the dust finer: on a dust-heavy frame 10.5% of pixels change and 95% of those get brighter, which is less speck covering more background. Kept, for three reasons in order of weight. The skirt was surface the tessellated form never had, so keeping it would keep a disagreement between two renderings of one node — the thing this fix exists to remove. Finer specks read as dust rather than as gravel, which is the direction the scene has been moving anyway. And if the cloud wants more visual mass, the honest lever is the flake's `half`, not a loose clip. A frame hash cannot referee this: the representation changed honestly, so the pixels *should* differ, and only an eye can say whether the new shape is the wanted one.
+
+  Guarded by a test over every factory that records both parts, comparing the sampled bounding box of the chart against the exact form's own. Bounding boxes rather than surfaces, deliberately: cheap, dependent on nothing that can itself be wrong, and it catches the failure that matters — one of the pair covering ground the other does not. A divergence is a bug until someone writes a documented exception, and there are none. Checked against the old clip before being trusted: four assertions fail there.
+
+  The reason this is worth an entry rather than a fix-in-place: the invariant exists, is documented, and is enforced on the one operation that was thought to threaten it. Nothing checks it where the two are first written down together — which is also where it is cheapest to check, since both are right there.
+
+  **Withdrawn along the way:** the claim that this class was demonstrated by `cylinder()` losing its end caps. It is not. `make_cylinder` is the lateral surface with no caps and `BoundedQuadric::cylinder_z` matches it exactly. The donut's sprinkles became open tubes because the demo swapped its own capped `solid_cylinder` helper for `scene.cylinder()`, which is a different *shape*, not a different *representation* of the same one.
+
+- **[course]** **`scatter_frame` builds its frame from one normal, and orienting *along* a surface needs a full one.** Found 2026-09-17, by checking a claim rather than by hitting a bug: the plan said the donut's sprinkles would instance for free once the renderer read a cooked scene, since `cylinder()` records a `BoundedQuadric`. They did not, because the demo does not use `cylinder()` — the sprinkle is a `literal()` of a hand-built mesh whose axes have been permuted so its length points sideways.
+
+  That permutation is the finding. A frame derived from a normal is enough for anything that points *along* the normal, or that has no orientation worth speaking of. A sprinkle lies *across* the surface, and there is no way to say so: `scatter()` binds the item's local z to the normal and offers no alternative, so the only remaining move is to rotate the mesh by hand — which a closed form cannot follow, since the exact `BoundedQuadric` is a cylinder about z and stays one. Hence `Literal`, hence no instancing.
+
+  Two distinct gaps sit under that, worth separating because they block different things:
+
+  - **The in-plane directions are arbitrary.** `basis_from_normal` (Duff et al. 2017) picks *some* pair perpendicular to the normal, and `scatter_frame` then turns it by a hash of the site index. Perfect for sprinkles, which really do lie every which way. Useless for anything that should follow the surface itself — hair along a curvature direction, scales along a flow, tiles along a parametrization.
+  - **The axis binding is fixed.** Local z goes to the normal, always. This is the one the sprinkle is blocked by, and it is the cheaper of the two.
+
+  Until a full frame exists — normal, tangent, bitangent, with the tangent meaning something — scattered items that must lie along a surface stay `Literal` meshes and cannot be instanced. The ceiling that puts on the donut demo is concrete and measured: 11 000 sprinkles are 429 848 triangles that a closed form would have made 11 000 instances of one shape.
+
 - ~~**[want]** Scattered items lying fully flush to the target surface, not slightly proud of it~~ — **done 2026-09-17**, and the cause was not the one this entry assumed. They were not proud because of a tangent-plane approximation; they were proud because `offset()` silently rendered at 48×24 instead of the tessellation it was asked for, and a coarse mesh of a convex surface sits *below* the analytic surface that `scatter()` places against. The gap was lifting every item into view by accident. `scatter_lift()` now raises an item by the depth of its own geometry below its local origin, and `scatter()`'s new `seat` parameter says how deep it sits — 1 rests it on the surface, 0 puts its origin there, between is a press into something soft. Note the trap that made a named parameter necessary: since the lift is derived from the item's own lowest point, shifting the item's mesh down by *d* lowers `min_z` by *d* and raises the lift by *d*, so the two cancel exactly and the nudge does nothing. The donut demo had exactly such a nudge, with a comment explaining what it was for, and it had silently stopped working.
 
 - **[course]** **Per-instance parameters: `MotionEnv` gains the instance's own origin.** The blocking step for two million particles, analysed 2026-09-17, and the analysis is the valuable part because the obvious answer is the wrong one.
@@ -705,7 +797,94 @@ question is not reopened from scratch in a month.
 
   The fix is the one `io/field.hpp` already wrote down the reason for — *"tomorrow a field is added to this struct and nothing else moves"*. `MotionEnv` gains the instance's **origin**, its rest position. A field reading `env.origin` stays a placement, because an origin is one value per object rather than one per vertex, so the affine test still holds and the instance path still applies. The dust then becomes a single node with N instances, each on its own trajectory.
 
-  Scope, so this is not mistaken for a parameter change: `MotionEnv`, a new leaf factory in `VecField` alongside `opaque_of_time`, `is_placement`/`affine_in_point`, `cook()`, `materialize_mesh()`, `Shape::exact`, and the renderer moving from `materialize()` to `cook()`. That last one uncovers a further gap — `cook()` hands back *rest* geometry for a refused (deforming) object with no way to recover its motion, so a renderer driven by `Cooked` alone would draw the exploding cube unexploded. Cost at two million, measured by extrapolation rather than guessed: roughly 350 MB for instances plus tree, about 2 s of BVH build per frame, and a frame in the ten-to-fifteen second range. Fine for a still, three hours for a 750-frame sequence.
+  **A second reason, found 2026-09-17 while trying to avoid needing this at all.** The plan had a cheaper intermediate step: a purely *radial* burst needs no per-instance parameters, because `A(t) + p·s(t)` is affine in the point and each particle's trajectory falls out of its own site position. The instancing half of that is true — `is_placement()` returns true and the objects collapse onto one node. The animation half is not.
+
+  A placement is `p ↦ b + R·s·p` applied to every vertex, and a scattered instance's vertex is `seat + F·local`. So:
+
+  ```
+  particle centre = b + R·s·seat     grows with s
+  particle radius = s·|local|        grows with s, the same s
+  ```
+
+  One scalar drives both. Expanding the cloud tenfold inflates every fleck tenfold: not a burst, an inflating balloon. They cannot be separated, because `seat` and `local` reach the field already summed into one point — and separating them is exactly what an instance origin is.
+
+  So `MotionEnv::origin` is not only what swirl and letterform convergence need. It is what a *plain radial burst at constant particle size* needs, which removes the cheaper intermediate step from the table: building it would mean building something thrown away one step later.
+
+  **A prediction, registered before the measurement rather than after.** Stage 1 gave 36.4× on stored vertices and 11% off the frame, and the gap between those two is itself explained: traversal is logarithmic, and `log(46 000)` against `log(429 000)` is almost nothing. So at two million the expectation is **7–10× on storage and 10–15% on the frame** — storage *falls* because one node's worth of geometry is amortised over vastly more instances while the instance array itself grows, and the frame moves little for the same logarithmic reason. Written down here so that a frame growing by more than that is a signal to look for a cause rather than a number to accept.
+
+  Scope, so this is not mistaken for a parameter change: `MotionEnv`, a new leaf factory in `VecField` alongside `opaque_of_time`, `is_placement`/`affine_in_point`, `cook()`, `materialize_mesh()`, `Shape::exact`, and the renderer moving from `materialize()` to `cook()`. That last one uncovers a further gap — `cook()` hands back *rest* geometry for a refused (deforming) object with no way to recover its motion, so a renderer driven by `Cooked` alone would draw the exploding cube unexploded. ~~Cost at two million, measured by extrapolation rather than guessed: roughly 350 MB for instances plus tree~~ — **wrong by a factor of three, corrected 2026-09-17 by measuring `sizeof` instead of recalling it**, and the correction is the point of checking before rather than after:
+
+  ```
+  sizeof(Object<double>)     192 B  ->  366 MB at 2M
+  sizeof(Instanced<BQ>)      112 B  ->  214 MB
+  the BVH's own copy of them         ->  214 MB
+  nodes_, reserving 2N               ->  244 MB
+                                         ~1.0 GB
+  ```
+
+  plus about 160 MB of build temporaries (`boxes`, `centroids`, `indices`). The 350 MB estimate forgot `Object<T>` entirely, and forgot that `BVH::build` takes its shapes **by value** — so the instance array exists twice.
+
+  **The full breakdown, measured 2026-09-17, since a figure without its layout is not a figure.** `Object<double>` is 192 B: `shape` 8 at offset 0, `source_node` 8, `translation` 24, `scale` 8, `rotation` **72**, `instanceable` 1 at offset 120, `material` **64** at 128 — members summing to 185 with 7 bytes of padding. That padding is *not* reclaimable by reordering: 185 rounds to 192 under 8-byte alignment in any permutation. A `BVH` node is `{Box<3,double> bounds, uint32 first, uint32 count}` = 56 B, of which the bounds are 48.
+
+  What that makes available, in order of return, with the projected `Object` alongside:
+
+  | change | saves at 2M | `Object` after |
+  |---|---|---|
+  | ~~`rotation` 72 → 32 (quaternion)~~ — **done**, `Object` only; measured 192 → 152 B | 80 MB | 152 B ✓ |
+  | `material` 64 → a `uint16` index into a palette — **measured first, and it is not what the estimate assumed**, see below | ~97 MB | 88 B |
+  | `shape`, `source_node` → `uint32` | 16 MB | 80 B |
+  | BVH bounds in `float`, rounded outward — a bound only has to be conservative | 96 MB | — |
+  | `prim_indices_` `size_t` → `uint32` | 8 MB | — |
+  | the BVH owning its shapes: hold indices into `Cooked` instead | 214 MB | — |
+
+  **How the rotation change is staged, decided before it starts.** The rotation is a matrix the whole way down — `scatter_frame` assembles columns from a basis, `rotated()` produces one through `SO3::exp`, their product is one — so a quaternion can only come from `from_matrix`, and the round trip is unavoidable. Measured over four thousand real objects: **zero bit-exact**, worst element 1.72e-15, about 8 ulp. A byte-identical frame after the matrix goes is therefore impossible rather than unlikely.
+
+  What that does *not* explain is any visible change, and the first two attempts to explain one both failed the same way — by sounding like a mechanism without ever being given a number.
+
+  The donut's worst object radius is 10.3 world units, so the worst vertex displacement is 1.8e-14 against a pixel of 5.4e-3: eleven orders below one. *The picture cannot shift.* The second story — that exact ties at a silhouette flip instead — is arithmetic too, and it does not survive it either. The band in which a tie could fall the other way is 3.3e-12 of a pixel wide; a 960×720 frame at four samples a pixel is 2.8 million rays, of which perhaps 5% land on a silhouette, so the expected number of flipped ties is about **5e-7**. Not "occasionally" — not once.
+
+  So the honest prediction is the stronger one: **step two should be byte-identical as well.** If it is not, neither of those stories covers it and the cause is something else — so the response is not a third explanation but a count: how many pixels differ, and where. One on a silhouette is a coincidence to accept and close. A dozen scattered across the frame is systematic, and no displacement of 1e-14 accounts for it under any reading.
+
+  **Both steps came out byte-identical, including the second one** — the strengthened prediction held, and the picture did not move by a pixel even though every rotation now arrives through a quaternion.
+
+  Four preconditions were checked rather than assumed, and each could have made the result meaningless:
+
+  - **The renderer is deterministic.** Three runs of one binary, one hash. Without that, "one pixel differs" could not have been attributed to anything.
+  - **The comparison can fail.** Substituting an identity quaternion for one object in forty changes the hash. A byte-identical result from a comparison that cannot detect a difference is not a result.
+  - **The expansion stayed cold.** `to_world` runs per vertex and now takes the matrix as an argument; the quaternion is unpacked once per object, beside the instance that keeps it as a matrix. A caller writing `o.rotation_q.to_matrix()` inside the vertex loop would have spent the memory and bought nothing.
+  - **The object count is asserted separately from any picture.** A lost rotation makes instances coalesce, and a slightly denser cluster is not a visible defect — neither a hash nor a pixel diff distinguishes forty thousand instances from forty thousand with two on top of each other. The test checks counts, pairwise distinct positions, pairwise distinct orientations, and that none of them is the identity.
+
+  So, two steps and two rules:
+
+  - **Step one: store both, and the matrix stays authoritative.** The renderer reads the matrix; the quaternion is carried and compared. A byte-identical hash then means something, because the thing being drawn has not changed — it tests the plumbing and nothing else. Two sources of truth for one rotation is otherwise exactly how they drift apart in silence.
+  - **Step two: remove the matrix and introduce the pixel comparison in the same change.** Splitting them leaves a window where the matrix still exists but the renderer already reads the quaternion and nothing checks the difference. The comparison is what makes the removal safe; without it the removal is blind. It reports a count and locations rather than a pass/fail tolerance, because the expected count is zero and anything else is a lead rather than a threshold to clear.
+
+  **The palette was costed before being built, and the costing changed it.** `Material` carries values rather than functions — `base_color`, `roughness`, `emissive`, `opacity` — so a palette is possible in principle; the question is whether per-object materials *collapse*, and that is a property of the scene rather than of the idea. The demo now reports it:
+
+  ```
+  t = 1.5    9 762 distinct materials over 46 196 objects   (21%)
+  t = 3.9   13 188                                          (29%)
+  ```
+
+  Neither the two-to-five the estimate imagined nor the N that would kill it. Three things follow, and the mechanism matters more than the ratio:
+
+  - **The collapse is saturation, not sharing.** `dust_color` clamps at `d/1.4` and the emissive at `d/0.75`, so every particle past those distances lands on exactly the same grey and exactly zero emission. The particles are not sharing a material because they mean the same thing; they are sharing one because two `clamp` calls flattened them.
+  - **The saving is smaller than the 124 MB claimed**, which was computed as though the palette were tiny. At 21% on two million: 128 MB of inline materials becomes 4 MB of indices plus 27 MB of palette, so about **97 MB**.
+  - **It is fragile, and cheaply broken.** Replace either falloff with something that does not saturate — an exponential, say — and the collapse disappears entirely, the palette becomes size N, and the change *costs* memory rather than saving it. The 97 MB currently rests on two `clamp`s in a demo.
+
+  The ratio also moves with time (9 762 against 13 188 on two frames of one scene), so a palette built in `cook()` is a different size every frame. Not a defect, but not a constant to plan against either.
+
+  If it is built: `Cooked`'s materials are immutable like everything else `cook()` produces, and that has to be said out loud rather than discovered — sharing one entry across N objects means recolouring one object recolours all of them, and someone will eventually want to flash a single instance. And the test that matters is not "the palette works" but "the palette *collapses*": two objects with equal materials must land on one index, asserted directly.
+
+  **`Instanced<S>` is excluded from that list on purpose**, and `docs/conventions.md` carries the principle: compaction belongs to cold storage, and the hot path keeps whatever computes fastest. `Object`'s rotation is read once a frame; `Instanced`'s is applied at every leaf test the traversal reaches, and a quaternion costs more arithmetic to apply than a matrix. Same saving, traversal untouched.
+
+  The trigger for revisiting it, written down instead of guessed: two million `Instanced` at 112 bytes is 214 MB that traversal walks and no cache holds. *If* traversal at that scale measures as memory-bound, the options are splitting the array — positions apart from rotations, so a ray touches only what it needs — or shrinking the element after all. Against a measurement showing the stall, not before it.
+
+  Landing at roughly `2M × 80 B` for objects plus a much thinner tree. The next boundary after that is SoA — positions in one array, rotations in another — which is a different change and should not be started until the cheap ones are measured.
+
+  **One of them was free and is already taken:** `BVH::build` takes its shapes by value, and the demo handed it an lvalue, so the instance array existed twice for the whole frame. `std::move` at the call site removes one copy — 214 MB at two million — and changes nothing else. Worth recording that checking *what still reads the vector afterwards* caught a real break: the report line counted `insts.size()` after the build and would have silently printed zeros.
+
+  **Two million is a memory problem before it is a speed problem**, and that reframes the work: the reductions available are layout ones the entry below already separates from deduplication. `rotation` as a full 3x3 is 72 of `Object`'s 192 bytes and a quaternion would be 32; `shape` and `source_node` are `size_t` where `uint32_t` would do; `Material` is 64 bytes repeated per instance where most instances of a node share everything but one field. And the BVH taking its shapes by value is a duplication nothing needs. None of that is hard, and none of it should be guessed at either — the number above is what makes it worth doing, and a measured number after each change is what says it worked.
 
 - **[course]** **One object deforming another.** Raised 2026-09-17, from wanting sprinkles to press visibly into liquid icing rather than merely sitting in it. Today a field is a function of `(u, v)` or of a `MotionEnv`, and it cannot see anything else in the scene — so "the glaze closes around each sprinkle" is not expressible, and neither is a footprint, a dent, a contact weld, or a drip running off a placed object. The concrete first case is narrow enough to build: `scatter()` knows its sites and does not expose them, so the target's own thickness field could read them. The cost is what makes it a real item rather than a tuning change — the naive form is a sum over every site per surface sample, 600 × 10 240 on today's donut and around 50 million at the sprinkle counts this scene now uses, so it needs a grid or similar index over the `(u, v)` domain before it is usable at all. Worth naming as the general capability rather than as "dimples": the same mechanism is what a scene needs before objects can be said to interact at all, and it is the one the demo keeps reaching for. Deliberately deferred past the first release.
 

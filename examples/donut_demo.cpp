@@ -71,6 +71,9 @@
 #include <functional>
 #include <numbers>
 #include <optional>
+#include <cstring>
+#include <map>
+#include <set>
 #include <memory>
 #include <random>
 #include <utility>
@@ -91,7 +94,7 @@ using spatium::render::Camera;
 using spatium::render::make_camera_basis;
 using spatium::render::camera_ray_dir;
 using spatium::render::parallel_for_rows;
-using spatium::render::supersample_pixel;
+using spatium::render::supersample_pixel_hdr;
 using spatium::render::write_png_rgb;
 
 namespace {
@@ -381,10 +384,70 @@ struct DustInstance {
     double opacity;
 };
 
+// The halo around something that emits, which is what actually reads as
+// light. Brightness alone does not: a clamped hot core and a merely
+// bright one arrive at the same pixel value, and the eye reads both as
+// paint. What separates them is that light spreads past the silhouette
+// of the thing emitting it, and nothing else in a frame does that.
+//
+// The source is the emission buffer, never the colour buffer, so this is
+// a mask and not a threshold -- see `Traced` in render_frame for the
+// measurements that ruled a threshold out. The blur is separable, two
+// passes of a 1D Gaussian instead of one 2D pass, which is the
+// difference between 2*r and r*r samples per pixel; at sigma 7 that is
+// 43 against 441. Even so it costs nothing worth measuring next to the
+// ray casting that produced the buffer.
+void add_bloom(std::vector<Vec<double, 3>>& hdr, const std::vector<Vec<double, 3>>& emission,
+               int W, int H) {
+    constexpr double kSigma = 7.0;       // halo width in pixels at 960x720
+    constexpr double kStrength = 1.25;   // how much of the halo is added back
+    const int radius = static_cast<int>(std::ceil(3.0 * kSigma));
 
+    std::vector<double> kernel(static_cast<std::size_t>(radius) + 1);
+    double norm = 0.0;
+    for (int i = 0; i <= radius; ++i) {
+        kernel[static_cast<std::size_t>(i)] = std::exp(-0.5 * (i * i) / (kSigma * kSigma));
+        norm += (i == 0 ? 1.0 : 2.0) * kernel[static_cast<std::size_t>(i)];
+    }
+    for (auto& k : kernel) k /= norm;
 
-std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& scene, const Camera<double>& cam,
-                                        int W, int H) {
+    const auto at = [W](int x, int y) {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(W) +
+               static_cast<std::size_t>(x);
+    };
+    std::vector<Vec<double, 3>> tmp(emission.size()), blurred(emission.size());
+
+    parallel_for_rows(H, [&](int y) {
+        for (int x = 0; x < W; ++x) {
+            Vec<double, 3> acc{};
+            for (int d = -radius; d <= radius; ++d) {
+                const int xx = std::clamp(x + d, 0, W - 1);
+                acc = Vec<double, 3>{acc + emission[at(xx, y)] *
+                                               kernel[static_cast<std::size_t>(std::abs(d))]};
+            }
+            tmp[at(x, y)] = acc;
+        }
+    });
+    parallel_for_rows(H, [&](int y) {
+        for (int x = 0; x < W; ++x) {
+            Vec<double, 3> acc{};
+            for (int d = -radius; d <= radius; ++d) {
+                const int yy = std::clamp(y + d, 0, H - 1);
+                acc = Vec<double, 3>{acc + tmp[at(x, yy)] *
+                                               kernel[static_cast<std::size_t>(std::abs(d))]};
+            }
+            blurred[at(x, y)] = acc;
+        }
+    });
+
+    for (std::size_t i = 0; i < hdr.size(); ++i)
+        hdr[i] = Vec<double, 3>{hdr[i] + blurred[i] * kStrength};
+}
+
+std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
+                                        const bd::Cooked<double>& cooked,
+                                        const std::vector<bd::Placed<double>>& gizmos,
+                                        const Camera<double>& cam, int W, int H) {
     // Two trees, because the scene has two kinds of object in it.
     //
     // Most of it is ordinary geometry: a torus, a shell, sprinkles --
@@ -407,29 +470,90 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
     // and those objects go through the triangle path unchanged.
     std::vector<Triangle3> tris;
     std::vector<Prim> prims;
-    std::vector<geometry::BoundedQuadric<double>> shapes;   // one entry per distinct shape
     std::vector<Instanced<geometry::BoundedQuadric<double>>> insts;
     std::vector<DustInstance> inst_info;
 
-    for (const auto& obj : scene) {
-        auto mat = obj.material();
+    // One quadric per distinct *shape*, not per object -- which is the
+    // whole point of reading a cooked scene rather than a list of
+    // materialized nodes. Sized up front and never grown, because every
+    // instance below holds a pointer into it.
+    std::vector<geometry::BoundedQuadric<double>> quadrics(cooked.shape_count());
+    std::vector<char> has_quadric(cooked.shape_count(), 0);
+    std::vector<std::vector<Vec<double, 3>>> shape_normals(cooked.shape_count());
+    for (std::size_t i = 0; i < cooked.shape_count(); ++i) {
+        const auto& sh = cooked.shapes()[i];
+        if (const auto* q = std::any_cast<geometry::BoundedQuadric<double>>(&sh.exact)) {
+            quadrics[i] = *q;
+            has_quadric[i] = 1;
+        }
+    }
+
+    // A shape's geometry is its *rest* form when the object placing it is
+    // instanceable, and its *placed* form when the object deforms -- in
+    // which case cook() hands back an identity transform. So one formula
+    // covers both, and the deforming case is not a special case here.
+    // Takes the rotation already expanded, rather than reaching into the
+    // object for it: this runs per *vertex*, and a quaternion unpacked
+    // here would spend the arithmetic the compact storage was supposed to
+    // be paying for. The expansion happens once per object, below.
+    auto to_world = [](const Vec<double, 3>& v, const Matrix<double, 3, 3>& R,
+                       const bd::Object<double>& o) {
+        return Vec<double, 3>{R * Vec<double, 3>{v * o.scale} + o.translation};
+    };
+
+    auto emit_triangles = [&](const mesh::Mesh<Euclidean<3, double>>& m,
+                              const std::vector<Vec<double, 3>>& vn,
+                              const bd::Object<double>& o, const Matrix<double, 3, 3>& R,
+                              const Material<double>& mat) {
+        for (const auto& f : m.faces) {
+            Triangle3 t(to_world(m.vertices[f[0]], R, o), to_world(m.vertices[f[1]], R, o),
+                        to_world(m.vertices[f[2]], R, o));
+            tris.push_back(t);
+            // Normals turn by the rotation alone: the scale is uniform, so
+            // it divides out of the inverse transpose.
+            prims.push_back(Prim{t,
+                                 {Vec<double, 3>{R * vn[f[0]]},
+                                  Vec<double, 3>{R * vn[f[1]]},
+                                  Vec<double, 3>{R * vn[f[2]]}},
+                                 mat.base_color, mat.roughness, mat.emissive});
+        }
+    };
+
+    for (const auto& obj : cooked.objects()) {
+        const auto& mat = obj.material;
+        // Once per object. Everything below uses this, including the
+        // instance, whose rotation stays a matrix precisely so the
+        // traversal never has to unpack anything.
+        const Matrix<double, 3, 3> R = obj.rotation_q.to_matrix();
+
         // Two conditions, and neither is a guess about what the object
-        // looks like. The node must have recorded an exact analytic form
-        // -- which torus(), cylinder() and sphere() do and space() cannot
-        // -- and its motion must be a placement, so copies differ only by
-        // where they are rather than by shape.
-        const auto* q = obj.template exact_as<geometry::BoundedQuadric<double>>();
-        auto place = obj.placement();
-        if (q && place) {
-            shapes.push_back(*q);
-            insts.push_back({nullptr, place->translation, place->scale, place->rotation});
+        // looks like: the shape must carry a closed form, and the object's
+        // motion must be a placement so copies differ only by where they
+        // are.
+        if (obj.instanceable && has_quadric[obj.shape]) {
+            insts.push_back({&quadrics[obj.shape], obj.translation, obj.scale, R});
             inst_info.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
             continue;
         }
-        // Bound once: Placed::mesh() builds on each call rather than
-        // caching, so the triangle view is taken here and reused.
-        auto m = obj.mesh();
+
+        // Smooth normals once per shape rather than once per object: a
+        // thousand instances of one sprinkle used to recompute the same
+        // normals a thousand times, through a merged mesh that had to be
+        // built first.
+        auto& vn = shape_normals[obj.shape];
+        if (vn.empty()) vn = smooth_normals(cooked.shapes()[obj.shape].geometry);
+        emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, R, mat);
+    }
+
+    // The gizmos are not in the scene and must not be: they are the
+    // editor, not the subject. They arrive as Placed views onto their own
+    // little Trace, and they are drawn here because forgetting them is the
+    // easy mistake in this refactor -- the build-up frames simply lose
+    // their axes and grid and nothing else changes.
+    for (const auto& g : gizmos) {
+        auto m = g.mesh();
         auto vn = smooth_normals(m);
+        auto mat = g.material();
         for (const auto& f : m.faces) {
             Triangle3 t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
             tris.push_back(t);
@@ -437,13 +561,106 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
                                  mat.emissive});
         }
     }
-    // Shapes are stored first and pointed at second: the vector has to
-    // stop reallocating before any instance holds its address.
-    for (std::size_t i = 0; i < insts.size(); ++i) insts[i].shape = &shapes[i];
 
-    auto bvh = BVH<Triangle3>::build(tris);
-    auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(insts);
+    // Counted before the move, because a moved-from vector is empty and
+    // the report below would have quietly started printing zeros. Found
+    // by checking what still reads these after this line rather than by
+    // assuming nothing did.
+    const std::size_t n_inst = insts.size(), n_tris = tris.size();
 
+    // Moved, not copied. `build` takes its shapes by value and keeps
+    // them, so handing it an lvalue leaves two copies of the array alive
+    // for the rest of the frame -- 112 bytes per instance, which is 214 MB
+    // at two million and was simply being spent.
+    auto bvh = BVH<Triangle3>::build(std::move(tris));
+    auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(std::move(insts));
+
+    // Reported rather than assumed, and the last pair is the whole reason
+    // a cooked scene exists: what a renderer would have held if every
+    // object carried its own copy of its geometry, against what the shape
+    // table actually holds.
+    std::println("  scene: {} objects -> {} instances + {} triangles; "
+                 "{} refused (motion deforms), {} shared; "
+                 "vertices {} without instancing, {} stored ({:.1f}x)",
+                 cooked.object_count(), n_inst, n_tris,
+                 cooked.opaque_refused(), cooked.shared_objects(),
+                 cooked.vertices_without_instancing(), cooked.vertices_stored(),
+                 cooked.vertices_stored() == 0
+                     ? 0.0
+                     : static_cast<double>(cooked.vertices_without_instancing()) /
+                           static_cast<double>(cooked.vertices_stored()));
+    {
+        // Which nodes were refused, by kind -- because "21 deformations"
+        // is a number nobody can act on, and because a claim about what
+        // they are has already been wrong once in this repository.
+        std::map<std::string, int> by_kind;
+        for (auto i : cooked.refused_nodes())
+            ++by_kind[bd::kind_name(trace.node(i).kind)];
+        // The worst-case world radius of any object, which is what a
+        // rotation's error actually gets multiplied by. A matrix error is
+        // dimensionless; a vertex displacement is not.
+        double worst_radius = 0.0;
+        for (const auto& o : cooked.objects()) {
+            double rest = 0.0;
+            for (const auto& v : cooked.shapes()[o.shape].geometry.vertices)
+                rest = std::max(rest, Vec<double, 3>{v}.norm());
+            worst_radius = std::max(worst_radius, rest * std::abs(o.scale) + o.translation.norm());
+        }
+        std::println("  worst object radius {:.3f} world units", worst_radius);
+
+        // How many *distinct* materials the cooked scene actually holds.
+        // The question a palette answers is whether a per-object Material
+        // collapses, and the answer is a property of the scene rather
+        // than of the idea: comparison is exact, so two colours a single
+        // ulp apart are two entries.
+        std::set<std::array<double, 8>> palette;
+        for (const auto& o : cooked.objects())
+            palette.insert({o.material.base_color[0], o.material.base_color[1],
+                            o.material.base_color[2], o.material.roughness,
+                            o.material.emissive[0], o.material.emissive[1],
+                            o.material.emissive[2], o.material.opacity});
+        std::println("  distinct materials {} over {} objects", palette.size(),
+                     cooked.object_count());
+        std::size_t glowing = 0, near_target = 0;
+        double max_glow = 0.0;
+        for (const auto& o : cooked.objects()) {
+            max_glow = std::max(max_glow, o.material.emissive[0]);
+            if (o.material.emissive[0] > 0.3) ++glowing;
+            if (o.material.base_color[0] > 0.8) ++near_target;
+        }
+        std::println("  glowing {} , hot-coloured {} , max emissive {:.3f}", glowing, near_target,
+                     max_glow);
+
+        std::print("  refused nodes:");
+        for (const auto& [k, n] : by_kind) std::print(" {}x{}", n, k);
+        std::println("");
+    }
+
+    // The last step stays a clamp, and that is a measured decision rather
+    // than the one this started as.
+    //
+    // The complaint it began with was right: the emission maxes out above
+    // 1 and clamping flattens every hot particle onto the same orange, so
+    // it reads as pigment. The obvious repair -- a tone curve compressing
+    // what is above 1 instead of cutting it -- was written, and then it
+    // was checked the only way that means anything: render with the
+    // emission switched off, before and after. It moved.
+    //
+    // The reason it moved is that this frame has no headroom. A curve that
+    // asymptotes to 1 must put its knee below 1, and the scene's own
+    // shading reaches 1.263 -- the icing's specular once the donut is
+    // fully grown. So every knee sits inside the range the scene actually
+    // occupies, and there is no neutral tone curve for this image at all,
+    // only curves that darken the icing by a little or by a lot.
+    //
+    // Which turned out not to matter, because brightness was never what
+    // was missing. What separates a light from a paint is that light
+    // spreads past the silhouette of what emits it, and that is add_bloom
+    // above, working off the emission buffer rather than off any pixel
+    // value. With the halo there, the flattening of the few brightest
+    // cores costs nothing visible, and the rest of the frame is left
+    // exactly as it was -- byte for byte, which is asserted by rendering
+    // a frame with no emission in it and comparing.
     const Vec<double, 3> background{0.55, 0.75, 0.92}; // plain light blue, no starfield
     const auto basis = make_camera_basis(cam);
     // Two lights, and the split is the whole reason the shadow reads.
@@ -487,11 +704,36 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         return static_cast<bool>(inst_bvh.ray_cast(shadow));
     };
 
+    // What a ray saw, kept as two values rather than one: the colour to
+    // show, and the part of that colour which came from something
+    // emitting.
+    //
+    // The split is what lets the bloom below be selective, and it exists
+    // because the obvious alternative was measured and does not work. A
+    // brightness threshold cannot separate fire from highlight here: the
+    // specular term is bounded by (1 - roughness) * 0.6, so a white
+    // sprinkle at roughness 0.35 is bounded at 0.98 + 0.39 = 1.37, and
+    // the icing at roughness 0.40 mixes in 0.168 of whatever it reflects,
+    // which reaches ~1.48 when what it reflects is the fire. The fire's
+    // own range starts around 1.63. Those overlap, so every threshold
+    // that catches the fire also catches a highlight -- and even if one
+    // did fit, it would be a number that silently stops working the next
+    // time a material, a light or the camera moves.
+    //
+    // Carrying the emission instead makes the question structural rather
+    // than numeric: a surface whose material has no emissive term
+    // contributes exactly zero to it, at any brightness, under any light,
+    // for ever. Nothing has to be re-measured when the scene changes.
+    struct Traced {
+        Vec<double, 3> color{};
+        Vec<double, 3> emission{};
+    };
+
     // trace_ray returns linear [0,1] color throughout -- the single
     // conversion back to [0,255] happens exactly once, at the very end
-    // of ray_color below, so reflection blending stays on one scale.
-    std::function<Vec<double, 3>(const Ray<3, double>&, int)> trace_ray =
-        [&](const Ray<3, double>& ray, int depth) -> Vec<double, 3> {
+    // of render_frame below, so reflection blending stays on one scale.
+    std::function<Traced(const Ray<3, double>&, int)> trace_ray =
+        [&](const Ray<3, double>& ray, int depth) -> Traced {
         // Both trees, nearer hit wins. Two structures rather than one
         // because the two kinds of object want different leaves, not
         // because the renderer is special-casing the dust: each tree is
@@ -507,7 +749,7 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         double opacity = 1.0;
 
         const bool dust_won = dhit && (!hit || dhit->t < hit->t);
-        if (!hit && !dhit) return background;
+        if (!hit && !dhit) return Traced{background, Vec<double, 3>{}};
 
         if (dust_won) {
             // The quadric's own normal at the hit, exact rather than
@@ -567,14 +809,22 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         // them fall into the donut's shadow.
         color = Vec<double, 3>{color + emissive};
 
+        // The emitted part travels alongside the colour through every
+        // blend below, with the same weights, so that a reflection of
+        // the fire stays recognisable as fire and a reflection of the
+        // table stays recognisable as not-fire. Blending it any other
+        // way would make the two disagree about the same pixel.
+        Vec<double, 3> emitted = emissive;
+
         // A real reflected ray for glossy materials, not just a
         // highlight -- what actually earns the word "raytracing" here.
         if (roughness < 0.6 && depth < MAX_DEPTH) {
             Vec<double, 3> refl_dir = Vec<double, 3>{ray.direction - n * (2.0 * ray.direction.dot(n))};
             Vec<double, 3> refl_origin = Vec<double, 3>{hit_point + n * 1e-4};
-            Vec<double, 3> refl_color = trace_ray(Ray<3, double>{refl_origin, refl_dir}, depth + 1);
+            Traced refl = trace_ray(Ray<3, double>{refl_origin, refl_dir}, depth + 1);
             double reflectivity = (1.0 - roughness) * 0.28;
-            color = Vec<double, 3>{color * (1.0 - reflectivity) + refl_color * reflectivity};
+            color = Vec<double, 3>{color * (1.0 - reflectivity) + refl.color * reflectivity};
+            emitted = Vec<double, 3>{emitted * (1.0 - reflectivity) + refl.emission * reflectivity};
         }
         // Seen through, not bent through. The continuation carries on in
         // the ray's own direction, so a flake tints what is behind it
@@ -583,28 +833,59 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         if (opacity < 1.0 && depth < MAX_DEPTH) {
             Ray<3, double> through{Vec<double, 3>{hit_point + ray.direction * 1e-4},
                                    ray.direction};
-            Vec<double, 3> behind = trace_ray(through, depth + 1);
-            color = Vec<double, 3>{color * opacity + behind * (1.0 - opacity)};
+            Traced behind = trace_ray(through, depth + 1);
+            color = Vec<double, 3>{color * opacity + behind.color * (1.0 - opacity)};
+            emitted = Vec<double, 3>{emitted * opacity + behind.emission * (1.0 - opacity)};
         }
-        return color;
+        return Traced{color, emitted};
     };
 
-    std::vector<std::uint8_t> img(3 * static_cast<std::size_t>(W) * H, 0);
+    // Two linear buffers rather than bytes straight out of the sampler,
+    // because the bloom below is a whole-image operation and cannot be
+    // done one pixel at a time.
+    const std::size_t npix = static_cast<std::size_t>(W) * static_cast<std::size_t>(H);
+    std::vector<Vec<double, 3>> hdr(npix), emission(npix);
     parallel_for_rows(H, [&](int y) {
         for (int x = 0; x < W; ++x) {
-            std::uint8_t* px = &img[3 * (static_cast<std::size_t>(y) * W + x)];
+            // The emitted part is accumulated here and divided by the
+            // number of samples actually taken, rather than by the AA
+            // factor: the two averages then cannot disagree even if the
+            // sampler's default changes underneath this call.
+            Vec<double, 3> emis_accum{};
+            int taken = 0;
             auto ray_color = [&](double sx, double sy) -> Vec<double, 3> {
                 Vec<double, 3> dir = camera_ray_dir(basis, sx, sy);
-                Vec<double, 3> c = trace_ray(Ray<3, double>{cam.position, dir}, 0);
-                return Vec<double, 3>{
-                    std::clamp(c[0], 0.0, 1.0) * 255.0,
-                    std::clamp(c[1], 0.0, 1.0) * 255.0,
-                    std::clamp(c[2], 0.0, 1.0) * 255.0};
+                Traced tr = trace_ray(Ray<3, double>{cam.position, dir}, 0);
+                emis_accum = Vec<double, 3>{emis_accum + tr.emission};
+                ++taken;
+                // Clamped per sample, before the average, which is where
+                // this has always done it. Averaging first and clamping
+                // after is the more defensible order -- it is the one
+                // that antialiases an overbright edge correctly -- but it
+                // is a different picture, and changing it here would ride
+                // in on the back of the bloom and be indistinguishable
+                // from it. It can be its own change, with its own before
+                // and after.
+                return Vec<double, 3>{std::clamp(tr.color[0], 0.0, 1.0),
+                                      std::clamp(tr.color[1], 0.0, 1.0),
+                                      std::clamp(tr.color[2], 0.0, 1.0)};
             };
-            supersample_pixel(x, y, W, H, basis.tan_half,
-                              static_cast<double>(W) / H, ray_color, px);
+            const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(W) +
+                                  static_cast<std::size_t>(x);
+            hdr[i] = supersample_pixel_hdr(x, y, W, H, basis.tan_half,
+                                           static_cast<double>(W) / H, ray_color);
+            emission[i] = Vec<double, 3>{emis_accum * (1.0 / std::max(taken, 1))};
         }
     });
+
+    add_bloom(hdr, emission, W, H);
+
+    std::vector<std::uint8_t> img(3 * npix, 0);
+    for (std::size_t i = 0; i < npix; ++i) {
+        for (int ch = 0; ch < 3; ++ch)
+            img[3 * i + static_cast<std::size_t>(ch)] =
+                static_cast<std::uint8_t>(std::clamp(hdr[i][ch], 0.0, 1.0) * 255.0);
+    }
     return img;
 }
 
@@ -612,9 +893,13 @@ Camera<double> hero_camera() {
     return {.position = {5.0, -4.2, 3.6}, .target = {0.0, 0.0, 0.0}, .up = {0.0, 0.0, 1.0}, .fov_deg = 38.0};
 }
 
-void render_photo(const std::vector<bd::Placed<double>>& scene, const std::string& out_path, bool force) {
+// No gizmos here, and that is the whole difference between the still and
+// the sequence: --photo is the render, the build-up frames are the
+// viewport. Blender's own arc, and nothing had to be written to say so.
+void render_photo(const bd::Trace<double>& trace, const bd::Cooked<double>& cooked,
+                   const std::string& out_path, bool force) {
     constexpr int W = 960, H = 720;
-    auto img = render_frame(scene, hero_camera(), W, H);
+    auto img = render_frame(trace, cooked, {}, hero_camera(), W, H);
     if (spatium::examples::confirm_overwrite(out_path, force))
         write_png_rgb(out_path, W, H, img);
     std::println("  -> {}", out_path);
@@ -635,27 +920,27 @@ void render_video(const bd::Trace<double>& scene, std::size_t lesson_idx, const 
     double orbit_start_angle = std::atan2(cam.position[1], cam.position[0]);
     int frame = 0;
 
-    auto write_frame = [&](const std::vector<bd::Placed<double>>& objs, const Camera<double>& c) {
+    auto write_frame = [&](const bd::Cooked<double>& ck,
+                           const std::vector<bd::Placed<double>>& gizmos,
+                           const Camera<double>& c) {
         std::string path = std::format("{}/frame_{:04d}.png", dir, frame);
         if (spatium::examples::confirm_overwrite(path, force))
-            write_png_rgb(path, W, H, render_frame(objs, c, W, H));
+            write_png_rgb(path, W, H,
+                          render_frame(scene, ck, gizmos, c, W, H));
         ++frame;
     };
 
     for (int i = 0; i < build_frames; ++i) {
         double t = T_BUILD_END * static_cast<double>(i) / static_cast<double>(build_frames - 1);
-        auto objs = bd::materialize(scene, lesson_idx, t);
-        auto ax = axes_placed();
-        objs.insert(objs.end(), ax.begin(), ax.end());
-        write_frame(objs, cam);
+        write_frame(bd::cook(scene, lesson_idx, t), axes_placed(), cam);
     }
-    auto full = bd::materialize(scene, lesson_idx, T_BUILD_END); // finished donut, axes hidden from here on
+    auto full = bd::cook(scene, lesson_idx, T_BUILD_END); // finished donut, viewport hidden from here on
     for (int i = 0; i < orbit_frames; ++i) {
         double frac = static_cast<double>(i) / static_cast<double>(orbit_frames);
         double angle = orbit_start_angle + frac * 2.0 * std::numbers::pi;
         Camera<double> orbit_cam = cam;
         orbit_cam.position = {orbit_radius * std::cos(angle), orbit_radius * std::sin(angle), cam.position[2]};
-        write_frame(full, orbit_cam);
+        write_frame(full, {}, orbit_cam);
     }
     std::println("donut_demo: wrote {} frames -> {}/", frame, dir);
     std::println("  ffmpeg -framerate 30 -i {}/frame_%04d.png -pix_fmt yuv420p donut.mp4", dir);
@@ -670,6 +955,7 @@ int main(int argc, char* argv[]) {
     std::string out_path = "donut.png";
     std::string video_dir = "donut_frames";
     std::size_t sprinkle_count = 11000; // small flecks, so many more of them
+    std::size_t dust_particles = 35200; // one Scatter now, so this is a number rather than a loop
     double t = T_BUILD_END; // how far into the build-up to render (T_BUILD_END = fully formed)
     int build_frames = 75, orbit_frames = 45; // half the sampling density -- ~9x more
                                               // dust triangles from copies_per_point makes
@@ -682,6 +968,7 @@ int main(int argc, char* argv[]) {
         if (a == "--photo") { photo = true; if (i + 1 < argc && argv[i + 1][0] != '-') out_path = argv[++i]; continue; }
         if (a == "--video") { video = true; if (i + 1 < argc && argv[i + 1][0] != '-') video_dir = argv[++i]; continue; }
         if (a == "--sprinkles" && i + 1 < argc) { sprinkle_count = static_cast<std::size_t>(std::atoi(argv[++i])); continue; }
+        if (a == "--dust" && i + 1 < argc) { dust_particles = static_cast<std::size_t>(std::atol(argv[++i])); continue; }
         if (a == "--frames" && i + 2 < argc) {   // build, orbit -- for previewing a sequence cheaply
             build_frames = std::atoi(argv[++i]);
             orbit_frames = std::atoi(argv[++i]);
@@ -689,7 +976,7 @@ int main(int argc, char* argv[]) {
         }
         if (a == "--t" && i + 1 < argc) { t = std::atof(argv[++i]); continue; }
         if (a == "--help") {
-            std::print("donut_demo [--photo [path]] [--video [dir]] [--sprinkles N] [--frames B O] [--t seconds] [--force]\n"
+            std::print("donut_demo [--photo [path]] [--video [dir]] [--sprinkles N] [--dust N] [--frames B O] [--t seconds] [--force]\n"
                        "  Spatium's getting-started demo: delete the default cube (explode it,\n"
                        "  --t controls how far), then torus dough, offset-surface icing,\n"
                        "  area-sampled sprinkles -- declarative steps, see the file's own header\n"
@@ -711,9 +998,20 @@ int main(int argc, char* argv[]) {
     // dissolve), so the donut visibly *replaces* the dust rather than
     // simply being present the whole time -- still one closed-form
     // function of (point, t), no simulation loop.
-    auto grow_scale = [](const Vec<double, 3>& p, double time) -> Vec<double, 3> {
-        double e = smoothstep01((time - T_DONUT_START) / (T_DONUT_END - T_DONUT_START));
-        return Vec<double, 3>{p * e};
+    // Written as an expression, not as a lambda, and the difference is not
+    // style: `p * e(t)` is a uniform scale either way, but only the
+    // expression form can be *seen* to be one. An opaque leaf that touches
+    // the point sets reads_point, is_placement() answers "deformation",
+    // and the node loses instancing -- for how it was spelled rather than
+    // for what it does. This one line was costing the dough, the icing and
+    // eighteen scatter nodes their instancing.
+    //
+    // A field is move-only, so each node gets its own rather than sharing
+    // one; the closure is stateless, so that costs nothing worth naming.
+    auto grow_scale = [] {
+        return scaled(bd::VecField<double>::point(), [](double time) {
+            return smoothstep01((time - T_DONUT_START) / (T_DONUT_END - T_DONUT_START));
+        });
     };
 
     // Step 0 -- the default cube. Visible briefly, static, then it's
@@ -721,9 +1019,10 @@ int main(int argc, char* argv[]) {
     // dust field below (`dust`), not this node's own motion.
     auto cube = scene.cube({0.9, 0.9, 0.9})
                     .colored(Material<double>{.base_color = {0.55, 0.55, 0.58}})
-                    .moving([](const Vec<double, 3>& p, double time) -> Vec<double, 3> {
-                        return Vec<double, 3>{p * (time < 0.12 ? 1.0 : 0.0)};
-                    });
+                    // Same reason as grow_scale: a uniform scale, spelled so
+                    // that it can be recognised as one.
+                    .moving(scaled(bd::VecField<double>::point(),
+                                   [](double time) { return time < 0.12 ? 1.0 : 0.0; }));
 
     // Step 0.5 -- delete the cube by *exploding* it: not a shrink this
     // time, real dust -- ~220 tiny cubes flying from the cube's own
@@ -783,119 +1082,135 @@ int main(int argc, char* argv[]) {
     // letter, swept along by the shape rather than drifting
     // independently, then carried on past by the swirl) and a smaller
     // fraction pull strongly enough to actually land and hold.
-    constexpr std::size_t copies_per_point = 160;
-    std::vector<bd::Handle<double>> dust;
-    dust.reserve(boom_uv.size() * copies_per_point);
-    for (std::size_t i = 0; i < boom_uv.size() * copies_per_point; ++i) {
-        Vec<double, 3> burst_dir = Vec<double, 3>{Vec<double, 3>{unit(burst_rng), unit(burst_rng), unit(burst_rng)}.normalized()};
-        double burst_dist = dist_amt(burst_rng);
-        double swirl_seed = unit01(burst_rng);
-        double roll = unit01(burst_rng);
-        // A real, if small, positional pull on the rest blurred the
-        // letterforms into a haze (every gap between letters had
-        // weakly-pulled specks drifting into it) -- pure swirl for
-        // those keeps the shape crisp; they still pick up color via
-        // dust_color's live distance check on whatever near passes
-        // their own turbulent wandering happens to bring them, which is
-        // the "just gets colored flying past" part without needing an
-        // explicit pull to manufacture it.
-        double pull_strength = roll < 0.3 ? (0.85 + 0.15 * unit01(burst_rng)) : 0.0; // ~30% land firmly
+    // ── The dust, as one node ─────────────────────────────────
+    //
+    // This used to be 35 200 handles: a loop calling flake() once per
+    // particle, each with its own captured burst direction, target
+    // letterform, pull, swirl seed and spin. It worked and it does not
+    // scale -- a TraceNode is 456 bytes, so a million particles is
+    // 456 MB of trace before a single one is drawn, and two million is
+    // not reachable at all.
+    //
+    // One Scatter over an invisible unit sphere replaces all of it. Every
+    // particle's parameters now come from *where it started*: the sphere
+    // site is its burst direction, and everything else is a hash of that
+    // same point. Nothing is stored per particle and the trace is three
+    // nodes regardless of the count.
+    //
+    // What makes that expressible is MotionEnv::origin. A Scatter has one
+    // motion field for all its instances, so before the origin existed
+    // the only thing a field could tell them apart by was the vertex
+    // position -- which makes the motion a deformation and refuses
+    // instancing outright. An origin is one value per object, so a field
+    // reading it stays affine in the point and stays shareable.
+    const std::size_t dust_count = dust_particles;
 
-        // Which way this flake faces, and how it tumbles. Without it all
-        // 19 800 flakes share one orientation, which was invisible while
-        // a speck was a ball and is impossible to miss now that it has a
-        // side: a cloud of identically-tilted chips reads as a lattice,
-        // not as dust. The axis is a random direction, the phase is a
-        // random offset so they do not turn in unison, and the rate is
-        // small -- a flake drifting on air turns slowly.
-        Vec<double, 3> spin_axis = Vec<double, 3>{
-            Vec<double, 3>{unit(burst_rng), unit(burst_rng), unit(burst_rng)}.normalized()};
-        double spin_phase = unit01(burst_rng) * 6.283185307179586;
-        double spin_rate  = 0.5 + 1.5 * unit01(burst_rng);
+    // Seeded from the particle's own starting point, so it is a pure
+    // function of the site and survives being recomputed anywhere. FNV
+    // over the bit patterns, then a final avalanche.
+    auto dust_hash = [](const Vec<double, 3>& o, std::uint32_t salt) {
+        std::uint32_t h = 2166136261u ^ salt;
+        for (int k = 0; k < 3; ++k) {
+            std::uint64_t bits = 0;
+            double v = o[k];
+            std::memcpy(&bits, &v, sizeof(bits));
+            h ^= static_cast<std::uint32_t>(bits ^ (bits >> 32));
+            h *= 16777619u;
+        }
+        h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
+        return h;
+    };
+    auto unit_from = [dust_hash](const Vec<double, 3>& o, std::uint32_t salt) {
+        return static_cast<double>(dust_hash(o, salt) % 1000000u) / 1000000.0;
+    };
 
-        auto [u, v] = boom_uv[i % boom_uv.size()];
-        Vec<double, 3> target = Vec<double, 3>{
-            text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)};
+    auto boom_points = std::make_shared<std::vector<Vec<double, 3>>>();
+    boom_points->reserve(boom_uv.size());
+    for (auto [u, v] : boom_uv)
+        boom_points->push_back(Vec<double, 3>{
+            text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)});
 
-        dust.push_back(
-            // A flake, not a ball and not an icosahedron. The speck used
-            // to be `literal(dust_speck(0.014))` -- a 20-face mesh built
-            // from `icosahedron(Sphere<2>{radius})`, an approximation of
-            // exactly the shape the library can hit exactly. Dust is not
-            // a ball either: it is a curved sheet, so this is a shallow
-            // spherical cap clipped to a thin slab, and the slab is the
-            // speck's own size. That matters at scale, because the clip
-            // box is what a tree traverses.
-            //
-            // Through flake() the node records a BoundedQuadric, so the
-            // renderer instances one shared analytic surface for all of
-            // them rather than putting hundreds of thousands of triangles
-            // in a tree, and every silhouette is a real curve.
-            scene.flake(Vec<double, 3>{0.010, 0.010, 0.003})
-                // Two `colored` calls, and they are not in conflict: one
-                // sets the node's Material (opacity, roughness), the
-                // other sets the colour *field* that overrides
-                // base_color per particle. Different slots.
-                //
-                // Slightly see-through, because dust is. Thousands of
-                // opaque flecks stack into a solid wall; at 0.72 the
-                // cloud has depth -- you see specks behind specks --
-                // which is what makes it read as a cloud rather than as
-                // a sprayed surface.
-                .colored(Material<double>{.roughness = 0.85, .opacity = 0.72})
-                .colored(bd::PointField<double>{
-                    [target, dust_color](const Vec<double, 3>& p, double) { return dust_color(p, target); }})
-                // The letterforms light up, and only while a speck is
-                // actually near one. The same distance that turns its
-                // colour from grey to hot drives the emission, squared so
-                // the glow arrives late and sharply rather than as a
-                // general haze over the whole cloud -- a particle merely
-                // passing by brightens a little, one that lands burns.
-                .glowing(bd::PointField<double>{
-                    [target](const Vec<double, 3>& p, double) {
-                        double d = std::clamp((p - target).norm() / 0.75, 0.0, 1.0);
+    // Every per-particle quantity the old loop captured, rebuilt from the
+    // origin instead. Same distributions, same meanings -- see the
+    // comments on dust_core for why pull_strength is continuous rather
+    // than a landed/missed coin flip.
+    auto target_of = [unit_from, boom_points](const Vec<double, 3>& o) {
+        return (*boom_points)[static_cast<std::size_t>(unit_from(o, 7u) *
+                                                       static_cast<double>(boom_points->size())) %
+                              boom_points->size()];
+    };
+    // More of them land, and the ones that do not are pulled harder than
+    // before. At 30% landing and no pull on the rest the cloud spread
+    // across the whole frame and the letterforms read as a faint tint
+    // inside it rather than as writing; the burst is supposed to *become*
+    // the word, not drift past it.
+    auto pull_of = [unit_from](const Vec<double, 3>& o) {
+        double roll = unit_from(o, 11u);
+        if (roll < 0.55) return 0.85 + 0.15 * unit_from(o, 13u);   // land and hold
+        return 0.25 * unit_from(o, 13u);                            // bent in close on the way past
+    };
+
+    auto dust = scene.scatter(scene.flake(Vec<double, 3>{0.010, 0.010, 0.003}),
+                              // A *tiny* sphere, and the size is the point.
+                              // A Scatter seats each instance on its site,
+                              // so the seat is added to wherever the motion
+                              // sends it -- which is exactly right when the
+                              // scatter means "put these on that surface"
+                              // and exactly wrong here, where the surface
+                              // is only a way of handing every particle a
+                              // distinct starting point. At radius 1 every
+                              // flake was displaced by a unit vector from
+                              // its own trajectory, which smeared the
+                              // letterforms into a haze: 7 393 particles
+                              // near their target and 52 actually on it.
+                              // At 1e-3 the sites stay distinct for the
+                              // hash and the displacement is nothing.
+                              scene.sphere(0.001, 96, 48), dust_count, 4242,
+                              /*seat=*/0.0)
+                    // Slightly see-through, because dust is: thousands of
+                    // opaque flecks stack into a wall, and at 0.72 the
+                    // cloud has depth.
+                    .colored(Material<double>{.roughness = 0.85, .opacity = 0.72})
+                    .colored(bd::PointField<double>{[target_of, dust_color](const bd::MotionEnv<double>& e) {
+                        return dust_color(e.p, target_of(e.origin));
+                    }})
+                    // The letterforms light up, and only while a speck is
+                    // near one. Squared, so the glow arrives late and
+                    // sharply rather than as a haze over the whole cloud.
+                    .glowing(bd::PointField<double>{[target_of](const bd::MotionEnv<double>& e) {
+                        double d = std::clamp((e.p - target_of(e.origin)).norm() / 0.75, 0.0, 1.0);
                         double hot = (1.0 - d) * (1.0 - d);
                         return Vec<double, 3>{Vec<double, 3>{1.00, 0.52, 0.12} * (1.35 * hot)};
                     }})
-                // Written as a *placement*, not as a point map, and the
-                // difference is not stylistic. Both forms produce exactly
-                // the same picture -- the particle flies where dust_core
-                // says and shrinks by dust_shrink -- but only this one
-                // says so in a way a later pass can read.
-                //
-                // A single lambda over (p, t) is opaque: nothing can tell
-                // whether it moves the speck or reshapes it, so every one
-                // of these 19 800 objects has to be tessellated
-                // separately even though they are all the same little
-                // cube. Split into "where it is" (which never looks at p)
-                // and "how big" (a scalar on the point), and cook()
-                // reports 19 800 instanceable objects instead of 19 800
-                // refusals -- measured, both ways, on this scene.
-                //
-                // The noise stays noise. opaque_of_time is opaque; what it
-                // promises is only that it does not read the vertex, which
-                // is the property that costs per-vertex work.
-                .moving(bd::VecField<double>::opaque_of_time(
-                            [burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl_noise](double time) {
-                                return dust_core(time, burst_dir, burst_dist, target, pull_strength,
-                                                 swirl_seed, *swirl_noise);
-                            })
-                        // The turn wraps the point, not the whole motion:
-                        // it orients the flake about its own centre
-                        // rather than swinging it around the origin. That
-                        // it can be written at all is the point of the op
-                        // -- a rotation is affine in the point, so the
-                        // node stays a placement and keeps its exact
-                        // form. Compare `.moving()` with a lambda that
-                        // rotates: identical picture, and every flake
-                        // falls back to triangles.
-                        + rotated(scaled(bd::VecField<double>::point(),
-                                         [](double time) { return dust_shrink(time); }),
-                                  [spin_axis, spin_phase, spin_rate](double time) {
-                                      return Vec<double, 3>{
-                                          spin_axis * (spin_phase + spin_rate * time)};
-                                  })));
-    }
+                    .moving(bd::VecField<double>::opaque_per_instance(
+                                [unit_from, target_of, pull_of, swirl_noise](
+                                    const Vec<double, 3>& origin, double time) {
+                                    // The site direction is the burst
+                                    // direction; its length is an artefact
+                                    // of the carrier sphere and is
+                                    // normalised away.
+                                    Vec<double, 3> dir{Vec<double, 3>{origin}.normalized()};
+                                    return dust_core(time, dir, 1.3 + 0.9 * unit_from(origin, 3u),
+                                                     target_of(origin), pull_of(origin),
+                                                     unit_from(origin, 5u), *swirl_noise);
+                                })
+                            // The turn wraps the point, not the whole
+                            // motion: it orients the flake about its own
+                            // centre rather than swinging it round the
+                            // origin. Per-instance, or every flake in the
+                            // cloud would tumble in lockstep.
+                            + rotated(scaled(bd::VecField<double>::point(),
+                                             [](double time) { return dust_shrink(time); }),
+                                      [unit_from](const Vec<double, 3>& o, double time) {
+                                          Vec<double, 3> axis{
+                                              Vec<double, 3>{unit_from(o, 17u) * 2.0 - 1.0,
+                                                             unit_from(o, 19u) * 2.0 - 1.0,
+                                                             unit_from(o, 23u) * 2.0 - 1.0}
+                                                  .normalized()};
+                                          double phase = unit_from(o, 29u) * 6.283185307179586;
+                                          double rate = 0.5 + 1.5 * unit_from(o, 31u);
+                                          return Vec<double, 3>{axis * (phase + rate * time)};
+                                      }));
 
     // Step 1 -- the dough is a torus, offset by a fine noise bump so it
     // actually has bready surface texture (not just a rough *shading*
@@ -942,7 +1257,7 @@ int main(int argc, char* argv[]) {
     auto dough_base = scene.torus(2.0, 1.0, 240, 120);
     auto dough = scene.offset(dough_base, dough_surface)
                      .colored(Material<double>{.base_color = {0.87, 0.58, 0.27}, .roughness = 0.92})
-                     .moving(grow_scale);
+                     .moving(grow_scale());
 
     // Step 2 -- the icing is the dough's own surface, offset outward --
     // over almost the whole top (torus_cap), clean-edged except for a
@@ -1005,7 +1320,7 @@ int main(int argc, char* argv[]) {
                         return (0.10 + pooling) * falloff;
                     }}, bd::EdgeRule::ZeroThickness)
                      .colored(Material<double>{.base_color = {0.98, 0.55, 0.68}, .roughness = 0.40})
-                     .moving(grow_scale);
+                     .moving(grow_scale());
 
     // Step 3 -- sprinkles scatter across the icing, area-weighted, in
     // several colors -- one scatter() call per color (each its own
@@ -1022,17 +1337,21 @@ int main(int argc, char* argv[]) {
     // (x,y,z) -> (z,x,y) so the length axis becomes x (a tangent
     // direction instead), then nudge down slightly so it sits sunk into
     // the icing rather than merely resting exactly half-in.
-    // Much smaller than they were, and many more of them: a real
-    // sprinkle is a fleck, and 600 fat ones read as gravel. The nudge
-    // that used to follow this line (`v[1] - 0.024`, with a comment about
-    // sinking them into the icing) is gone because it had stopped doing
-    // anything -- scatter_lift() derives the rise from the item's own
-    // lowest point, so lowering every vertex raises the lift by the same
-    // amount and the two cancel. Sinking is now said out loud, as
-    // scatter()'s `seat`.
-    auto sprinkle_mesh = solid_cylinder(0.011, 0.062, 8);
-    for (auto& v : sprinkle_mesh.vertices) v = Vec<double, 3>{v[2], v[0], v[1]};
-    auto sprinkle = scene.literal(sprinkle_mesh);
+    // A real cylinder now, not a hand-built mesh with its axes permuted.
+    //
+    // The permutation was there because scatter() could only stand an item
+    // *up* on the normal, and a sprinkle lies down -- so the only way to
+    // say so was to rotate the vertices, which a closed form cannot
+    // follow. cylinder() records a BoundedQuadric about z; permute the
+    // mesh and the exact form no longer describes it, so the node had to
+    // be a Literal, and a Literal cannot be instanced. SeatAxis::X says
+    // "this item's local x points along the normal" instead, which leaves
+    // its z -- the cylinder's own axis -- lying in the surface, and the
+    // closed form intact.
+    //
+    // Much smaller than they were and many more of them: a real sprinkle
+    // is a fleck, and 600 fat ones read as gravel.
+    auto sprinkle = scene.cylinder(0.011, 0.062, 8, 2);
     std::vector<Vec<double, 3>> sprinkle_colors{
         {0.95, 0.20, 0.25}, {0.98, 0.75, 0.15}, {0.25, 0.65, 0.35},
         {0.30, 0.45, 0.90}, {0.85, 0.30, 0.75}, {0.98, 0.98, 0.95}};
@@ -1080,9 +1399,10 @@ int main(int argc, char* argv[]) {
             // sites, and it is deliberately not in this release.
             sprinkle_groups.push_back(
                 scene.scatter(sprinkle, target, count,
-                              static_cast<std::uint32_t>(g * 97 + salt), 0.45)
+                              static_cast<std::uint32_t>(g * 97 + salt), 0.45,
+                              bd::SeatAxis::X)
                     .colored(mat)
-                    .moving(grow_scale)); // scatter() places against the icing's *analytic*,
+                    .moving(grow_scale())); // scatter() places against the icing's *analytic*,
                                           // always-full-size surface (resolve_surface() does not
                                           // see .moving()) -- which is what keeps sprinkles in
                                           // sync with the growing donut
@@ -1123,7 +1443,7 @@ int main(int argc, char* argv[]) {
 
     std::vector<bd::Handle<double>> scene_children{table, cube, dough, icing};
     scene_children.insert(scene_children.end(), sprinkle_groups.begin(), sprinkle_groups.end());
-    scene_children.insert(scene_children.end(), dust.begin(), dust.end());
+    scene_children.push_back(dust);   // one node now, not 35 200
     auto lesson = scene.compose(scene_children);
 
     std::println("donut_demo: a Trace is real data -- here it is, {} nodes:", scene.size());
@@ -1179,7 +1499,17 @@ int main(int argc, char* argv[]) {
     std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles -> {} vertices, {} triangles, {:.1f} ms",
                  t, sprinkle_count, verts, faces, ms);
 
-    if (photo) render_photo(placed, out_path, force);
+    if (photo) {
+        // Timed on its own, because "cook() got faster" has two possible
+        // causes -- fewer nodes, or a hash that stopped touching vertices
+        // -- and only a number separates them.
+        auto c0 = std::chrono::steady_clock::now();
+        auto cooked = bd::cook(scene, lesson.index, t);
+        auto c1 = std::chrono::steady_clock::now();
+        std::println("  cook() {:.1f} ms over {} trace nodes",
+                     std::chrono::duration<double, std::milli>(c1 - c0).count(), scene.size());
+        render_photo(scene, cooked, out_path, force);
+    }
     if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames);
     return 0;
 }
