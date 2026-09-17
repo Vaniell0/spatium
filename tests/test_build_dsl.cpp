@@ -6,6 +6,7 @@
 #include <memory>
 #include <spatium/algebra/noise.hpp>
 #include <spatium/geometry/concepts.hpp>
+#include <spatium/algebra/quaternion.hpp>
 #include <spatium/io/build.hpp>
 #include <spatium/spaces/offset.hpp>
 #include <spatium/spaces/sample.hpp>
@@ -901,4 +902,49 @@ TEST_CASE("A scatter's instances fly apart, and materialize_mesh agrees with coo
             for (std::size_t k = 0; k < 3; ++k) CHECK_THAT(world[k], WithinAbs(want[k], 1e-9));
         }
     }
+}
+
+TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
+          "[build_dsl]") {
+    // Pinning a magnitude, not a property. Storing a rotation as a
+    // quaternion and rebuilding the matrix is not bit-exact -- measured
+    // over the rotations this DSL actually produces (a scatter frame
+    // composed with an SO3::exp placement), *zero* of four thousand round
+    // trips come back identical, and the worst element moves by about
+    // 8 ulp.
+    //
+    // That is small enough to be invisible and large enough that a frame
+    // hash cannot survive it, which is worth knowing before a compaction
+    // rather than after a "the picture changed" panic. What this test
+    // guards is the *size* of that error: if a future change to
+    // from_matrix or to_matrix makes it 1e-8 instead of 1e-15, the
+    // rotations are still rotations and nothing else would notice.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> tr;
+    auto ball = tr.sphere(1.0);
+    auto speck = tr.cube({0.02, 0.02, 0.02});
+    auto spun = tr.scatter(speck, ball, 512, 11, 0.5, bd::SeatAxis::X)
+                    .moving(rotated(bd::VecField<double>::point(), [](double t) {
+                        return V3{0.3 + t, 0.7, -0.4 * t};
+                    }));
+    auto cooked = bd::cook(tr, spun.index, 1.0);
+    REQUIRE(cooked.object_count() == 512);
+
+    double worst = 0.0;
+    for (const auto& o : cooked.objects()) {
+        auto back = spatium::Quaternion<double>::from_matrix(o.rotation).to_matrix();
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                worst = std::max(worst, std::abs(back(i, j) - o.rotation(i, j)));
+
+        // Still a rotation afterwards: orthonormal columns, determinant
+        // +1. A round trip that drifted off SO(3) would mirror or shear
+        // an instance, which is a different failure from losing a few ulp.
+        V3 c0{back(0, 0), back(1, 0), back(2, 0)};
+        V3 c1{back(0, 1), back(1, 1), back(2, 1)};
+        CHECK_THAT(c0.norm(), WithinAbs(1.0, 1e-12));
+        CHECK_THAT(c0.dot(c1), WithinAbs(0.0, 1e-12));
+    }
+    INFO("worst element error " << worst);
+    CHECK(worst < 1e-13);      // measured ~1.7e-15; this is the alarm, not the value
 }
