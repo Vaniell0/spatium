@@ -100,9 +100,16 @@ struct Scene {
 // ray_torus() both return, so any factory -- built-in or
 // user-registered -- can hand back a closure in that same shape and a
 // renderer never needs to know which concrete shape it is calling.
+// The capacity is 4 because the deepest built-in is the torus's quartic,
+// and it is the *erasure's* capacity rather than any one shape's: a
+// factory returning fewer simply returns fewer, and one that could
+// return more does not fit this signature -- which is a real limit and
+// is named here rather than discovered. Widening it costs four
+// RayHit-sized slots per call on the stack and nothing else.
 template<Scalar T = double>
 struct ResolvedShape {
-    std::function<std::vector<geometry::RayHit<T>>(const geometry::Ray<3, T>&)> ray_hits;
+    static constexpr std::size_t max_hits = 4;
+    std::function<UpTo<geometry::RayHit<T>, max_hits>(const geometry::Ray<3, T>&)> ray_hits;
 };
 
 template<Scalar T = double>
@@ -202,8 +209,9 @@ Result<ResolvedShape<T>> make_sphere(const SceneObject<T>& obj) {
     shape.ray_hits = [quadric, position, rotation](const geometry::Ray<3, T>& ray) {
         auto local_ray = to_local_ray(ray, position, rotation);
         auto hits = geometry::ray_quadric(local_ray, quadric);
-        for (auto& h : hits) h = to_world_hit(h, position, rotation);
-        return hits;
+        UpTo<geometry::RayHit<T>, ResolvedShape<T>::max_hits> out;
+        for (auto& h : hits) out.push_back(to_world_hit(h, position, rotation));
+        return out;
     };
     return shape;
 }
@@ -234,7 +242,7 @@ Result<ResolvedShape<T>> make_box(const SceneObject<T>& obj) {
 
     ResolvedShape<T> shape;
     shape.ray_hits = [local_box, position, rotation](const geometry::Ray<3, T>& ray)
-        -> std::vector<geometry::RayHit<T>> {
+        -> UpTo<geometry::RayHit<T>, ResolvedShape<T>::max_hits> {
         auto local_ray = to_local_ray(ray, position, rotation);
         auto params = geometry::intersect_parameters(local_ray, local_box);
         if (!params) return {};
@@ -313,8 +321,7 @@ Result<ResolvedShape<T>> make_torus(const SceneObject<T>& obj) {
         // in test_ray_surface.cpp, which checks exactly this equation
         // against 300 random rays and finds none rejected.
         T R = torus.major_radius, r = torus.minor_radius;
-        std::vector<geometry::RayHit<T>> valid;
-        valid.reserve(hits.size());
+        UpTo<geometry::RayHit<T>, ResolvedShape<T>::max_hits> valid;
         for (auto& h : hits) {
             T lp2 = h.point.dot(h.point);
             T s = lp2 + R * R - r * r;

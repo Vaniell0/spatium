@@ -51,6 +51,30 @@
 // the Debug CI job it turns reading past the count from undefined into
 // visibly wrong. It is a debugging aid and never part of the contract,
 // the same category as `_GLIBCXX_ASSERTIONS`.
+//
+// ── What this costs, measured rather than assumed ────────────────
+//
+// It is not free relative to a `std::vector`, and the direction depends
+// on whether the answer is empty. `benchmarks/bench_raycast.cpp`, on
+// `ray_quadric` against a unit sphere (Release, same build both ways):
+//
+//     mostly misses   vector 23.7 ns   UpTo 26.9 ns   (UpTo 1.13x slower)
+//     every ray hits  vector 54.8 ns   UpTo 48.9 ns   (UpTo 1.12x faster)
+//
+// An empty `std::vector` never allocates and is three pointers, while
+// `UpTo<RayHit<double>, 2>` is 120 bytes that get zero-initialised and
+// returned whether or not anything was found. On a hit the vector pays
+// a malloc (two, in fact — it grows 0→1→2) and loses.
+//
+// The zero-initialisation is the avoidable half and is not avoided:
+// `Vec` carries a default member initialiser, so `RayHit` is not
+// trivially default-constructible and `std::array<T, N> data_;` still
+// clears it. Removing it needs uninitialised storage plus placement
+// new, which costs `constexpr` and buys a few nanoseconds on a function
+// with no hot consumer — `ray_hit(BoundedQuadric)` deliberately bypasses
+// `ray_quadric` for exactly the leaf-test case, and the only physics
+// caller is the swept query used for fast movers. Recorded so the
+// trade-off is visible if a hot consumer ever appears.
 
 SPATIUM_EXPORT namespace spatium {
 
@@ -110,6 +134,29 @@ public:
     constexpr T* end() noexcept { return data_.data() + size_; }
     constexpr const T* begin() const noexcept { return data_.data(); }
     constexpr const T* end() const noexcept { return data_.data() + size_; }
+
+    // Insertion sort, not std::sort, and not as a micro-optimisation
+    // although it is one. `std::sort` is introsort: median-of-three
+    // quicksort that falls back to insertion sort below a threshold of
+    // 16, so on a buffer that holds at most 4 it reasons about
+    // `first + 16` and GCC's -Warray-bounds fires -- correctly, in the
+    // sense that the pointer arithmetic really is out of bounds even
+    // though the read never happens. A container whose capacity is 2, 3
+    // or 4 has no business paying for that machinery, and silencing the
+    // warning rather than removing the cause would be the wrong way
+    // round.
+    template<typename Compare>
+    constexpr void sort(Compare less) {
+        for (std::size_t i = 1; i < size_; ++i) {
+            T key = std::move(data_[i]);
+            std::size_t j = i;
+            while (j > 0 && less(key, data_[j - 1])) {
+                data_[j] = std::move(data_[j - 1]);
+                --j;
+            }
+            data_[j] = std::move(key);
+        }
+    }
 
     constexpr T& front() { return (*this)[0]; }
     constexpr const T& front() const { return (*this)[0]; }
