@@ -420,6 +420,7 @@ The same shape recurs at every level:
 | `assert` | a build that keeps `NDEBUG` off |
 | poisoning unused slots in Debug | a Debug test run |
 | a `[!shouldfail]` pin on a known bug | a suite that reports it as expected-failed rather than skipping it |
+| a count printed from a container | that container not having been moved from before the print |
 | an `is_structural()` flag | something that reports the *consequence*, not just the fact |
 | two code paths that must give the same answer | a test comparing them **to each other**, not each to itself |
 
@@ -439,6 +440,21 @@ visible, land what executes it first, or in the same change.** Not after.
 The infrastructure is the part that can be silently missing, because a
 mechanism with nothing running it looks exactly like a mechanism that
 passes.
+
+**The count row is the cheapest of these to cause, found 2026-09-17.**
+`BVH::build` keeps its shapes by value, so handing it an lvalue leaves
+the array alive twice — 214 MB at two million instances, spent on
+nothing. `std::move` fixes that, and the report line two statements later
+counts `insts.size()`. A moved-from vector is empty, so the line would
+have printed **0 instances**, which reads perfectly as "this scene has no
+instances" and not at all as "someone moved the vector". A plausible zero
+again, in a place a reader trusts.
+
+Caught by asking what still reads the vector after the move rather than
+by assuming nothing did. The general form is this section's own: when a
+number is read out of a container, ask what that container holds when
+nothing was put into it — and whether that is distinguishable from
+someone having taken it away.
 
 **The last row earned its place 2026-09-17.** `materialize_mesh()` bakes a
 scattered item's site frame into its vertices; `cook()` hands the same
