@@ -208,6 +208,52 @@ where the model stops applying rather than patching the value it
 produced; and prefer a type that can say "no answer" over a sentinel that
 has to be recognised.
 
+### The variant where the value is honest and the *name* is not
+
+Found 2026-09-17, and it belongs to this section by its consequence
+while differing from every row above by its cause — which matters,
+because it changes the fix.
+
+`VecField::is_placement()` returns `false` for
+
+```cpp
+[](const Vec<double, 3>& p, double t) { return Vec<double, 3>{p * e(t)}; }
+```
+
+which is a uniform scale, i.e. a placement by any definition. Spelled
+`scaled(point(), e)` the identical motion returns `true`.
+
+Nothing here is a stale zero or an uninitialised field. The function
+answers truthfully about what it can see: an opaque leaf touched `p`, and
+a closure cannot be asked what it does with it. **The lie is in the
+name.** `is_placement()` reads as a question about the motion — a
+mathematical property — and computes a question about the *spelling*.
+A caller who reads `false` concludes "my motion deforms", and that
+conclusion is wrong.
+
+The consequence is the same as every row above: a value read as an answer
+that means something else. The remedy is not, because the other five were
+fixed by making the value truthful and there is no truthful value to
+produce here. Three fixes are available and they are not exclusive:
+
+- **Rename to what it computes.** `is_recognisably_a_placement()` is ugly
+  and honest; the ugliness is the point, since it makes the caller ask
+  "recognisably by whom?".
+- **Make the refusal explain itself.** Distinguish "refused because an
+  opaque leaf reads the point" from "refused because the expression
+  genuinely is not affine" — `VecField` can tell those apart — and say
+  the first one with the remedy attached. A number nobody can act on is
+  the thing `Cooked::refused_nodes()` already exists to avoid.
+- **Make the structural spelling the obvious one.** `.moving()` advertises
+  `(point, t) -> point`, so the lambda is what a reader reaches for first
+  and the expression form is undiscoverable. That is an API problem, not
+  a documentation one.
+
+The general shape, worth carrying past this instance: **when a predicate
+can only see a syntactic property, its name must not promise a semantic
+one.** Otherwise the caller is told "no" to a question they did not ask,
+and there is no value you can return that fixes it.
+
 ## A check needs the thing that runs it, first
 
 Added 2026-09-15, after getting the order right by accident.

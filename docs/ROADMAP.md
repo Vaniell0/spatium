@@ -311,6 +311,7 @@ So: the items we are actually steering by, with their state. Everything below th
 | Per-instance parameters (`MotionEnv::origin`) | **next** | the row above | Declarative scene DSL |
 | Scatter's fixed axis binding (local z to the normal) | **next** | nothing; a fix, and one of two preconditions for instancing scattered items | Object model as manifold substrate |
 | Structural motions in the demo (`grow_scale` and friends) | **next** | nothing; the other precondition, and a matter of spelling | Object model as manifold substrate |
+| A refusal that explains itself (and `is_placement()`'s name) | **next** | nothing; rewriting the demo fixes one user, not the trap | Object model as manifold substrate |
 | Scatter's arbitrary in-plane directions | parked | a consumer — "follows the flow" is its own design, not this fix | Object model as manifold substrate |
 | One object deforming another | parked | an index over the `(u,v)` domain — and a decision about the cycle it introduces, below | Object model as manifold substrate |
 | `ball_pit_demo` cleanup | parked | nothing; it is just work | Object model as manifold substrate |
@@ -712,6 +713,12 @@ question is not reopened from scratch in a month.
   An opaque leaf that touches `p` sets `reads_point`, and `is_placement()` then answers "deformation" — correctly, since it cannot ask a closure what it does. Written structurally as `scaled(point(), e)` the very same motion is a placement. The donut's dust was rewritten that way when instancing landed; **nothing else was**, so everything but the dust is refused for a reason that is a matter of spelling.
 
   So sprinkle instancing has **two** preconditions, not one: the axis binding above, and structural motions here. Both are fixes rather than features, and they land together.
+
+  **And rewriting the demo's motions does not close this**, which is the part worth separating. The demo is one user; the trap is in the API. Someone who writes `p * e(t)` as a lambda — the shape `.moving()` itself advertises, `(point, t) -> point` — gets a silent refusal, no instancing, and no way to find out why. `docs/conventions.md` records the general form under "the variant where the value is honest and the *name* is not": a predicate that can only see a syntactic property must not carry a name promising a semantic one. Three fixes, not exclusive:
+
+  - **The refusal explains itself.** `VecField` can distinguish "refused because an opaque leaf reads the point" from "refused because the expression genuinely is not affine", and the first should say so with the remedy attached. `Cooked::refused_nodes()` already exists precisely so a report can point at nodes rather than state a number nobody can act on; it should also point at *why*.
+  - **`is_placement()` is renamed to what it computes.** `is_recognisably_a_placement()` is ugly, and the ugliness is the point: it makes a caller ask "recognisably by whom?".
+  - **The structural spelling becomes the obvious one.** `scaled(point(), e)` is already shorter than the lambda; it is simply undiscoverable, because the slot advertises a callable. That is an API problem and not a documentation one.
 
 - **[want]** **Does collapsing the dust into one node remove `content_hash`'s O(vertices) cost?** Deferred, and recorded so it is not lost rather than answered from a guess. `content_hash` keys a `Literal` on its mesh content, which is the expensive case — roughly 158 000 vertices hashed across the donut's dust — and the entry for it already says this is the first line to look at if cooking ever runs per frame. One `Scatter` of one flake would hash the item once and be done. The dust is *not* collapsed yet (that waits on `MotionEnv::origin`), so there is nothing to measure and the question has no answer today. Measure it at the collapse, against a before figure taken in the same configuration.
 
