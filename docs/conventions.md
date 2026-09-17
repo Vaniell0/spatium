@@ -244,6 +244,32 @@ and one that cannot.
 This is the third instance of the "say which half" family, and the
 sharpest, because the other two were incomplete rather than false.
 
+### A per-instance field has to be tested with at least two instances
+
+Named 2026-09-17, on adding `MotionEnv::origin`.
+
+At N = 1, **"the value was read" and "the value was stored and never
+read" are indistinguishable.** The single instance's origin is the origin,
+so a field that ignores it and a field that uses it return the same
+answer. The plumbing can carry the value the whole way, every existing
+test can pass, and nothing anywhere notices that the expression never
+saw it.
+
+So: any field whose whole purpose is to differ between instances is
+tested with **two instances, one `t`, and nothing differing but the
+instance**. Verified by breaking it — substituting a zero origin at the
+leaf fails 3 assertions at the field and 16 through a real `Scatter`,
+and passes everything else.
+
+**And the two rendering paths are compared at N ≥ 2 as well.**
+`materialize_mesh` and `cook()` answer the same question about the same
+node, and their agreement is only interesting where they can disagree —
+which is per instance. That pair has already drifted once, when `cook()`
+dropped the site frame and nothing compared them; a per-instance motion
+is a second way for them to part company, so the agreement test runs
+with one in play. A frame hash is not a substitute: it says the picture
+did not change, not that the two descriptions of it agree.
+
 ### A `make_*` factory's box is the clip region, not a bound on the result
 
 One line, because the next person to write a factory will otherwise
