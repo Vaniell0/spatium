@@ -1491,13 +1491,35 @@ int main(int argc, char* argv[]) {
         std::println("render levels: {} exact, {} tessellated, {} newton",
                      exact, tess, newton);
     }
-    std::size_t verts = 0, faces = 0;
-    for (auto& obj : placed) { auto m = obj.mesh(); verts += m.vertex_count(); faces += m.face_count(); }
-
-    auto t1 = std::chrono::steady_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles -> {} vertices, {} triangles, {:.1f} ms",
-                 t, sprinkle_count, verts, faces, ms);
+    // The vertex and triangle totals used to be counted here, by walking
+    // `placed` and calling `mesh()` on every object. That loop was the
+    // single most expensive thing in the program and it existed to print
+    // two integers.
+    //
+    // `mesh()` on a Scatter flattens the whole cloud into one
+    // non-deduplicated mesh, so at two million particles it built
+    // 64 351 744 vertices and 96 527 616 faces -- 2.70 GB of them --
+    // taking twenty seconds, and then threw them away. Measured peak RSS
+    // was 2.88 GB, of which this loop was 2.88 GB minus a rounding error;
+    // the render path it was supposedly measuring settles under 1 GB.
+    // Because it ran before the `--photo` gate, a console run with no
+    // output at all paid the whole cost.
+    //
+    // What makes it worth a comment rather than a silent deletion is what
+    // the number was for. It is the "vertices without instancing" figure,
+    // the one quoted to show that instancing works -- and it was obtained
+    // by performing, in full, the work instancing exists to avoid. The
+    // measurement cost more than the thing it measured, and it was also
+    // redundant: `cook()` reports the same total two lines below, summed
+    // over the shape table without materialising anything
+    // (`Cooked::vertices_without_instancing`).
+    //
+    // The timing went with it. With no mesh built, `materialize()` only
+    // hands back views onto trace nodes, so a duration printed here would
+    // be measuring nothing and inviting the reader to compare it against
+    // `cook()`'s, which does real work.
+    std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles",
+                 t, sprinkle_count);
 
     if (photo) {
         // Timed on its own, because "cook() got faster" has two possible
