@@ -956,8 +956,22 @@ int main(int argc, char* argv[]) {
     // and closes against it -- it just has a name now. (The dough above
     // is a plain offset(): a whole torus is closed, so there is no rim
     // to rule on and nothing to state.)
-    auto icing_base = scene.offset_shell(scene.space(torus_cap(2.0, 1.0), 160, 64), dough_bump,
-                                         bd::EdgeRule::ZeroThickness);
+    // The band stops at 0.88pi, not 0.98pi: real glaze stops short of the
+    // hole, and the tightest curvature on the whole torus is right there,
+    // which is also where an offset of any thickness comes closest to
+    // overrunning its own centre of curvature -- the pink fins.
+    //
+    // It has to be the *domain* that shrinks, not the thickness. Driving
+    // the thickness to zero over a band while the surface still exists
+    // there lays a whole strip of icing exactly on the dough underneath,
+    // and two coincident surfaces read as stripes, which is worse than
+    // the fins were. Zero thickness at a single rim is what
+    // EdgeRule::ZeroThickness means; zero thickness across a region is
+    // just a surface with nothing to do.
+    constexpr double icing_rim = std::numbers::pi * 0.88;
+    auto icing_base = scene.offset_shell(
+        scene.space(torus_cap(2.0, 1.0, std::numbers::pi * 0.02, icing_rim), 160, 64),
+        dough_bump, bd::EdgeRule::ZeroThickness);
     auto icing = scene.offset_shell(icing_base, bd::ScalarField<double>{[icing_noise](double u, double v) {
                         constexpr double pi = std::numbers::pi;
                         // The two rims are not interchangeable. v -> 0 is
@@ -973,7 +987,7 @@ int main(int argc, char* argv[]) {
                         // drip is added to the outer distance only, which
                         // is both the cheap fix and the correct one.
                         double outer = v - pi * 0.02;      // toward the outer equator
-                        double inner = pi * 0.98 - v;      // toward the hole
+                        double inner = icing_rim - v;      // toward the hole
                         double wobble = icing_noise(std::cos(u) * 2.0, std::sin(u) * 2.0, 0.0) * (pi * 0.03);
                         double drip = std::max(0.0, icing_noise(std::cos(u) * 1.3, std::sin(u) * 1.3, 8.0) - 0.35) * (pi * 0.35);
                         double edge_dist = std::min(outer + drip, inner);
