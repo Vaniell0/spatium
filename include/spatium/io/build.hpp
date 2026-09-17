@@ -840,6 +840,7 @@ template<Scalar T>
 mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t idx, T t, bool placed) {
     const auto& n = trace.node(idx);
     mesh::Mesh<Euclidean<3, T>> out;
+    std::vector<Vec<T, 3>> scatter_seats;   // one per site, for the per-instance origin below
 
     if (n.kind == Kind::Space || n.kind == Kind::Offset) {
         auto surface = resolve_surface(trace, idx);
@@ -853,6 +854,7 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         auto sites = sample_surface_uniform(target_surface, n.count, n.seed);
         auto item_mesh = materialize_mesh(trace, n.item, t, /*placed=*/false);
         const T lift = scatter_lift<T>(item_mesh, n.seat_axis) * n.seat;
+        scatter_seats.reserve(sites.size());
 
         out.vertices.reserve(item_mesh.vertex_count() * sites.size());
         out.faces.reserve(item_mesh.face_count() * sites.size());
@@ -866,6 +868,7 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
 
             uint32_t base_idx = static_cast<uint32_t>(out.vertices.size());
             Vec<T, 3> seat{site.position + site.normal * lift};
+            scatter_seats.push_back(seat);
             for (const auto& iv : item_mesh.vertices)
                 out.vertices.push_back(Vec<T, 3>{seat + frame * iv});
             for (const auto& f : item_mesh.faces)
@@ -873,6 +876,25 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         }
     } else {
         throw std::logic_error("materialize_mesh: Compose has no single mesh, use materialize()");
+    }
+
+    // A Scatter applies its motion per site, with that site's seat as the
+    // instance origin -- so a field reading `origin` can send every
+    // instance somewhere different while staying affine in the point.
+    // Vertices were appended per site with a fixed stride above, so the
+    // split is arithmetic rather than bookkeeping.
+    //
+    // This has to agree, site for site, with what cook() computes for the
+    // same node; the vertex-for-vertex test between the two paths is what
+    // says it does.
+    if (placed && n.transform && n.kind == Kind::Scatter && !scatter_seats.empty()) {
+        const std::size_t per = out.vertices.size() / scatter_seats.size();
+        for (std::size_t i = 0; i < scatter_seats.size(); ++i)
+            for (std::size_t k = 0; k < per; ++k) {
+                auto& v = out.vertices[i * per + k];
+                v = n.transform(MotionEnv<T>{v, t, scatter_seats[i]});
+            }
+        return out;
     }
 
     // `placed = false` gives the *rest* geometry -- the shape before this
@@ -1357,8 +1379,6 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         }
         const auto rest_centroid = Vec<T, 3>{out.shapes_[shape_index].geometry.centroid()};
 
-        const auto pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
-
         // Composing the two transforms, written out because getting the
         // order wrong is silent. A vertex `v` of the rest item becomes
         //
@@ -1372,6 +1392,13 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         // nothing consumed the cooked scene and every scattering scene so
         // far had scale 1.
         for (const auto& p : placements) {
+            // Resolved per instance, with that instance's seat as its
+            // origin -- which is what lets one motion field send every
+            // scattered item somewhere different while staying a
+            // placement. For a node that is its own object the seat is
+            // the origin and this reduces to what it was.
+            const auto pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t, p.position});
+
             Object<T> o{.shape = shape_index,
                         .source_node = idx,
                         .translation = Vec<T, 3>{carried + pl.translation +

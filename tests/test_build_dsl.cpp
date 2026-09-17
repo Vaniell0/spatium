@@ -806,3 +806,99 @@ TEST_CASE("Every factory's exact form agrees with the chart recorded beside it",
         agrees("flake", tr, f.index, V3{b.min_corner}, V3{b.max_corner}, 1e-6);
     }
 }
+
+TEST_CASE("Same t, different origin, different position -- and still a placement",
+          "[build_dsl]") {
+    // The test without which `origin` is stored and not read. A field can
+    // take the new member, the plumbing can carry it, every existing case
+    // can keep passing, and nothing anywhere would notice that the value
+    // never reaches the expression -- because every test until now used
+    // one instance, where an origin of zero and an origin that is ignored
+    // look identical.
+    //
+    // So: two instances of one node, one time, one motion field, and the
+    // only thing that differs between them is where they started.
+    using V3 = spatium::Vec<double, 3>;
+
+    // Fly away from the origin along your own direction, at a speed that
+    // does not depend on the point being moved.
+    auto burst = bd::VecField<double>::opaque_per_instance(
+                     [](const V3& origin, double time) { return V3{origin * (time * 3.0)}; }) +
+                 bd::VecField<double>::point();
+
+    // Reading the origin must NOT make this a deformation: an origin is
+    // one value per object, so the motion is still affine in the point.
+    // This is the load-bearing half -- a per-instance motion that refused
+    // instancing would be worth nothing.
+    REQUIRE(burst.is_placement());
+
+    const double t = 2.0;
+    auto at = [&](const V3& origin) {
+        return burst.placement_at(bd::MotionEnv<double>{V3{}, t, origin}).translation;
+    };
+
+    V3 a = at(V3{1.0, 0.0, 0.0});
+    V3 b = at(V3{0.0, -2.0, 0.0});
+
+    CHECK_THAT(a[0], WithinAbs(6.0, 1e-12));   // 1 * 2 * 3
+    CHECK_THAT(a[1], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(b[1], WithinAbs(-12.0, 1e-12)); // -2 * 2 * 3
+    CHECK_THAT(b[0], WithinAbs(0.0, 1e-12));
+
+    // Stated as the property rather than as two numbers, because the
+    // numbers could both be right while the mechanism is wrong.
+    CHECK((a - b).norm() > 1.0);
+
+    // Same origin, same answer: the field is a function of (origin, t) and
+    // of nothing else.
+    V3 again = at(V3{1.0, 0.0, 0.0});
+    for (int k = 0; k < 3; ++k) CHECK_THAT(again[k], WithinAbs(a[k], 1e-15));
+}
+
+TEST_CASE("A scatter's instances fly apart, and materialize_mesh agrees with cook()",
+          "[build_dsl]") {
+    // The same property one level up, where it has to survive the plumbing
+    // rather than just the field: one Scatter node, one motion, and every
+    // instance going somewhere different because of where it sat.
+    //
+    // And the agreement between the two renderings re-checked *with* a
+    // per-instance motion in play -- that test has guarded this pair since
+    // the site frame was dropped, and the per-site motion path is a new
+    // way for them to disagree.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+    auto ball = scene.sphere(1.0);
+    auto speck = scene.cube({0.02, 0.02, 0.02});
+
+    auto fly = bd::VecField<double>::opaque_per_instance(
+                   [](const V3& origin, double time) { return V3{origin * (time * 2.0)}; }) +
+               bd::VecField<double>::point();
+
+    const double t = 1.0;
+    auto burst = scene.scatter(speck, ball, 16, 3).moving(std::move(fly));
+
+    auto cooked = bd::cook(scene, burst.index, t);
+    REQUIRE(cooked.object_count() == 16);
+    REQUIRE(cooked.opaque_refused() == 0);          // per-instance, still instanceable
+    REQUIRE(cooked.shapes().size() == 1);           // one geometry for all of them
+
+    // Every instance ended up somewhere different, and further out than
+    // it started: the sphere has radius 1, and t * 2 sends each seat to
+    // roughly three times its own distance.
+    for (const auto& o : cooked.objects()) CHECK(o.translation.norm() > 2.0);
+    for (std::size_t i = 1; i < cooked.objects().size(); ++i)
+        CHECK((cooked.objects()[i].translation - cooked.objects()[0].translation).norm() > 1e-6);
+
+    // Vertex for vertex against the other path.
+    auto baked = bd::materialize_mesh(scene, burst.index, t);
+    const auto& rest = cooked.shapes()[0].geometry;
+    REQUIRE(baked.vertex_count() == 16 * rest.vertex_count());
+    for (std::size_t o = 0; o < cooked.objects().size(); ++o) {
+        const auto& obj = cooked.objects()[o];
+        for (std::size_t v = 0; v < rest.vertex_count(); ++v) {
+            V3 world{obj.rotation * V3{rest.vertices[v] * obj.scale} + obj.translation};
+            const auto& want = baked.vertices[o * rest.vertex_count() + v];
+            for (std::size_t k = 0; k < 3; ++k) CHECK_THAT(world[k], WithinAbs(want[k], 1e-9));
+        }
+    }
+}
