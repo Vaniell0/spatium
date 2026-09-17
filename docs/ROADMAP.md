@@ -813,6 +813,23 @@ question is not reopened from scratch in a month.
 
   plus about 160 MB of build temporaries (`boxes`, `centroids`, `indices`). The 350 MB estimate forgot `Object<T>` entirely, and forgot that `BVH::build` takes its shapes **by value** — so the instance array exists twice.
 
+  **The full breakdown, measured 2026-09-17, since a figure without its layout is not a figure.** `Object<double>` is 192 B: `shape` 8 at offset 0, `source_node` 8, `translation` 24, `scale` 8, `rotation` **72**, `instanceable` 1 at offset 120, `material` **64** at 128 — members summing to 185 with 7 bytes of padding. That padding is *not* reclaimable by reordering: 185 rounds to 192 under 8-byte alignment in any permutation. A `BVH` node is `{Box<3,double> bounds, uint32 first, uint32 count}` = 56 B, of which the bounds are 48.
+
+  What that makes available, in order of return, with the projected `Object` alongside:
+
+  | change | saves at 2M | `Object` after |
+  |---|---|---|
+  | `rotation` 72 → 32 (quaternion; rotation in a placement already exists, #46) | 80 MB | 152 B |
+  | `material` 64 → a `uint16` index into a palette (the demo uses three) | 124 MB | 88 B |
+  | `shape`, `source_node` → `uint32` | 16 MB | 80 B |
+  | BVH bounds in `float`, rounded outward — a bound only has to be conservative | 96 MB | — |
+  | `prim_indices_` `size_t` → `uint32` | 8 MB | — |
+  | the BVH owning its shapes: hold indices into `Cooked` instead | 214 MB | — |
+
+  Landing at roughly `2M × 80 B` for objects plus a much thinner tree. The next boundary after that is SoA — positions in one array, rotations in another — which is a different change and should not be started until the cheap ones are measured.
+
+  **One of them was free and is already taken:** `BVH::build` takes its shapes by value, and the demo handed it an lvalue, so the instance array existed twice for the whole frame. `std::move` at the call site removes one copy — 214 MB at two million — and changes nothing else. Worth recording that checking *what still reads the vector afterwards* caught a real break: the report line counted `insts.size()` after the build and would have silently printed zeros.
+
   **Two million is a memory problem before it is a speed problem**, and that reframes the work: the reductions available are layout ones the entry below already separates from deduplication. `rotation` as a full 3x3 is 72 of `Object`'s 192 bytes and a quaternion would be 32; `shape` and `source_node` are `size_t` where `uint32_t` would do; `Material` is 64 bytes repeated per instance where most instances of a node share everything but one field. And the BVH taking its shapes by value is a duplication nothing needs. None of that is hard, and none of it should be guessed at either — the number above is what makes it worth doing, and a measured number after each change is what says it worked.
 
 - **[course]** **One object deforming another.** Raised 2026-09-17, from wanting sprinkles to press visibly into liquid icing rather than merely sitting in it. Today a field is a function of `(u, v)` or of a `MotionEnv`, and it cannot see anything else in the scene — so "the glaze closes around each sprinkle" is not expressible, and neither is a footprint, a dent, a contact weld, or a drip running off a placed object. The concrete first case is narrow enough to build: `scatter()` knows its sites and does not expose them, so the target's own thickness field could read them. The cost is what makes it a real item rather than a tuning change — the naive form is a sum over every site per surface sample, 600 × 10 240 on today's donut and around 50 million at the sprinkle counts this scene now uses, so it needs a grid or similar index over the `(u, v)` domain before it is usable at all. Worth naming as the general capability rather than as "dimples": the same mechanism is what a scene needs before objects can be said to interact at all, and it is the one the demo keeps reaching for. Deliberately deferred past the first release.

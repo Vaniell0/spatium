@@ -492,8 +492,18 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         }
     }
 
-    auto bvh = BVH<Triangle3>::build(tris);
-    auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(insts);
+    // Counted before the move, because a moved-from vector is empty and
+    // the report below would have quietly started printing zeros. Found
+    // by checking what still reads these after this line rather than by
+    // assuming nothing did.
+    const std::size_t n_inst = insts.size(), n_tris = tris.size();
+
+    // Moved, not copied. `build` takes its shapes by value and keeps
+    // them, so handing it an lvalue leaves two copies of the array alive
+    // for the rest of the frame -- 112 bytes per instance, which is 214 MB
+    // at two million and was simply being spent.
+    auto bvh = BVH<Triangle3>::build(std::move(tris));
+    auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(std::move(insts));
 
     // Reported rather than assumed, and the last pair is the whole reason
     // a cooked scene exists: what a renderer would have held if every
@@ -502,7 +512,7 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
     std::println("  scene: {} objects -> {} instances + {} triangles; "
                  "{} refused (motion deforms), {} shared; "
                  "vertices {} without instancing, {} stored ({:.1f}x)",
-                 cooked.object_count(), insts.size(), tris.size(),
+                 cooked.object_count(), n_inst, n_tris,
                  cooked.opaque_refused(), cooked.shared_objects(),
                  cooked.vertices_without_instancing(), cooked.vertices_stored(),
                  cooked.vertices_stored() == 0

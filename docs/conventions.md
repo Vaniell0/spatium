@@ -244,6 +244,30 @@ and one that cannot.
 This is the third instance of the "say which half" family, and the
 sharpest, because the other two were incomplete rather than false.
 
+### A memory figure is a number *and* the layout it was taken in
+
+Added 2026-09-17, alongside the same rule for frame hashes ("a baseline
+is a number and the configuration that produced it").
+
+`sizeof(Object<double>) == 192` is not a fact about the program, it is a
+fact about one arrangement of six members. Shrink the rotation and it is
+152; narrow two indices and it is 144. Quoting 192 later, against a tree
+where one of those has happened, produces a discrepancy with no cause —
+and someone will go looking for the cause.
+
+So every recorded memory number carries the layout: which members, which
+widths, and what the total rounds to. The ROADMAP entry that said "two
+million costs roughly 350 MB" did not, and it was wrong by a factor of
+three — it had silently omitted a whole array and a duplicated one.
+
+The same applies to the thing people reach for first. **Reordering
+members to reclaim padding is usually not free, and whether it is can
+only be measured.** `Object<double>`'s members sum to 185 bytes with 7
+of padding, and no permutation recovers them: 185 rounds to 192 under
+8-byte alignment whatever the order. The padding is only reclaimable by
+making a member smaller, which is a different change with different
+consequences.
+
 ### A per-instance field has to be tested with at least two instances
 
 Named 2026-09-17, on adding `MotionEnv::origin`.
