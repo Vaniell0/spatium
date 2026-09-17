@@ -257,6 +257,59 @@ jobs:
       - name: Run it
         run: ./build-consumer/sphere_distance_demo
 
+  installed-consumer:
+    name: installed package + find_package(Spatium)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-15 g++-15 cmake ninja-build
+
+      # The other consumer job proves FetchContent. This one proves the
+      # *other* way a project picks Spatium up, and it is the one that was
+      # never checked: install(EXPORT SpatiumTargets), the generated
+      # SpatiumConfig.cmake and the version file have shipped since before
+      # the first release with nothing in CI ever installing them. A
+      # package config nobody consumes is a mechanism with nothing running
+      # it -- see docs/conventions.md, "A check needs the thing that runs
+      # it, first".
+      #
+      # Deliberately a per-push job rather than something that runs on a
+      # release tag. A check that only runs at a release runs once, at the
+      # worst possible moment to discover it was broken.
+      - name: Build and install to a prefix
+        env:
+          CC: gcc-15
+          CXX: g++-15
+        run: |
+          cmake -B build-lib -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/prefix \
+            -DSPATIUM_BUILD_TESTS=OFF \
+            -DSPATIUM_BUILD_VIEWER=OFF \
+            -DSPATIUM_BUILD_EXAMPLES=OFF \
+            -DSPATIUM_BUILD_BENCHMARKS=OFF \
+            -DSPATIUM_USE_MODULES=OFF
+          cmake --build build-lib -j
+          cmake --install build-lib
+
+      - name: Configure the standalone consumer against the install tree
+        env:
+          CC: gcc-15
+          CXX: g++-15
+        run: |
+          cmake -S examples/external-consumer -B build-fp -G Ninja \
+            -DSPATIUM_CONSUME=find_package \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/prefix
+          cmake --build build-fp -j
+
+      - name: Run it
+        run: ./build-fp/sphere_distance_demo
+
   clang:
     name: clang 19 (libstdc++, no optional deps)
     runs-on: ubuntu-24.04

@@ -1,9 +1,14 @@
 # External Consumer Example
 
-A minimal, completely standalone CMake project showing how to pull Spatium
-into your own project with `FetchContent` -- no Nix, no manual
-`cmake --install`, no `find_package(Spatium REQUIRED PATHS ...)` pointed at
-a hand-built scratch prefix.
+A minimal, completely standalone CMake project showing the two ways an
+unrelated project picks Spatium up: `FetchContent`, which needs no install
+step and nothing on the system, and `find_package` against an installed
+tree, which is how a system or distro package is consumed.
+
+One project and one `main.cpp` for both. They are the same program asking
+the same question of the same library, and a second copy would be a second
+thing to keep in step -- the kind that drifts unnoticed, because a build
+nobody runs is not a check.
 
 This directory is **not** part of Spatium's own build: it is not listed in
 `examples/CMakeLists.txt` and does not use `spatium_add_example()`. It is
@@ -30,13 +35,36 @@ default OFF when Spatium is not the top-level CMake project.
 
 ## Build and run
 
+The one-command path, pulling the sources at configure time:
+
 ```bash
-mkdir build && cmake -B build && cmake --build build && ./build/sphere_distance_demo
+cmake -B build && cmake --build build && ./build/sphere_distance_demo
 ```
 
 The first configure clones Spatium (`main` branch) into
 `build/_deps/spatium-src`; later configures reuse that checkout instead of
 re-cloning.
+
+Against an installed Spatium instead:
+
+```bash
+# from the Spatium checkout
+cmake -B build-lib -DCMAKE_INSTALL_PREFIX=/tmp/spatium-prefix \
+      -DSPATIUM_BUILD_TESTS=OFF -DSPATIUM_BUILD_VIEWER=OFF
+cmake --build build-lib && cmake --install build-lib
+
+# here
+cmake -B build-fp -DSPATIUM_CONSUME=find_package \
+      -DCMAKE_PREFIX_PATH=/tmp/spatium-prefix
+cmake --build build-fp && ./build-fp/sphere_distance_demo
+```
+
+Both are gated in CI. The `find_package` path is the newer of the two, and
+it was added because it was the *untested* one: Spatium has shipped
+`install(EXPORT SpatiumTargets)`, a generated `SpatiumConfig.cmake` and a
+version file since before its first release, and no job ever installed
+them. A package config nothing consumes is a mechanism with nothing running
+it, which `docs/conventions.md` has a whole section about.
 
 Expected output:
 

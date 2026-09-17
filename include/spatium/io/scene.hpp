@@ -58,6 +58,36 @@ struct Material {
     // highlight hack -- a renderer that honors this is what tells rough
     // dough from glossy icing apart, not just their base_color.
     T roughness{T{1}};
+
+    // Light this surface emits rather than reflects, linear RGB, added
+    // after shading and unaffected by it -- so an emissive surface stays
+    // bright in its own shadow, which is what makes it read as a source
+    // rather than as a very pale paint.
+    //
+    // A colour rather than a scalar multiplier on base_color, because the
+    // two are genuinely independent: hot dust glows orange while its
+    // surface colour is grey, and a scalar could only ever brighten what
+    // was already there.
+    //
+    // It does not light anything else. A renderer that wanted that would
+    // need the surface as a sampled source, which is a different and much
+    // larger feature; this is the object seen glowing, not the room lit
+    // by it, and saying so here is cheaper than having someone discover
+    // it from a render.
+    Vec<T, 3> emissive{};
+
+    // 1 = opaque, 0 = invisible. A straight alpha blend with whatever is
+    // behind, **not** refraction: the ray continues in the direction it
+    // was already going rather than bending at the surface.
+    //
+    // That is the honest model for something thin. A dust flake is three
+    // thousandths across; the lateral displacement a real refraction
+    // would produce across it is far below a pixel, so bending the ray
+    // would cost a second intersection and buy an effect nothing can
+    // see. Refraction earns its keep on something with depth -- a glass
+    // marble, a thick glaze -- and that is a separate feature with a
+    // separate cost, named in ROADMAP rather than smuggled in here.
+    T opacity{T{1}};
 };
 
 // ── Scene object ─────────────────────────────────────────────────
