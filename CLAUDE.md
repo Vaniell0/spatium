@@ -114,7 +114,7 @@ differential.hpp — cotangent Laplacian, mass matrix, face gradients, divergenc
 - `include/spatium/viewer/` — Vulkan App (multi-mesh, point clouds, per-mesh color, ImGui), Camera
 - `include/spatium/` — Point, Morphism, umbrella header
 - `include/spatium/vendor/` — stb_image_write (screenshot export)
-- `tests/` — Catch2 (790+ tests)
+- `tests/` — Catch2; `ctest -N` reports the count, which depends on which optional dependencies are enabled
 - `examples/` — geometry_demo, showcase, sets_demo, spd_relationship_demo, scene_demo (text/SVG); donut_demo (spatium::io::build's declarative DSL getting-started demo — console by default, `--photo` for PNG; see `docs/getting-started-dsl.md`); atom_demo + primitives_demo (Vulkan; primitives_demo dispatches `--scene primitives|torus|klein`); blackhole_demo + blackhole_gr_demo, wormhole_demo, tumbling_body_demo, parametric_analytical_demo, geodesic_curvature_grid_demo, geodesic_procgen_demo, hyperbolic_tessellation_demo, wave_ca_demo, collatz_demo, burning_ship_demo, native_collision_demo, ball_pit_demo, sound_synthesis_demo, terminal_donut_demo (ASCII, `render::terminal_canvas.hpp`, not Vulkan), cloth_sphere_probe (offline/Vulkan raytracers and diagrams — see `spatium_add_example()` in `cmake/SpatiumTarget.cmake`)
 - `benchmarks/` — Google Benchmark (vec, intersection, mesh, bvh, orbital, raycast)
 - `cmake/` — SpatiumConfig.cmake.in, SpatiumModule.cmake (C++23 modules helper), SpatiumTarget.cmake (spatium_add_example() helper)

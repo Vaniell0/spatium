@@ -32,16 +32,16 @@ existing consumer. This is not extended to other domains: `Triangle`,
 `spatium::geometry::`/`spatium::mesh::` qualification, because unlike
 `Vec` they aren't used as raw building blocks everywhere.
 
-**Known violation (being fixed by this change):** most of `algebra/`
+**Resolved 2026-08-28, kept as the record of what changed.** Before that pass, most of `algebra/`
 (`vector.hpp`, `matrix.hpp`, `quaternion.hpp`, `complex.hpp`,
 `calculus.hpp`, `dual.hpp`, `functions.hpp`, `ode.hpp`,
 `linear_solve.hpp`, `polynomial.hpp`, `vec_expr.hpp`,
 `eigen_interop.hpp`, `format.hpp`) currently sits directly in bare
 `spatium::` with no `algebra::` qualification available at all, while
 `algebra/groups/`, `algebra/concepts.hpp`, and `algebra/verify.hpp`
-already use plain (non-inline) `spatium::algebra::`. Target: the first
-group moves into `inline namespace algebra`, so it's addressable both
-ways. The second group keeps its plain `namespace algebra {}` block and
+already used plain (non-inline) `spatium::algebra::`. The first group has
+since moved into `inline namespace algebra` and is addressable both ways —
+verified in the headers, and `ROADMAP.md` and `CLAUDE.md` agree. The second group keeps its plain `namespace algebra {}` block and
 is documented as `spatium::algebra::`-qualified — `Group`, `SO3`, `SE3`
 are concepts/types you opt into, not ambient building blocks, so that's
 the form to use even though C++'s inline-namespace rule (inline-ness is a
@@ -64,11 +64,11 @@ stay flat. It fires when there's a real seam to name, the way
 `physics/mechanics/` + `physics/relativity/` already separate from each
 other.
 
-**Known violation:** `physics/` mixes `mechanics/` and `relativity/`
-(core physics) with five flat top-level files that are visualization
-support, not physics — `atom_model.hpp`, `atom_palette.hpp`,
-`atom_svg.hpp`, `bohr_model.hpp`, `orbital.hpp`. Target: these move to
-`physics/atomic/`. `physics/elements.hpp` stays at the top level — it's
+**Resolved 2026-08-28.** `physics/` used to mix `mechanics/` and
+`relativity/` (core physics) with five flat top-level files that are
+visualization support, not physics — `atom_model.hpp`, `atom_palette.hpp`,
+`atom_svg.hpp`, `bohr_model.hpp`, `orbital.hpp`. They now live in
+`physics/atomic/`, which is what made this rule worth writing down. `physics/elements.hpp` stays at the top level — it's
 the data backing `atomic/`'s models, and is separately called out below
 as the project's one compiled-translation-unit exception.
 
@@ -297,9 +297,9 @@ convenience aliases that must forward to `measure()`, never reimplement
 the formula. This is a correctness rule, not a style preference — two
 implementations of the same formula drift.
 
-**Known violations:** `geometry/triangle.hpp` and `geometry/circle.hpp`
-(the `Disk` case) both invert the rule — `area()` holds the real
-per-dimension formula and `measure()` is the one-line alias.
+**Resolved.** `geometry/triangle.hpp` and `geometry/circle.hpp` (the
+`Disk` case) used to invert the rule — `area()` held the real
+per-dimension formula and `measure()` was the one-line alias.
 `geometry/box.hpp` is the compliant reference implementation. Target:
 `triangle.hpp` and `circle.hpp` swap which function holds the body, to
 match `box.hpp`.

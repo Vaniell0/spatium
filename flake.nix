@@ -88,6 +88,11 @@
               install_demo examples/atom_demo                  atom-demo
               install_demo examples/primitives_demo            primitives-demo
               install_demo examples/terminal_donut_demo        terminal-donut
+              install_demo examples/donut_demo                 donut
+              install_demo examples/ball_pit_demo              ball-pit
+              install_demo examples/sound_synthesis_demo       sound-synthesis
+              install_demo examples/scene_demo                 scene
+              install_demo examples/spd_relationship_demo      spd-relationship
               [ -f benchmarks/spatium_bench ] && install -Dm755 benchmarks/spatium_bench $out/bin/spatium-bench
               for so in lib*.so; do [ -f "$so" ] && install -Dm755 "$so" $out/lib/; done
               cp -r ${src}/include/spatium $out/include/
@@ -136,6 +141,11 @@
           native-collision = p.mkApp "spatium-native-collision";
           burning-ship  = p.mkApp "spatium-burning-ship";
           terminal-donut = p.mkApp "spatium-terminal-donut";
+          donut         = p.mkApp "spatium-donut";
+          ball-pit      = p.mkApp "spatium-ball-pit";
+          sound-synthesis = p.mkApp "spatium-sound-synthesis";
+          scene         = p.mkApp "spatium-scene";
+          spd-relationship = p.mkApp "spatium-spd-relationship";
           bench         = p.mkApp "spatium-bench";
         });
 

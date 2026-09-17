@@ -670,7 +670,7 @@ and safe exactly where it is *structure*.
 - **Data.** A ray's direction is user input and can degenerate — down a
   cylinder's axis, along a cone's generator. `geometry/ray_surface.hpp`,
   `geometry/ray_hit.hpp`, `io/scene.hpp`, `physics/mechanics/rigid_contact.hpp`.
-  A third live instance sits at `ray_surface.hpp:369` in
+  A third live instance sits at `ray_surface.hpp:394` in
   `ray_quadric_proximity`, and it presents worse than the other two. A ray
   down a cylinder's axis returns `Result` **success** with
   `closest_t = NaN`, a `NaN` point, and `miss = 0` — because the NaN root's
@@ -803,7 +803,7 @@ needs to own a `unique_ptr`" -- nothing in the tree has move-only state
 today. It was 19 800 copies of a 512-byte table, and `move_only_function`
 does not fix that: each closure would still carry its own table, moved
 rather than copied. What fixes it is **sharing the state**, which
-`donut_demo.cpp:545` already does by hand with one
+`donut_demo.cpp:639` already does by hand with one
 `std::make_shared<const PerlinNoise>`. The "hand-rolled shared_ptr dance"
 this item feared turns out to be two lines, already written, and working.
 
