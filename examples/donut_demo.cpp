@@ -498,8 +498,10 @@ std::vector<std::uint8_t> render_frame(const bd::Cooked<double>& cooked,
     // object carried its own copy of its geometry, against what the shape
     // table actually holds.
     std::println("  scene: {} objects -> {} instances + {} triangles; "
+                 "{} refused (motion deforms), {} shared; "
                  "vertices {} without instancing, {} stored ({:.1f}x)",
                  cooked.object_count(), insts.size(), tris.size(),
+                 cooked.opaque_refused(), cooked.shared_objects(),
                  cooked.vertices_without_instancing(), cooked.vertices_stored(),
                  cooked.vertices_stored() == 0
                      ? 0.0

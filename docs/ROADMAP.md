@@ -309,6 +309,9 @@ So: the items we are actually steering by, with their state. Everything below th
 |---|---|---|---|
 | Renderer consuming `cook()` | **in flight** | — | Declarative scene DSL |
 | Per-instance parameters (`MotionEnv::origin`) | **next** | the row above | Declarative scene DSL |
+| Scatter's fixed axis binding (local z to the normal) | **next** | nothing; a fix, and one of two preconditions for instancing scattered items | Object model as manifold substrate |
+| Structural motions in the demo (`grow_scale` and friends) | **next** | nothing; the other precondition, and a matter of spelling | Object model as manifold substrate |
+| Scatter's arbitrary in-plane directions | parked | a consumer — "follows the flow" is its own design, not this fix | Object model as manifold substrate |
 | One object deforming another | parked | an index over the `(u,v)` domain — and a decision about the cycle it introduces, below | Object model as manifold substrate |
 | `ball_pit_demo` cleanup | parked | nothing; it is just work | Object model as manifold substrate |
 | Offset self-intersection, in the library | parked | nothing; a thickness check against the base's minimum radius of curvature | Analytical rendering |
@@ -688,6 +691,29 @@ question is not reopened from scratch in a month.
 - **[want]** Open the node set — `Kind` is a closed `enum class`, so a user cannot add an operation without editing `build.hpp`. `io/scene.hpp` already solved the same problem in the same namespace with an open registry (`register_shape_kind()`), so this is a consistency gap, not an unknown. Sequenced after the field work because whatever opens `Kind` has to survive lowering.
 - **[course]** Vulkan live display — CPU raytraces (`donut_demo.cpp`'s `--photo` engine, extended), a small new Vulkan path just presents the frame (swapchain + one texture, uploaded and blitted every frame), not `viewer::App`'s mesh/point-cloud rasterizer. Real new plumbing (no sampled-texture descriptor/pipeline exists today), deliberately deferred rather than landed blind against a deadline.
 - **[want]** Texture/UV mapping — `io::Material` currently has only `base_color`/`roughness`, no texture at all. Flagged back on 2026-09-07 alongside conform-to-surface (now shipped as `offset_surface`) as one of two primitives needed before the DSL; still open.
+
+- **[course]** **A motion written as a plain lambda cannot be seen into, so almost every node in the donut demo is refused as a deformation when it is nothing of the kind.** Found 2026-09-17 by asking what the demo's 22 tessellated objects actually were.
+
+  ```
+  scene: 35222 objects -> 35200 instances + 429848 triangles;
+         10995 refused (motion deforms), 35200 shared
+  ```
+
+  The 22 are eighteen sprinkle `Scatter` nodes (six colours times three bands, one merged object each), plus the cube, the dough and the icing, plus the table — which *is* a placement and goes to triangles only because it carries no closed form. The 10 995 counts refused *instances* rather than objects: 10 992 sprinkles and three whole nodes.
+
+  The cause is not that those motions deform. It is that they are written as plain `(p, t)` lambdas:
+
+  ```cpp
+  auto grow_scale = [](const Vec<double, 3>& p, double time) {
+      return Vec<double, 3>{p * e};        // a textbook placement
+  };
+  ```
+
+  An opaque leaf that touches `p` sets `reads_point`, and `is_placement()` then answers "deformation" — correctly, since it cannot ask a closure what it does. Written structurally as `scaled(point(), e)` the very same motion is a placement. The donut's dust was rewritten that way when instancing landed; **nothing else was**, so everything but the dust is refused for a reason that is a matter of spelling.
+
+  So sprinkle instancing has **two** preconditions, not one: the axis binding above, and structural motions here. Both are fixes rather than features, and they land together.
+
+- **[want]** **Does collapsing the dust into one node remove `content_hash`'s O(vertices) cost?** Deferred, and recorded so it is not lost rather than answered from a guess. `content_hash` keys a `Literal` on its mesh content, which is the expensive case — roughly 158 000 vertices hashed across the donut's dust — and the entry for it already says this is the first line to look at if cooking ever runs per frame. One `Scatter` of one flake would hash the item once and be done. The dust is *not* collapsed yet (that waits on `MotionEnv::origin`), so there is nothing to measure and the question has no answer today. Measure it at the collapse, against a before figure taken in the same configuration.
 
 - **[course]** **`scatter_frame` builds its frame from one normal, and orienting *along* a surface needs a full one.** Found 2026-09-17, by checking a claim rather than by hitting a bug: the plan said the donut's sprinkles would instance for free once the renderer read a cooked scene, since `cylinder()` records a `BoundedQuadric`. They did not, because the demo does not use `cylinder()` — the sprinkle is a `literal()` of a hand-built mesh whose axes have been permuted so its length points sideways.
 
