@@ -36,34 +36,80 @@ TEST_CASE("Quadratic: complex roots", "[polynomial]") {
     CHECK_FALSE(roots[0].is_real());
 }
 
-// Tagged [!shouldfail], deliberately: it asserts the *correct* answer to
-// a known open bug, so the suite stays green while the defect stays
-// visible, and the day the solvers are fixed this starts passing --
-// which Catch2 then reports as a failure, forcing the tag off. A bug
-// recorded as a comment gets skimmed; one recorded as a test that must
-// keep failing cannot be quietly forgotten.
+// Was tagged [!shouldfail] from 2026-09-15 to 2026-09-17, asserting the
+// correct answer to a known open bug so that the suite stayed green while
+// the defect stayed visible. The mechanism worked exactly as designed:
+// the day the solvers stopped dividing by a vanishing leading
+// coefficient, this started passing, Catch2 reported *that* as a failure,
+// and the tag had to come off. A bug recorded as a comment gets skimmed;
+// one recorded as a test that must keep failing cannot be quietly
+// forgotten, and cannot be quietly left marked broken after it is fixed
+// either.
 //
-// Note this is NOT a Debug-versus-Release difference -- that was a
-// separate finding about Eigen's asserts vanishing under NDEBUG. This
-// one is wrong in every build: all three solvers divide by the leading
-// coefficient with no guard, so a degenerate input silently loses its
-// real root. And because NaN reports is_real() == true, the garbage
-// walks straight through every caller's filter.
-TEST_CASE("Quadratic: a vanishing leading coefficient loses the real root",
-          "[polynomial][!shouldfail]") {
+// Note this was never a Debug-versus-Release difference -- that was a
+// separate finding about Eigen's asserts vanishing under NDEBUG.
+TEST_CASE("Quadratic: a vanishing leading coefficient keeps the real root",
+          "[polynomial]") {
     // 0x² + 2x - 1 = 0 is still a perfectly good equation with the root
-    // x = 0.5. Today this returns NaN and -inf.
+    // x = 0.5. It used to return NaN and -inf, and because NaN reports
+    // is_real() == true the garbage walked through every caller's filter.
     auto roots = solve_quadratic(0.0, 2.0, -1.0);
-    bool found = false;
-    for (const auto& r : roots)
-        if (r.is_real() && std::abs(r.re - 0.5) < 1e-10) found = true;
-    CHECK(found);
+    REQUIRE(roots.size() == 1);            // one root, not two NaNs
+    CHECK_THAT(roots[0].re, WithinAbs(0.5, 1e-10));
+    CHECK(roots[0].is_real());
 
-    // The real fix needs a return type that can say "one root" rather
-    // than always exactly two, which is why this is an API change and
-    // not a guard clause.
     auto reals = real_roots_quadratic(0.0, 2.0, -1.0);
-    CHECK(reals.size() == 1);
+    REQUIRE(reals.size() == 1);
+    CHECK_THAT(reals[0], WithinAbs(0.5, 1e-10));
+}
+
+TEST_CASE("The degree collapses all the way down", "[polynomial]") {
+    // Each solver hands off to the next one down rather than dividing by
+    // zero, so a quartic with three vanishing leading coefficients is a
+    // linear equation and says so by returning one root.
+    auto quartic = solve_quartic(0.0, 0.0, 0.0, 2.0, -1.0);
+    REQUIRE(quartic.size() == 1);
+    CHECK_THAT(quartic[0].re, WithinAbs(0.5, 1e-10));
+
+    auto cubic = solve_cubic(0.0, 1.0, -5.0, 6.0);   // x² - 5x + 6
+    REQUIRE(cubic.size() == 2);
+    CHECK_THAT(std::min(cubic[0].re, cubic[1].re), WithinAbs(2.0, 1e-10));
+    CHECK_THAT(std::max(cubic[0].re, cubic[1].re), WithinAbs(3.0, 1e-10));
+
+    // 0 = c with c nonzero has no roots; 0 = 0 has every number, and an
+    // empty root *list* is the honest answer to both -- a list cannot say
+    // "all of them", and a caller iterating roots does the right thing
+    // either way.
+    CHECK(solve_quadratic(0.0, 0.0, 5.0).empty());
+    CHECK(solve_quadratic(0.0, 0.0, 0.0).empty());
+}
+
+TEST_CASE("UpTo: the count is what iterates, and at() refuses past it",
+          "[polynomial]") {
+    // The contract that changed. roots[2] used to be valid always, by
+    // virtue of a fixed-size array; it is now valid only when the count
+    // reaches 3. Both halves need covering -- indexing within the count,
+    // and at() refusing beyond it -- because testing only in-range
+    // indexing tests the behaviour that did not change.
+    auto full = solve_cubic(1.0, -6.0, 11.0, -6.0);   // (x-1)(x-2)(x-3)
+    REQUIRE(full.size() == 3);
+    CHECK(full.capacity() == 3);
+    CHECK(full.at(2).has_value());
+    CHECK_FALSE(full.at(3).has_value());
+
+    auto collapsed = solve_cubic(0.0, 0.0, 2.0, -1.0);
+    REQUIRE(collapsed.size() == 1);
+    CHECK(collapsed.capacity() == 3);     // capacity is the shape, size is the answer
+
+    // Range-for takes its bounds from the count, which is what lets every
+    // existing `for (auto& r : roots)` call site keep working and quietly
+    // start iterating the right number of elements.
+    std::size_t seen = 0;
+    for ([[maybe_unused]] const auto& r : collapsed) ++seen;
+    CHECK(seen == 1);
+
+    CHECK_FALSE(collapsed.at(1).has_value());
+    CHECK(collapsed.at(1).error().code == spatium::ErrorCode::OutOfDomain);
 }
 
 TEST_CASE("Quadratic: real_roots_quadratic filters correctly", "[polynomial]") {

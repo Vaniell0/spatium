@@ -464,12 +464,19 @@ Substitutes p(t) = o + t·d into quadric equation → at² + bt + c = 0 → `sol
 
 | Function | Line | Returns | Algorithm |
 |----------|------|---------|-----------|
-| `solve_quadratic(a, b, c)` | 18 | `array<Complex<T>, 2>` | Discriminant |
-| `solve_cubic(a, b, c, d)` | 48 | `array<Complex<T>, 3>` | Cardano |
-| `solve_quartic(a, b, c, d, e)` | 92 | `array<Complex<T>, 4>` | Ferrari |
-| `real_roots_quadratic(a, b, c)` | 33 | `vector<T>` | Filter |im| < eps |
-| `real_roots_cubic(...)` | 148 | `vector<T>` | Filter |
-| `real_roots_quartic(...)` | 155 | `vector<T>` | Filter |
+| `solve_linear(b, c)` | 60 | `UpTo<Complex<T>, 2>` | The degenerate case, named |
+| `solve_quadratic(a, b, c)` | 69 | `UpTo<Complex<T>, 2>` | Discriminant |
+| `solve_cubic(a, b, c, d)` | 101 | `UpTo<Complex<T>, 3>` | Cardano |
+| `solve_quartic(a, b, c, d, e)` | 177 | `UpTo<Complex<T>, 4>` | Ferrari |
+| `real_roots_quadratic(a, b, c)` | 88 | `vector<T>` | Filter \|im\| < eps |
+| `real_roots_cubic(...)` | 297 | `vector<T>` | Filter |
+| `real_roots_quartic(...)` | 307 | `vector<T>` | Filter |
+
+**`UpTo<T, N>`, not `array<T, N>`, and the difference is the whole point** (`core/up_to.hpp`). A quadratic has *at most* two roots; a degenerate one has one. Returning a fixed-size array said "exactly N" where the truth is "at most N", and that is what forced all three solvers to divide by a vanishing leading coefficient rather than report a shorter answer. `solve_quadratic(0, 2, -1)` is `2x - 1 = 0` with the root `0.5`, and it used to return NaN and `-inf` — with `NaN` reporting `is_real() == true`, so the garbage walked through every caller's filter. Each solver now collapses to the one below it.
+
+`UpTo` is a fixed-capacity container with a count and no allocation. `size()` is the count, `capacity()` is 2/3/4, and range-`for` takes its bounds from the count, so `for (auto& r : roots)` keeps working and quietly starts iterating the right number. **`operator[]` is unchecked under `NDEBUG`** — no branch in a hot path, so indexing at or past `size()` is undefined there, which is exactly what stops being true compared to `std::array`; in Debug it asserts. `at(i)` returns `Result<T>` and never throws: checked access signals, unchecked access does not. In Debug the slots past the count are poisoned with NaN through an ADL `debug_poison`, so reading past the count is visibly wrong rather than undefined — zero instructions shipped.
+
+The zero test is **exact equality**, deliberately. A relative test would turn a genuine but ill-conditioned quadratic into a linear one and drop a real root that is large but honest. Exact zero is the only threshold that says *this is not a quadratic*, and it is what the geometry produces — for a ray along a cone's generator the `t²` coefficient is one quantity minus itself. Catastrophic cancellation for a leading coefficient that is tiny but nonzero is a separate, still-open defect; see ROADMAP.
 
 ### Noise (`algebra/noise.hpp`)
 

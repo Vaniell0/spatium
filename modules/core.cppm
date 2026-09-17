@@ -4,5 +4,6 @@ export module spatium.core;
 export import :concepts;
 export import :error;
 export import :epsilon;
+export import :up_to;
 export import :precision;
 export import :verify;

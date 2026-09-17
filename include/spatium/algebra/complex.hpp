@@ -6,6 +6,7 @@
 #  include <spatium/core/epsilon.hpp>
 #  include <cmath>
 #  include <format>
+#  include <limits>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
@@ -80,6 +81,22 @@ Complex<T> cbrt(const Complex<T>& z) {
 
 using Complex64 = Complex<double>;
 using Complex32 = Complex<float>;
+
+// Opt into `UpTo`'s Debug-only slot poisoning (see core/up_to.hpp). A
+// root read past the count comes back NaN rather than a stale value that
+// still looks like an answer -- which is the exact failure this library
+// has already caught twice, a value wearing the costume of a result.
+//
+// Debug-only by construction: `UpTo` only calls this under NDEBUG being
+// off, so this is never part of the contract and costs nothing shipped.
+// Guarded on has_quiet_NaN because Scalar admits types that have none.
+template<Scalar T>
+constexpr void debug_poison(Complex<T>& c) noexcept {
+    if constexpr (std::numeric_limits<T>::has_quiet_NaN) {
+        c.re = std::numeric_limits<T>::quiet_NaN();
+        c.im = std::numeric_limits<T>::quiet_NaN();
+    }
+}
 
 } // namespace algebra
 } // namespace spatium

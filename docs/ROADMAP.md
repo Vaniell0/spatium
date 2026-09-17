@@ -666,9 +666,49 @@ question is not reopened from scratch in a month.
 
 ## Polynomial solvers: the degenerate leading coefficient
 
-Design settled 2026-09-15, code not written. Pinned as two `[!shouldfail]`
-tests (`tests/test_polynomial.cpp`, `tests/test_ray_surface.cpp`) so it
-cannot be forgotten and cannot quietly stay fixed-but-marked.
+Design settled 2026-09-15. **Shipped 2026-09-17**, and the three
+`[!shouldfail]` pins did exactly the job they were written for: the day
+the solvers stopped dividing by a vanishing leading coefficient all three
+started passing, Catch2 reported *that* as a failure, and the tags had to
+come off. A bug recorded as a comment gets skimmed; one recorded as a
+test that must keep failing cannot be quietly forgotten, and cannot be
+quietly left marked broken after it is fixed either.
+
+The return type is `UpTo<Complex<T>, N>` in a new `core/up_to.hpp` — at
+most N values with a count, no allocation — and the name states the thing
+that changed. `solve_linear` exists as a named function because a
+degenerate quadratic is exactly that, and each solver now collapses to
+the one below it. The donut frame is byte-identical afterwards, which is
+the expected result rather than a disappointing one: a ray exactly
+parallel to a quadric's null direction is measure-zero among camera rays,
+and the defect was always about the cases a renderer does not sample.
+
+**Two decisions the design did not contain, recorded because both had a
+plausible alternative.**
+
+*The zero test is exact equality, not a tolerance.* A relative test — "a
+is negligible beside b and c" — catches more cases and is the wrong trade:
+it turns a genuine but ill-conditioned quadratic into a linear one and
+drops a real root that is large but honest, replacing one silent wrong
+answer with another. Exact zero is the only threshold that says *this is
+not a quadratic* rather than *this quadratic is awkward*, and it is also
+exactly what the geometry produces — for a ray along a cone's generator
+the t² coefficient is one quantity minus itself, zero to the bit. What
+this leaves open, stated so it is not mistaken for covered: catastrophic
+cancellation when the leading coefficient is tiny but nonzero. The fix
+for that is the numerically stable form (`q = -(b + sign(b)·√disc)/2`,
+then `x₁ = q/a`, `x₂ = c/q`), it is a separate defect, and bundling it
+would have made one change two.
+
+*`ray_quadric_proximity` checks the answer, not the coefficient.* The
+`[!shouldfail]` test's own comment predicted the fix would be a
+degeneracy check on the t² coefficient *before* `solve_quadratic`, on the
+grounds that checking after would catch the symptom. That prediction was
+written when the return type could not say "fewer roots", and it is
+superseded rather than merely unmet: asking whether the answer has two
+roots is what the function's model actually requires, and it leaves one
+place deciding what degenerate means. A coefficient test at the call site
+would be a second copy of the solver's rule, free to drift from it.
 
 **The defect.** `solve_quadratic`, `solve_cubic` and `solve_quartic` all
 divide by the leading coefficient with no guard. `solve_quadratic(0, 2, -1)`
