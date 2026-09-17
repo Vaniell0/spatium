@@ -432,36 +432,46 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
     // instanceable, and its *placed* form when the object deforms -- in
     // which case cook() hands back an identity transform. So one formula
     // covers both, and the deforming case is not a special case here.
-    auto to_world = [](const Vec<double, 3>& v, const bd::Object<double>& o) {
-        return Vec<double, 3>{o.rotation * Vec<double, 3>{v * o.scale} + o.translation};
+    // Takes the rotation already expanded, rather than reaching into the
+    // object for it: this runs per *vertex*, and a quaternion unpacked
+    // here would spend the arithmetic the compact storage was supposed to
+    // be paying for. The expansion happens once per object, below.
+    auto to_world = [](const Vec<double, 3>& v, const Matrix<double, 3, 3>& R,
+                       const bd::Object<double>& o) {
+        return Vec<double, 3>{R * Vec<double, 3>{v * o.scale} + o.translation};
     };
 
     auto emit_triangles = [&](const mesh::Mesh<Euclidean<3, double>>& m,
                               const std::vector<Vec<double, 3>>& vn,
-                              const bd::Object<double>& o, const Material<double>& mat) {
+                              const bd::Object<double>& o, const Matrix<double, 3, 3>& R,
+                              const Material<double>& mat) {
         for (const auto& f : m.faces) {
-            Triangle3 t(to_world(m.vertices[f[0]], o), to_world(m.vertices[f[1]], o),
-                        to_world(m.vertices[f[2]], o));
+            Triangle3 t(to_world(m.vertices[f[0]], R, o), to_world(m.vertices[f[1]], R, o),
+                        to_world(m.vertices[f[2]], R, o));
             tris.push_back(t);
             // Normals turn by the rotation alone: the scale is uniform, so
             // it divides out of the inverse transpose.
             prims.push_back(Prim{t,
-                                 {Vec<double, 3>{o.rotation * vn[f[0]]},
-                                  Vec<double, 3>{o.rotation * vn[f[1]]},
-                                  Vec<double, 3>{o.rotation * vn[f[2]]}},
+                                 {Vec<double, 3>{R * vn[f[0]]},
+                                  Vec<double, 3>{R * vn[f[1]]},
+                                  Vec<double, 3>{R * vn[f[2]]}},
                                  mat.base_color, mat.roughness, mat.emissive});
         }
     };
 
     for (const auto& obj : cooked.objects()) {
         const auto& mat = obj.material;
+        // Once per object. Everything below uses this, including the
+        // instance, whose rotation stays a matrix precisely so the
+        // traversal never has to unpack anything.
+        const Matrix<double, 3, 3> R = obj.rotation_q.to_matrix();
 
         // Two conditions, and neither is a guess about what the object
         // looks like: the shape must carry a closed form, and the object's
         // motion must be a placement so copies differ only by where they
         // are.
         if (obj.instanceable && has_quadric[obj.shape]) {
-            insts.push_back({&quadrics[obj.shape], obj.translation, obj.scale, obj.rotation});
+            insts.push_back({&quadrics[obj.shape], obj.translation, obj.scale, R});
             inst_info.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
             continue;
         }
@@ -472,7 +482,7 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         // built first.
         auto& vn = shape_normals[obj.shape];
         if (vn.empty()) vn = smooth_normals(cooked.shapes()[obj.shape].geometry);
-        emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, mat);
+        emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, R, mat);
     }
 
     // The gizmos are not in the scene and must not be: they are the

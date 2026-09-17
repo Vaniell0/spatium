@@ -626,7 +626,7 @@ TEST_CASE("cook() puts a scattered item exactly where materialize_mesh draws it"
         const auto& obj = cooked.objects()[o];
         REQUIRE(obj.instanceable);
         for (std::size_t v = 0; v < rest.vertex_count(); ++v) {
-            V3 world{obj.rotation * V3{rest.vertices[v] * obj.scale} + obj.translation};
+            V3 world{obj.rotation_q.to_matrix() * V3{rest.vertices[v] * obj.scale} + obj.translation};
             const auto& want = baked.vertices[o * rest.vertex_count() + v];
             for (std::size_t k = 0; k < 3; ++k)
                 CHECK_THAT(world[k], WithinAbs(want[k], 1e-9));
@@ -667,7 +667,7 @@ TEST_CASE("cook() hands back geometry a renderer can actually use for a deformat
     // the unit cube sits at |(1,1,1)| = sqrt(3); doubled, 2*sqrt(3).
     double farthest = 0.0;
     for (const auto& v : geometry.vertices) {
-        V3 world{obj.rotation * V3{v * obj.scale} + obj.translation};
+        V3 world{obj.rotation_q.to_matrix() * V3{v * obj.scale} + obj.translation};
         farthest = std::max(farthest, world.norm());
     }
     CHECK_THAT(farthest, WithinAbs(2.0 * std::sqrt(3.0), 1e-9));
@@ -897,7 +897,7 @@ TEST_CASE("A scatter's instances fly apart, and materialize_mesh agrees with coo
     for (std::size_t o = 0; o < cooked.objects().size(); ++o) {
         const auto& obj = cooked.objects()[o];
         for (std::size_t v = 0; v < rest.vertex_count(); ++v) {
-            V3 world{obj.rotation * V3{rest.vertices[v] * obj.scale} + obj.translation};
+            V3 world{obj.rotation_q.to_matrix() * V3{rest.vertices[v] * obj.scale} + obj.translation};
             const auto& want = baked.vertices[o * rest.vertex_count() + v];
             for (std::size_t k = 0; k < 3; ++k) CHECK_THAT(world[k], WithinAbs(want[k], 1e-9));
         }
@@ -937,9 +937,13 @@ TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
     // instances at genuinely different orientations.
     for (const auto& o : cooked.objects()) {
         auto from_stored = o.rotation_q.to_matrix();
-        for (std::size_t i = 0; i < 3; ++i)
-            for (std::size_t j = 0; j < 3; ++j)
-                CHECK_THAT(from_stored(i, j), WithinAbs(o.rotation(i, j), 1e-13));
+        // Still a rotation after the trip: orthonormal columns. The
+        // matrix it used to be compared against is gone, so what is left
+        // to check is the property rather than the equality.
+        V3 c0{from_stored(0, 0), from_stored(1, 0), from_stored(2, 0)};
+        V3 c1{from_stored(0, 1), from_stored(1, 1), from_stored(2, 1)};
+        CHECK_THAT(c0.norm(), WithinAbs(1.0, 1e-12));
+        CHECK_THAT(c0.dot(c1), WithinAbs(0.0, 1e-12));
     }
 
     // Two quantities, and the second is the one that matters. A matrix
@@ -950,11 +954,15 @@ TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
     // would call that unchanged.
     double worst = 0.0, worst_shift = 0.0;
     for (const auto& o : cooked.objects()) {
-        auto back = spatium::Quaternion<double>::from_matrix(o.rotation).to_matrix();
+        // Round-tripped once more, from the stored quaternion, so the
+        // error being measured is the one a second conversion would add
+        // on top of what is already stored.
+        auto stored = o.rotation_q.to_matrix();
+        auto back = spatium::Quaternion<double>::from_matrix(stored).to_matrix();
         double err = 0.0;
         for (std::size_t i = 0; i < 3; ++i)
             for (std::size_t j = 0; j < 3; ++j)
-                err = std::max(err, std::abs(back(i, j) - o.rotation(i, j)));
+                err = std::max(err, std::abs(back(i, j) - stored(i, j)));
         worst = std::max(worst, err);
 
         double rest = 0.0;
@@ -979,4 +987,55 @@ TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
     INFO("worst element error " << worst << ", worst vertex shift " << worst_shift);
     CHECK(worst < 1e-13);          // measured ~1.7e-15
     CHECK(worst_shift < 1e-12);    // measured ~1e-16 here; the donut's worst object is 10.3 units
+}
+
+TEST_CASE("Cooking preserves the object count, whatever the rotations do",
+          "[build_dsl]") {
+    // A count, checked separately from any picture, because a picture
+    // cannot check it. If a rotation were lost -- stored as identity, or
+    // dropped somewhere in the compaction -- instances would coalesce
+    // toward each other and the render would look *nearly* the same: a
+    // slightly denser cluster is not a visible defect, and neither a
+    // frame hash nor a pixel diff distinguishes "forty thousand
+    // instances" from "forty thousand instances, two of them on top of
+    // each other".
+    //
+    // So: one object per site, every site distinct, and the distinctness
+    // asserted on positions rather than inferred from the count.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+    auto ball = scene.sphere(1.0);
+    auto speck = scene.cube({0.03, 0.03, 0.03});
+
+    constexpr std::size_t N = 200;
+    auto sown = scene.scatter(speck, ball, N, 17, 0.6, bd::SeatAxis::X)
+                    .moving(rotated(bd::VecField<double>::point(),
+                                    [](double t) { return V3{0.2, 0.5 + t, -0.3}; }));
+
+    auto cooked = bd::cook(scene, sown.index, 0.5);
+    REQUIRE(cooked.object_count() == N);
+    REQUIRE(cooked.shape_count() == 1);
+    CHECK(cooked.shapes()[0].instances == N);
+
+    // No two objects share a position, and no two share an orientation.
+    // Coalescing shows up here and nowhere else.
+    std::size_t coincident = 0, same_rotation = 0;
+    for (std::size_t i = 0; i < cooked.objects().size(); ++i)
+        for (std::size_t j = i + 1; j < cooked.objects().size(); ++j) {
+            if ((cooked.objects()[i].translation - cooked.objects()[j].translation).norm() < 1e-9)
+                ++coincident;
+            auto a = cooked.objects()[i].rotation_q, b = cooked.objects()[j].rotation_q;
+            if (std::abs(a.w - b.w) < 1e-12 && std::abs(a.x - b.x) < 1e-12 &&
+                std::abs(a.y - b.y) < 1e-12 && std::abs(a.z - b.z) < 1e-12)
+                ++same_rotation;
+        }
+    CHECK(coincident == 0);
+    CHECK(same_rotation == 0);
+
+    // And the rotations are not all the identity, which is the specific
+    // way a lost rotation would present.
+    std::size_t identities = 0;
+    for (const auto& o : cooked.objects())
+        if (std::abs(o.rotation_q.w - 1.0) < 1e-12) ++identities;
+    CHECK(identities == 0);
 }

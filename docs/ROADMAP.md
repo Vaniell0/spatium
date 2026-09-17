@@ -819,7 +819,7 @@ question is not reopened from scratch in a month.
 
   | change | saves at 2M | `Object` after |
   |---|---|---|
-  | `rotation` 72 → 32 (quaternion; rotation in a placement already exists, #46) — **in `Object` only**, see below | 80 MB | 152 B |
+  | ~~`rotation` 72 → 32 (quaternion)~~ — **done**, `Object` only; measured 192 → 152 B | 80 MB | 152 B ✓ |
   | `material` 64 → a `uint16` index into a palette (the demo uses three) | 124 MB | 88 B |
   | `shape`, `source_node` → `uint32` | 16 MB | 80 B |
   | BVH bounds in `float`, rounded outward — a bound only has to be conservative | 96 MB | — |
@@ -833,6 +833,15 @@ question is not reopened from scratch in a month.
   The donut's worst object radius is 10.3 world units, so the worst vertex displacement is 1.8e-14 against a pixel of 5.4e-3: eleven orders below one. *The picture cannot shift.* The second story — that exact ties at a silhouette flip instead — is arithmetic too, and it does not survive it either. The band in which a tie could fall the other way is 3.3e-12 of a pixel wide; a 960×720 frame at four samples a pixel is 2.8 million rays, of which perhaps 5% land on a silhouette, so the expected number of flipped ties is about **5e-7**. Not "occasionally" — not once.
 
   So the honest prediction is the stronger one: **step two should be byte-identical as well.** If it is not, neither of those stories covers it and the cause is something else — so the response is not a third explanation but a count: how many pixels differ, and where. One on a silhouette is a coincidence to accept and close. A dozen scattered across the frame is systematic, and no displacement of 1e-14 accounts for it under any reading.
+
+  **Both steps came out byte-identical, including the second one** — the strengthened prediction held, and the picture did not move by a pixel even though every rotation now arrives through a quaternion.
+
+  Four preconditions were checked rather than assumed, and each could have made the result meaningless:
+
+  - **The renderer is deterministic.** Three runs of one binary, one hash. Without that, "one pixel differs" could not have been attributed to anything.
+  - **The comparison can fail.** Substituting an identity quaternion for one object in forty changes the hash. A byte-identical result from a comparison that cannot detect a difference is not a result.
+  - **The expansion stayed cold.** `to_world` runs per vertex and now takes the matrix as an argument; the quaternion is unpacked once per object, beside the instance that keeps it as a matrix. A caller writing `o.rotation_q.to_matrix()` inside the vertex loop would have spent the memory and bought nothing.
+  - **The object count is asserted separately from any picture.** A lost rotation makes instances coalesce, and a slightly denser cluster is not a visible defect — neither a hash nor a pixel diff distinguishes forty thousand instances from forty thousand with two on top of each other. The test checks counts, pairwise distinct positions, pairwise distinct orientations, and that none of them is the identity.
 
   So, two steps and two rules:
 
