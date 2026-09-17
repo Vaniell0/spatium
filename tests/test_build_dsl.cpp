@@ -930,12 +930,25 @@ TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
     auto cooked = bd::cook(tr, spun.index, 1.0);
     REQUIRE(cooked.object_count() == 512);
 
-    double worst = 0.0;
+    // Two quantities, and the second is the one that matters. A matrix
+    // element error is dimensionless; what actually moves is a vertex,
+    // and it moves by that error times the object's own world radius. A
+    // scene built at radius 10^3 has a thousand times the displacement
+    // for the same matrix error, and a test that only watched the matrix
+    // would call that unchanged.
+    double worst = 0.0, worst_shift = 0.0;
     for (const auto& o : cooked.objects()) {
         auto back = spatium::Quaternion<double>::from_matrix(o.rotation).to_matrix();
+        double err = 0.0;
         for (std::size_t i = 0; i < 3; ++i)
             for (std::size_t j = 0; j < 3; ++j)
-                worst = std::max(worst, std::abs(back(i, j) - o.rotation(i, j)));
+                err = std::max(err, std::abs(back(i, j) - o.rotation(i, j)));
+        worst = std::max(worst, err);
+
+        double rest = 0.0;
+        for (const auto& v : cooked.shapes()[o.shape].geometry.vertices)
+            rest = std::max(rest, V3{v}.norm());
+        worst_shift = std::max(worst_shift, err * rest * std::abs(o.scale));
 
         // Still a rotation afterwards: orthonormal columns, determinant
         // +1. A round trip that drifted off SO(3) would mirror or shear
@@ -945,6 +958,13 @@ TEST_CASE("A rotation survives a quaternion round trip to within a few ulp",
         CHECK_THAT(c0.norm(), WithinAbs(1.0, 1e-12));
         CHECK_THAT(c0.dot(c1), WithinAbs(0.0, 1e-12));
     }
-    INFO("worst element error " << worst);
-    CHECK(worst < 1e-13);      // measured ~1.7e-15; this is the alarm, not the value
+    // Both thresholds are alarms rather than values: each sits about two
+    // orders above what is measured, so a real degradation trips them
+    // while ordinary noise does not. A threshold set far above the
+    // measurement -- 1e-8, say -- would let the error grow by a factor of
+    // ten million and still pass, which is a test about catastrophes and
+    // not about drift.
+    INFO("worst element error " << worst << ", worst vertex shift " << worst_shift);
+    CHECK(worst < 1e-13);          // measured ~1.7e-15
+    CHECK(worst_shift < 1e-12);    // measured ~1e-16 here; the donut's worst object is 10.3 units
 }

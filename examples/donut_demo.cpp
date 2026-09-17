@@ -526,6 +526,18 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
         std::map<std::string, int> by_kind;
         for (auto i : cooked.refused_nodes())
             ++by_kind[bd::kind_name(trace.node(i).kind)];
+        // The worst-case world radius of any object, which is what a
+        // rotation's error actually gets multiplied by. A matrix error is
+        // dimensionless; a vertex displacement is not.
+        double worst_radius = 0.0;
+        for (const auto& o : cooked.objects()) {
+            double rest = 0.0;
+            for (const auto& v : cooked.shapes()[o.shape].geometry.vertices)
+                rest = std::max(rest, Vec<double, 3>{v}.norm());
+            worst_radius = std::max(worst_radius, rest * std::abs(o.scale) + o.translation.norm());
+        }
+        std::println("  worst object radius {:.3f} world units", worst_radius);
+
         std::print("  refused nodes:");
         for (const auto& [k, n] : by_kind) std::print(" {}x{}", n, k);
         std::println("");

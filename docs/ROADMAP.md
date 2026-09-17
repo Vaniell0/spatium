@@ -826,6 +826,15 @@ question is not reopened from scratch in a month.
   | `prim_indices_` `size_t` → `uint32` | 8 MB | — |
   | the BVH owning its shapes: hold indices into `Cooked` instead | 214 MB | — |
 
+  **How the rotation change is staged, decided before it starts.** The rotation is a matrix the whole way down — `scatter_frame` assembles columns from a basis, `rotated()` produces one through `SO3::exp`, their product is one — so a quaternion can only come from `from_matrix`, and the round trip is unavoidable. Measured over four thousand real objects: **zero bit-exact**, worst element 1.72e-15, about 8 ulp. A byte-identical frame after the matrix goes is therefore impossible rather than unlikely.
+
+  What that does *not* explain is any visible change. The donut's worst object radius is 10.3 world units, so the worst vertex displacement is 1.8e-14 against a pixel of 5.4e-3 — eleven orders below one. Pixels can still flip, but by exact ties at a silhouette landing inside 1e-14 of a boundary, not by anything moving. Worth separating, because "the picture shifted" and "a coin landed the other way" call for different investigations.
+
+  So, two steps and two rules:
+
+  - **Step one: store both, and the matrix stays authoritative.** The renderer reads the matrix; the quaternion is carried and compared. A byte-identical hash then means something, because the thing being drawn has not changed — it tests the plumbing and nothing else. Two sources of truth for one rotation is otherwise exactly how they drift apart in silence.
+  - **Step two: remove the matrix and introduce the pixel-tolerance comparison in the same change.** Splitting them leaves a window where the matrix still exists but the renderer already reads the quaternion and nothing checks the difference. The tolerance is what makes the removal safe; without it the removal is blind.
+
   **`Instanced<S>` is excluded from that list on purpose**, and `docs/conventions.md` carries the principle: compaction belongs to cold storage, and the hot path keeps whatever computes fastest. `Object`'s rotation is read once a frame; `Instanced`'s is applied at every leaf test the traversal reaches, and a quaternion costs more arithmetic to apply than a matrix. Same saving, traversal untouched.
 
   The trigger for revisiting it, written down instead of guessed: two million `Instanced` at 112 bytes is 214 MB that traversal walks and no cache holds. *If* traversal at that scale measures as memory-bound, the options are splitting the array — positions apart from rotations, so a ray touches only what it needs — or shrinking the element after all. Against a measurement showing the stall, not before it.
