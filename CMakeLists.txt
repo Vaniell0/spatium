@@ -451,14 +451,14 @@ endif()
 # consumer pulling in Spatium::sdk needs built.
 #
 # Also requires SPATIUM_BOOST: RSC's founding dispatch domain is
-# "f64 vs. Real50 on casus-irreducibilis cubics" (rsc/precision_ops.hpp
+# "f64 vs. Real50 on casus-irreducibilis cubics" (rsc/include/precision_ops.hpp
 # calls solve_cubic<Real50> directly), so without Boost.Multiprecision
 # there is no domain to train, not merely a compile error to patch around.
 option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_RSC_TOOLS AND NOT SPATIUM_BOOST)
     message(STATUS
         "Spatium: RSC tools SKIPPED -- they need arbitrary precision "
-        "(rsc/precision_ops.hpp uses Real50). Re-run with -DSPATIUM_BOOST=ON.")
+        "(rsc/include/precision_ops.hpp uses Real50). Re-run with -DSPATIUM_BOOST=ON.")
 elseif(SPATIUM_BUILD_RSC_TOOLS)
     add_subdirectory(rsc/tools)
 endif()
