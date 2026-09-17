@@ -632,3 +632,91 @@ TEST_CASE("cook() puts a scattered item exactly where materialize_mesh draws it"
         }
     }
 }
+
+TEST_CASE("cook() hands back geometry a renderer can actually use for a deformation",
+          "[build_dsl]") {
+    // The regression this fix exists for. cook() used to store the *rest*
+    // geometry for a refused (deforming) object and no transform capable
+    // of expressing its motion -- because no such transform exists, which
+    // is what makes it a deformation. A renderer driven by Cooked alone
+    // would therefore have drawn the donut demo's exploding cube
+    // unexploded, and nothing noticed for as long as nothing consumed a
+    // cooked scene.
+    //
+    // So for a refused object the stored geometry is the *placed* one,
+    // and the test is that it actually moved.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+
+    // Reads the point in a way no placement can express: each vertex is
+    // pushed along its own direction, so the shape genuinely changes.
+    auto burst = scene.cube({1.0, 1.0, 1.0}).moving([](const V3& p, double time) {
+        return V3{p + V3{p * (time * 0.5)}};
+    });
+
+    auto cooked = bd::cook(scene, burst.index, 2.0);
+    REQUIRE(cooked.object_count() == 1);
+    REQUIRE_FALSE(cooked.objects()[0].instanceable);
+    CHECK(cooked.opaque_refused() == 1);
+
+    const auto& geometry = cooked.shapes()[cooked.objects()[0].shape].geometry;
+    const auto& obj = cooked.objects()[0];
+
+    // At t = 2 every vertex is twice as far out as at rest. A corner of
+    // the unit cube sits at |(1,1,1)| = sqrt(3); doubled, 2*sqrt(3).
+    double farthest = 0.0;
+    for (const auto& v : geometry.vertices) {
+        V3 world{obj.rotation * V3{v * obj.scale} + obj.translation};
+        farthest = std::max(farthest, world.norm());
+    }
+    CHECK_THAT(farthest, WithinAbs(2.0 * std::sqrt(3.0), 1e-9));
+
+    // And the rest shape really is smaller, so the check above could fail.
+    auto rest = bd::cook(scene, burst.index, 0.0);
+    double rest_farthest = 0.0;
+    for (const auto& v : rest.shapes()[0].geometry.vertices)
+        rest_farthest = std::max(rest_farthest, V3{v}.norm());
+    CHECK_THAT(rest_farthest, WithinAbs(std::sqrt(3.0), 1e-9));
+}
+
+TEST_CASE("cook() resolves colour and emission per object, not per node",
+          "[build_dsl]") {
+    // cook() used to copy the node's raw Material and never evaluate
+    // color_fn or emissive_fn at all, so a renderer reading a cooked scene
+    // would have lost every per-particle colour and the whole glow on the
+    // donut's letterforms -- silently, since a default Material is a
+    // perfectly plausible grey.
+    //
+    // Scattered objects are the case that matters: they share one node and
+    // must still differ, because the field is evaluated where each one
+    // ended up.
+    using V3 = spatium::Vec<double, 3>;
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 1.0);
+    auto speck = scene.cube({0.02, 0.02, 0.02});
+
+    // Colour from height, so two objects at different heights differ.
+    auto by_height = bd::PointField<double>{
+        [](const V3& p, double) { return V3{0.5 + 0.5 * p[2], 0.0, 0.0}; }};
+    auto glow = bd::PointField<double>{
+        [](const V3& p, double) { return V3{0.0, p[2] > 0.0 ? 1.0 : 0.0, 0.0}; }};
+
+    auto sprinkled = scene.scatter(speck, dough, 24, 7)
+                         .colored(std::move(by_height))
+                         .glowing(std::move(glow));
+
+    auto cooked = bd::cook(scene, sprinkled.index, 0.0);
+    REQUIRE(cooked.object_count() == 24);
+
+    bool any_different = false;
+    bool any_glowing = false, any_dark = false;
+    for (const auto& o : cooked.objects()) {
+        if (std::abs(o.material.base_color[0] - cooked.objects()[0].material.base_color[0]) > 1e-9)
+            any_different = true;
+        if (o.material.emissive[1] > 0.5) any_glowing = true;
+        else any_dark = true;
+    }
+    CHECK(any_different);   // the colour field was evaluated, and per object
+    CHECK(any_glowing);     // so was the emission field
+    CHECK(any_dark);        // and it distinguishes objects, rather than being constant
+}

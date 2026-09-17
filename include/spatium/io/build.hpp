@@ -917,19 +917,31 @@ std::optional<ParametricSurface<T>> Placed<T>::surface() const {
         base.domain(), base.periodic_u(), base.periodic_v());
 }
 
+// A node's material, with its colour and emission fields evaluated at one
+// representative point.
+//
+// A free function rather than a method because there are two callers that
+// must not disagree: `Placed::material()`, which answers for a whole node,
+// and `cook()`, which answers per object. They differ only in *which*
+// point is representative -- a node's placed centroid, or one instance's
+// -- and keeping the rest in one place is what stops that difference from
+// quietly growing into two different materials.
+template<Scalar T>
+Material<T> resolve_material(const TraceNode<T>& n, const Vec<T, 3>& at, T t) {
+    Material<T> mat = n.material;
+    if (n.color_fn)    mat.base_color = n.color_fn(at, t);
+    if (n.emissive_fn) mat.emissive   = n.emissive_fn(at, t);
+    return mat;
+}
+
 template<Scalar T>
 Material<T> Placed<T>::material() const {
     const auto& n = trace->node(index);
-    Material<T> mat = n.material;
-    // One centroid, not two: mesh() rebuilds on every call, so asking it
-    // twice would tessellate the node twice to answer one question about
-    // where it is.
-    if (n.color_fn || n.emissive_fn) {
-        auto at = mesh().centroid();
-        if (n.color_fn) mat.base_color = n.color_fn(at, t);
-        if (n.emissive_fn) mat.emissive = n.emissive_fn(at, t);
-    }
-    return mat;
+    // The early out is not a micro-optimisation: mesh() rebuilds on every
+    // call, so a node with no fields would otherwise tessellate itself to
+    // answer a question whose answer does not depend on the geometry.
+    if (!n.color_fn && !n.emissive_fn) return n.material;
+    return resolve_material(n, Vec<T, 3>{mesh().centroid()}, t);
 }
 
 // Walks a Compose node into its leaves. Each leaf comes back as a view
@@ -1237,6 +1249,58 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             placements.push_back(Spot{});
         }
 
+        // A renderer can instance this object -- draw one geometry many
+        // times, each with its own transform -- exactly when the node's
+        // motion is a *placement*: affine in the point, so it moves the
+        // object without reshaping it.
+        //
+        // Note what the test is not. It is not "is the motion structural".
+        // The donut's dust is Perlin noise and will always be opaque, yet
+        // it is a placement, because the noise decides *where the particle
+        // is* and never reads the vertex. Opacity and point-dependence are
+        // different questions, and only the second one costs anything:
+        // a term that ignores the point is evaluated once per object, a
+        // term that reads it once per vertex.
+        const bool placeable = n.transform.is_placement();
+
+        // ── The refused path, which used to hand back unusable geometry ──
+        //
+        // A deformation cannot be decomposed into per-instance transforms
+        // -- that is what makes it a deformation -- so there is nothing to
+        // instance and nothing to share. The geometry *is* the answer, and
+        // it has to be the **placed** geometry: storing the rest shape here
+        // left a consumer with a mesh and no way to recover the motion that
+        // moved it, which would have drawn the donut demo's exploding cube
+        // unexploded. Nothing noticed for as long as nothing consumed a
+        // cooked scene.
+        //
+        // No deduplication either, and that is not a shortcut: a placed
+        // shape is unique by construction, which the comment on the shared
+        // path below has always said. Hashing it would find no matches and
+        // cost a full pass over the vertices to find none.
+        //
+        // And one object, not N: a refused `Scatter` is a single merged
+        // mesh, exactly the answer `materialize()` gives for it. The
+        // refusal *count* still adds the instances, because the number
+        // answers "how much sharing was lost", which is a question about
+        // instances rather than about objects.
+        if (!placeable) {
+            const std::size_t shape_index = out.shapes_.size();
+            auto placed_mesh = materialize_mesh(trace, idx, t, /*placed=*/true);
+            auto at = placed_mesh.centroid();
+            out.shapes_.push_back(Shape<T>{std::move(placed_mesh), 1, std::any{}});
+            out.objects_.push_back(Object<T>{.shape = shape_index,
+                                             .source_node = idx,
+                                             .translation = carried,
+                                             .scale = T{1},
+                                             .rotation = Matrix<T, 3, 3>::identity(),
+                                             .instanceable = false,
+                                             .material = resolve_material(n, at, t)});
+            out.refused_ += placements.size();
+            out.refused_nodes_.push_back(idx);
+            return;
+        }
+
         const auto key = content_hash(trace, geometry_node);
         auto it = shape_of_key.find(key);
         std::size_t shape_index;
@@ -1252,22 +1316,9 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         } else {
             shape_index = it->second;
         }
+        const auto rest_centroid = Vec<T, 3>{out.shapes_[shape_index].geometry.centroid()};
 
-        // A renderer can instance this object -- draw one geometry many
-        // times, each with its own transform -- exactly when the node's
-        // motion is a *placement*: affine in the point, so it moves the
-        // object without reshaping it.
-        //
-        // Note what the test is not. It is not "is the motion structural".
-        // The donut's dust is Perlin noise and will always be opaque, yet
-        // it is a placement, because the noise decides *where the particle
-        // is* and never reads the vertex. Opacity and point-dependence are
-        // different questions, and only the second one costs anything:
-        // a term that ignores the point is evaluated once per object, a
-        // term that reads it once per vertex.
-        const bool placeable = n.transform.is_placement();
-        typename VecField<T>::Placement pl{};
-        if (placeable) pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
+        const auto pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t});
 
         // Composing the two transforms, written out because getting the
         // order wrong is silent. A vertex `v` of the rest item becomes
@@ -1282,21 +1333,23 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         // nothing consumed the cooked scene and every scattering scene so
         // far had scale 1.
         for (const auto& p : placements) {
-            out.objects_.push_back(Object<T>{
-                .shape = shape_index,
-                .source_node = idx,
-                .translation = Vec<T, 3>{carried + pl.translation +
-                                         pl.rotation * Vec<T, 3>{p.position * pl.scale}},
-                .scale = pl.scale,
-                .rotation = pl.rotation * p.frame,
-                .instanceable = placeable,
-                .material = n.material});
+            Object<T> o{.shape = shape_index,
+                        .source_node = idx,
+                        .translation = Vec<T, 3>{carried + pl.translation +
+                                                 pl.rotation * Vec<T, 3>{p.position * pl.scale}},
+                        .scale = pl.scale,
+                        .rotation = pl.rotation * p.frame,
+                        .instanceable = true,
+                        .material = {}};
+            // Resolved where this object actually ends up, and computed
+            // from the rest centroid rather than by building the placed
+            // mesh -- which is the same point, and is the point
+            // `Placed::material()` uses, so the two paths cannot answer
+            // differently.
+            o.material = resolve_material(
+                n, Vec<T, 3>{o.rotation * Vec<T, 3>{rest_centroid * o.scale} + o.translation}, t);
+            out.objects_.push_back(std::move(o));
             ++out.shapes_[shape_index].instances;
-        }
-
-        if (!placeable) {
-            out.refused_ += placements.size();
-            out.refused_nodes_.push_back(idx);
         }
     };
 
