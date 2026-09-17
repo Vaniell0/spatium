@@ -689,6 +689,17 @@ question is not reopened from scratch in a month.
 - **[course]** Vulkan live display — CPU raytraces (`donut_demo.cpp`'s `--photo` engine, extended), a small new Vulkan path just presents the frame (swapchain + one texture, uploaded and blitted every frame), not `viewer::App`'s mesh/point-cloud rasterizer. Real new plumbing (no sampled-texture descriptor/pipeline exists today), deliberately deferred rather than landed blind against a deadline.
 - **[want]** Texture/UV mapping — `io::Material` currently has only `base_color`/`roughness`, no texture at all. Flagged back on 2026-09-07 alongside conform-to-surface (now shipped as `offset_surface`) as one of two primitives needed before the DSL; still open.
 
+- **[course]** **`scatter_frame` builds its frame from one normal, and orienting *along* a surface needs a full one.** Found 2026-09-17, by checking a claim rather than by hitting a bug: the plan said the donut's sprinkles would instance for free once the renderer read a cooked scene, since `cylinder()` records a `BoundedQuadric`. They did not, because the demo does not use `cylinder()` — the sprinkle is a `literal()` of a hand-built mesh whose axes have been permuted so its length points sideways.
+
+  That permutation is the finding. A frame derived from a normal is enough for anything that points *along* the normal, or that has no orientation worth speaking of. A sprinkle lies *across* the surface, and there is no way to say so: `scatter()` binds the item's local z to the normal and offers no alternative, so the only remaining move is to rotate the mesh by hand — which a closed form cannot follow, since the exact `BoundedQuadric` is a cylinder about z and stays one. Hence `Literal`, hence no instancing.
+
+  Two distinct gaps sit under that, worth separating because they block different things:
+
+  - **The in-plane directions are arbitrary.** `basis_from_normal` (Duff et al. 2017) picks *some* pair perpendicular to the normal, and `scatter_frame` then turns it by a hash of the site index. Perfect for sprinkles, which really do lie every which way. Useless for anything that should follow the surface itself — hair along a curvature direction, scales along a flow, tiles along a parametrization.
+  - **The axis binding is fixed.** Local z goes to the normal, always. This is the one the sprinkle is blocked by, and it is the cheaper of the two.
+
+  Until a full frame exists — normal, tangent, bitangent, with the tangent meaning something — scattered items that must lie along a surface stay `Literal` meshes and cannot be instanced. The ceiling that puts on the donut demo is concrete and measured: 11 000 sprinkles are 429 848 triangles that a closed form would have made 11 000 instances of one shape.
+
 - ~~**[want]** Scattered items lying fully flush to the target surface, not slightly proud of it~~ — **done 2026-09-17**, and the cause was not the one this entry assumed. They were not proud because of a tangent-plane approximation; they were proud because `offset()` silently rendered at 48×24 instead of the tessellation it was asked for, and a coarse mesh of a convex surface sits *below* the analytic surface that `scatter()` places against. The gap was lifting every item into view by accident. `scatter_lift()` now raises an item by the depth of its own geometry below its local origin, and `scatter()`'s new `seat` parameter says how deep it sits — 1 rests it on the surface, 0 puts its origin there, between is a press into something soft. Note the trap that made a named parameter necessary: since the lift is derived from the item's own lowest point, shifting the item's mesh down by *d* lowers `min_z` by *d* and raises the lift by *d*, so the two cancel exactly and the nudge does nothing. The donut demo had exactly such a nudge, with a comment explaining what it was for, and it had silently stopped working.
 
 - **[course]** **Per-instance parameters: `MotionEnv` gains the instance's own origin.** The blocking step for two million particles, analysed 2026-09-17, and the analysis is the valuable part because the obvious answer is the wrong one.
@@ -704,6 +715,19 @@ question is not reopened from scratch in a month.
   **A `Scatter` node has one motion field for all its instances.** For particles to fly differently the field must tell them apart, and the only thing it can tell them apart by today is `p`, the vertex position — which sets `reads_point`, makes the motion a deformation, and makes instancing refuse. Correctly: that test is doing its job. Per-instance variation smuggled through the vertex position is exactly what it exists to catch.
 
   The fix is the one `io/field.hpp` already wrote down the reason for — *"tomorrow a field is added to this struct and nothing else moves"*. `MotionEnv` gains the instance's **origin**, its rest position. A field reading `env.origin` stays a placement, because an origin is one value per object rather than one per vertex, so the affine test still holds and the instance path still applies. The dust then becomes a single node with N instances, each on its own trajectory.
+
+  **A second reason, found 2026-09-17 while trying to avoid needing this at all.** The plan had a cheaper intermediate step: a purely *radial* burst needs no per-instance parameters, because `A(t) + p·s(t)` is affine in the point and each particle's trajectory falls out of its own site position. The instancing half of that is true — `is_placement()` returns true and the objects collapse onto one node. The animation half is not.
+
+  A placement is `p ↦ b + R·s·p` applied to every vertex, and a scattered instance's vertex is `seat + F·local`. So:
+
+  ```
+  particle centre = b + R·s·seat     grows with s
+  particle radius = s·|local|        grows with s, the same s
+  ```
+
+  One scalar drives both. Expanding the cloud tenfold inflates every fleck tenfold: not a burst, an inflating balloon. They cannot be separated, because `seat` and `local` reach the field already summed into one point — and separating them is exactly what an instance origin is.
+
+  So `MotionEnv::origin` is not only what swirl and letterform convergence need. It is what a *plain radial burst at constant particle size* needs, which removes the cheaper intermediate step from the table: building it would mean building something thrown away one step later.
 
   Scope, so this is not mistaken for a parameter change: `MotionEnv`, a new leaf factory in `VecField` alongside `opaque_of_time`, `is_placement`/`affine_in_point`, `cook()`, `materialize_mesh()`, `Shape::exact`, and the renderer moving from `materialize()` to `cook()`. That last one uncovers a further gap — `cook()` hands back *rest* geometry for a refused (deforming) object with no way to recover its motion, so a renderer driven by `Cooked` alone would draw the exploding cube unexploded. Cost at two million, measured by extrapolation rather than guessed: roughly 350 MB for instances plus tree, about 2 s of BVH build per frame, and a frame in the ten-to-fifteen second range. Fine for a still, three hours for a 750-frame sequence.
 
