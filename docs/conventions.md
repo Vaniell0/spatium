@@ -244,6 +244,39 @@ and one that cannot.
 This is the third instance of the "say which half" family, and the
 sharpest, because the other two were incomplete rather than false.
 
+### A small number with a plausible story stops being checked
+
+Named 2026-09-17, after the same nine survived three separate readings
+with the same wrong explanation attached.
+
+`ROADMAP.md` said the donut reported nine deformations and that they were
+"the exploding cube's fragments, which genuinely deform". The nine were
+six scatter nodes, two offsets and one literal — every one refused over
+how its motion was spelled, and the cube has no fragments at all. The
+sentence was read, quoted and built upon three times without anyone
+recomputing it, including by the person who wrote it.
+
+Two properties together did that, and neither alone would have:
+
+- **The number is small enough to feel accounted for.** Nine invites a
+  glance rather than a count. A thousand would have been re-derived,
+  because nobody believes a thousand of anything without checking.
+- **The story is plausible enough to close the question.** "Fragments of
+  an exploding cube genuinely deform" is exactly what a deformation
+  sounds like. A reader who knows what the words mean has no reason to
+  look further, and a *correct* number sitting next to it lends it
+  credibility it did not earn.
+
+So the rule is narrow and mechanical: **when a small count comes with an
+explanation, print the breakdown, not the total.** The corrected entry
+does — the demo emits `1xLiteral 2xOffset 18xScatter` and the claim is
+now whatever that line says. A breakdown cannot carry a wrong story,
+because the story is the breakdown.
+
+Sits next to "a *why* rots faster than a *what*" above: that one is about
+reasons going unchecked over time, this one is about a reason never being
+checked at all, because the number beside it looked settled.
+
 ### The variant where the value is honest and the *name* is not
 
 Found 2026-09-17, and it belongs to this section by its consequence

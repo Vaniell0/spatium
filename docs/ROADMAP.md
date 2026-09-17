@@ -736,6 +736,27 @@ question is not reopened from scratch in a month.
 
 - **[want]** **Does collapsing the dust into one node remove `content_hash`'s O(vertices) cost?** Deferred, and recorded so it is not lost rather than answered from a guess. `content_hash` keys a `Literal` on its mesh content, which is the expensive case — roughly 158 000 vertices hashed across the donut's dust — and the entry for it already says this is the first line to look at if cooking ever runs per frame. One `Scatter` of one flake would hash the item once and be done. The dust is *not* collapsed yet (that waits on `MotionEnv::origin`), so there is nothing to measure and the question has no answer today. Measure it at the collapse, against a before figure taken in the same configuration.
 
+- **[course]** **An exact form that does not agree with its own chart, created that way by the factory.** `docs/api-reference.md` already states the invariant — *"the exact form must agree with the map, so any operation that can move them apart clears it"* — and `.moving()` honours it. A factory can violate it at the moment of creation, and one does.
+
+  | factory | exact form | chart it is recorded beside | agree |
+  |---|---|---|---|
+  | `torus(R, r)` | `Torus{R, r}` | `make_torus` | yes |
+  | `cylinder(r, h)` | `BoundedQuadric::cylinder_z(r, 0, h)` | `make_cylinder` — lateral surface, no caps | yes |
+  | `sphere(r)` | `BoundedQuadric::sphere(r)` | `chart_of(Sphere<2,T>)` | yes |
+  | `flake(half, bulge)` | a sphere clipped to `Box{-half, half}` | a spherical cap out to `v_max`, derived from `rim = min(hx, hy)` | **no** |
+
+  `flake`'s chart is the disc *inscribed* in the clip box; the exact form keeps the box's corners. For the donut's `flake({0.010, 0.010, 0.003})` the square's corner reaches 0.0141 against the disc's 0.010 — so the exact form is a rounded square and the tessellation is a circle. The exact form covers **more**, which is the opposite direction from the guess that prompted this entry.
+
+  Three ways out, and the choice should be made rather than inherited:
+
+  - **Make the chart match the clip.** Correct, and the most work: the box boundary is not a `v` isoline, so the cap can no longer be tessellated as a rectangle in `(u, v)`.
+  - **Make the clip match the chart.** `BoundedQuadric` clips to a `Box` only, so this means a box whose half-width is `rim` in x and y — which changes what `flake` means for a non-square `half`.
+  - **Accept it, in writing.** A dust speck is two pixels and the difference is invisible. That is a real answer for this scene and it must be *stated*, because the whole point of recording an exact form is that a renderer may choose it over the mesh, and it should not be choosing a different shape without being told.
+
+  The reason this is worth an entry rather than a fix-in-place: the invariant exists, is documented, and is enforced on the one operation that was thought to threaten it. Nothing checks it where the two are first written down together — which is also where it is cheapest to check, since both are right there.
+
+  **Withdrawn along the way:** the claim that this class was demonstrated by `cylinder()` losing its end caps. It is not. `make_cylinder` is the lateral surface with no caps and `BoundedQuadric::cylinder_z` matches it exactly. The donut's sprinkles became open tubes because the demo swapped its own capped `solid_cylinder` helper for `scene.cylinder()`, which is a different *shape*, not a different *representation* of the same one.
+
 - **[course]** **`scatter_frame` builds its frame from one normal, and orienting *along* a surface needs a full one.** Found 2026-09-17, by checking a claim rather than by hitting a bug: the plan said the donut's sprinkles would instance for free once the renderer read a cooked scene, since `cylinder()` records a `BoundedQuadric`. They did not, because the demo does not use `cylinder()` — the sprinkle is a `literal()` of a hand-built mesh whose axes have been permuted so its length points sideways.
 
   That permutation is the finding. A frame derived from a normal is enough for anything that points *along* the normal, or that has no orientation worth speaking of. A sprinkle lies *across* the surface, and there is no way to say so: `scatter()` binds the item's local z to the normal and offers no alternative, so the only remaining move is to rotate the mesh by hand — which a closed form cannot follow, since the exact `BoundedQuadric` is a cylinder about z and stays one. Hence `Literal`, hence no instancing.
@@ -775,6 +796,8 @@ question is not reopened from scratch in a month.
   One scalar drives both. Expanding the cloud tenfold inflates every fleck tenfold: not a burst, an inflating balloon. They cannot be separated, because `seat` and `local` reach the field already summed into one point — and separating them is exactly what an instance origin is.
 
   So `MotionEnv::origin` is not only what swirl and letterform convergence need. It is what a *plain radial burst at constant particle size* needs, which removes the cheaper intermediate step from the table: building it would mean building something thrown away one step later.
+
+  **A prediction, registered before the measurement rather than after.** Stage 1 gave 36.4× on stored vertices and 11% off the frame, and the gap between those two is itself explained: traversal is logarithmic, and `log(46 000)` against `log(429 000)` is almost nothing. So at two million the expectation is **7–10× on storage and 10–15% on the frame** — storage *falls* because one node's worth of geometry is amortised over vastly more instances while the instance array itself grows, and the frame moves little for the same logarithmic reason. Written down here so that a frame growing by more than that is a signal to look for a cause rather than a number to accept.
 
   Scope, so this is not mistaken for a parameter change: `MotionEnv`, a new leaf factory in `VecField` alongside `opaque_of_time`, `is_placement`/`affine_in_point`, `cook()`, `materialize_mesh()`, `Shape::exact`, and the renderer moving from `materialize()` to `cook()`. That last one uncovers a further gap — `cook()` hands back *rest* geometry for a refused (deforming) object with no way to recover its motion, so a renderer driven by `Cooked` alone would draw the exploding cube unexploded. Cost at two million, measured by extrapolation rather than guessed: roughly 350 MB for instances plus tree, about 2 s of BVH build per frame, and a frame in the ten-to-fifteen second range. Fine for a still, three hours for a 750-frame sequence.
 
