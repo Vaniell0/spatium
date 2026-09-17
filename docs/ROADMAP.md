@@ -299,6 +299,37 @@ Each item carries a tag for *intent*, not difficulty or sequencing — Spatium's
 
 A PR against any tag here is welcome. So is a PR against nothing here — if you build something we didn't list, that's a real step toward Spatium becoming a standard in its own right, not a detour from this list.
 
+## What is actually live — the index
+
+The rest of this Backlog is long and stays long: the reasoning is worth more than the list, and an item's entry is usually an argument rather than a ticket. But an argument is not an entry point, and until 2026-09-17 there was none — finding "what is being worked on, what is half-done, what was dropped and why" meant reading a thousand lines, and the answer was split across this file, a task list and a plan file, two of which are not in the repository at all.
+
+So: the items we are actually steering by, with their state. Everything below this table is still real; it is simply not what anyone is doing right now.
+
+| Item | State | What would unblock it | Where |
+|---|---|---|---|
+| Renderer consuming `cook()` | **in flight** | — | Declarative scene DSL |
+| Per-instance parameters (`MotionEnv::origin`) | **next** | the row above | Declarative scene DSL |
+| One object deforming another | parked | an index over the `(u,v)` domain — and a decision about the cycle it introduces, below | Object model as manifold substrate |
+| `ball_pit_demo` cleanup | parked | nothing; it is just work | Object model as manifold substrate |
+| Offset self-intersection, in the library | parked | nothing; a thickness check against the base's minimum radius of curvature | Analytical rendering |
+| Full `EdgeRule` (`RoundCap`, `FlatCap`, `ExtendTo`) | parked | nothing | Declarative scene DSL |
+| C ABI for the DSL (CUDA / WASM / JS) | parked | **the field work, not RSC** — a scene exports only as far as its fields are structural, and the donut measures 39 612 opaque leaves of 39 631 | GPU rendering |
+| Rewrite `docs/gpu-abi-design.md` | parked | nothing; its centre of gravity moved and it needs rewriting, not patching | GPU rendering |
+| RSC as search | parked | the ABI, by our own ordering | RSC as search |
+| Ball tree on a manifold | parked | nothing. Note the dependency runs *backwards* from how it reads: the tree is what gives RSC a second method to choose between | Interop / ecosystem |
+| Vulkan live display | parked | traversal getting cheaper — a four-second frame makes a live window a slideshow | Declarative scene DSL |
+| Sound from geometry | parked | sparse linear algebra, of which there is not a line in the tree | Sound synthesis |
+| Time as a property of the space | parked | a scene where the difference is visible | Declarative scene DSL |
+| A rainbow, then interference | parked | the sound work; they share the machinery | Analytical rendering |
+
+### Two rules this table exists to enforce
+
+**An item shipped in half says which half in its first line.** Not its third paragraph. This is not style: "no renderer consumes any of it" sat stale for a full day inside an item marked done, and was then quoted back as the current state by the person who wrote it.
+
+**An abandoned item is struck through *with the reason*.** The convention already exists here — see the scattered-items entry under Object model — and simply was not applied everywhere. An item that vanishes silently is indistinguishable from one nobody got to.
+
+Both rules exist because a claim decays in three different places with three different mechanisms, and none of them is visible from the other two: a comment citing a line number rots when the line moves, a ROADMAP sentence rots when the code catches up with it, and a task in an external tracker rots by being invisible. Three scripts in CI catch the first kind. Nothing catches the second, which is what these rules are for.
+
 ## Mesh processing
 
 - **[course]** Mesh simplification (edge collapse + QEM)
@@ -677,6 +708,14 @@ question is not reopened from scratch in a month.
   Scope, so this is not mistaken for a parameter change: `MotionEnv`, a new leaf factory in `VecField` alongside `opaque_of_time`, `is_placement`/`affine_in_point`, `cook()`, `materialize_mesh()`, `Shape::exact`, and the renderer moving from `materialize()` to `cook()`. That last one uncovers a further gap — `cook()` hands back *rest* geometry for a refused (deforming) object with no way to recover its motion, so a renderer driven by `Cooked` alone would draw the exploding cube unexploded. Cost at two million, measured by extrapolation rather than guessed: roughly 350 MB for instances plus tree, about 2 s of BVH build per frame, and a frame in the ten-to-fifteen second range. Fine for a still, three hours for a 750-frame sequence.
 
 - **[course]** **One object deforming another.** Raised 2026-09-17, from wanting sprinkles to press visibly into liquid icing rather than merely sitting in it. Today a field is a function of `(u, v)` or of a `MotionEnv`, and it cannot see anything else in the scene — so "the glaze closes around each sprinkle" is not expressible, and neither is a footprint, a dent, a contact weld, or a drip running off a placed object. The concrete first case is narrow enough to build: `scatter()` knows its sites and does not expose them, so the target's own thickness field could read them. The cost is what makes it a real item rather than a tuning change — the naive form is a sum over every site per surface sample, 600 × 10 240 on today's donut and around 50 million at the sprinkle counts this scene now uses, so it needs a grid or similar index over the `(u, v)` domain before it is usable at all. Worth naming as the general capability rather than as "dimples": the same mechanism is what a scene needs before objects can be said to interact at all, and it is the one the demo keeps reaching for. Deliberately deferred past the first release.
+
+  **What it breaks, which is not what it looks like it breaks.** Raised 2026-09-17 as a worry that this item ends the "`materialize(trace, t)` is a pure function of `t`" property — and therefore time scrubbing, which falls out of that purity for free. Worth being exact, because the worry is right about there being a cost and wrong about where:
+
+  *Purity survives the dimple.* A scatter's sites are a pure function of (target surface, count, seed) with no history in them, so a thickness field reading those sites is still a pure function of `t`. Rewinding keeps working.
+
+  *What the dimple actually breaks is acyclicity.* The icing's shape would depend on where the sprinkles are, and where the sprinkles are depends on the icing's shape — a cycle in a structure that is a DAG **by construction**, since a node can only name indices that already exist. The resolution is to scatter against the *undented* surface and apply the dent afterwards: one truncated iteration of a fixed point, which is what a solver would do anyway. That has to be stated here rather than discovered, because the alternative reading — make it self-consistent — has no answer, and someone will spend a day finding that out.
+
+  *Purity dies one step later, at the thing anyone asks for next:* a mark that stays. A footprint, a dent that does not spring back, glaze that remembers. That is accumulation over history rather than a function of the current configuration, and it is where rewind genuinely stops — not here. Two different failure modes, one step apart, and only the second one is fatal to the property.
 
 - **[want]** Removing the self-intersection an offset surface produces when its thickness exceeds the local radius of curvature. Seen in the donut's icing as pink fins around the hole, where the drip field pushed glaze down the inner wall of the torus and the offset overran its own centre of curvature. The demo's fix is to stop drips at the inner rim, which is correct for glaze — it runs off the outside, it does not climb into the middle — and is a scene decision, not a library one. The library answer is either a validity check (`offset_shell` refusing, or clamping, a thickness above the base's minimum radius of curvature, which `ParametricSurface` has the derivatives to compute) or self-intersection removal on the resulting mesh. The first is cheap and catches the case at the call that makes it; the second is a general mesh operation this tree does not have.
 - ~~Per-instance orientation variance in `scatter()`~~ — **done**, and this entry was stale from the day it was written: `build.hpp`'s scatter branch already gives each instance its own spin about the normal, hashed from `(seed, site index)` so the same trace at the same `t` reproduces exactly. Kept here struck through rather than deleted, because it was listed as open for a week while the code was already in the tree, which is the failure worth remembering.
