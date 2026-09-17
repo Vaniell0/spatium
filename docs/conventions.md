@@ -244,6 +244,32 @@ and one that cannot.
 This is the third instance of the "say which half" family, and the
 sharpest, because the other two were incomplete rather than false.
 
+### A `make_*` factory's box is the clip region, not a bound on the result
+
+One line, because the next person to write a factory will otherwise
+assume the size they passed in is the size they get.
+
+`BoundedQuadric`'s box is where the surface is **cut**, not a promise
+about what the cut leaves behind. Those coincide for a sphere or a
+truncated cylinder, and they did not for `flake`, whose box was the slab
+the caller asked for while the surface inside it was a smaller cap. A
+box wider than its own surface is not a harmless overestimate: it made
+the exact form and the chart beside it describe different sets, and the
+renderer that picked the exact form drew a shape the tessellation did
+not have.
+
+So a factory's job is to return the tightest box that still cuts where it
+means to cut. `flake` now derives its box from the cap it actually
+produces rather than from the caller's request — which means the caller's
+`half` is an upper bound on the flake, not its size. That is the correct
+reading of a clip and it needed saying out loud.
+
+**Three of four factories already did this correctly.** `torus`,
+`cylinder` and `sphere` agree with their charts to the bit; `flake` was
+the single exception. Worth recording so that nobody goes looking for a
+systemic cause: the clip logic is sound, and one factory was written
+against a different idea of what its box meant.
+
 ### A small number with a plausible story stops being checked
 
 Named 2026-09-17, after the same nine survived three separate readings
