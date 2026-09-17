@@ -333,6 +333,29 @@ std::pair<Vec<T, 3>, Vec<T, 3>> basis_from_normal(const Vec<T, 3>& n) {
 // The columns are {r1, r2, normal}, so `frame * v` maps an item's local
 // (x, y, z) onto (in-plane, in-plane, along the normal) exactly as
 // scattering means it.
+// How far a scattered item has to rise along the site normal so that it
+// rests ON the surface instead of halfway inside it: the depth of its own
+// geometry below its local origin.
+//
+// This was never decided; it was inherited from a bug. `offset()` used to
+// ignore its base's tessellation and render at 48x24, and a coarse mesh
+// of a convex surface sits *below* the analytic surface it approximates,
+// which lifted every item placed on that analytic surface into view by
+// accident. Making offset() honour the request removed the accident and
+// the sprinkles sank into the icing -- the same picture the ROADMAP entry
+// about items "lying fully flush, not slightly proud" describes from the
+// other side. Either way the answer is to place them deliberately.
+//
+// Computed from the item's own rest geometry rather than taken as a
+// parameter: the caller already said how big the item is by building it,
+// and asking twice is how the two answers drift apart.
+template<Scalar T>
+T scatter_lift(const mesh::Mesh<Euclidean<3, T>>& item) {
+    T lowest{};
+    for (const auto& v : item.vertices) lowest = std::min(lowest, v[2]);
+    return -lowest;
+}
+
 template<Scalar T>
 Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
                               std::size_t index) {
@@ -513,6 +536,22 @@ public:
         n.kind = Kind::Offset;
         n.base = base.index;
         n.thickness = std::move(thickness);
+        // The base's tessellation, not this node's defaults. An offset
+        // *is* its base pushed along its own normals, so the two are the
+        // same grid by construction and a different one here would be a
+        // second answer to a question the base already answered.
+        //
+        // It used to default to 48x24 regardless, which meant
+        // `torus(2.0, 1.0, 160, 80)` followed by `offset()` silently
+        // rendered at 48x24: the caller's request was accepted and
+        // discarded, with nothing saying so. The donut demo had asked for
+        // 160x80 since it was written and had been drawing 48x24. Same
+        // family as every other defect this tree has caught -- a value
+        // wearing the costume of an answer -- and the one place it shows
+        // is a surface detail that never appears no matter how fine the
+        // field describing it gets.
+        n.u_steps = node(base.index).u_steps;
+        n.v_steps = node(base.index).v_steps;
         return push(std::move(n));
     }
 
@@ -532,6 +571,8 @@ public:
         n.base = base.index;
         n.thickness = std::move(thickness);
         n.edge = edge;
+        n.u_steps = node(base.index).u_steps;   // see offset(), same reason
+        n.v_steps = node(base.index).v_steps;
         return push(std::move(n));
     }
 
@@ -731,7 +772,8 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
     } else if (n.kind == Kind::Scatter) {
         auto target_surface = resolve_surface(trace, n.target);
         auto sites = sample_surface_uniform(target_surface, n.count, n.seed);
-        auto item_mesh = materialize_mesh(trace, n.item, t);
+        auto item_mesh = materialize_mesh(trace, n.item, t, /*placed=*/false);
+        const T lift = scatter_lift<T>(item_mesh);
 
         out.vertices.reserve(item_mesh.vertex_count() * sites.size());
         out.faces.reserve(item_mesh.face_count() * sites.size());
@@ -744,8 +786,9 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
             auto frame = scatter_frame<T>(site.normal, n.seed, i);
 
             uint32_t base_idx = static_cast<uint32_t>(out.vertices.size());
+            Vec<T, 3> seat{site.position + site.normal * lift};
             for (const auto& iv : item_mesh.vertices)
-                out.vertices.push_back(Vec<T, 3>{site.position + frame * iv});
+                out.vertices.push_back(Vec<T, 3>{seat + frame * iv});
             for (const auto& f : item_mesh.faces)
                 out.faces.push_back({f[0] + base_idx, f[1] + base_idx, f[2] + base_idx});
         }
@@ -1119,10 +1162,12 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         if (n.kind == Kind::Scatter) {
             auto target = resolve_surface(trace, n.target);
             auto sites = sample_surface_uniform(target, n.count, n.seed);
+            const T lift = scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false));
             placements.reserve(sites.size());
             for (std::size_t i = 0; i < sites.size(); ++i)
-                placements.push_back(Spot{Vec<T, 3>{sites[i].position},
-                                          scatter_frame<T>(sites[i].normal, n.seed, i)});
+                placements.push_back(
+                    Spot{Vec<T, 3>{sites[i].position + sites[i].normal * lift},
+                         scatter_frame<T>(sites[i].normal, n.seed, i)});
             geometry_node = n.item;
         } else {
             placements.push_back(Spot{});

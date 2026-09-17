@@ -403,8 +403,46 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
 
     const Vec<double, 3> background{0.55, 0.75, 0.92}; // plain light blue, no starfield
     const auto basis = make_camera_basis(cam);
-    const Vec<double, 3> light = Vec<double, 3>{Vec<double, 3>{0.55, -0.4, 1.0}.normalized()};
+    // Two lights, and the split is the whole reason the shadow reads.
+    //
+    // The key was {0.55, -0.4, 1.0}: dominated by +z and pointing back
+    // toward the camera, so every visible surface was lit and the shadow
+    // fell straight down, hidden under the donut by the donut. Moving it
+    // sideways and lowering it puts the shadow on the table where the
+    // camera can see it -- the geometry had been casting one all along.
+    //
+    // That alone left the near-left side in shade, because a single
+    // off-axis light means half the object faces away from the only light
+    // there is. The fill is what a photographer would reach for: a weaker
+    // source from the camera's own side, **casting no shadow**, which
+    // recovers the shaded half without touching the shadow the key throws.
+    // Skipping the shadow ray for it is not a shortcut -- a fill that cast
+    // its own shadow would put a second, contradictory one on the table.
+    const Vec<double, 3> light = Vec<double, 3>{Vec<double, 3>{0.85, 0.45, 0.55}.normalized()};
+    const Vec<double, 3> fill = Vec<double, 3>{Vec<double, 3>{0.62, -0.70, 0.35}.normalized()};
+    constexpr double FILL_STRENGTH = 0.38;
     constexpr int MAX_DEPTH = 3;
+
+    // Is anything between this point and the light? The light is
+    // directional -- a unit vector, the sun rather than a bulb -- so the
+    // shadow ray has no far limit and any hit at all occludes.
+    //
+    // Both trees are asked, for the same reason the primary ray asks
+    // both: a shadow that ignored the dust would be a shadow of half the
+    // scene. This is the change that stops objects floating. Its most
+    // visible consequence is not the big one you would expect -- with no
+    // ground plane the donut casts onto itself and onto the dust -- it is
+    // the sprinkles, each of which now sits in a small dark patch on the
+    // icing instead of appearing painted onto it.
+    //
+    // The offset along the normal is the classic shadow-acne guard: a
+    // point on a surface, tested against that same surface, hits itself
+    // at t ~ 0 without it and every lit pixel comes back shadowed.
+    auto occluded = [&](const Vec<double, 3>& point, const Vec<double, 3>& n) {
+        Ray<3, double> shadow{Vec<double, 3>{point + n * 1e-4}, light};
+        if (bvh.ray_cast(shadow)) return true;
+        return static_cast<bool>(inst_bvh.ray_cast(shadow));
+    };
 
     // trace_ray returns linear [0,1] color throughout -- the single
     // conversion back to [0,255] happens exactly once, at the very end
@@ -453,11 +491,25 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         double diff = std::max(0.0, n.dot(light));
         roughness = std::clamp(roughness, 0.0, 1.0);
 
+        // A point facing away from the light is already dark and cannot
+        // be shadowed any further, so the shadow ray is skipped there --
+        // which is most of the scene's back half, and the reason this
+        // costs less than doubling the ray count.
+        const bool shadowed = diff > 0.0 && occluded(hit_point, n);
+        if (shadowed) diff = 0.0;
+        diff += FILL_STRENGTH * std::max(0.0, n.dot(fill));
+        diff = std::min(diff, 1.0);
+
         Vec<double, 3> view = Vec<double, 3>{-ray.direction};
         Vec<double, 3> half = Vec<double, 3>{Vec<double, 3>{view + light}.normalized()};
         double shininess = 4.0 + 90.0 * (1.0 - roughness); // rough: broad/dull, glossy: tight/bright
         double spec = std::pow(std::max(0.0, n.dot(half)), shininess) * (1.0 - roughness) * 0.6;
+        if (shadowed) spec = 0.0;   // a highlight is the light source seen in the surface
 
+        // The ambient term survives the shadow deliberately. A shadow
+        // that goes to black is a shadow with no bounce light in it,
+        // which reads as a hole cut out of the object rather than as a
+        // shaded part of it.
         Vec<double, 3> local = Vec<double, 3>{base_color * (0.22 + 0.78 * diff)};
         Vec<double, 3> color = Vec<double, 3>{local + Vec<double, 3>{1.0, 1.0, 1.0} * spec};
 
@@ -771,8 +823,32 @@ int main(int argc, char* argv[]) {
     auto dough_bump = bd::ScalarField<double>{[surface_noise](double u, double v) {
         return 0.020 * surface_noise(u * 3.0, v * 3.0, 0.0); // visible but still broad, not fine-grain
     }};
-    auto dough_base = scene.torus(2.0, 1.0, 160, 80);
-    auto dough = scene.offset(dough_base, dough_bump)
+    // The crumb: sparse pits, and the shape of the field is the whole
+    // point. The note above records that an earlier pass added symmetric
+    // fine-grain noise and it read as sandpaper rather than as bread --
+    // that finding stands, and this is built to avoid it rather than to
+    // ignore it. Only the deep negative lobe of a second field survives
+    // the threshold, so most of the surface stays smooth and a minority
+    // of it is pitted, which is what a crumb actually looks like: voids,
+    // not roughness. Squared, so a pit is shallow at its rim and deepens
+    // toward the middle instead of being a flat-bottomed dent.
+    //
+    // Applied to the dough only, not to the shared `dough_bump`, because
+    // that field is also the icing's base -- glaze pools over the crumb
+    // and hides it, so pores pushing through the icing would be wrong.
+    algebra::PerlinNoise pore_noise(11);
+    auto dough_surface = bd::ScalarField<double>{[surface_noise, pore_noise](double u, double v) {
+        double broad = 0.020 * surface_noise(u * 3.0, v * 3.0, 0.0);
+        // u runs around the major circle and v around the tube, so a
+        // radian of u covers ~2.5x the arc a radian of v does; the
+        // frequencies are in that ratio so the pits come out round
+        // rather than smeared along the ring.
+        double n = pore_noise(u * 11.0, v * 4.5, 0.0);
+        double pit = std::max(0.0, -n - 0.18);
+        return broad - 0.075 * pit * pit;
+    }};
+    auto dough_base = scene.torus(2.0, 1.0, 240, 120);
+    auto dough = scene.offset(dough_base, dough_surface)
                      .colored(Material<double>{.base_color = {0.87, 0.58, 0.27}, .roughness = 0.92})
                      .moving(grow_scale);
 
@@ -797,7 +873,15 @@ int main(int argc, char* argv[]) {
                         double drip = std::max(0.0, icing_noise(std::cos(u) * 1.3, std::sin(u) * 1.3, 8.0) - 0.35) * (pi * 0.35);
                         double falloff = std::clamp((edge_dist + wobble + drip) / (pi * 0.09), 0.0, 1.0);
                         falloff = falloff * falloff * (3.0 - 2.0 * falloff); // soft, not torn
-                        double pooling = icing_noise(u * 3.0, v * 3.0, 4.0) * 0.045; // broad, gentle waves
+                        // 0.045 until 2026-09-17, tuned when offset()
+                        // silently rendered this at 48x24 and the waves
+                        // were under-sampled into near-smoothness. With
+                        // the base's own 160x64 actually reaching the
+                        // mesh they resolve fully, and +-45% of a 0.10
+                        // thickness reads as lumps rather than as glaze
+                        // settling. The field did not change; what
+                        // changed is that it is now being listened to.
+                        double pooling = icing_noise(u * 3.0, v * 3.0, 4.0) * 0.016; // broad, gentle waves
                         return (0.10 + pooling) * falloff;
                     }}, bd::EdgeRule::ZeroThickness)
                      .colored(Material<double>{.base_color = {0.98, 0.55, 0.68}, .roughness = 0.40})
@@ -834,7 +918,22 @@ int main(int argc, char* argv[]) {
                                       // surface (resolve_surface() doesn't see .moving()) -- this is
                                       // what actually keeps sprinkles in sync with the growing donut
 
-    std::vector<bd::Handle<double>> scene_children{cube, dough, icing};
+    // Something for the shadows to land on. Added after measuring what
+    // shadows were worth without it: 0.3% of the frame's pixels, for 58%
+    // more time. A shadow needs a receiver, and with the donut floating
+    // in front of a flat sky the only receivers were the donut itself
+    // and the dust. This is the cheapest object in the scene -- twelve
+    // triangles -- and it is what makes the rest of the lighting legible.
+    //
+    // Through the DSL like everything else here, which is the point of
+    // the file: `cube()` is a Literal, `.moving()` a translation, and the
+    // table is a node in the same trace the donut is.
+    auto table = scene.cube({14.0, 14.0, 0.05})
+                     .colored(Material<double>{.base_color = {0.80, 0.76, 0.70},
+                                               .roughness = 0.88})
+                     .moving(bd::VecField<double>::translation({0.0, 0.0, -1.10}));
+
+    std::vector<bd::Handle<double>> scene_children{table, cube, dough, icing};
     scene_children.insert(scene_children.end(), sprinkle_groups.begin(), sprinkle_groups.end());
     scene_children.insert(scene_children.end(), dust.begin(), dust.end());
     auto lesson = scene.compose(scene_children);
