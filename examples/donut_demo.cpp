@@ -383,8 +383,11 @@ struct DustInstance {
 
 
 
-std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& scene, const Camera<double>& cam,
-                                        int W, int H) {
+std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
+                                        const bd::Cooked<double>& cooked,
+                                        const std::vector<bd::Placed<double>>& gizmos,
+                                        const Camera<double>& cam, int W, int H,
+                                        bool instance_scattered) {
     // Two trees, because the scene has two kinds of object in it.
     //
     // Most of it is ordinary geometry: a torus, a shell, sprinkles --
@@ -407,29 +410,87 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
     // and those objects go through the triangle path unchanged.
     std::vector<Triangle3> tris;
     std::vector<Prim> prims;
-    std::vector<geometry::BoundedQuadric<double>> shapes;   // one entry per distinct shape
     std::vector<Instanced<geometry::BoundedQuadric<double>>> insts;
     std::vector<DustInstance> inst_info;
 
-    for (const auto& obj : scene) {
-        auto mat = obj.material();
-        // Two conditions, and neither is a guess about what the object
-        // looks like. The node must have recorded an exact analytic form
-        // -- which torus(), cylinder() and sphere() do and space() cannot
-        // -- and its motion must be a placement, so copies differ only by
-        // where they are rather than by shape.
-        const auto* q = obj.template exact_as<geometry::BoundedQuadric<double>>();
-        auto place = obj.placement();
-        if (q && place) {
-            shapes.push_back(*q);
-            insts.push_back({nullptr, place->translation, place->scale, place->rotation});
+    // One quadric per distinct *shape*, not per object -- which is the
+    // whole point of reading a cooked scene rather than a list of
+    // materialized nodes. Sized up front and never grown, because every
+    // instance below holds a pointer into it.
+    std::vector<geometry::BoundedQuadric<double>> quadrics(cooked.shape_count());
+    std::vector<char> has_quadric(cooked.shape_count(), 0);
+    std::vector<std::vector<Vec<double, 3>>> shape_normals(cooked.shape_count());
+    for (std::size_t i = 0; i < cooked.shape_count(); ++i) {
+        const auto& sh = cooked.shapes()[i];
+        if (const auto* q = std::any_cast<geometry::BoundedQuadric<double>>(&sh.exact)) {
+            quadrics[i] = *q;
+            has_quadric[i] = 1;
+        }
+    }
+
+    // A shape's geometry is its *rest* form when the object placing it is
+    // instanceable, and its *placed* form when the object deforms -- in
+    // which case cook() hands back an identity transform. So one formula
+    // covers both, and the deforming case is not a special case here.
+    auto to_world = [](const Vec<double, 3>& v, const bd::Object<double>& o) {
+        return Vec<double, 3>{o.rotation * Vec<double, 3>{v * o.scale} + o.translation};
+    };
+
+    auto emit_triangles = [&](const mesh::Mesh<Euclidean<3, double>>& m,
+                              const std::vector<Vec<double, 3>>& vn,
+                              const bd::Object<double>& o, const Material<double>& mat) {
+        for (const auto& f : m.faces) {
+            Triangle3 t(to_world(m.vertices[f[0]], o), to_world(m.vertices[f[1]], o),
+                        to_world(m.vertices[f[2]], o));
+            tris.push_back(t);
+            // Normals turn by the rotation alone: the scale is uniform, so
+            // it divides out of the inverse transpose.
+            prims.push_back(Prim{t,
+                                 {Vec<double, 3>{o.rotation * vn[f[0]]},
+                                  Vec<double, 3>{o.rotation * vn[f[1]]},
+                                  Vec<double, 3>{o.rotation * vn[f[2]]}},
+                                 mat.base_color, mat.roughness, mat.emissive});
+        }
+    };
+
+    for (const auto& obj : cooked.objects()) {
+        const auto& mat = obj.material;
+
+        // The gate is scaffolding, and it comes out in the next commit.
+        //
+        // Reading a cooked scene makes scattered items eligible for
+        // instancing *by itself*: cylinder() records a BoundedQuadric, and
+        // a Scatter is N objects of one shape, so the sprinkles qualify the
+        // moment this loop stops looking at merged meshes. That is the win,
+        // not a bug -- but it means the switch cannot be checked by
+        // comparing frames unless the win is held back for one commit.
+        // With the gate on, exactly what was instanced before is instanced
+        // now, and the frame hash has to match to the byte.
+        const bool scattered = trace.node(obj.source_node).kind == bd::Kind::Scatter;
+        if (obj.instanceable && has_quadric[obj.shape] && !(scattered && !instance_scattered)) {
+            insts.push_back({&quadrics[obj.shape], obj.translation, obj.scale, obj.rotation});
             inst_info.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
             continue;
         }
-        // Bound once: Placed::mesh() builds on each call rather than
-        // caching, so the triangle view is taken here and reused.
-        auto m = obj.mesh();
+
+        // Smooth normals once per shape rather than once per object: a
+        // thousand instances of one sprinkle used to recompute the same
+        // normals a thousand times, through a merged mesh that had to be
+        // built first.
+        auto& vn = shape_normals[obj.shape];
+        if (vn.empty()) vn = smooth_normals(cooked.shapes()[obj.shape].geometry);
+        emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, mat);
+    }
+
+    // The gizmos are not in the scene and must not be: they are the
+    // editor, not the subject. They arrive as Placed views onto their own
+    // little Trace, and they are drawn here because forgetting them is the
+    // easy mistake in this refactor -- the build-up frames simply lose
+    // their axes and grid and nothing else changes.
+    for (const auto& g : gizmos) {
+        auto m = g.mesh();
         auto vn = smooth_normals(m);
+        auto mat = g.material();
         for (const auto& f : m.faces) {
             Triangle3 t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
             tris.push_back(t);
@@ -437,9 +498,6 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
                                  mat.emissive});
         }
     }
-    // Shapes are stored first and pointed at second: the vector has to
-    // stop reallocating before any instance holds its address.
-    for (std::size_t i = 0; i < insts.size(); ++i) insts[i].shape = &shapes[i];
 
     auto bvh = BVH<Triangle3>::build(tris);
     auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(insts);
@@ -612,9 +670,13 @@ Camera<double> hero_camera() {
     return {.position = {5.0, -4.2, 3.6}, .target = {0.0, 0.0, 0.0}, .up = {0.0, 0.0, 1.0}, .fov_deg = 38.0};
 }
 
-void render_photo(const std::vector<bd::Placed<double>>& scene, const std::string& out_path, bool force) {
+// No gizmos here, and that is the whole difference between the still and
+// the sequence: --photo is the render, the build-up frames are the
+// viewport. Blender's own arc, and nothing had to be written to say so.
+void render_photo(const bd::Trace<double>& trace, const bd::Cooked<double>& cooked,
+                   const std::string& out_path, bool force, bool instance_scattered) {
     constexpr int W = 960, H = 720;
-    auto img = render_frame(scene, hero_camera(), W, H);
+    auto img = render_frame(trace, cooked, {}, hero_camera(), W, H, instance_scattered);
     if (spatium::examples::confirm_overwrite(out_path, force))
         write_png_rgb(out_path, W, H, img);
     std::println("  -> {}", out_path);
@@ -626,7 +688,7 @@ void render_photo(const std::vector<bd::Placed<double>>& scene, const std::strin
 // different t -- no separate animation system, the trace already
 // describes motion as a function of time.
 void render_video(const bd::Trace<double>& scene, std::size_t lesson_idx, const std::string& dir,
-                   bool force, int build_frames, int orbit_frames) {
+                   bool force, int build_frames, int orbit_frames, bool instance_scattered) {
     namespace fs = std::filesystem;
     fs::create_directories(dir);
     constexpr int W = 960, H = 720;
@@ -635,27 +697,27 @@ void render_video(const bd::Trace<double>& scene, std::size_t lesson_idx, const 
     double orbit_start_angle = std::atan2(cam.position[1], cam.position[0]);
     int frame = 0;
 
-    auto write_frame = [&](const std::vector<bd::Placed<double>>& objs, const Camera<double>& c) {
+    auto write_frame = [&](const bd::Cooked<double>& ck,
+                           const std::vector<bd::Placed<double>>& gizmos,
+                           const Camera<double>& c) {
         std::string path = std::format("{}/frame_{:04d}.png", dir, frame);
         if (spatium::examples::confirm_overwrite(path, force))
-            write_png_rgb(path, W, H, render_frame(objs, c, W, H));
+            write_png_rgb(path, W, H,
+                          render_frame(scene, ck, gizmos, c, W, H, instance_scattered));
         ++frame;
     };
 
     for (int i = 0; i < build_frames; ++i) {
         double t = T_BUILD_END * static_cast<double>(i) / static_cast<double>(build_frames - 1);
-        auto objs = bd::materialize(scene, lesson_idx, t);
-        auto ax = axes_placed();
-        objs.insert(objs.end(), ax.begin(), ax.end());
-        write_frame(objs, cam);
+        write_frame(bd::cook(scene, lesson_idx, t), axes_placed(), cam);
     }
-    auto full = bd::materialize(scene, lesson_idx, T_BUILD_END); // finished donut, axes hidden from here on
+    auto full = bd::cook(scene, lesson_idx, T_BUILD_END); // finished donut, viewport hidden from here on
     for (int i = 0; i < orbit_frames; ++i) {
         double frac = static_cast<double>(i) / static_cast<double>(orbit_frames);
         double angle = orbit_start_angle + frac * 2.0 * std::numbers::pi;
         Camera<double> orbit_cam = cam;
         orbit_cam.position = {orbit_radius * std::cos(angle), orbit_radius * std::sin(angle), cam.position[2]};
-        write_frame(full, orbit_cam);
+        write_frame(full, {}, orbit_cam);
     }
     std::println("donut_demo: wrote {} frames -> {}/", frame, dir);
     std::println("  ffmpeg -framerate 30 -i {}/frame_%04d.png -pix_fmt yuv420p donut.mp4", dir);
@@ -671,6 +733,7 @@ int main(int argc, char* argv[]) {
     std::string video_dir = "donut_frames";
     std::size_t sprinkle_count = 11000; // small flecks, so many more of them
     double t = T_BUILD_END; // how far into the build-up to render (T_BUILD_END = fully formed)
+    bool instance_scattered = false;          // see the gate in render_frame
     int build_frames = 75, orbit_frames = 45; // half the sampling density -- ~9x more
                                               // dust triangles from copies_per_point makes
                                               // full 150/90 too costly for today; render at
@@ -682,6 +745,7 @@ int main(int argc, char* argv[]) {
         if (a == "--photo") { photo = true; if (i + 1 < argc && argv[i + 1][0] != '-') out_path = argv[++i]; continue; }
         if (a == "--video") { video = true; if (i + 1 < argc && argv[i + 1][0] != '-') video_dir = argv[++i]; continue; }
         if (a == "--sprinkles" && i + 1 < argc) { sprinkle_count = static_cast<std::size_t>(std::atoi(argv[++i])); continue; }
+        if (a == "--instance-scattered") { instance_scattered = true; continue; }
         if (a == "--frames" && i + 2 < argc) {   // build, orbit -- for previewing a sequence cheaply
             build_frames = std::atoi(argv[++i]);
             orbit_frames = std::atoi(argv[++i]);
@@ -1179,7 +1243,13 @@ int main(int argc, char* argv[]) {
     std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles -> {} vertices, {} triangles, {:.1f} ms",
                  t, sprinkle_count, verts, faces, ms);
 
-    if (photo) render_photo(placed, out_path, force);
-    if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames);
+    // Scaffolding for one commit: with instancing of scattered items held
+    // back, exactly what was instanced before is instanced now, so the
+    // frame has to come out byte-identical. `--instance-scattered` turns
+    // the win on, and the flag goes away with the gate.
+    if (photo) render_photo(scene, bd::cook(scene, lesson.index, t), out_path, force,
+                            instance_scattered);
+    if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames,
+                            instance_scattered);
     return 0;
 }
