@@ -304,6 +304,28 @@ thing does get found — and only then assert the negative, so a refusal
 one layer up cannot masquerade as the behaviour under test. The negative
 alone is indistinguishable from a test that never arrived.
 
+### A dimensionless number is printed next to the scale it multiplies
+
+Named 2026-09-17, on the third occasion the same omission made a figure
+unreadable.
+
+"The rotation round trip loses 8 ulp" says nothing on its own. What moves
+is a vertex, by that error times the object's own world radius — so the
+same 8 ulp is 1.8e-14 in this scene and 1.8e-11 in one built a thousand
+times larger, and only one of those is worth a second thought. The demo
+therefore prints the worst object radius beside it.
+
+The same shape as `field_report`'s payload, which is meaningless as a
+byte count and meaningful against L3; and as a frame hash, which is not a
+baseline without the configuration that produced it. In each case the
+number is fine and the reader cannot use it.
+
+So: **when reporting a relative, dimensionless or normalised quantity,
+print the quantity it is relative to in the same breath.** A reader
+should not have to go and find the denominator, because the usual outcome
+is that they do not, and a figure that cannot be misread is worth more
+than one that is merely correct.
+
 ### A memory figure is a number *and* the layout it was taken in
 
 Added 2026-09-17, alongside the same rule for frame hashes ("a baseline
