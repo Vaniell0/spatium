@@ -988,10 +988,17 @@ std::optional<ParametricSurface<T>> Placed<T>::surface() const {
 // -- and keeping the rest in one place is what stops that difference from
 // quietly growing into two different materials.
 template<Scalar T>
-Material<T> resolve_material(const TraceNode<T>& n, const Vec<T, 3>& at, T t) {
+Material<T> resolve_material(const TraceNode<T>& n, const Vec<T, 3>& at, T t,
+                             const Vec<T, 3>& origin = {}) {
+    // The origin travels with the point for the same reason it travels
+    // with a motion: a colour that must differ between the instances of
+    // one node has nothing else to differ by. A scatter's colour field
+    // reads `origin`; a node that is its own object passes zero and is
+    // unaffected.
     Material<T> mat = n.material;
-    if (n.color_fn)    mat.base_color = n.color_fn(at, t);
-    if (n.emissive_fn) mat.emissive   = n.emissive_fn(at, t);
+    MotionEnv<T> env{at, t, origin};
+    if (n.color_fn)    mat.base_color = n.color_fn(env);
+    if (n.emissive_fn) mat.emissive   = n.emissive_fn(env);
     return mat;
 }
 
@@ -1437,7 +1444,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             // differently.
             o.material = resolve_material(
                 n, Vec<T, 3>{world_rotation * Vec<T, 3>{rest_centroid * o.scale} + o.translation},
-                t);
+                t, p.position);
             out.objects_.push_back(std::move(o));
             ++out.shapes_[shape_index].instances;
         }

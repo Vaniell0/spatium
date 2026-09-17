@@ -685,6 +685,33 @@ public:
     // exponentiates it through SO3, which is what a constant orientation
     // (`[o](T) { return o; }`) and a spin (`[w](T t) { return w * t; }`)
     // both want to write.
+    // Per-instance turns, for the same reason `scaled` has them: a
+    // scatter has one motion field, so anything that must differ between
+    // its instances has to read the origin. Without this every flake in a
+    // cloud tumbles in lockstep.
+    template<typename R>
+        requires (!std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>) &&
+                 (!std::is_invocable_r_v<Vec<T, 3>, const R&, T>) &&
+                 std::is_invocable_r_v<Vec<T, 3>, const R&, const Vec<T, 3>&, T>
+    friend VecField rotated(VecField x, R r) {
+        return rotated(std::move(x), [r = std::move(r)](const Vec<T, 3>& o, T t) {
+            return algebra::SO3<T>{}.exp(r(o, t));
+        });
+    }
+
+    template<typename R>
+        requires (!std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>) &&
+                 std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, const Vec<T, 3>&, T>
+    friend VecField rotated(VecField x, R r) {
+        VecFieldOp<T> n{};
+        n.op     = VecOp::Rotate;
+        n.a      = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        n.rot_fn = [r = std::move(r)](const MotionEnv<T>& e) { return r(e.origin, e.t); };
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+        return x;
+    }
+
     template<typename R>
         requires std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>
     friend VecField rotated(VecField x, R r) {

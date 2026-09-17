@@ -71,6 +71,7 @@
 #include <functional>
 #include <numbers>
 #include <optional>
+#include <cstring>
 #include <map>
 #include <set>
 #include <memory>
@@ -562,6 +563,15 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
                             o.material.emissive[2], o.material.opacity});
         std::println("  distinct materials {} over {} objects", palette.size(),
                      cooked.object_count());
+        std::size_t glowing = 0, near_target = 0;
+        double max_glow = 0.0;
+        for (const auto& o : cooked.objects()) {
+            max_glow = std::max(max_glow, o.material.emissive[0]);
+            if (o.material.emissive[0] > 0.3) ++glowing;
+            if (o.material.base_color[0] > 0.8) ++near_target;
+        }
+        std::println("  glowing {} , hot-coloured {} , max emissive {:.3f}", glowing, near_target,
+                     max_glow);
 
         std::print("  refused nodes:");
         for (const auto& [k, n] : by_kind) std::print(" {}x{}", n, k);
@@ -798,6 +808,7 @@ int main(int argc, char* argv[]) {
     std::string out_path = "donut.png";
     std::string video_dir = "donut_frames";
     std::size_t sprinkle_count = 11000; // small flecks, so many more of them
+    std::size_t dust_particles = 35200; // one Scatter now, so this is a number rather than a loop
     double t = T_BUILD_END; // how far into the build-up to render (T_BUILD_END = fully formed)
     int build_frames = 75, orbit_frames = 45; // half the sampling density -- ~9x more
                                               // dust triangles from copies_per_point makes
@@ -810,6 +821,7 @@ int main(int argc, char* argv[]) {
         if (a == "--photo") { photo = true; if (i + 1 < argc && argv[i + 1][0] != '-') out_path = argv[++i]; continue; }
         if (a == "--video") { video = true; if (i + 1 < argc && argv[i + 1][0] != '-') video_dir = argv[++i]; continue; }
         if (a == "--sprinkles" && i + 1 < argc) { sprinkle_count = static_cast<std::size_t>(std::atoi(argv[++i])); continue; }
+        if (a == "--dust" && i + 1 < argc) { dust_particles = static_cast<std::size_t>(std::atol(argv[++i])); continue; }
         if (a == "--frames" && i + 2 < argc) {   // build, orbit -- for previewing a sequence cheaply
             build_frames = std::atoi(argv[++i]);
             orbit_frames = std::atoi(argv[++i]);
@@ -817,7 +829,7 @@ int main(int argc, char* argv[]) {
         }
         if (a == "--t" && i + 1 < argc) { t = std::atof(argv[++i]); continue; }
         if (a == "--help") {
-            std::print("donut_demo [--photo [path]] [--video [dir]] [--sprinkles N] [--frames B O] [--t seconds] [--force]\n"
+            std::print("donut_demo [--photo [path]] [--video [dir]] [--sprinkles N] [--dust N] [--frames B O] [--t seconds] [--force]\n"
                        "  Spatium's getting-started demo: delete the default cube (explode it,\n"
                        "  --t controls how far), then torus dough, offset-surface icing,\n"
                        "  area-sampled sprinkles -- declarative steps, see the file's own header\n"
@@ -923,119 +935,135 @@ int main(int argc, char* argv[]) {
     // letter, swept along by the shape rather than drifting
     // independently, then carried on past by the swirl) and a smaller
     // fraction pull strongly enough to actually land and hold.
-    constexpr std::size_t copies_per_point = 160;
-    std::vector<bd::Handle<double>> dust;
-    dust.reserve(boom_uv.size() * copies_per_point);
-    for (std::size_t i = 0; i < boom_uv.size() * copies_per_point; ++i) {
-        Vec<double, 3> burst_dir = Vec<double, 3>{Vec<double, 3>{unit(burst_rng), unit(burst_rng), unit(burst_rng)}.normalized()};
-        double burst_dist = dist_amt(burst_rng);
-        double swirl_seed = unit01(burst_rng);
-        double roll = unit01(burst_rng);
-        // A real, if small, positional pull on the rest blurred the
-        // letterforms into a haze (every gap between letters had
-        // weakly-pulled specks drifting into it) -- pure swirl for
-        // those keeps the shape crisp; they still pick up color via
-        // dust_color's live distance check on whatever near passes
-        // their own turbulent wandering happens to bring them, which is
-        // the "just gets colored flying past" part without needing an
-        // explicit pull to manufacture it.
-        double pull_strength = roll < 0.3 ? (0.85 + 0.15 * unit01(burst_rng)) : 0.0; // ~30% land firmly
+    // ── The dust, as one node ─────────────────────────────────
+    //
+    // This used to be 35 200 handles: a loop calling flake() once per
+    // particle, each with its own captured burst direction, target
+    // letterform, pull, swirl seed and spin. It worked and it does not
+    // scale -- a TraceNode is 456 bytes, so a million particles is
+    // 456 MB of trace before a single one is drawn, and two million is
+    // not reachable at all.
+    //
+    // One Scatter over an invisible unit sphere replaces all of it. Every
+    // particle's parameters now come from *where it started*: the sphere
+    // site is its burst direction, and everything else is a hash of that
+    // same point. Nothing is stored per particle and the trace is three
+    // nodes regardless of the count.
+    //
+    // What makes that expressible is MotionEnv::origin. A Scatter has one
+    // motion field for all its instances, so before the origin existed
+    // the only thing a field could tell them apart by was the vertex
+    // position -- which makes the motion a deformation and refuses
+    // instancing outright. An origin is one value per object, so a field
+    // reading it stays affine in the point and stays shareable.
+    const std::size_t dust_count = dust_particles;
 
-        // Which way this flake faces, and how it tumbles. Without it all
-        // 19 800 flakes share one orientation, which was invisible while
-        // a speck was a ball and is impossible to miss now that it has a
-        // side: a cloud of identically-tilted chips reads as a lattice,
-        // not as dust. The axis is a random direction, the phase is a
-        // random offset so they do not turn in unison, and the rate is
-        // small -- a flake drifting on air turns slowly.
-        Vec<double, 3> spin_axis = Vec<double, 3>{
-            Vec<double, 3>{unit(burst_rng), unit(burst_rng), unit(burst_rng)}.normalized()};
-        double spin_phase = unit01(burst_rng) * 6.283185307179586;
-        double spin_rate  = 0.5 + 1.5 * unit01(burst_rng);
+    // Seeded from the particle's own starting point, so it is a pure
+    // function of the site and survives being recomputed anywhere. FNV
+    // over the bit patterns, then a final avalanche.
+    auto dust_hash = [](const Vec<double, 3>& o, std::uint32_t salt) {
+        std::uint32_t h = 2166136261u ^ salt;
+        for (int k = 0; k < 3; ++k) {
+            std::uint64_t bits = 0;
+            double v = o[k];
+            std::memcpy(&bits, &v, sizeof(bits));
+            h ^= static_cast<std::uint32_t>(bits ^ (bits >> 32));
+            h *= 16777619u;
+        }
+        h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
+        return h;
+    };
+    auto unit_from = [dust_hash](const Vec<double, 3>& o, std::uint32_t salt) {
+        return static_cast<double>(dust_hash(o, salt) % 1000000u) / 1000000.0;
+    };
 
-        auto [u, v] = boom_uv[i % boom_uv.size()];
-        Vec<double, 3> target = Vec<double, 3>{
-            text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)};
+    auto boom_points = std::make_shared<std::vector<Vec<double, 3>>>();
+    boom_points->reserve(boom_uv.size());
+    for (auto [u, v] : boom_uv)
+        boom_points->push_back(Vec<double, 3>{
+            text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)});
 
-        dust.push_back(
-            // A flake, not a ball and not an icosahedron. The speck used
-            // to be `literal(dust_speck(0.014))` -- a 20-face mesh built
-            // from `icosahedron(Sphere<2>{radius})`, an approximation of
-            // exactly the shape the library can hit exactly. Dust is not
-            // a ball either: it is a curved sheet, so this is a shallow
-            // spherical cap clipped to a thin slab, and the slab is the
-            // speck's own size. That matters at scale, because the clip
-            // box is what a tree traverses.
-            //
-            // Through flake() the node records a BoundedQuadric, so the
-            // renderer instances one shared analytic surface for all of
-            // them rather than putting hundreds of thousands of triangles
-            // in a tree, and every silhouette is a real curve.
-            scene.flake(Vec<double, 3>{0.010, 0.010, 0.003})
-                // Two `colored` calls, and they are not in conflict: one
-                // sets the node's Material (opacity, roughness), the
-                // other sets the colour *field* that overrides
-                // base_color per particle. Different slots.
-                //
-                // Slightly see-through, because dust is. Thousands of
-                // opaque flecks stack into a solid wall; at 0.72 the
-                // cloud has depth -- you see specks behind specks --
-                // which is what makes it read as a cloud rather than as
-                // a sprayed surface.
-                .colored(Material<double>{.roughness = 0.85, .opacity = 0.72})
-                .colored(bd::PointField<double>{
-                    [target, dust_color](const Vec<double, 3>& p, double) { return dust_color(p, target); }})
-                // The letterforms light up, and only while a speck is
-                // actually near one. The same distance that turns its
-                // colour from grey to hot drives the emission, squared so
-                // the glow arrives late and sharply rather than as a
-                // general haze over the whole cloud -- a particle merely
-                // passing by brightens a little, one that lands burns.
-                .glowing(bd::PointField<double>{
-                    [target](const Vec<double, 3>& p, double) {
-                        double d = std::clamp((p - target).norm() / 0.75, 0.0, 1.0);
+    // Every per-particle quantity the old loop captured, rebuilt from the
+    // origin instead. Same distributions, same meanings -- see the
+    // comments on dust_core for why pull_strength is continuous rather
+    // than a landed/missed coin flip.
+    auto target_of = [unit_from, boom_points](const Vec<double, 3>& o) {
+        return (*boom_points)[static_cast<std::size_t>(unit_from(o, 7u) *
+                                                       static_cast<double>(boom_points->size())) %
+                              boom_points->size()];
+    };
+    // More of them land, and the ones that do not are pulled harder than
+    // before. At 30% landing and no pull on the rest the cloud spread
+    // across the whole frame and the letterforms read as a faint tint
+    // inside it rather than as writing; the burst is supposed to *become*
+    // the word, not drift past it.
+    auto pull_of = [unit_from](const Vec<double, 3>& o) {
+        double roll = unit_from(o, 11u);
+        if (roll < 0.55) return 0.85 + 0.15 * unit_from(o, 13u);   // land and hold
+        return 0.25 * unit_from(o, 13u);                            // bent in close on the way past
+    };
+
+    auto dust = scene.scatter(scene.flake(Vec<double, 3>{0.010, 0.010, 0.003}),
+                              // A *tiny* sphere, and the size is the point.
+                              // A Scatter seats each instance on its site,
+                              // so the seat is added to wherever the motion
+                              // sends it -- which is exactly right when the
+                              // scatter means "put these on that surface"
+                              // and exactly wrong here, where the surface
+                              // is only a way of handing every particle a
+                              // distinct starting point. At radius 1 every
+                              // flake was displaced by a unit vector from
+                              // its own trajectory, which smeared the
+                              // letterforms into a haze: 7 393 particles
+                              // near their target and 52 actually on it.
+                              // At 1e-3 the sites stay distinct for the
+                              // hash and the displacement is nothing.
+                              scene.sphere(0.001, 96, 48), dust_count, 4242,
+                              /*seat=*/0.0)
+                    // Slightly see-through, because dust is: thousands of
+                    // opaque flecks stack into a wall, and at 0.72 the
+                    // cloud has depth.
+                    .colored(Material<double>{.roughness = 0.85, .opacity = 0.72})
+                    .colored(bd::PointField<double>{[target_of, dust_color](const bd::MotionEnv<double>& e) {
+                        return dust_color(e.p, target_of(e.origin));
+                    }})
+                    // The letterforms light up, and only while a speck is
+                    // near one. Squared, so the glow arrives late and
+                    // sharply rather than as a haze over the whole cloud.
+                    .glowing(bd::PointField<double>{[target_of](const bd::MotionEnv<double>& e) {
+                        double d = std::clamp((e.p - target_of(e.origin)).norm() / 0.75, 0.0, 1.0);
                         double hot = (1.0 - d) * (1.0 - d);
                         return Vec<double, 3>{Vec<double, 3>{1.00, 0.52, 0.12} * (1.35 * hot)};
                     }})
-                // Written as a *placement*, not as a point map, and the
-                // difference is not stylistic. Both forms produce exactly
-                // the same picture -- the particle flies where dust_core
-                // says and shrinks by dust_shrink -- but only this one
-                // says so in a way a later pass can read.
-                //
-                // A single lambda over (p, t) is opaque: nothing can tell
-                // whether it moves the speck or reshapes it, so every one
-                // of these 19 800 objects has to be tessellated
-                // separately even though they are all the same little
-                // cube. Split into "where it is" (which never looks at p)
-                // and "how big" (a scalar on the point), and cook()
-                // reports 19 800 instanceable objects instead of 19 800
-                // refusals -- measured, both ways, on this scene.
-                //
-                // The noise stays noise. opaque_of_time is opaque; what it
-                // promises is only that it does not read the vertex, which
-                // is the property that costs per-vertex work.
-                .moving(bd::VecField<double>::opaque_of_time(
-                            [burst_dir, burst_dist, target, pull_strength, swirl_seed, swirl_noise](double time) {
-                                return dust_core(time, burst_dir, burst_dist, target, pull_strength,
-                                                 swirl_seed, *swirl_noise);
-                            })
-                        // The turn wraps the point, not the whole motion:
-                        // it orients the flake about its own centre
-                        // rather than swinging it around the origin. That
-                        // it can be written at all is the point of the op
-                        // -- a rotation is affine in the point, so the
-                        // node stays a placement and keeps its exact
-                        // form. Compare `.moving()` with a lambda that
-                        // rotates: identical picture, and every flake
-                        // falls back to triangles.
-                        + rotated(scaled(bd::VecField<double>::point(),
-                                         [](double time) { return dust_shrink(time); }),
-                                  [spin_axis, spin_phase, spin_rate](double time) {
-                                      return Vec<double, 3>{
-                                          spin_axis * (spin_phase + spin_rate * time)};
-                                  })));
-    }
+                    .moving(bd::VecField<double>::opaque_per_instance(
+                                [unit_from, target_of, pull_of, swirl_noise](
+                                    const Vec<double, 3>& origin, double time) {
+                                    // The site direction is the burst
+                                    // direction; its length is an artefact
+                                    // of the carrier sphere and is
+                                    // normalised away.
+                                    Vec<double, 3> dir{Vec<double, 3>{origin}.normalized()};
+                                    return dust_core(time, dir, 1.3 + 0.9 * unit_from(origin, 3u),
+                                                     target_of(origin), pull_of(origin),
+                                                     unit_from(origin, 5u), *swirl_noise);
+                                })
+                            // The turn wraps the point, not the whole
+                            // motion: it orients the flake about its own
+                            // centre rather than swinging it round the
+                            // origin. Per-instance, or every flake in the
+                            // cloud would tumble in lockstep.
+                            + rotated(scaled(bd::VecField<double>::point(),
+                                             [](double time) { return dust_shrink(time); }),
+                                      [unit_from](const Vec<double, 3>& o, double time) {
+                                          Vec<double, 3> axis{
+                                              Vec<double, 3>{unit_from(o, 17u) * 2.0 - 1.0,
+                                                             unit_from(o, 19u) * 2.0 - 1.0,
+                                                             unit_from(o, 23u) * 2.0 - 1.0}
+                                                  .normalized()};
+                                          double phase = unit_from(o, 29u) * 6.283185307179586;
+                                          double rate = 0.5 + 1.5 * unit_from(o, 31u);
+                                          return Vec<double, 3>{axis * (phase + rate * time)};
+                                      }));
 
     // Step 1 -- the dough is a torus, offset by a fine noise bump so it
     // actually has bready surface texture (not just a rough *shading*
@@ -1268,7 +1296,7 @@ int main(int argc, char* argv[]) {
 
     std::vector<bd::Handle<double>> scene_children{table, cube, dough, icing};
     scene_children.insert(scene_children.end(), sprinkle_groups.begin(), sprinkle_groups.end());
-    scene_children.insert(scene_children.end(), dust.begin(), dust.end());
+    scene_children.push_back(dust);   // one node now, not 35 200
     auto lesson = scene.compose(scene_children);
 
     std::println("donut_demo: a Trace is real data -- here it is, {} nodes:", scene.size());
@@ -1324,7 +1352,17 @@ int main(int argc, char* argv[]) {
     std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles -> {} vertices, {} triangles, {:.1f} ms",
                  t, sprinkle_count, verts, faces, ms);
 
-    if (photo) render_photo(scene, bd::cook(scene, lesson.index, t), out_path, force);
+    if (photo) {
+        // Timed on its own, because "cook() got faster" has two possible
+        // causes -- fewer nodes, or a hash that stopped touching vertices
+        // -- and only a number separates them.
+        auto c0 = std::chrono::steady_clock::now();
+        auto cooked = bd::cook(scene, lesson.index, t);
+        auto c1 = std::chrono::steady_clock::now();
+        std::println("  cook() {:.1f} ms over {} trace nodes",
+                     std::chrono::duration<double, std::milli>(c1 - c0).count(), scene.size());
+        render_photo(scene, cooked, out_path, force);
+    }
     if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames);
     return 0;
 }

@@ -734,7 +734,18 @@ question is not reopened from scratch in a month.
   - **`is_placement()` is renamed to what it computes.** `is_recognisably_a_placement()` is ugly, and the ugliness is the point: it makes a caller ask "recognisably by whom?".
   - **The structural spelling becomes the obvious one.** `scaled(point(), e)` is already shorter than the lambda; it is simply undiscoverable, because the slot advertises a callable. That is an API problem and not a documentation one.
 
-- **[want]** **Does collapsing the dust into one node remove `content_hash`'s O(vertices) cost?** Deferred, and recorded so it is not lost rather than answered from a guess. `content_hash` keys a `Literal` on its mesh content, which is the expensive case — roughly 158 000 vertices hashed across the donut's dust — and the entry for it already says this is the first line to look at if cooking ever runs per frame. One `Scatter` of one flake would hash the item once and be done. The dust is *not* collapsed yet (that waits on `MotionEnv::origin`), so there is nothing to measure and the question has no answer today. Measure it at the collapse, against a before figure taken in the same configuration.
+- ~~**[want]** Does collapsing the dust into one node remove `content_hash`'s O(vertices) cost?~~ — **measured 2026-09-17, and the answer is that the cost was never there.** The premise was wrong twice over. The dust is not a `Literal`: `flake()` builds a `Space` node, hashed by its exact form's type plus sixteen chart samples, so the O(vertices) path touches exactly two nodes in the whole scene (the cube and the table). The "158 000 vertices hashed across the dust" figure was inherited from when a speck was `literal(dust_speck(...))` and never re-derived.
+
+  And the measurement settles it regardless of the premise:
+
+  ```
+  trace nodes   35 231 -> 34
+  cook()         114.6 -> 105.6 ms
+  ```
+
+  A thousandfold fewer nodes and **8% less time**. So neither "proportional to the node count" nor "stronger than that" — hashing was not the cost at all. What dominates is per-*object* work, which the collapse does not reduce: 46 196 objects still each evaluate a placement and resolve a material through two opaque fields. The first line to look at, if cooking ever needs to be faster, is that — not the hash.
+
+  The real win is the one the entry was not looking for: the trace went from 35 231 × 456 B ≈ **16 MB** to 34 × 456 B ≈ **15 KB**, which is what makes two million reachable at all.
 
 - **[course]** **An exact form that does not agree with its own chart, created that way by the factory.** `docs/api-reference.md` already states the invariant — *"the exact form must agree with the map, so any operation that can move them apart clears it"* — and `.moving()` honours it. A factory can violate it at the moment of creation, and one does.
 
