@@ -72,6 +72,7 @@
 #include <numbers>
 #include <optional>
 #include <map>
+#include <set>
 #include <memory>
 #include <random>
 #include <utility>
@@ -547,6 +548,20 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
             worst_radius = std::max(worst_radius, rest * std::abs(o.scale) + o.translation.norm());
         }
         std::println("  worst object radius {:.3f} world units", worst_radius);
+
+        // How many *distinct* materials the cooked scene actually holds.
+        // The question a palette answers is whether a per-object Material
+        // collapses, and the answer is a property of the scene rather
+        // than of the idea: comparison is exact, so two colours a single
+        // ulp apart are two entries.
+        std::set<std::array<double, 8>> palette;
+        for (const auto& o : cooked.objects())
+            palette.insert({o.material.base_color[0], o.material.base_color[1],
+                            o.material.base_color[2], o.material.roughness,
+                            o.material.emissive[0], o.material.emissive[1],
+                            o.material.emissive[2], o.material.opacity});
+        std::println("  distinct materials {} over {} objects", palette.size(),
+                     cooked.object_count());
 
         std::print("  refused nodes:");
         for (const auto& [k, n] : by_kind) std::print(" {}x{}", n, k);

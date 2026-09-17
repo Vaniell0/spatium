@@ -820,7 +820,7 @@ question is not reopened from scratch in a month.
   | change | saves at 2M | `Object` after |
   |---|---|---|
   | ~~`rotation` 72 → 32 (quaternion)~~ — **done**, `Object` only; measured 192 → 152 B | 80 MB | 152 B ✓ |
-  | `material` 64 → a `uint16` index into a palette (the demo uses three) | 124 MB | 88 B |
+  | `material` 64 → a `uint16` index into a palette — **measured first, and it is not what the estimate assumed**, see below | ~97 MB | 88 B |
   | `shape`, `source_node` → `uint32` | 16 MB | 80 B |
   | BVH bounds in `float`, rounded outward — a bound only has to be conservative | 96 MB | — |
   | `prim_indices_` `size_t` → `uint32` | 8 MB | — |
@@ -847,6 +847,23 @@ question is not reopened from scratch in a month.
 
   - **Step one: store both, and the matrix stays authoritative.** The renderer reads the matrix; the quaternion is carried and compared. A byte-identical hash then means something, because the thing being drawn has not changed — it tests the plumbing and nothing else. Two sources of truth for one rotation is otherwise exactly how they drift apart in silence.
   - **Step two: remove the matrix and introduce the pixel comparison in the same change.** Splitting them leaves a window where the matrix still exists but the renderer already reads the quaternion and nothing checks the difference. The comparison is what makes the removal safe; without it the removal is blind. It reports a count and locations rather than a pass/fail tolerance, because the expected count is zero and anything else is a lead rather than a threshold to clear.
+
+  **The palette was costed before being built, and the costing changed it.** `Material` carries values rather than functions — `base_color`, `roughness`, `emissive`, `opacity` — so a palette is possible in principle; the question is whether per-object materials *collapse*, and that is a property of the scene rather than of the idea. The demo now reports it:
+
+  ```
+  t = 1.5    9 762 distinct materials over 46 196 objects   (21%)
+  t = 3.9   13 188                                          (29%)
+  ```
+
+  Neither the two-to-five the estimate imagined nor the N that would kill it. Three things follow, and the mechanism matters more than the ratio:
+
+  - **The collapse is saturation, not sharing.** `dust_color` clamps at `d/1.4` and the emissive at `d/0.75`, so every particle past those distances lands on exactly the same grey and exactly zero emission. The particles are not sharing a material because they mean the same thing; they are sharing one because two `clamp` calls flattened them.
+  - **The saving is smaller than the 124 MB claimed**, which was computed as though the palette were tiny. At 21% on two million: 128 MB of inline materials becomes 4 MB of indices plus 27 MB of palette, so about **97 MB**.
+  - **It is fragile, and cheaply broken.** Replace either falloff with something that does not saturate — an exponential, say — and the collapse disappears entirely, the palette becomes size N, and the change *costs* memory rather than saving it. The 97 MB currently rests on two `clamp`s in a demo.
+
+  The ratio also moves with time (9 762 against 13 188 on two frames of one scene), so a palette built in `cook()` is a different size every frame. Not a defect, but not a constant to plan against either.
+
+  If it is built: `Cooked`'s materials are immutable like everything else `cook()` produces, and that has to be said out loud rather than discovered — sharing one entry across N objects means recolouring one object recolours all of them, and someone will eventually want to flash a single instance. And the test that matters is not "the palette works" but "the palette *collapses*": two objects with equal materials must land on one index, asserted directly.
 
   **`Instanced<S>` is excluded from that list on purpose**, and `docs/conventions.md` carries the principle: compaction belongs to cold storage, and the hot path keeps whatever computes fastest. `Object`'s rotation is read once a frame; `Instanced`'s is applied at every leaf test the traversal reaches, and a quaternion costs more arithmetic to apply than a matrix. Same saving, traversal untouched.
 
