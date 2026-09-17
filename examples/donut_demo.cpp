@@ -831,7 +831,7 @@ int main(int argc, char* argv[]) {
             // renderer instances one shared analytic surface for all of
             // them rather than putting hundreds of thousands of triangles
             // in a tree, and every silhouette is a real curve.
-            scene.flake(Vec<double, 3>{0.0075, 0.0075, 0.0022})
+            scene.flake(Vec<double, 3>{0.010, 0.010, 0.003})
                 // Two `colored` calls, and they are not in conflict: one
                 // sets the node's Material (opacity, roughness), the
                 // other sets the colour *field* that overrides
