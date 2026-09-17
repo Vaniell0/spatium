@@ -383,11 +383,9 @@ struct DustInstance {
 
 
 
-std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
-                                        const bd::Cooked<double>& cooked,
+std::vector<std::uint8_t> render_frame(const bd::Cooked<double>& cooked,
                                         const std::vector<bd::Placed<double>>& gizmos,
-                                        const Camera<double>& cam, int W, int H,
-                                        bool instance_scattered) {
+                                        const Camera<double>& cam, int W, int H) {
     // Two trees, because the scene has two kinds of object in it.
     //
     // Most of it is ordinary geometry: a torus, a shell, sprinkles --
@@ -456,18 +454,11 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
     for (const auto& obj : cooked.objects()) {
         const auto& mat = obj.material;
 
-        // The gate is scaffolding, and it comes out in the next commit.
-        //
-        // Reading a cooked scene makes scattered items eligible for
-        // instancing *by itself*: cylinder() records a BoundedQuadric, and
-        // a Scatter is N objects of one shape, so the sprinkles qualify the
-        // moment this loop stops looking at merged meshes. That is the win,
-        // not a bug -- but it means the switch cannot be checked by
-        // comparing frames unless the win is held back for one commit.
-        // With the gate on, exactly what was instanced before is instanced
-        // now, and the frame hash has to match to the byte.
-        const bool scattered = trace.node(obj.source_node).kind == bd::Kind::Scatter;
-        if (obj.instanceable && has_quadric[obj.shape] && !(scattered && !instance_scattered)) {
+        // Two conditions, and neither is a guess about what the object
+        // looks like: the shape must carry a closed form, and the object's
+        // motion must be a placement so copies differ only by where they
+        // are.
+        if (obj.instanceable && has_quadric[obj.shape]) {
             insts.push_back({&quadrics[obj.shape], obj.translation, obj.scale, obj.rotation});
             inst_info.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
             continue;
@@ -501,6 +492,19 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
 
     auto bvh = BVH<Triangle3>::build(tris);
     auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(insts);
+
+    // Reported rather than assumed, and the last pair is the whole reason
+    // a cooked scene exists: what a renderer would have held if every
+    // object carried its own copy of its geometry, against what the shape
+    // table actually holds.
+    std::println("  scene: {} objects -> {} instances + {} triangles; "
+                 "vertices {} without instancing, {} stored ({:.1f}x)",
+                 cooked.object_count(), insts.size(), tris.size(),
+                 cooked.vertices_without_instancing(), cooked.vertices_stored(),
+                 cooked.vertices_stored() == 0
+                     ? 0.0
+                     : static_cast<double>(cooked.vertices_without_instancing()) /
+                           static_cast<double>(cooked.vertices_stored()));
 
     const Vec<double, 3> background{0.55, 0.75, 0.92}; // plain light blue, no starfield
     const auto basis = make_camera_basis(cam);
@@ -673,10 +677,10 @@ Camera<double> hero_camera() {
 // No gizmos here, and that is the whole difference between the still and
 // the sequence: --photo is the render, the build-up frames are the
 // viewport. Blender's own arc, and nothing had to be written to say so.
-void render_photo(const bd::Trace<double>& trace, const bd::Cooked<double>& cooked,
-                   const std::string& out_path, bool force, bool instance_scattered) {
+void render_photo(const bd::Cooked<double>& cooked,
+                   const std::string& out_path, bool force) {
     constexpr int W = 960, H = 720;
-    auto img = render_frame(trace, cooked, {}, hero_camera(), W, H, instance_scattered);
+    auto img = render_frame(cooked, {}, hero_camera(), W, H);
     if (spatium::examples::confirm_overwrite(out_path, force))
         write_png_rgb(out_path, W, H, img);
     std::println("  -> {}", out_path);
@@ -688,7 +692,7 @@ void render_photo(const bd::Trace<double>& trace, const bd::Cooked<double>& cook
 // different t -- no separate animation system, the trace already
 // describes motion as a function of time.
 void render_video(const bd::Trace<double>& scene, std::size_t lesson_idx, const std::string& dir,
-                   bool force, int build_frames, int orbit_frames, bool instance_scattered) {
+                   bool force, int build_frames, int orbit_frames) {
     namespace fs = std::filesystem;
     fs::create_directories(dir);
     constexpr int W = 960, H = 720;
@@ -703,7 +707,7 @@ void render_video(const bd::Trace<double>& scene, std::size_t lesson_idx, const 
         std::string path = std::format("{}/frame_{:04d}.png", dir, frame);
         if (spatium::examples::confirm_overwrite(path, force))
             write_png_rgb(path, W, H,
-                          render_frame(scene, ck, gizmos, c, W, H, instance_scattered));
+                          render_frame(ck, gizmos, c, W, H));
         ++frame;
     };
 
@@ -733,7 +737,6 @@ int main(int argc, char* argv[]) {
     std::string video_dir = "donut_frames";
     std::size_t sprinkle_count = 11000; // small flecks, so many more of them
     double t = T_BUILD_END; // how far into the build-up to render (T_BUILD_END = fully formed)
-    bool instance_scattered = false;          // see the gate in render_frame
     int build_frames = 75, orbit_frames = 45; // half the sampling density -- ~9x more
                                               // dust triangles from copies_per_point makes
                                               // full 150/90 too costly for today; render at
@@ -745,7 +748,6 @@ int main(int argc, char* argv[]) {
         if (a == "--photo") { photo = true; if (i + 1 < argc && argv[i + 1][0] != '-') out_path = argv[++i]; continue; }
         if (a == "--video") { video = true; if (i + 1 < argc && argv[i + 1][0] != '-') video_dir = argv[++i]; continue; }
         if (a == "--sprinkles" && i + 1 < argc) { sprinkle_count = static_cast<std::size_t>(std::atoi(argv[++i])); continue; }
-        if (a == "--instance-scattered") { instance_scattered = true; continue; }
         if (a == "--frames" && i + 2 < argc) {   // build, orbit -- for previewing a sequence cheaply
             build_frames = std::atoi(argv[++i]);
             orbit_frames = std::atoi(argv[++i]);
@@ -1243,13 +1245,7 @@ int main(int argc, char* argv[]) {
     std::println("materialized at t={}: exploded cube + dough + icing + {} sprinkles -> {} vertices, {} triangles, {:.1f} ms",
                  t, sprinkle_count, verts, faces, ms);
 
-    // Scaffolding for one commit: with instancing of scattered items held
-    // back, exactly what was instanced before is instanced now, so the
-    // frame has to come out byte-identical. `--instance-scattered` turns
-    // the win on, and the flag goes away with the gate.
-    if (photo) render_photo(scene, bd::cook(scene, lesson.index, t), out_path, force,
-                            instance_scattered);
-    if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames,
-                            instance_scattered);
+    if (photo) render_photo(bd::cook(scene, lesson.index, t), out_path, force);
+    if (video) render_video(scene, lesson.index, video_dir, force, build_frames, orbit_frames);
     return 0;
 }
