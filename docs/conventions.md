@@ -244,6 +244,66 @@ and one that cannot.
 This is the third instance of the "say which half" family, and the
 sharpest, because the other two were incomplete rather than false.
 
+### Compact the cold storage; leave the hot path in the shape that computes
+
+Named 2026-09-17, before the first compaction rather than after the first
+regression.
+
+The same quantity can want two different representations depending on
+how it is reached. A rotation stored once per object and read once per
+frame wants to be small. The *same* rotation, applied at every
+ray-against-leaf test, wants to be whatever multiplies a vector fastest.
+A quaternion is 32 bytes against a matrix's 72 and costs more arithmetic
+to apply; which of those matters is entirely a question of how often the
+thing is touched.
+
+So `Object<T>`, which is cold — two million of them, walked once a frame
+to build the tree — takes the quaternion. `Instanced<S>`, which is hot —
+the same two million, but its rotation is applied on every leaf test the
+traversal reaches — keeps the matrix, expanded once while the tree is
+built. The saving is the same; the traversal is not touched.
+
+Stated as a principle because the alternative is a specific, repeatable
+mistake: compacting everything uniformly, watching traversal get slower,
+and then not knowing which of six changes did it. **A memory
+optimisation that reaches the hot path is a trade, not a saving, and has
+to be measured as one.**
+
+**When the hot form should be revisited, and the trigger rather than the
+guess:** two million `Instanced` at 112 bytes is 214 MB walked by the
+traversal, which no cache holds. If traversal at that scale turns out to
+be memory-bound, *then* the choices are splitting the array (positions
+apart from rotations, so a ray touches only what it needs) or shrinking
+the element after all — and either only makes sense against a
+measurement showing the stall. Not before.
+
+### A test on a boundary must prove it reached the boundary
+
+Named 2026-09-17, after writing the same test wrong twice in a row.
+
+A BVH bound only has to be conservative, so before narrowing one it is
+worth having tests that a *tighter* bound would fail. Three were written.
+Two of them passed and proved nothing, because they never got as far as
+the bound: the leaf refused them first.
+
+- A ray lying **in** the plane of a flat shape is refused by
+  Möller-Trumbore, correctly — a coplanar ray meets a triangle in
+  nothing or in a segment, never in a point. The box may well have
+  admitted it; the assertion could not tell.
+- A ray tilted out of that plane by `1e-9` is refused for the same
+  reason: the determinant lands under the leaf's own epsilon, so it is
+  still "parallel" as far as the algorithm is concerned.
+
+Both read as boundary tests. Both measured the leaf. The surviving
+version crosses at a real angle and well inside a face, where the leaf
+has no objection and only the bound can reject it.
+
+So the rule: **a test aimed at one stage must establish that the earlier
+stages let it through.** Concretely, assert the positive case first — the
+thing does get found — and only then assert the negative, so a refusal
+one layer up cannot masquerade as the behaviour under test. The negative
+alone is indistinguishable from a test that never arrived.
+
 ### A memory figure is a number *and* the layout it was taken in
 
 Added 2026-09-17, alongside the same rule for frame hashes ("a baseline

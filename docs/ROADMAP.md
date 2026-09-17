@@ -819,12 +819,16 @@ question is not reopened from scratch in a month.
 
   | change | saves at 2M | `Object` after |
   |---|---|---|
-  | `rotation` 72 → 32 (quaternion; rotation in a placement already exists, #46) | 80 MB | 152 B |
+  | `rotation` 72 → 32 (quaternion; rotation in a placement already exists, #46) — **in `Object` only**, see below | 80 MB | 152 B |
   | `material` 64 → a `uint16` index into a palette (the demo uses three) | 124 MB | 88 B |
   | `shape`, `source_node` → `uint32` | 16 MB | 80 B |
   | BVH bounds in `float`, rounded outward — a bound only has to be conservative | 96 MB | — |
   | `prim_indices_` `size_t` → `uint32` | 8 MB | — |
   | the BVH owning its shapes: hold indices into `Cooked` instead | 214 MB | — |
+
+  **`Instanced<S>` is excluded from that list on purpose**, and `docs/conventions.md` carries the principle: compaction belongs to cold storage, and the hot path keeps whatever computes fastest. `Object`'s rotation is read once a frame; `Instanced`'s is applied at every leaf test the traversal reaches, and a quaternion costs more arithmetic to apply than a matrix. Same saving, traversal untouched.
+
+  The trigger for revisiting it, written down instead of guessed: two million `Instanced` at 112 bytes is 214 MB that traversal walks and no cache holds. *If* traversal at that scale measures as memory-bound, the options are splitting the array — positions apart from rotations, so a ray touches only what it needs — or shrinking the element after all. Against a measurement showing the stall, not before it.
 
   Landing at roughly `2M × 80 B` for objects plus a much thinner tree. The next boundary after that is SoA — positions in one array, rotations in another — which is a different change and should not be started until the cheap ones are measured.
 
