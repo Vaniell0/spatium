@@ -195,6 +195,20 @@ struct TraceNode {
     std::size_t count = 0;
     std::uint32_t seed = 42;
 
+    // How deep a scattered item sits. 1 rests it on the surface (its
+    // lowest point touching), 0 puts its own origin there -- half sunk,
+    // for an item modelled around its centre. Anything between is a
+    // press into a soft surface.
+    //
+    // It has to be a named knob rather than an offset baked into the
+    // item's mesh, and the reason is not style. `scatter_lift()` derives
+    // the rise from the item's own lowest point, so shifting every vertex
+    // down by d lowers min_z by d and raises the lift by d: the two
+    // cancel exactly and the nudge does nothing at all. The donut demo
+    // had such a nudge, with a comment explaining what it was for, and it
+    // had silently stopped doing anything.
+    T seat = T{1};
+
     // Compose
     std::vector<std::size_t> children;
 
@@ -207,6 +221,12 @@ struct TraceNode {
     // `transform`, just producing a color instead of a position. When
     // set, overrides `material.base_color` for that materialize() call.
     PointField<T> color_fn;
+
+    // Emission, same shape and same reason as color_fn: a field, because
+    // a node that glows only sometimes cannot say so with a constant.
+    // Unset means the identity VecField, which is falsy -- so "is there
+    // one" is a question about the expression rather than a null check.
+    PointField<T> emissive_fn;
 };
 
 template<Scalar T>
@@ -389,6 +409,13 @@ struct Handle {
     Handle colored(Material<T> m) const;
     Handle rendered_as(RenderLevel level) const;
     Handle colored(PointField<T> color_fn) const;
+
+    // Emission, as a field for the same reason colour is one: the donut's
+    // dust has to *catch* light as it nears its letterform and lose it
+    // again as it drifts off, and a constant on the node could only say
+    // "always" or "never".
+    Handle glowing(PointField<T> emissive_fn) const;
+    Handle glowing(Vec<T, 3> emissive) const;
     Handle moving(PointField<T> f) const;
 };
 
@@ -585,7 +612,8 @@ public:
     // space, and a Literal mesh or a group is not one. Unlike offset(),
     // an open target is fine -- sampling a band by its own area element
     // is well posed, and the rim never comes up.
-    Handle<T> scatter(Handle<T> item, Handle<T> target, std::size_t count, std::uint32_t seed = 42) {
+    Handle<T> scatter(Handle<T> item, Handle<T> target, std::size_t count,
+                      std::uint32_t seed = 42, T seat = T{1}) {
         require_surface(target.index, "scatter");
         TraceNode<T> n{};
         n.kind = Kind::Scatter;
@@ -593,6 +621,7 @@ public:
         n.target = target.index;
         n.count = count;
         n.seed = seed;
+        n.seat = seat;
         return push(std::move(n));
     }
 
@@ -670,6 +699,18 @@ Handle<T> Handle<T>::rendered_as(RenderLevel level) const {
 template<Scalar T>
 Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
     trace->node(index).color_fn = std::move(color_fn);
+    return *this;
+}
+
+template<Scalar T>
+Handle<T> Handle<T>::glowing(PointField<T> emissive_fn) const {
+    trace->node(index).emissive_fn = std::move(emissive_fn);
+    return *this;
+}
+
+template<Scalar T>
+Handle<T> Handle<T>::glowing(Vec<T, 3> emissive) const {
+    trace->node(index).material.emissive = emissive;
     return *this;
 }
 
@@ -773,7 +814,7 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         auto target_surface = resolve_surface(trace, n.target);
         auto sites = sample_surface_uniform(target_surface, n.count, n.seed);
         auto item_mesh = materialize_mesh(trace, n.item, t, /*placed=*/false);
-        const T lift = scatter_lift<T>(item_mesh);
+        const T lift = scatter_lift<T>(item_mesh) * n.seat;
 
         out.vertices.reserve(item_mesh.vertex_count() * sites.size());
         out.faces.reserve(item_mesh.face_count() * sites.size());
@@ -880,7 +921,14 @@ template<Scalar T>
 Material<T> Placed<T>::material() const {
     const auto& n = trace->node(index);
     Material<T> mat = n.material;
-    if (n.color_fn) mat.base_color = n.color_fn(mesh().centroid(), t);
+    // One centroid, not two: mesh() rebuilds on every call, so asking it
+    // twice would tessellate the node twice to answer one question about
+    // where it is.
+    if (n.color_fn || n.emissive_fn) {
+        auto at = mesh().centroid();
+        if (n.color_fn) mat.base_color = n.color_fn(at, t);
+        if (n.emissive_fn) mat.emissive = n.emissive_fn(at, t);
+    }
     return mat;
 }
 
@@ -997,6 +1045,21 @@ template<Scalar T = double>
 struct Shape {
     mesh::Mesh<Euclidean<3, T>> geometry;
     std::size_t instances = 0;    // how many objects point here
+
+    // The closed form, when the node this shape came from had one --
+    // carried across the deduplication rather than dropped at it.
+    //
+    // Dropping it had a consequence worth stating, because it made the
+    // instancing story incomplete in exactly the place the DSL says
+    // "many": a node that is its own object (the donut's dust, one node
+    // per particle) kept its exact form and could be instanced, while a
+    // `Scatter` -- the one operation whose entire meaning is "N of
+    // these" -- came out of cook() as N meshes of one mesh, with the
+    // BoundedQuadric that `cylinder()` had carefully recorded nowhere to
+    // be found. The dedup key is `content_hash` of the geometry node, so
+    // two objects sharing a shape share its exact form too, by the same
+    // argument that lets them share the mesh.
+    std::any exact;
 };
 
 template<Scalar T = double>
@@ -1162,7 +1225,8 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         if (n.kind == Kind::Scatter) {
             auto target = resolve_surface(trace, n.target);
             auto sites = sample_surface_uniform(target, n.count, n.seed);
-            const T lift = scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false));
+            const T lift =
+                scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false)) * n.seat;
             placements.reserve(sites.size());
             for (std::size_t i = 0; i < sites.size(); ++i)
                 placements.push_back(
@@ -1182,7 +1246,8 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             // motion moved it. Sharing is only possible between shapes
             // that have not yet been put anywhere.
             out.shapes_.push_back(
-                Shape<T>{materialize_mesh(trace, geometry_node, t, /*placed=*/false), 0});
+                Shape<T>{materialize_mesh(trace, geometry_node, t, /*placed=*/false), 0,
+                         trace.node(geometry_node).exact});
             shape_of_key.emplace(key, shape_index);
         } else {
             shape_index = it->second;

@@ -58,6 +58,23 @@ struct Material {
     // highlight hack -- a renderer that honors this is what tells rough
     // dough from glossy icing apart, not just their base_color.
     T roughness{T{1}};
+
+    // Light this surface emits rather than reflects, linear RGB, added
+    // after shading and unaffected by it -- so an emissive surface stays
+    // bright in its own shadow, which is what makes it read as a source
+    // rather than as a very pale paint.
+    //
+    // A colour rather than a scalar multiplier on base_color, because the
+    // two are genuinely independent: hot dust glows orange while its
+    // surface colour is grey, and a scalar could only ever brighten what
+    // was already there.
+    //
+    // It does not light anything else. A renderer that wanted that would
+    // need the surface as a sampled source, which is a different and much
+    // larger feature; this is the object seen glowing, not the room lit
+    // by it, and saying so here is cheaper than having someone discover
+    // it from a render.
+    Vec<T, 3> emissive{};
 };
 
 // ── Scene object ─────────────────────────────────────────────────

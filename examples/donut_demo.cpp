@@ -203,7 +203,9 @@ std::vector<std::pair<double, double>> load_boom_points(const std::string& path)
 // primitive (unlike offset_surface() itself, which this still goes
 // through directly -- this is the base being offset, not a second
 // surface projected onto the first).
-ParametricSurface<double> torus_cap(double major_r, double minor_r) {
+ParametricSurface<double> torus_cap(double major_r, double minor_r,
+                                     double v0 = std::numbers::pi * 0.02,
+                                     double v1 = std::numbers::pi * 0.98) {
     constexpr double pi = std::numbers::pi;
     return ParametricSurface<double>(
         [=](double u, double v) -> Vec<double, 3> {
@@ -212,7 +214,7 @@ ParametricSurface<double> torus_cap(double major_r, double minor_r) {
                 (major_r + minor_r * std::cos(v)) * std::sin(u),
                 minor_r * std::sin(v)};
         },
-        {0.0, 2.0 * pi, pi * 0.02, pi * 0.98}, // wide band; the noisy thickness
+        {0.0, 2.0 * pi, v0, v1},               // wide band; the noisy thickness
                                                // falloff below does the actual
                                                // edge shaping, not this domain.
                                                // Being a band, this is an open
@@ -331,12 +333,14 @@ struct Prim {
     std::array<Vec<double, 3>, 3> vertex_normals;
     Vec<double, 3> color;
     double roughness;
+    Vec<double, 3> emissive;
 };
 
 // One instanced object: which shared shape, where, and what colour.
 struct DustInstance {
     Vec<double, 3> color;
     double roughness;
+    Vec<double, 3> emissive;
 };
 
 
@@ -381,7 +385,7 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         if (q && place) {
             shapes.push_back(*q);
             insts.push_back({nullptr, place->translation, place->scale, place->rotation});
-            inst_info.push_back({mat.base_color, mat.roughness});
+            inst_info.push_back({mat.base_color, mat.roughness, mat.emissive});
             continue;
         }
         // Bound once: Placed::mesh() builds on each call rather than
@@ -391,7 +395,8 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         for (const auto& f : m.faces) {
             Triangle3 t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
             tris.push_back(t);
-            prims.push_back(Prim{t, {vn[f[0]], vn[f[1]], vn[f[2]]}, mat.base_color, mat.roughness});
+            prims.push_back(Prim{t, {vn[f[0]], vn[f[1]], vn[f[2]]}, mat.base_color, mat.roughness,
+                                 mat.emissive});
         }
     }
     // Shapes are stored first and pointed at second: the vector has to
@@ -460,6 +465,7 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         Vec<double, 3> base_color{};
         double roughness = 1.0;
         Vec<double, 3> hit_point{};
+        Vec<double, 3> emissive{};
 
         const bool dust_won = dhit && (!hit || dhit->t < hit->t);
         if (!hit && !dhit) return background;
@@ -473,6 +479,7 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
             const auto& info = inst_info[dhit->index];
             base_color = info.color;
             roughness = info.roughness;
+            emissive = info.emissive;
             hit_point = dhit->point;
         } else {
             const auto& prim = prims[hit->index];
@@ -484,6 +491,7 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
                                    .normalized()};
             base_color = prim.color;
             roughness = prim.roughness;
+            emissive = prim.emissive;
             hit_point = hit->point;
         }
         if (n.dot(ray.direction) > 0.0) n = Vec<double, 3>{-n};
@@ -512,6 +520,12 @@ std::vector<std::uint8_t> render_frame(const std::vector<bd::Placed<double>>& sc
         // shaded part of it.
         Vec<double, 3> local = Vec<double, 3>{base_color * (0.22 + 0.78 * diff)};
         Vec<double, 3> color = Vec<double, 3>{local + Vec<double, 3>{1.0, 1.0, 1.0} * spec};
+
+        // Emission is added, not blended: a surface that emits does so
+        // whether or not anything is lighting it, which is exactly why
+        // the BOOM letterforms stay bright while the particles around
+        // them fall into the donut's shadow.
+        color = Vec<double, 3>{color + emissive};
 
         // A real reflected ray for glossy materials, not just a
         // highlight -- what actually earns the word "raytracing" here.
@@ -605,7 +619,7 @@ int main(int argc, char* argv[]) {
     bool video = false;
     std::string out_path = "donut.png";
     std::string video_dir = "donut_frames";
-    std::size_t sprinkle_count = 600; // 3x denser
+    std::size_t sprinkle_count = 3600; // small flecks, so many more of them
     double t = T_BUILD_END; // how far into the build-up to render (T_BUILD_END = fully formed)
     int build_frames = 75, orbit_frames = 45; // half the sampling density -- ~9x more
                                               // dust triangles from copies_per_point makes
@@ -765,6 +779,18 @@ int main(int argc, char* argv[]) {
             scene.flake(Vec<double, 3>{0.010, 0.010, 0.003})
                 .colored(bd::PointField<double>{
                     [target, dust_color](const Vec<double, 3>& p, double) { return dust_color(p, target); }})
+                // The letterforms light up, and only while a speck is
+                // actually near one. The same distance that turns its
+                // colour from grey to hot drives the emission, squared so
+                // the glow arrives late and sharply rather than as a
+                // general haze over the whole cloud -- a particle merely
+                // passing by brightens a little, one that lands burns.
+                .glowing(bd::PointField<double>{
+                    [target](const Vec<double, 3>& p, double) {
+                        double d = std::clamp((p - target).norm() / 0.75, 0.0, 1.0);
+                        double hot = (1.0 - d) * (1.0 - d);
+                        return Vec<double, 3>{Vec<double, 3>{1.00, 0.52, 0.12} * (1.35 * hot)};
+                    }})
                 // Written as a *placement*, not as a point map, and the
                 // difference is not stylistic. Both forms produce exactly
                 // the same picture -- the particle flies where dust_core
@@ -868,10 +894,24 @@ int main(int argc, char* argv[]) {
                                          bd::EdgeRule::ZeroThickness);
     auto icing = scene.offset_shell(icing_base, bd::ScalarField<double>{[icing_noise](double u, double v) {
                         constexpr double pi = std::numbers::pi;
-                        double edge_dist = std::min(v - pi * 0.02, pi * 0.98 - v); // distance to the band's edge
+                        // The two rims are not interchangeable. v -> 0 is
+                        // the outer equator and v -> pi is the wall of the
+                        // hole, and glaze runs off the outside; it does not
+                        // climb into the middle. Adding the drip to both --
+                        // which the symmetric `min` used to do -- pushed
+                        // icing down the inside of the hole, where the
+                        // surface turns sharply and the offset overruns its
+                        // own centre of curvature. That is what the pink
+                        // fins around the hole were: an offset surface
+                        // self-intersecting, not a shading artefact. So the
+                        // drip is added to the outer distance only, which
+                        // is both the cheap fix and the correct one.
+                        double outer = v - pi * 0.02;      // toward the outer equator
+                        double inner = pi * 0.98 - v;      // toward the hole
                         double wobble = icing_noise(std::cos(u) * 2.0, std::sin(u) * 2.0, 0.0) * (pi * 0.03);
                         double drip = std::max(0.0, icing_noise(std::cos(u) * 1.3, std::sin(u) * 1.3, 8.0) - 0.35) * (pi * 0.35);
-                        double falloff = std::clamp((edge_dist + wobble + drip) / (pi * 0.09), 0.0, 1.0);
+                        double edge_dist = std::min(outer + drip, inner);
+                        double falloff = std::clamp((edge_dist + wobble) / (pi * 0.09), 0.0, 1.0);
                         falloff = falloff * falloff * (3.0 - 2.0 * falloff); // soft, not torn
                         // 0.045 until 2026-09-17, tuned when offset()
                         // silently rendered this at 48x24 and the waves
@@ -902,21 +942,53 @@ int main(int argc, char* argv[]) {
     // (x,y,z) -> (z,x,y) so the length axis becomes x (a tangent
     // direction instead), then nudge down slightly so it sits sunk into
     // the icing rather than merely resting exactly half-in.
-    auto sprinkle_mesh = solid_cylinder(0.024, 0.13, 8); // bigger
-    for (auto& v : sprinkle_mesh.vertices) v = Vec<double, 3>{v[2], v[0], v[1] - 0.024};
+    // Much smaller than they were, and many more of them: a real
+    // sprinkle is a fleck, and 600 fat ones read as gravel. The nudge
+    // that used to follow this line (`v[1] - 0.024`, with a comment about
+    // sinking them into the icing) is gone because it had stopped doing
+    // anything -- scatter_lift() derives the rise from the item's own
+    // lowest point, so lowering every vertex raises the lift by the same
+    // amount and the two cancel. Sinking is now said out loud, as
+    // scatter()'s `seat`.
+    auto sprinkle_mesh = solid_cylinder(0.011, 0.062, 8);
+    for (auto& v : sprinkle_mesh.vertices) v = Vec<double, 3>{v[2], v[0], v[1]};
     auto sprinkle = scene.literal(sprinkle_mesh);
     std::vector<Vec<double, 3>> sprinkle_colors{
         {0.95, 0.20, 0.25}, {0.98, 0.75, 0.15}, {0.25, 0.65, 0.35},
         {0.30, 0.45, 0.90}, {0.85, 0.30, 0.75}, {0.98, 0.98, 0.95}};
+    // Two bands rather than one, which is how the density gradient is
+    // got without a weight in the sampler: sample_surface_uniform is
+    // uniform *by area* and has no notion of "more here than there". A
+    // dense scatter over the crown and a sparse one over the whole cap
+    // add up to a falloff -- most of them on top, a scattering of
+    // stragglers running down the sides, which is what a real donut
+    // looks like and is composition rather than new API.
+    constexpr double pi_ = std::numbers::pi;
+    auto crown = scene.offset_shell(
+        scene.space(torus_cap(2.0, 1.0, pi_ * 0.28, pi_ * 0.72), 120, 40),
+        dough_bump, bd::EdgeRule::ZeroThickness);
+
     std::vector<bd::Handle<double>> sprinkle_groups;
     std::size_t per_group = sprinkle_count / sprinkle_colors.size();
-    for (std::size_t g = 0; g < sprinkle_colors.size(); ++g)
+    for (std::size_t g = 0; g < sprinkle_colors.size(); ++g) {
+        auto mat = Material<double>{.base_color = sprinkle_colors[g], .roughness = 0.35};
+        // seat 0.45: pressed into the glaze rather than perched on it.
+        // Still not the same thing as the glaze closing around them --
+        // that needs a field that can read the scatter's own sites, and
+        // it is deliberately not in this release.
         sprinkle_groups.push_back(
-            scene.scatter(sprinkle, icing, per_group, static_cast<std::uint32_t>(g * 97 + 11))
-                .colored(Material<double>{.base_color = sprinkle_colors[g], .roughness = 0.35})
+            scene.scatter(sprinkle, crown, (per_group * 2) / 3,
+                          static_cast<std::uint32_t>(g * 97 + 11), 0.45)
+                .colored(mat)
+                .moving(grow_scale));
+        sprinkle_groups.push_back(
+            scene.scatter(sprinkle, icing, per_group / 3,
+                          static_cast<std::uint32_t>(g * 97 + 53), 0.45)
+                .colored(mat)
                 .moving(grow_scale)); // scatter() places against icing's *analytic*, always-full-size
                                       // surface (resolve_surface() doesn't see .moving()) -- this is
                                       // what actually keeps sprinkles in sync with the growing donut
+    }
 
     // Something for the shadows to land on. Added after measuring what
     // shadows were worth without it: 0.3% of the frame's pixels, for 58%
@@ -928,10 +1000,24 @@ int main(int argc, char* argv[]) {
     // Through the DSL like everything else here, which is the point of
     // the file: `cube()` is a Literal, `.moving()` a translation, and the
     // table is a node in the same trace the donut is.
-    auto table = scene.cube({14.0, 14.0, 0.05})
+    // Turned to face the camera edge-on rather than corner-on. Square by
+    // construction and seen from an angle, its far *corner* otherwise
+    // rises into the middle of the frame as a brown peak -- harmless
+    // behind the donut, and directly behind the BOOM letterforms in the
+    // build-up, where it costs the text its sky. Yawing the table to the
+    // camera's own azimuth puts a straight horizon there instead.
+    //
+    // Written with rotated(), which is also the first use of the new
+    // operation in this file: a rotation is affine in the point, so the
+    // table stays a placement and keeps whatever a renderer can do with
+    // one.
+    constexpr double table_yaw = 0.873;   // ~50 deg; camera sits at atan2(-4.2, 5)
+    auto table = scene.cube({6.5, 6.5, 0.05})
                      .colored(Material<double>{.base_color = {0.80, 0.76, 0.70},
                                                .roughness = 0.88})
-                     .moving(bd::VecField<double>::translation({0.0, 0.0, -1.10}));
+                     .moving(rotated(bd::VecField<double>::point(),
+                                     [](double) { return Vec<double, 3>{0.0, 0.0, table_yaw}; })
+                             + bd::VecField<double>::constant({0.0, 0.0, -1.10}));
 
     std::vector<bd::Handle<double>> scene_children{table, cube, dough, icing};
     scene_children.insert(scene_children.end(), sprinkle_groups.begin(), sprinkle_groups.end());
