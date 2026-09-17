@@ -598,3 +598,72 @@ TEST_CASE("BoundedQuadric satisfies what a BVH demands of a shape", "[ray_surfac
     // A bare Quadric must NOT qualify: most quadrics are unbounded.
     STATIC_REQUIRE_FALSE(Bounded<Quadric<double>>);
 }
+
+// ── The instance leaf, oriented ──────────────────────────────
+
+TEST_CASE("Instanced: the ray goes into the rotated shape's own space",
+          "[ray_surface]") {
+    // A cylinder along z, turned a quarter turn about x so its axis lies
+    // along y. Chosen because the *unrotated* version of this exact test
+    // is the degenerate case pinned above: a ray straight down the axis,
+    // which the solvers currently lose. After the turn the ray is
+    // perpendicular to the axis, so a wrong rotation does not merely
+    // shift the answer -- it produces no hit at all.
+    auto c = BoundedQuadric<>::cylinder_z(0.5, -1.0, 1.0);
+    // Written out rather than exponentiated, so this pins ray_hit alone:
+    // a quarter turn about x, mapping z to -y.
+    Matrix<double, 3, 3> R{};
+    R(0, 0) = 1.0; R(1, 2) = -1.0; R(2, 1) = 1.0;
+
+    Instanced<BoundedQuadric<double>> inst{&c, Vec<double, 3>{}, 1.0, R};
+    Ray<3, double> probe{Vec<double, 3>{0.0, 0.0, -5.0}, Vec<double, 3>{0.0, 0.0, 1.0}};
+
+    auto h = ray_hit(probe, inst);
+    REQUIRE(h.has_value());
+    CHECK_THAT(h->t, WithinAbs(4.5, 1e-9));          // wall at z = -0.5
+    CHECK_THAT(h->point[2], WithinAbs(-0.5, 1e-9));
+    // The normal comes back out through R, so it points at the ray.
+    CHECK_THAT(h->normal[2], WithinAbs(-1.0, 1e-9));
+    CHECK_THAT(h->normal[0], WithinAbs(0.0, 1e-9));
+    CHECK_THAT(h->normal[1], WithinAbs(0.0, 1e-9));
+
+    // Unrotated, the same probe runs down the axis and finds nothing --
+    // which is what makes the case above a test of the rotation rather
+    // than of the cylinder.
+    Instanced<BoundedQuadric<double>> upright{&c, Vec<double, 3>{}, 1.0};
+    CHECK_FALSE(ray_hit(probe, upright).has_value());
+}
+
+TEST_CASE("Instanced: the box bounds the rotated shape, not the rotated box",
+          "[ray_surface]") {
+    // Getting this wrong is not a visibly wrong picture -- it is a box
+    // that fails to contain its own shape, so rays that should hit are
+    // culled before the leaf test ever runs, and the object develops
+    // holes that look like a shading bug.
+    auto c = BoundedQuadric<>::cylinder_z(0.5, -1.0, 1.0);
+    // Written out rather than exponentiated, so this pins ray_hit alone:
+    // a quarter turn about x, mapping z to -y.
+    Matrix<double, 3, 3> R{};
+    R(0, 0) = 1.0; R(1, 2) = -1.0; R(2, 1) = 1.0;
+
+    Instanced<BoundedQuadric<double>> inst{&c, Vec<double, 3>{}, 1.0, R};
+    auto b = inst.bounding_box();
+
+    // The upright clip is x,y in [-0.5, 0.5] and z in [-1, 1]; after a
+    // quarter turn about x the long axis is y.
+    CHECK_THAT(b.min_corner[0], WithinAbs(-0.5, 1e-9));
+    CHECK_THAT(b.max_corner[0], WithinAbs(0.5, 1e-9));
+    CHECK_THAT(b.min_corner[1], WithinAbs(-1.0, 1e-9));
+    CHECK_THAT(b.max_corner[1], WithinAbs(1.0, 1e-9));
+    CHECK_THAT(b.min_corner[2], WithinAbs(-0.5, 1e-9));
+    CHECK_THAT(b.max_corner[2], WithinAbs(0.5, 1e-9));
+
+    // And it really does contain the hit the ray test reports.
+    Ray<3, double> probe{Vec<double, 3>{0.0, 0.0, -5.0}, Vec<double, 3>{0.0, 0.0, 1.0}};
+    auto h = ray_hit(probe, inst);
+    REQUIRE(h.has_value());
+    for (std::size_t i = 0; i < 3; ++i) {
+        CHECK(h->point[i] >= b.min_corner[i] - 1e-9);
+        CHECK(h->point[i] <= b.max_corner[i] + 1e-9);
+    }
+}

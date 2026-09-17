@@ -658,7 +658,7 @@ for (const auto& obj : bd::materialize(scene, root.index)) {
 
 The slot is a `std::any`, deliberately **not** the shape of `io/scene.hpp`'s `ResolvedShape` (which erases to a `std::function` returning hits). Both are open, but a renderer needs the *concrete type back* to bucket nodes into one monomorphic `BVH<Shape>` per type; erasing to a callable would instead put an indirect call at every leaf test. Type erasure belongs to describing a scene; evaluating one stays monomorphic.
 
-**It is an invariant, not a field.** The exact form must agree with the map, so any operation that can move them apart clears it — `.moving()` drops it unconditionally, including for a pure translation that would in fact have preserved it. Deciding otherwise means asking an opaque callable what it does, which is the one question a callable cannot answer; it becomes answerable once motion has a structural form. A stale exact form would render a picture correct for the shape and wrong for the scene, with nothing to notice, which is why `is_exact()` is visible rather than inferred from a frame time.
+**It is an invariant, not a field.** The exact form must agree with the map, so any operation that can move them apart clears it. `.moving()` used to drop it unconditionally, including for a pure translation that would in fact have preserved it, because deciding otherwise means asking an opaque callable what it does — the one question a callable cannot answer. That is no longer the question being asked: since motion became a `VecField`, a **placement** (affine in the point: translation, rotation, uniform scale, in any composition) keeps the exact form and a **deformation** still clears it, and which one a motion is comes from walking the expression rather than from asking a closure. A stale exact form would render a picture correct for the shape and wrong for the scene, with nothing to notice, which is why `is_exact()` is visible rather than inferred from a frame time.
 
 **`offset` and `offset_shell` are two operations, not one with a flag.** Offsetting a closed surface produces a closed surface and there is no edge to rule on. Offsetting a surface that *has* an edge — a band cut out of a torus, a tube with open ends — produces a shell, and what happens at the rim is a real choice that the caller has to make. `offset()` refuses an open base and says so, naming `offset_shell()`; `offset_shell()` takes any base and requires an `EdgeRule`.
 
@@ -668,7 +668,18 @@ Both operations, and `scatter()`'s target, check at the **call site** that they 
 
 Closure itself is `is_closed(surface)` in `spaces/parametric.hpp`. A direction closes either by being periodic or by having both its edge curves collapse to a point — the second case is a pole, which is how a sphere closes in `v` while its `v` domain stays a plain interval and its `periodic_v` flag stays false. Both directions have to close for the surface to.
 
-Every node also has `.colored(Material<T>)` and `.moving(fn(point, t) -> point)` — the one motion/mutation slot, taking a constant, a `Morphism` pipe, or a genuine function of time, uniformly. Free functions `resolve_surface(trace, idx)` (Space/Offset only, throws otherwise), `materialize_mesh(trace, idx, t)`, `materialize(trace, idx, t)`, `kind_name(kind)`.
+Every node also has `.colored(Material<T>)` and `.moving(fn(point, t) -> point)` — the one motion/mutation slot, taking a constant, a `Morphism` pipe, or a genuine function of time, uniformly. A lambda of that shape becomes an opaque leaf; writing the motion as a `PointField` expression instead is what lets it stay a placement:
+
+```cpp
+using bd::VecField;
+auto motion = VecField<double>::opaque_of_time(where_it_flies)   // reads t, never the point
+            + rotated(scaled(VecField<double>::point(), how_big),
+                      [](double t) { return Vec<double, 3>{0, 0, spin * t}; });
+```
+
+`point()`, `constant(v)`, `opaque_of_time(f)`, `opaque(f)`, `scaled(field, s(t))`, `rotated(field, r(t))` and `+`/`-` are the vocabulary; `rotated` takes either a matrix or an axis-angle vector, exponentiating the latter through `SO3`. `is_placement()` walks the expression to decide whether the object can be instanced, and `placement_at(env)` returns the `{translation, rotation, scale}` it amounts to at one moment.
+
+Free functions `resolve_surface(trace, idx)` (Space/Offset only, throws otherwise), `materialize_mesh(trace, idx, t)`, `materialize(trace, idx, t)`, `cook(trace, root, t)`, `kind_name(kind)`.
 
 ---
 
