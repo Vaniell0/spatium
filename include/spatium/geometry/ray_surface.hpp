@@ -266,16 +266,48 @@ struct BoundedQuadric {
     //
     // Still one quadric test at a BVH leaf, so it instances exactly like
     // a sphere does; what changes is only which surface the ray meets.
+    // A flake: the top of a sphere, cut down to a thin curved sheet.
+    //
+    // `half` says how big the caller wants it; the *clip* returned is
+    // tighter than that, and deliberately so. The clip is not a
+    // description of the requested size -- it is the region the surface
+    // actually occupies, and those were allowed to differ until
+    // 2026-09-17, which made this the one factory in the DSL whose exact
+    // form disagreed with the chart recorded beside it.
+    //
+    // Measured, since the disagreement had already been misdescribed
+    // twice from the armchair: for `flake({0.010, 0.010, 0.003})` the
+    // chart's image spans z in [-0.001431, 0.003] and the old clip said
+    // [-0.003, 0.003]. Not the corners, which agreed exactly -- the
+    // *bottom*. Below where the cap ends the sphere keeps widening past
+    // the slab's half-width and is cut by its sides, so the exact form
+    // carried a skirt the tessellation had never heard of.
+    //
+    // The cure is to clip where the sheet really stops. `rim` is the
+    // widest the cap gets (the slab's narrower half-width), and `z_end`
+    // is the height at which it gets there. Clipping to that box gives
+    // exactly the cap and nothing else: at any z above `z_end` the
+    // sphere's radius is at most `rim`, so the sides never cut, and the
+    // bottom cuts precisely where the cap ends. `spaces` `flake()` builds
+    // its chart from the same two quantities, so the two cannot drift.
     static BoundedQuadric flake(const Vec<T, 3>& half, T bulge = T{1.35}) {
-        using std::max;
+        using std::max, std::min, std::sqrt;
         // Curvature comes from the sphere being wider than the slab it is
         // cut by; `bulge` is that ratio in the flake's widest direction.
         T radius = bulge * max(half[0], max(half[1], half[2]));
         // Centred below the slab so the cap that survives is the top of
         // the sphere: one curved sheet, not a lens with two faces.
         Vec<T, 3> centre{T{0}, T{0}, half[2] - radius};
+
+        T rim = min(half[0], half[1]);
+        // Height of the point where the cap's radius reaches `rim`,
+        // measured from the sphere's centre.
+        T drop = sqrt(max(T{0}, radius * radius - rim * rim));
+        T z_end = centre[2] + drop;
+
         return {Quadric<T>::sphere(centre, radius),
-                Box<3, T>{Vec<T, 3>{-half}, Vec<T, 3>{half}}};
+                Box<3, T>{Vec<T, 3>{-rim, -rim, z_end},
+                          Vec<T, 3>{rim, rim, half[2]}}};
     }
 
     static BoundedQuadric ellipsoid(T a, T b, T c) {

@@ -720,3 +720,89 @@ TEST_CASE("cook() resolves colour and emission per object, not per node",
     CHECK(any_glowing);     // so was the emission field
     CHECK(any_dark);        // and it distinguishes objects, rather than being constant
 }
+
+TEST_CASE("Every factory's exact form agrees with the chart recorded beside it",
+          "[build_dsl]") {
+    // The invariant `docs/api-reference.md` already states -- "the exact
+    // form must agree with the map" -- checked where the two are first
+    // written down together, which is where it is cheapest to check and
+    // was the one place nothing looked.
+    //
+    // `.moving()` has always honoured it by clearing the exact form when
+    // a motion could move them apart. A *factory* can violate it at the
+    // moment of creation, and `flake()` did: its chart was a spherical
+    // cap ending where its radius reached the slab's half-width, while
+    // its clip box ran on to the slab's floor, so the exact form carried
+    // a skirt the tessellation had never heard of.
+    //
+    // Comparing bounding boxes rather than surfaces is deliberate. It is
+    // cheap, it needs nothing that can itself be wrong, and it catches
+    // the failure that matters -- one of the pair covering ground the
+    // other does not. A divergence here is a bug until someone adds a
+    // documented exception, and there are none.
+    using V3 = spatium::Vec<double, 3>;
+
+    auto chart_box = [](const bd::Trace<double>& tr, std::size_t idx) {
+        auto s = bd::resolve_surface(tr, idx);
+        auto [u0, u1, v0, v1] = s.domain();
+        V3 lo{1e30, 1e30, 1e30}, hi{-1e30, -1e30, -1e30};
+        constexpr int N = 96;
+        for (int i = 0; i <= N; ++i)
+            for (int j = 0; j <= N; ++j) {
+                auto p = s.evaluate(u0 + (u1 - u0) * i / N, v0 + (v1 - v0) * j / N);
+                for (int k = 0; k < 3; ++k) {
+                    lo[k] = std::min(lo[k], p[k]);
+                    hi[k] = std::max(hi[k], p[k]);
+                }
+            }
+        return std::pair{lo, hi};
+    };
+
+    auto agrees = [&](const char* what, const bd::Trace<double>& tr, std::size_t idx,
+                      const V3& elo, const V3& ehi, double tol) {
+        INFO(what);
+        auto [lo, hi] = chart_box(tr, idx);
+        for (int k = 0; k < 3; ++k) {
+            CHECK_THAT(lo[k], WithinAbs(elo[k], tol));
+            CHECK_THAT(hi[k], WithinAbs(ehi[k], tol));
+        }
+    };
+
+    bd::Trace<double> tr;
+
+    auto t = tr.torus(2.0, 1.0);
+    {
+        auto* e = std::any_cast<spatium::geometry::Torus<double>>(&tr.node(t.index).exact);
+        REQUIRE(e != nullptr);
+        auto b = e->bounding_box();
+        agrees("torus", tr, t.index, V3{b.min_corner}, V3{b.max_corner}, 1e-9);
+    }
+
+    auto c = tr.cylinder(0.011, 0.062, 24, 4);
+    {
+        auto* e = std::any_cast<spatium::geometry::BoundedQuadric<double>>(&tr.node(c.index).exact);
+        REQUIRE(e != nullptr);
+        auto b = e->bounding_box();
+        agrees("cylinder", tr, c.index, V3{b.min_corner}, V3{b.max_corner}, 1e-9);
+    }
+
+    auto sp = tr.sphere(0.5);
+    {
+        auto* e = std::any_cast<spatium::geometry::BoundedQuadric<double>>(&tr.node(sp.index).exact);
+        REQUIRE(e != nullptr);
+        auto b = e->bounding_box();
+        agrees("sphere", tr, sp.index, V3{b.min_corner}, V3{b.max_corner}, 1e-9);
+    }
+
+    // The one that was wrong, and the asymmetric one: a square slab, so
+    // `rim` is unambiguous, and a rectangular one, where `rim` is the
+    // narrower half-width and the clip must follow it rather than the
+    // caller's larger number.
+    for (auto half : {V3{0.010, 0.010, 0.003}, V3{0.020, 0.008, 0.004}}) {
+        auto f = tr.flake(half);
+        auto* e = std::any_cast<spatium::geometry::BoundedQuadric<double>>(&tr.node(f.index).exact);
+        REQUIRE(e != nullptr);
+        auto b = e->bounding_box();
+        agrees("flake", tr, f.index, V3{b.min_corner}, V3{b.max_corner}, 1e-6);
+    }
+}

@@ -747,11 +747,11 @@ question is not reopened from scratch in a month.
 
   `flake`'s chart is the disc *inscribed* in the clip box; the exact form keeps the box's corners. For the donut's `flake({0.010, 0.010, 0.003})` the square's corner reaches 0.0141 against the disc's 0.010 — so the exact form is a rounded square and the tessellation is a circle. The exact form covers **more**, which is the opposite direction from the guess that prompted this entry.
 
-  Three ways out, and the choice should be made rather than inherited:
+  **Fixed 2026-09-17, and the measurement corrected the diagnosis twice on the way.** The disagreement is not in the corners — sampling both shows x and y agreeing to the bit — it is in **z**: the chart spans `[-0.001431, 0.003]` and the old clip claimed `[-0.003, 0.003]`. Below where the cap ends the sphere keeps widening past the slab's half-width and is cut by its sides, so the exact form carried a skirt the tessellation had never heard of.
 
-  - **Make the chart match the clip.** Correct, and the most work: the box boundary is not a `v` isoline, so the cap can no longer be tessellated as a rectangle in `(u, v)`.
-  - **Make the clip match the chart.** `BoundedQuadric` clips to a `Box` only, so this means a box whose half-width is `rim` in x and y — which changes what `flake` means for a non-square `half`.
-  - **Accept it, in writing.** A dust speck is two pixels and the difference is invisible. That is a real answer for this scene and it must be *stated*, because the whole point of recording an exact form is that a renderer may choose it over the mesh, and it should not be choosing a different shape without being told.
+  Making the chart match was not available: `ParametricSurface`'s domain is a rectangle in `(u, v)` and "sphere ∩ box" is not one. Making the clip match was, and is exactly right — clip to `rim` and to the height where the cap reaches it, and then at any `z` above that the sphere's radius is at most `rim`, the sides never cut, and the bottom cuts precisely where the cap ends. Sphere ∩ box is then *equal* to the cap. The clip stops describing the size the caller asked for and starts describing the region the surface occupies, which is what a clip is for.
+
+  Guarded by a test over every factory that records both parts, comparing the sampled bounding box of the chart against the exact form's own. Bounding boxes rather than surfaces, deliberately: cheap, dependent on nothing that can itself be wrong, and it catches the failure that matters — one of the pair covering ground the other does not. A divergence is a bug until someone writes a documented exception, and there are none. Checked against the old clip before being trusted: four assertions fail there.
 
   The reason this is worth an entry rather than a fix-in-place: the invariant exists, is documented, and is enforced on the one operation that was thought to threaten it. Nothing checks it where the two are first written down together — which is also where it is cheapest to check, since both are right there.
 
