@@ -14,12 +14,28 @@ static_assert(spatium::RiemannianManifold<FlatTorus>);
 // Mesh<FlatTorus>, subdivision, geodesics, morphisms — all work automatically.
 ```
 
+One exception to "all work automatically", stated here rather than left to
+be discovered: **spatial acceleration is still flat.** `spatial/`'s BVH
+bounds with axis-aligned boxes, so ray casting and nearest-neighbour
+queries are accelerated in Euclidean space and unaccelerated off it. The
+operations still give correct answers on any space; they just walk
+everything. A ball tree over geodesic balls is the fix and is an open item
+in the [roadmap](docs/ROADMAP.md), not an oversight.
+
 C++23, in large part header-only — three deliberate exceptions exist where real complexity made that the wrong tradeoff, not an oversight: the Vulkan viewer needs genuine C linkage, the periodic-table data backs a single compiled translation unit, and the `physics/mechanics` research track plus optional CUDA/ipc-toolkit integrations sit outside the header-only spine on purpose. See [Architecture](docs/architecture.md#header-only-spine-and-three-principled-exceptions) for the honest breakdown, not a marketing gloss.
 
 ## Gallery
 
 - [Kerr black hole](gallery/blackhole_gr.png) — full 4-coordinate geodesic integration, GPU-rendered (CUDA) at 1920x1080 ([video](gallery/blackhole_gr.mp4))
 - [A donut, declaratively](gallery/donut_dsl.png) — built entirely from `torus()`/`offset()`/`scatter()`, see the [getting-started guide](docs/getting-started-dsl.md) ([build-up video](gallery/donut_dsl.mp4))
+
+The donut is also where the scene DSL's argument is easiest to check. A
+scene is described as *spaces* rather than as meshes, and the description
+stays a small inspectable graph: **34 nodes describing 2,021,984 objects**.
+Geometry that would be 64,654,768 vertices if every object carried its own
+copy is stored as 39,272 — about **1646x** — and the frame renders in under
+a gigabyte. That is not a trick in the renderer; it is what having
+described the scene as spaces buys.
 
 More in [`gallery/`](gallery/).
 
