@@ -6,13 +6,19 @@
 // decides whether a trained dispatcher can live in a hot path rather than
 // being consulted once per scene.
 //
-// Four things are timed on the same inputs:
+// Timed on the same inputs:
 //
 //   if-cascade      the hand-written branch the model replaces
+//   trees           at the depths distillation actually needs, which
+//                   `distill_tree` measured rather than assumed
 //   forward+softmax what the dispatcher does today
 //   forward+argmax  the same, minus the softmax
-//   depth-4 tree    a distilled decision tree, the shape the literature
-//                   reaches for when a policy has to answer in microseconds
+//
+// The tree depths are not a free choice. An earlier version of this file
+// timed depth 4, called it 1.6x an `if`, and treated the question as
+// settled -- before anything had checked what a depth-4 tree costs in
+// accuracy. It costs 0.511 on the worst domain, which is not a tree
+// anybody would ship. The depths worth timing are 8 and 12.
 //
 // The softmax row is here because it should not need to exist. argmax over
 // a softmax is argmax over the logits -- the exponentials cannot reorder
@@ -47,17 +53,45 @@ std::size_t if_cascade(const std::vector<double>& x) {
     return (x[5] < 0.0) ? 6u : 7u;
 }
 
-// A depth-4 tree over the same features, standing in for a distilled
-// policy. Sixteen leaves, each naming an op -- the shape the distillation
-// literature produces, and the reason it is worth measuring is that its
-// cost does not depend on the hidden layer it was distilled from.
-std::size_t tree_depth4(const std::vector<double>& x, const std::vector<std::size_t>& leaf) {
-    std::size_t i = 0;
-    i = 2 * i + (x[0] > 0.0);
-    i = 2 * i + (x[1] > 0.0);
-    i = 2 * i + (x[2] > 0.0);
-    i = 2 * i + (x[3] > 0.0);
-    return leaf[i % leaf.size()];
+// Trees at the depths the distillation actually needs, not at a depth
+// chosen for looking good. `distill_tree` measured the loss against the
+// network it imitates: depth 4 gives up 0.511 accuracy on the worst
+// domain and is unusable, depth 8 gives up 0.092, depth 12 gives up
+// 0.041. So depth 4 is here only as the number that was quoted before it
+// was checked, and the honest rows are the deep ones.
+//
+// The comparisons are cheap; what makes a deep tree cost more than its
+// depth suggests is that the node array stops fitting in L1 and the
+// branches stop being predictable.
+struct Tree {
+    std::vector<std::size_t> feature;
+    std::vector<double> threshold;
+    std::vector<std::size_t> label;
+    std::size_t depth = 0;
+};
+
+Tree make_tree(std::size_t depth, std::size_t num_ops, std::size_t dim, std::mt19937_64& rng) {
+    const std::size_t internal = (std::size_t{1} << depth) - 1;
+    Tree t;
+    t.depth = depth;
+    t.feature.resize(internal);
+    t.threshold.resize(internal);
+    t.label.resize(std::size_t{1} << depth);
+    std::uniform_int_distribution<std::size_t> fd(0, dim - 1);
+    std::normal_distribution<double> td(0.0, 1.0);
+    for (std::size_t i = 0; i < internal; ++i) { t.feature[i] = fd(rng); t.threshold[i] = td(rng); }
+    for (std::size_t i = 0; i < t.label.size(); ++i) t.label[i] = i % num_ops;
+    return t;
+}
+
+std::size_t tree_eval(const Tree& t, const std::vector<double>& x) {
+    // Heap layout: the children of node i are 2i+1 and 2i+2, so after
+    // `depth` descents the index lands in the leaf band starting at
+    // 2^depth - 1 and the offset into `label` is that band's base.
+    std::size_t node = 0;
+    for (std::size_t d = 0; d < t.depth; ++d)
+        node = 2 * node + 1 + (x[t.feature[node]] > t.threshold[node] ? 1u : 0u);
+    return t.label[node - ((std::size_t{1} << t.depth) - 1)];
 }
 
 template<class F>
@@ -82,8 +116,6 @@ int main() {
     std::vector<std::vector<double>> inputs(kPool, std::vector<double>(kInputDim));
     for (auto& v : inputs) for (auto& e : v) e = nd(rng);
 
-    std::vector<std::size_t> leaf(16);
-    for (std::size_t i = 0; i < leaf.size(); ++i) leaf[i] = i % kNumOps;
 
     std::println("Learned dispatch against the branch it replaces");
     std::println("input dim {}, {} ops, {} reps, inputs drawn from a pool of {}",
@@ -95,13 +127,16 @@ int main() {
         return if_cascade(inputs[i % kPool]);
     }, kReps);
 
-    const double t_tree = time_ns([&](std::size_t i) {
-        return tree_depth4(inputs[i % kPool], leaf);
-    }, kReps);
-
     std::println("  {:<24} | {:>12.2f} | {:>13.1f}x", "if-cascade", t_if, 1.0);
-    std::println("  {:<24} | {:>12.2f} | {:>13.1f}x", "distilled tree, depth 4",
-                 t_tree, t_tree / t_if);
+
+    for (std::size_t depth : {4u, 8u, 10u, 12u}) {
+        const Tree tree = make_tree(depth, kNumOps, kInputDim, rng);
+        const double t_tree = time_ns([&](std::size_t i) {
+            return tree_eval(tree, inputs[i % kPool]);
+        }, kReps);
+        std::println("  {:<24} | {:>12.2f} | {:>13.1f}x",
+                     std::format("tree, depth {}", depth), t_tree, t_tree / t_if);
+    }
 
     for (std::size_t hidden : {8u, 16u, 32u, 64u, 128u}) {
         rsc::Dispatcher model(kInputDim, hidden, kNumOps, /*seed=*/7);

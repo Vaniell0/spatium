@@ -21,3 +21,11 @@ target_include_directories(dispatch_cost PRIVATE
 )
 target_link_libraries(dispatch_cost PRIVATE spatium_core)
 target_compile_options(dispatch_cost PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(distill_tree distill_tree.cpp)
+target_include_directories(distill_tree PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(distill_tree PRIVATE spatium_core)
+target_compile_options(distill_tree PRIVATE -Wall -Wextra -Wpedantic)
