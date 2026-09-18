@@ -1281,7 +1281,20 @@ It also inverts the economics, which the toy got backwards. Expanding a node ove
 
 **And the existing design already predicts which half transfers.** This file's own dispatch/calibration split -- dispatch is the trained model, calibration is classical optimization and not the model -- maps exactly onto it: the *dispatch* transfers, since which operations in which order is space-agnostic by construction, while the *calibration* does not, because a step size tuned on a unit sphere will not hold on a hyperbolic space. Structure travels, constants are re-fitted per space.
 
-**The experiment that would settle it:** search for a chain meeting a specification on one space, instantiate the same chain on two others, and measure the transfer rate -- and separately whether the transferred chain is any worse than one found by searching the target space directly. That is the claim, run on its own machinery.
+**Measured 2026-09-18** (`rsc/tools/transfer.cpp`), and it came out as the design predicted rather than as hoped. A chain was searched for on `Sphere<2>` and then replayed unchanged on `Euclidean<3>` and on a `ParametricSurface` torus -- three spaces that behave differently under the same operation, since subdivision projects new vertices onto the sphere, onto nothing in Euclidean space, and onto the torus.
+
+| specification | transfers |
+|---|---|
+| relative (10x the starting faces, edge at most 0.45x the starting edge) | **3 of 3** |
+| absolute (at least 200 faces, edge in [0.40, 0.50]) | 1 of 3 |
+
+The relative chain is `subdivide -> subdivide` and holds everywhere. The absolute one is `subdivide -> subdivide -> scale_up`, and fails on Euclidean by 6% (0.5303 against a 0.50 ceiling) and on the torus by half (0.2840 against a 0.40 floor).
+
+**Structure transfers, constants do not** -- measured, and landing exactly on the dispatch/calibration split this design already drew for unrelated reasons. Two independent routes to the same seam is the sort of agreement worth trusting.
+
+The check is also the compiler's: the operations are templates over `Surface S` and none of them names a space, so the file compiling for three of them *is* the single interface through which such a generalisation can be checked. That phrase stops being a metaphor here.
+
+Still open: whether a transferred chain is any worse than one found by searching the target space directly.
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 

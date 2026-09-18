@@ -61,3 +61,11 @@ target_include_directories(synthesize_mesh PRIVATE
 )
 target_link_libraries(synthesize_mesh PRIVATE spatium_core)
 target_compile_options(synthesize_mesh PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(transfer transfer.cpp)
+target_include_directories(transfer PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(transfer PRIVATE spatium_core)
+target_compile_options(transfer PRIVATE -Wall -Wextra -Wpedantic)
