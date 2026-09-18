@@ -207,7 +207,12 @@ with the factor as a scalar field rather than a callable. It is the same
 missing piece in both languages, and it is a precondition for the export
 question rather than a nicety.
 
-### The recommendation: JS holds handles, not an IR
+### If a JS binding is built: handles, not an IR
+
+Deprioritised 2026-09-18 — the browser is reachable and stays reachable,
+and the description-based door below is the cheaper boundary to build
+first. Recorded here so the design does not have to be re-derived when it
+comes back round.
 
 Since WASM runs the real library, JS does not have to build an op array at
 all, and therefore does not have to solve "how does a JS closure become
@@ -259,6 +264,79 @@ onto one.
 the JS thing is a reimplementation rather than a binding, sharing only a
 scene format. That is a legitimate architecture — roughly what glTF is —
 and it is a different project.
+
+## The other door: a description, not an ABI
+
+Everything above assumes the boundary is a *binding* — a caller in another
+language holding handles or buffers and issuing calls. There is a second
+shape for the same boundary, it is cheaper, and half of it is already
+built: **the outside sends a description, and one entry point reads it.**
+
+One door instead of a wrapper per builder. No handle protocol, no ABI
+surface that grows every time the DSL gains a verb.
+
+### The precedent is `io/scene.hpp`, and it already works
+
+A scene loads from JSON today, and `ShapeRegistry` maps a `shape_kind`
+string to a factory. The property worth copying is the one its header
+comment leads with: **an object with an unregistered `shape_kind` still
+loads and saves correctly**, carrying its string and its raw parameters
+through untouched. The format does not break on what it does not know.
+
+That covers *placed objects*. Extending the same idea from placed objects
+to the **trace** — `torus`, `offset`, `scatter`, `moving`, as records
+rather than as calls — is the whole job, and it needs no IR, no vocabulary
+and no structural factor, because the description is read on the C++ side
+and turns straight into the builders that already exist.
+
+### But a dispatcher is not a parser
+
+RSC is the obvious thing to reach for here and it is the wrong tool for
+half of the job. The two halves must stay separate:
+
+**A precise description → a parser.** `torus(1.0, 0.4)` determines its
+result completely. Parsing is deterministic, testable, and fails cleanly on
+input it does not understand. A trained model put in that position is
+strictly worse: non-deterministic, unverifiable, and unable to say "I don't
+know" — it always selects something.
+
+**An under-determined goal → search.** A model earns its place only where
+the input genuinely does not determine the output.
+
+### Where RSC does belong: it decides *how*, not *what*
+
+The description says "offset this torus by 0.08". It does not say whether
+to stay analytic or tessellate, at what resolution, with which root-finder,
+at what precision. **That is exactly what RSC is already trained to
+decide** — precision dispatch, root-finding method, mesh strategy are three
+of its existing domains.
+
+So the division is clean and both halves have machinery today:
+
+| | decides | mechanism | state |
+|---|---|---|---|
+| Parser | *what* was asked | `io/scene.hpp`'s string registry, extended from objects to trace nodes | half built |
+| RSC | *how* to carry it out | `rsc/include/registry.hpp`, dispatcher trained per domain | built, unapplied |
+
+`rsc/include/registry.hpp`'s `add()` returns the dispatch-head index — the
+value the model's classification head emits to select an op. That is the
+far side of the same door.
+
+This is also the honest answer to "is the IR overkill". For *this* path it
+is not needed at all. The IR earns its place in exactly two places —
+evaluating fields on a device, and serialising a scene to a file or a wire
+— and neither of those is what a language binding needs.
+
+### The cheap GPU layer, unchanged by any of this
+
+Worth restating because it keeps getting buried under the IR discussion:
+**uploading a cooked scene and traversing it on the GPU needs none of this
+work.** `Cooked<T>` is already flat POD arrays of objects and shapes with
+no pointers. The CPU cooks, the device traverses and shades. The IR becomes
+necessary only when fields must be re-evaluated *on the device* every
+frame, which is a real-time-animation requirement and not a rendering one —
+cooking two million instances takes 2.6 s on the CPU, which is fine offline
+and not fine at sixty frames a second.
 
 ### The first step is a proof, not a backend
 
