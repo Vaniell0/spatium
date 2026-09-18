@@ -29,3 +29,11 @@ target_include_directories(distill_tree PRIVATE
 )
 target_link_libraries(distill_tree PRIVATE spatium_core)
 target_compile_options(distill_tree PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(search_heuristic search_heuristic.cpp)
+target_include_directories(search_heuristic PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(search_heuristic PRIVATE spatium_core)
+target_compile_options(search_heuristic PRIVATE -Wall -Wextra -Wpedantic)
