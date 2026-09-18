@@ -25,12 +25,7 @@
 //
 // Build: part of the rsc tools target.
 
-#include <spatium/mesh/mesh.hpp>
-#include <cstring>
-#include <spatium/mesh/operations.hpp>
-#include <spatium/mesh/primitives.hpp>
-#include <spatium/mesh/subdivision.hpp>
-#include <spatium/spaces/sphere.hpp>
+#include "mesh_toy.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -40,107 +35,33 @@
 #include <string>
 #include <vector>
 
-namespace {
 
-using Space = spatium::Sphere<2, double>;
-using MeshT = spatium::mesh::Mesh<Space>;
-
-constexpr std::size_t kVertexCap = 5000;   // an op that exceeds this is skipped
-
-struct Op {
-    const char* name;
-    MeshT (*apply)(const MeshT&, const Space&);
-};
-
-MeshT op_subdivide(const MeshT& m, const Space& s) {
-    return spatium::mesh::subdivide_once(m, s);
-}
-MeshT op_scale_up(const MeshT& m, const Space&) {
-    return spatium::mesh::transform(m, [](const auto& p) { return decltype(p){p * 1.5}; });
-}
-MeshT op_scale_down(const MeshT& m, const Space&) {
-    return spatium::mesh::transform(m, [](const auto& p) { return decltype(p){p * (1.0 / 1.5)}; });
-}
-MeshT op_shift_x(const MeshT& m, const Space&) {
-    return spatium::mesh::transform(m, [](const auto& p) {
-        auto q = p; q[0] += 0.25; return q;
-    });
-}
-MeshT op_shift_y(const MeshT& m, const Space&) {
-    return spatium::mesh::transform(m, [](const auto& p) {
-        auto q = p; q[1] += 0.25; return q;
-    });
-}
-MeshT op_flip(const MeshT& m, const Space&) {
-    return spatium::mesh::flip_normals(m);
-}
-
-const std::vector<Op>& ops() {
-    static const std::vector<Op> v{
-        {"subdivide", op_subdivide}, {"scale_up", op_scale_up},
-        {"scale_down", op_scale_down}, {"shift_x", op_shift_x},
-        {"shift_y", op_shift_y}, {"flip", op_flip},
-    };
-    return v;
-}
-
-// A mesh's identity, as a string so two of them can be compared exactly.
-// `digits` < 0 means the full bit pattern; otherwise coordinates are
-// rounded first, which is what decides whether near-misses count as the
-// same mesh.
-std::string fingerprint(const MeshT& m, int digits) {
-    std::string out = std::to_string(m.vertex_count()) + ":" + std::to_string(m.face_count()) + "|";
-    std::vector<std::string> coords;
-    coords.reserve(m.vertex_count());
-    for (const auto& v : m.vertices) {
-        std::string s;
-        for (int k = 0; k < 3; ++k) {
-            double x = v[static_cast<std::size_t>(k)];
-            if (digits >= 0) {
-                const double scale = std::pow(10.0, digits);
-                x = std::round(x * scale) / scale;
-                if (x == 0.0) x = 0.0;   // fold -0.0 into 0.0
-            }
-            std::uint64_t bits = 0;
-            std::memcpy(&bits, &x, sizeof(bits));
-            s += std::to_string(bits) + ",";
-        }
-        coords.push_back(std::move(s));
-    }
-    // Sorted, so a mesh that differs only in vertex ordering is the same
-    // mesh -- otherwise relabelling would be counted as discovery.
-    std::sort(coords.begin(), coords.end());
-    for (const auto& c : coords) out += c;
-    return out;
-}
-
-}  // namespace
 
 int main() {
-    const Space space{};
-    const MeshT start = spatium::mesh::icosahedron(space);
+    const meshtoy::Space space{};
+    const meshtoy::MeshT start = spatium::mesh::icosahedron(space);
 
     std::println("Do different operation sequences reach the same mesh?");
     std::println("start: icosahedron on Sphere<2>, {} vertices; {} operations",
-                 start.vertex_count(), ops().size());
+                 start.vertex_count(), meshtoy::ops().size());
     std::print("ops:");
-    for (const auto& o : ops()) std::print(" {}", o.name);
+    for (const auto& o : meshtoy::ops()) std::print(" {}", o.name);
     std::println("\n");
 
     std::println("  {:>5} | {:>12} | {:>10} | {:>12} | {:>10} | {:>12}",
                  "depth", "sequences", "exact", "collapse", "rounded 1e-9", "collapse");
 
-    std::vector<MeshT> frontier{start};
+    std::vector<meshtoy::MeshT> frontier{start};
     std::size_t sequences = 1;
 
     for (std::size_t depth = 1; depth <= 6; ++depth) {
-        std::vector<MeshT> next;
+        std::vector<meshtoy::MeshT> next;
         std::size_t attempted = 0;
         for (const auto& m : frontier) {
-            for (const auto& o : ops()) {
+            for (const auto& o : meshtoy::ops()) {
                 ++attempted;
-                MeshT r = o.apply(m, space);
-                if (r.vertex_count() > kVertexCap) continue;
+                meshtoy::MeshT r = o.apply(m, space);
+                if (r.vertex_count() > meshtoy::kVertexCap) continue;
                 next.push_back(std::move(r));
             }
         }
@@ -148,8 +69,8 @@ int main() {
 
         std::set<std::string> exact, rounded;
         for (const auto& m : next) {
-            exact.insert(fingerprint(m, -1));
-            rounded.insert(fingerprint(m, 9));
+            exact.insert(meshtoy::fingerprint(m, -1));
+            rounded.insert(meshtoy::fingerprint(m, 9));
         }
 
         std::println("  {:>5} | {:>12} | {:>10} | {:>11.1f}x | {:>12} | {:>11.1f}x",
@@ -162,9 +83,9 @@ int main() {
         // integer search deduplicated states -- otherwise the count grows
         // as the number of paths rather than of reachable meshes.
         std::set<std::string> seen;
-        std::vector<MeshT> deduped;
+        std::vector<meshtoy::MeshT> deduped;
         for (auto& m : next)
-            if (seen.insert(fingerprint(m, -1)).second) deduped.push_back(std::move(m));
+            if (seen.insert(meshtoy::fingerprint(m, -1)).second) deduped.push_back(std::move(m));
         frontier = std::move(deduped);
     }
 

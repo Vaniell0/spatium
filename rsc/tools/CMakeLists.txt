@@ -53,3 +53,11 @@ target_include_directories(mesh_collisions PRIVATE
 )
 target_link_libraries(mesh_collisions PRIVATE spatium_core)
 target_compile_options(mesh_collisions PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(synthesize_mesh synthesize_mesh.cpp)
+target_include_directories(synthesize_mesh PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(synthesize_mesh PRIVATE spatium_core)
+target_compile_options(synthesize_mesh PRIVATE -Wall -Wextra -Wpedantic)
