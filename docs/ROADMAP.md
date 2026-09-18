@@ -1285,6 +1285,26 @@ It also inverts the economics, which the toy got backwards. Expanding a node ove
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 
+## Two searchable domains, and why owning the library is what makes them searchable
+
+Recorded 2026-09-18, pulling together threads that were already here separately.
+
+**The reason everything is hand-rolled turns out to be a training reason, not only an independence one.** A search needs to grade its candidates, and grading at the resolution a search needs means running instrumented code you own. On someone else's library an operation is a black box: it can be called, not scored. Here every registered operation is simultaneously a legal action and a measurable outcome, which is the whole substrate. `Vec`, the solvers, the eigendecomposition, `json.hpp`, `wav.hpp` — the argument for those was self-containment, and this is the second one.
+
+There are exactly two places where an oracle is free, exact, and ours.
+
+**Rewriting the IR.** "The trace is the IR" (see the Declarative scene DSL section). A rewritten op graph must compute the identical result, and the oracle for that is already queued rather than new work: the POD interpreter asserting bit-exact agreement with `eval_into`. The test that would demonstrate exportability *is* the grader for a rewrite — one artifact, two uses. This is also, precisely, "arrive at one algorithm's results from a different set of primitives": a rewritten graph computes the same thing by a different composition, which is the shape AlphaTensor's result had.
+
+**Building trees.** The oracle is measured query cost — build the hierarchy, then run queries and time them.
+
+The difference between the two is worth keeping straight, because it decides what each search can be asked for. **IR search can only equal**: bit-exact equality admits no improvement on correctness, so the objective is cost subject to exact identity. **Tree search can beat**: there is no output to match, only a cost to lower, so improvement over the reference is on the table.
+
+**Domain-specific models are not a hypothesis here.** Measured 2026-09-18: one distilled tree per domain loses 0.005 accuracy against the network at 8.43 ns, where a single tree covering all four domains loses 0.008 at 11.18 ns — better and roughly half the cost, because the domain is known at the call site and should not be costing the tree two levels to re-derive. The base-plus-custom split already in the RSC design is the same idea one storey up.
+
+**And the manifold tree is where the transfer claim gets tested cheaply.** A BVH and a ball tree differ only in the bound; construction and traversal are the same. Given a bound concept — bound a set, merge two bounds, test a query against a bound — one hierarchy serves axis-aligned boxes, geodesic balls, OBBs and k-DOPs alike. A split policy learned over that concept on Euclidean boxes can then be run against geodesic balls, and whether it still helps is a measurement, not an argument. That is the space-agnostic discovery claim in its cheapest concrete form, and the compiler does the checking.
+
+**Dependencies, so the order is not confused.** IR search needs the op vocabulary and the POD interpreter, both already queued. Tree search needs the bound concept, which does not exist yet. Neither needs the other, so either can be taken first.
+
 ## Contact physics / RSC
 
 - **[course]** Full multi-config sweep for the implicit-contact Newton solver, matching the XPBD investigation's own 20-point discipline, plus a performance pass (current single traced config takes multiple CPU-minutes under ipc-toolkit's TBB-based collision detection).
