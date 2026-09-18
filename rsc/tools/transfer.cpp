@@ -142,18 +142,37 @@ std::vector<std::string> search(const spatium::mesh::Mesh<S>& start, const S& sp
 }
 
 // Replay, not re-search. The chain is fixed; only the space changes.
+//
+// Also searches the target space directly, because "the transferred chain
+// still satisfies the spec" is a weaker claim than "it is as good as what
+// a search would have found here". If transfer routinely costs extra
+// steps, it buys correctness and not quality, which is a smaller thing
+// than the one being claimed.
 template<spatium::Surface S>
 void replay(const char* space_name, const spatium::mesh::Mesh<S>& start, const S& space,
-            const std::vector<std::string>& chain, const Spec& spec) {
+            const std::vector<std::string>& chain, const Spec& spec, bool compare_local) {
     auto m = start;
     for (const auto& step : chain)
         for (const auto& [name, fn] : Ops<S>::all())
             if (step == name) { m = fn(m, space); break; }
 
     const bool ok = satisfies<S>(m, start, spec);
-    std::println("    {:<22} start {:4} faces / edge {:7.4f}  ->  {:5} faces / edge {:7.4f}   {}",
-                 space_name, start.face_count(), longest_edge<S>(start),
-                 m.face_count(), longest_edge<S>(m), ok ? "holds" : "FAILS");
+    std::print("    {:<20} {:5} faces / edge {:7.4f}   {:<6}",
+               space_name, m.face_count(), longest_edge<S>(m), ok ? "holds" : "FAILS");
+
+    if (!compare_local) { std::println(""); return; }
+
+    const auto local = search<S>(start, space, spec, 4);
+    if (local.empty()) {
+        std::println("   | local search: none found");
+        return;
+    }
+    std::string ls;
+    for (const auto& c : local) ls += (ls.empty() ? "" : " ") + c;
+
+    const char* verdict = local.size() == chain.size() ? "same length"
+                        : (local.size() < chain.size() ? "LOCAL SHORTER" : "transferred shorter");
+    std::println("   | local: {} steps ({})  -> {}", local.size(), ls, verdict);
 }
 
 spatium::ParametricSurface<double> torus() {
@@ -196,9 +215,9 @@ int main() {
         std::string s;
         for (const auto& c : chain_rel) s += (s.empty() ? "" : " -> ") + c;
         std::println("    found on Sphere<2>: {}", s);
-        replay<Sph>("Sphere<2>", sphere_start, sphere, chain_rel, rel);
-        replay<Euc>("Euclidean<3>", euclid_start, euclid, chain_rel, rel);
-        replay<Par>("ParametricSurface", torus_start, tor, chain_rel, rel);
+        replay<Sph>("Sphere<2>", sphere_start, sphere, chain_rel, rel, false);
+        replay<Euc>("Euclidean<3>", euclid_start, euclid, chain_rel, rel, true);
+        replay<Par>("ParametricSurface", torus_start, tor, chain_rel, rel, true);
     }
     std::println("");
 
@@ -212,11 +231,15 @@ int main() {
         std::string s;
         for (const auto& c : chain_abs) s += (s.empty() ? "" : " -> ") + c;
         std::println("    found on Sphere<2>: {}", s);
-        replay<Sph>("Sphere<2>", sphere_start, sphere, chain_abs, abs);
-        replay<Euc>("Euclidean<3>", euclid_start, euclid, chain_abs, abs);
-        replay<Par>("ParametricSurface", torus_start, tor, chain_abs, abs);
+        replay<Sph>("Sphere<2>", sphere_start, sphere, chain_abs, abs, false);
+        replay<Euc>("Euclidean<3>", euclid_start, euclid, chain_abs, abs, true);
+        replay<Par>("ParametricSurface", torus_start, tor, chain_abs, abs, true);
     }
 
+    std::println("");
+    std::println("The local column is the one that decides how much transfer is worth: a");
+    std::println("chain that holds but takes more steps than a local search would have");
+    std::println("found buys correctness, not quality.");
     std::println("");
     std::println("The three spaces do different things under the same operation --");
     std::println("subdivision projects onto the sphere, projects onto nothing in");

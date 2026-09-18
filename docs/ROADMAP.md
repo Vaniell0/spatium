@@ -1294,7 +1294,10 @@ The relative chain is `subdivide -> subdivide` and holds everywhere. The absolut
 
 The check is also the compiler's: the operations are templates over `Surface S` and none of them names a space, so the file compiling for three of them *is* the single interface through which such a generalisation can be checked. That phrase stops being a metaphor here.
 
-Still open: whether a transferred chain is any worse than one found by searching the target space directly.
+**And the follow-up question is answered too.** "The transferred chain still satisfies the spec" is weaker than "it is as good as a local search would have found", so each target space was also searched directly:
+
+- **Relative spec: transfer costs nothing.** Searching Euclidean and the torus directly returns a chain of the *same length* -- in fact the same chain. One caveat: the search returns the first solution at minimum depth and `subdivide` is listed first, so the identity of the chains is partly an artefact of op ordering. The equality of *length* is not.
+- **Absolute spec: two different failures, and they must not be conflated.** On Euclidean the transferred chain fails and a local search finds nothing at all -- the specification is unreachable there, which is not transfer's fault. On the torus a local search does find one, of the same length but a *different* composition (`scale_down -> subdivide -> scale_up`). There the structure genuinely did not carry.
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 
