@@ -276,6 +276,53 @@ int main() {
     std::println("");
     }
 
+    // One tree per domain, which is the shape a real call site can use:
+    // the domain is known there and does not need deriving. The single
+    // tree above spends its first two levels separating four domains
+    // before any domain's own question is reached, and at depth 4 that is
+    // its entire budget -- which is why the residual features changed
+    // nothing at depths 2 and 4 while helping at 10.
+    //
+    // Reported as the worst domain, same as above, so the two are
+    // comparable. The label space shrinks too: each domain has two to
+    // four ops rather than ten.
+    {
+        const auto fit_rows = collect(model, /*seed=*/1, kFitRows, /*augmented=*/true);
+        const auto eval_rows = collect(model, /*seed=*/9876, kEvalRows, /*augmented=*/true);
+
+        std::println("  one tree per domain, raw + two Tier-1 residuals");
+        std::println("  {:>5} | {:>6} | {:>29} | {:>8}",
+                     "depth", "leaves", "tree accuracy per domain", "worst gap");
+
+        for (std::size_t depth : {2u, 4u, 6u, 8u}) {
+            std::array<std::unique_ptr<Node>, 4> trees;
+            std::size_t leaves = 0;
+            for (std::size_t d = 0; d < 4; ++d) {
+                std::vector<const Sample*> rows;
+                for (const auto& s : fit_rows) if (s.domain == d) rows.push_back(&s);
+                trees[d] = fit(rows, 0, depth, /*min_rows=*/20);
+                leaves += count_leaves(*trees[d]);
+            }
+
+            std::array<std::size_t, 4> ok{}, tot{};
+            for (const auto& s : eval_rows) {
+                ++tot[s.domain];
+                if (predict(*trees[s.domain], s.x) == s.truth) ++ok[s.domain];
+            }
+
+            double worst = 0.0;
+            std::string acc;
+            for (std::size_t d = 0; d < 4; ++d) {
+                const double n = static_cast<double>(net_ok[d]) / static_cast<double>(total[d]);
+                const double t = static_cast<double>(ok[d]) / static_cast<double>(tot[d]);
+                worst = std::max(worst, n - t);
+                acc += std::format(" {:.3f}", t);
+            }
+            std::println("  {:>5} | {:>6} | {:>29} | {:>+7.3f}", depth, leaves, acc, -worst);
+        }
+        std::println("");
+    }
+
     std::println("");
     std::println("Fidelity is agreement with the network; accuracy is agreement with the");
     std::println("registry. They fail differently, so neither stands in for the other.");
