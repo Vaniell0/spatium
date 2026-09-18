@@ -149,10 +149,76 @@ the boundary.
 **WASM** is the same interpreter under Emscripten, reading the same buffer
 out of `WebAssembly.Memory`.
 
-**JS** needs no separate IR at all: the op array is index-addressed and
-small — 107 fields for this whole scene — so it serialises directly to a
-typed array. A JS caller either runs a short native interpreter for tooling
-or hands the identical buffer to the WASM module.
+**JS** is where the earlier version of this section was wrong, and the
+error is worth keeping visible because it is easy to make again. It said JS
+"needs no separate IR — the op array serialises directly to a typed array".
+That describes a *consumer* of the buffer. It says nothing about where the
+buffer comes from, and if the answer is "from C++", then the JS side is a
+viewer and not a DSL.
+
+### Nothing turns a closure into IR. Not in JS, and not in C++ either
+
+This is the part to be clear about, because the C++ side can look like
+magic from the outside and isn't.
+
+In C++ you can write a motion two ways. As a closure:
+
+```cpp
+.moving([](const Vec<double,3>& p, double t) { return p * (1.0 - smoothstep(t)); })
+```
+
+or structurally, out of combinators — `point()`, `scaled`, `rotated`,
+`operator+` — which build the op array by construction. The first is an
+opaque leaf and does not cross an ABI. The second does. Nothing traces the
+first into the second; `is_structural()` exists precisely because that
+conversion does not happen.
+
+So the C++ DSL is already the "write structural expressions" model, with a
+soft refusal rather than a hard one: the closure is legal, it simply does
+not export. **A JS binding should mirror exactly that, and then it is not a
+special case at all** — the same combinators, the same legal escape hatch
+that runs locally and does not serialise.
+
+The objection to that model is that an expression builder is an IR
+constructor with a human face rather than a DSL. It is a fair objection and
+the C++ side answers it by naming things well — `scaled(point(), ...)`
+reads fine. Where it stops reading fine is exactly where the vocabulary has
+a hole, because then there is nothing to reach for but a lambda.
+
+### The hole, found while writing this
+
+**There is no structural way to express a scale or rotation factor.** Both
+`scaled` overloads take a callable, both `rotated` overloads take a
+callable, and no overload takes a `Field<T>`. So today even the structural
+path bottoms out in a closure the moment anything changes over time — which
+is why the donut's report shows the factor closures it does, and why
+`scaled`/`rotated` had to be taught to declare themselves opaque at all.
+
+The fix is one overload family: `scaled(point(), smoothstep(Field::t()))`,
+with the factor as a scalar field rather than a callable. It is the same
+missing piece in both languages, and it is a precondition for the export
+question rather than a nicety.
+
+### The three ways JS could work, and what each costs
+
+**Mirror the C++ combinators** (what this document recommends). JS builds
+the op array directly through the same named operations; a JS closure is
+legal and does not export, exactly as in C++. Cost: the vocabulary has to
+be good enough that reaching for a closure is a choice rather than the only
+option — see the hole above.
+
+**Trace, the way JAX does.** Call the user's function with proxy objects
+instead of numbers, so `p.scale(...)` records into a graph rather than
+computing. This genuinely works and is ergonomic. It is also not
+JS-specific: the C++ equivalent is a symbolic scalar type substituted for
+`T`, which is the roadmap's "an IR evaluable in `Dual<T>`" note. If tracing
+gets built it should be built for both, not bolted onto one.
+
+**Let JS construct, cook and render on its own.** Then WASM is not needed —
+and the JS thing is a reimplementation rather than a binding, with only the
+scene format shared between them. That is a legitimate architecture, it is
+roughly what glTF is, and it is a different project. Worth naming so it is
+chosen deliberately rather than arrived at.
 
 ### The first step is a proof, not a backend
 
