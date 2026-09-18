@@ -37,3 +37,11 @@ target_include_directories(search_heuristic PRIVATE
 )
 target_link_libraries(search_heuristic PRIVATE spatium_core)
 target_compile_options(search_heuristic PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(synthesize synthesize.cpp)
+target_include_directories(synthesize PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(synthesize PRIVATE spatium_core)
+target_compile_options(synthesize PRIVATE -Wall -Wextra -Wpedantic)
