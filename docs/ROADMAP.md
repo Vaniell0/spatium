@@ -317,8 +317,8 @@ So: the items we are actually steering by, with their state. Everything below th
 | `ball_pit_demo` cleanup | parked | nothing; it is just work | Object model as manifold substrate |
 | Offset self-intersection, in the library | parked | nothing; a thickness check against the base's minimum radius of curvature | Analytical rendering |
 | Full `EdgeRule` (`RoundCap`, `FlatCap`, `ExtendTo`) | parked | nothing | Declarative scene DSL |
-| C ABI for the DSL (CUDA / WASM / JS) | parked | **the field work, not RSC** — a scene exports only as far as its fields are structural, and the donut measures 39 612 opaque leaves of 39 631 | GPU rendering |
-| Rewrite `docs/gpu-abi-design.md` | parked | nothing; its centre of gravity moved and it needs rewriting, not patching | GPU rendering |
+| C ABI for the DSL (CUDA / WASM / JS) | next | **the field work, not RSC** — a scene exports only as far as its fields are structural; the donut measures 32 opaque leaves across 107 fields, and whether they fall into a closed vocabulary is the open question | GPU rendering |
+| Rewrite `docs/gpu-abi-design.md` | **done 2026-09-18** | — | GPU rendering |
 | RSC as search | parked | the ABI, by our own ordering | RSC as search |
 | Ball tree on a manifold | parked | nothing. Note the dependency runs *backwards* from how it reads: the tree is what gives RSC a second method to choose between | Interop / ecosystem |
 | Vulkan live display | parked | traversal getting cheaper — a four-second frame makes a live window a slideshow | Declarative scene DSL |
@@ -1234,19 +1234,22 @@ The goal was never to remove dependencies. It is to have a working default for e
 - **[course]** Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
 - **[want]** `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
 
-- **[want]** **The C ABI for the DSL — and a correction to what gates it.** `docs/gpu-abi-design.md` says the WASM/JS boundary is gated behind RSC "working in genuinely sufficient volume". Reviewed 2026-09-17: that is wrong, and it is wrong in the direction that costs the most, because it points at something unrelated and so nothing about it ever gets closer.
+- **[want]** **The C ABI for the DSL.** What gates it is how much of a scene is structural — not RSC, which an earlier draft of `docs/gpu-abi-design.md` named and which pointed at something unrelated, so nothing about it ever got closer. The document was rewritten 2026-09-18 and now carries the design; this entry records the state and the open question.
 
-  **What actually gates it is how much of a scene is structural**, and that is already measured on every run of the donut demo:
+  Measured on every run of the donut demo, on `main`:
 
   ```
-  fields: 39 631 total, 19 structural, 39 612 opaque
+  fields: 107 total, 77 structural, 30 opaque; leaves 32
+          (32 recognized, 0 unknown), 11 distinct types, 3208 B captured
   ```
 
-  A `Trace` is a flat array of tagged ops addressed by index — the exact shape a C ABI wants, and `gpu/geodesic_kernel.cu`'s own boundary comment ("flat arrays only across this boundary — no structs/STL") says the same thing from the other side. So the *structure* crosses trivially. What never crosses is an opaque leaf, because it is a C++ closure. A binding built today would therefore export a scene that is 99.95% closures: a door into an empty room.
+  A `Trace` is a flat array of tagged ops addressed by index — the exact shape a C ABI wants, and `gpu/geodesic_kernel.cu`'s own boundary comment ("flat arrays only across this boundary — no structs/STL") says the same thing from the other side. So the *structure* crosses trivially. What never crosses is an opaque leaf, because it is a C++ closure.
 
-  What moves it is the field work — series item 6, and the separately-recorded "an IR evaluable in `Dual<T>`" — not RSC. As long as a particle's motion is `PerlinNoise` inside a lambda, no ABI can carry it anywhere.
+  **The figure used to be quoted as 39 612 opaque leaves of 39 631, and later as 7 of 73. Neither is usable.** The first predates the dust collapsing from tens of thousands of per-particle nodes into a single `Scatter`. The second came from a report with two blind spots — it never walked a node's emission slot, and it never counted the closures a `Scale` or `Rotate` carries in `scale_fn`/`rot_fn`, which also left `is_structural()` returning true for a field with a lambda in it. Fixed 2026-09-18 with tests that fail without the fix; the numbers above are the honest ones.
 
-  Two further things `gpu-abi-design.md` predates and would be written differently now. Its "fusing a chain" section treats trace-once/fuse/cache-by-concrete-shape as a model to borrow from JAX/XLA and TVM some day; half of it shipped, because `Trace` *is* that trace and `cook()` is the compile-at-known-values step — the reason recorded for the representation was "a topologically ordered array evaluates in one linear pass, which is the shape a GPU can run". And its manifest sketch is much less speculative for the scene path than it sounds: `Cooked<T>` is already flat POD arrays of objects and shapes, so one entry point taking a cooked scene covers a renderer. The document needs rewriting rather than patching; its centre of gravity moved.
+  **The open question is not the count but the classification.** `unknown = 0` says every leaf carries a `type_index`, not that every leaf is a *known operation* — a lambda that happens to be a smoothstep and a lambda that is arbitrary are indistinguishable by that number. A first pass suggests all 32 fall into a small vocabulary (noise, hash-from-origin, smoothstep, trig, lerp, clamp, dot/cross, select, normalize, and an indexed gather from a small constant table) with nothing doing I/O or iterating a solver, but that pass was made by reading call sites rather than walking the trace, and the two disagree by one. Until each of the 32 is named with a vocabulary word, "exportable" is a guess.
+
+  **The first step is a test, not a backend:** a POD interpreter run alongside `eval_into` over the whole donut scene, asserting bit-exact agreement. No epsilon — a tolerance passes under a different order of operations, and order of operations is exactly what a SIMT lane does not guarantee, so it would hide the class the test exists to catch. Passing demonstrates exportability for a real scene; failing names the missing operation. Neither outcome needs a GPU toolchain.
 
 ## RSC as search, not classification
 
