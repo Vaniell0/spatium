@@ -637,6 +637,27 @@ public:
         return f;
     }
 
+    // A Scale or a Rotate carries its factor as a closure, and that
+    // closure is every bit as opaque as a leaf built by `make_opaque`.
+    // It has to be recorded as such, in the same three fields, or the
+    // report cannot see it.
+    //
+    // It could not, and said so in our favour. `accumulate` only looks at
+    // nodes whose op is `Opaque`, and these are `Scale` and `Rotate`, so
+    // twenty-four closures in the donut scene were invisible to both the
+    // report and `is_structural()` -- which kept answering "structural"
+    // for a field with a lambda inside it. The printed figure was 66 of
+    // 73 fields structural, reading as "nearly all of it"; the truth was
+    // under half. A measurement that is wrong towards "everything is
+    // fine" is the one that never gets questioned, and this one is the
+    // instrument the export question is measured with.
+    template<typename F>
+    static void note_factor(VecFieldOp<T>& n) {
+        n.type      = std::type_index(typeid(F));
+        n.payload   = sizeof(F);
+        n.stateless = std::is_empty_v<F>;
+    }
+
     // `field * s(t)`. The factor reads time, never the point: a factor
     // that varied per vertex would make this a deformation again, which
     // is the thing the whole distinction exists to keep out.
@@ -655,8 +676,10 @@ public:
         n.op       = VecOp::Scale;
         n.a        = static_cast<std::uint32_t>(x.ops_.size() - 1);
         n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(e.origin, e.t); };
+        note_factor<S>(n);
         assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
         x.ops_.push_back(std::move(n));
+        x.structural_ = false;
         return x;
     }
 
@@ -667,8 +690,10 @@ public:
         n.op       = VecOp::Scale;
         n.a        = static_cast<std::uint32_t>(x.ops_.size() - 1);
         n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(e.t); };
+        note_factor<S>(n);
         assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
         x.ops_.push_back(std::move(n));
+        x.structural_ = false;
         return x;
     }
 
@@ -694,9 +719,13 @@ public:
                  (!std::is_invocable_r_v<Vec<T, 3>, const R&, T>) &&
                  std::is_invocable_r_v<Vec<T, 3>, const R&, const Vec<T, 3>&, T>
     friend VecField rotated(VecField x, R r) {
-        return rotated(std::move(x), [r = std::move(r)](const Vec<T, 3>& o, T t) {
+        // Recorded after the fact so the report names the type the caller
+        // actually wrote, not the axis-angle wrapper put around it here.
+        auto f = rotated(std::move(x), [r = std::move(r)](const Vec<T, 3>& o, T t) {
             return algebra::SO3<T>{}.exp(r(o, t));
         });
+        note_factor<R>(f.ops_.back());
+        return f;
     }
 
     template<typename R>
@@ -707,8 +736,10 @@ public:
         n.op     = VecOp::Rotate;
         n.a      = static_cast<std::uint32_t>(x.ops_.size() - 1);
         n.rot_fn = [r = std::move(r)](const MotionEnv<T>& e) { return r(e.origin, e.t); };
+        note_factor<R>(n);
         assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
         x.ops_.push_back(std::move(n));
+        x.structural_ = false;
         return x;
     }
 
@@ -719,8 +750,10 @@ public:
         n.op     = VecOp::Rotate;
         n.a      = static_cast<std::uint32_t>(x.ops_.size() - 1);
         n.rot_fn = [r = std::move(r)](const MotionEnv<T>& e) { return r(e.t); };
+        note_factor<R>(n);
         assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
         x.ops_.push_back(std::move(n));
+        x.structural_ = false;
         return x;
     }
 
@@ -728,9 +761,11 @@ public:
         requires (!std::is_invocable_r_v<Matrix<T, 3, 3>, const R&, T>) &&
                  std::is_invocable_r_v<Vec<T, 3>, const R&, T>
     friend VecField rotated(VecField x, R r) {
-        return rotated(std::move(x), [r = std::move(r)](T t) {
+        auto f = rotated(std::move(x), [r = std::move(r)](T t) {
             return algebra::SO3<T>{}.exp(r(t));
         });
+        note_factor<R>(f.ops_.back());
+        return f;
     }
 
     // A callable leaf. Accepts either shape: a function of the whole
@@ -1038,7 +1073,12 @@ void accumulate(FieldStats& stats, const VecField<T>& f,
 
     for (std::size_t i = 0; i < f.size(); ++i) {
         const auto& n = f.op(i);
-        if (n.op != VecOp::Opaque) continue;
+        // A Scale's or a Rotate's factor is a closure too. Counting only
+        // `Opaque` was the blind spot that let a field with a lambda in
+        // it report as structural.
+        const bool factor = (n.op == VecOp::Scale  && n.scale_fn) ||
+                            (n.op == VecOp::Rotate && n.rot_fn);
+        if (n.op != VecOp::Opaque && !factor) continue;
         ++stats.opaque_leaves;
         if (n.type == std::type_index(typeid(void))) { ++stats.unknown_leaves; continue; }
         ++stats.recognized_leaves;

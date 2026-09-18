@@ -1039,3 +1039,68 @@ TEST_CASE("Cooking preserves the object count, whatever the rotations do",
         if (std::abs(o.rotation_q.w - 1.0) < 1e-12) ++identities;
     CHECK(identities == 0);
 }
+
+// Both halves of a report that was wrong in the direction nobody checks.
+//
+// `field_report()` and `is_structural()` are the instruments the export
+// question is measured with, and both were answering "more structural
+// than it is". A `Scale` or a `Rotate` carries its factor as a closure,
+// but `accumulate` only looked at nodes tagged `Opaque`, so those
+// closures were counted nowhere and left `structural_` untouched;
+// separately, the walk never visited a node's emission slot at all, so an
+// opaque glow was invisible rather than merely unclassified.
+//
+// Both tests fail without the fix: the first reports structural, the
+// second reports zero leaves.
+TEST_CASE("A factor closure is opaque, and a field holding one is not structural",
+          "[build][dsl][field][report]") {
+    using bd::VecField;
+
+    // Reads time only, so it stays a placement -- the point of the test is
+    // that being a placement and being made of known ops are two different
+    // questions, and a closure answers the second one "no".
+    auto spin = scaled(VecField<double>::point(), [](double t) { return 1.0 + t; });
+    CHECK(spin.is_placement());
+    CHECK_FALSE(spin.is_structural());
+
+    auto turn = rotated(VecField<double>::point(),
+                        [](double t) { return Vec<double, 3>{0.0, 0.0, t}; });
+    CHECK(turn.is_placement());
+    CHECK_FALSE(turn.is_structural());
+
+    // A field built only from structural ops is still structural, so the
+    // flag has not simply been pinned to false.
+    auto plain = VecField<double>::point() + VecField<double>::constant({1.0, 0.0, 0.0});
+    CHECK(plain.is_structural());
+}
+
+TEST_CASE("The report walks every field-bearing slot, emission included",
+          "[build][dsl][field][report]") {
+    bd::Trace<double> trace;
+    auto ball = trace.sphere(1.0, 8, 4);
+
+    const auto before = bd::field_report(trace);
+
+    // An opaque emission field on a node the report must visit. Nothing
+    // else about the node changes.
+    ball.glowing(bd::PointField<double>{
+        [](const bd::MotionEnv<double>& e) { return Vec<double, 3>{e.t, 0.0, 0.0}; }});
+
+    const auto after = bd::field_report(trace);
+
+    // The slot is visited as a field in its own right, not merely as a
+    // source of leaves. An empty emission field is still a field, so the
+    // total does not move; what moves is which side of the split it is
+    // counted on. Checking that, rather than the leaf count alone, is
+    // what makes this fail when the slot is skipped entirely -- a missed
+    // slot cannot even report "unknown".
+    CHECK(after.fields == before.fields);
+    CHECK(after.opaque_fields == before.opaque_fields + 1);
+    CHECK(after.structural_fields + 1 == before.structural_fields);
+    CHECK(after.opaque_leaves == before.opaque_leaves + 1);
+    CHECK(after.unknown_leaves == before.unknown_leaves);
+
+    // The two identities the stats promise still hold afterwards.
+    CHECK(after.structural_fields + after.opaque_fields == after.fields);
+    CHECK(after.recognized_leaves + after.unknown_leaves == after.opaque_leaves);
+}

@@ -1051,6 +1051,13 @@ FieldStats field_report(const Trace<T>& trace) {
         if (n.kind == Kind::Offset) accumulate(stats, n.thickness, seen);
         accumulate(stats, n.transform, seen);
         accumulate(stats, n.color_fn, seen);
+        // Emission was missed here, and a missed slot is worse than a
+        // missed leaf: the whole field is invisible, so the report cannot
+        // even say "unknown". The dust's glow is an opaque closure and it
+        // was not being counted at all. Every field-bearing slot on a node
+        // belongs in this list; a new one added above and not added here
+        // reintroduces exactly this.
+        accumulate(stats, n.emissive_fn, seen);
     }
     return stats;
 }
