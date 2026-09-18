@@ -132,22 +132,30 @@ shape a GPU wants per thread.
 array — noise permutation tables (512 B each) and point lookup tables. Both
 are static per render and neither depends on scene structure.
 
-### What each target needs on top of the IR
+### What each target needs — and they do not need the same thing
 
-**CUDA and WASM need the same thing first:** a POD mirror of
-`FieldOp`/`VecFieldOp` with no `std::function` and no `std::type_index`,
-plus a switch-based loop reproducing `eval_into`. That loop is already the
-shape a SIMT lane wants — one linear pass, no recursion, no branching on
-depth — so this is a port, not a design.
+Earlier drafts wrote "CUDA + WASM + JS" as one item. That grouping is
+wrong and it hides the most useful fact in this document: **the browser
+does not need any of the export work.**
 
-**CUDA** then uploads the op array, `Cooked<T>`'s object and shape arrays,
-the mesh buffers and the two side tables as device buffers, and compiles
-the interpreter as `__device__` code. Byte buffers cross, not live objects.
-`Shape<T>::exact` is a `std::any`, is diagnostic only, and is dropped at
-the boundary.
+**CUDA needs the IR.** Device code cannot run `std::function`, so a field
+holding an erased callable cannot be evaluated on a GPU at all. This is
+what the POD mirror of `FieldOp`/`VecFieldOp` and the switch-based
+`eval_into` loop are for. CUDA then uploads that op array, `Cooked<T>`'s
+object and shape arrays, the mesh buffers and the two side tables as device
+buffers, and compiles the interpreter as `__device__` code. Byte buffers
+cross, not live objects; `Shape<T>::exact` is a `std::any`, is diagnostic
+only, and is dropped at the boundary.
 
-**WASM** is the same interpreter under Emscripten, reading the same buffer
-out of `WebAssembly.Memory`.
+**WASM needs none of it.** WASM is compiled C++. Emscripten handles
+`std::function`, RTTI and lambdas, so an opaque leaf in the browser is just
+a compiled lambda that runs. Structurality is a constraint imposed by
+device code and by serialisation — writing a scene to a file or sending it
+over a network — and the browser is neither. Nothing about the vocabulary
+gates a WASM build.
+
+That makes the browser the *nearest* target rather than the furthest, which
+is the opposite of how this document used to read.
 
 **JS** is where the earlier version of this section was wrong, and the
 error is worth keeping visible because it is easy to make again. It said JS
@@ -199,26 +207,58 @@ with the factor as a scalar field rather than a callable. It is the same
 missing piece in both languages, and it is a precondition for the export
 question rather than a nicety.
 
-### The three ways JS could work, and what each costs
+### The recommendation: JS holds handles, not an IR
 
-**Mirror the C++ combinators** (what this document recommends). JS builds
-the op array directly through the same named operations; a JS closure is
-legal and does not export, exactly as in C++. Cost: the vocabulary has to
-be good enough that reaching for a closure is a choice rather than the only
-option — see the hole above.
+Since WASM runs the real library, JS does not have to build an op array at
+all, and therefore does not have to solve "how does a JS closure become
+IR". **The trace lives in WASM memory and JS holds integer handles into
+it.**
 
-**Trace, the way JAX does.** Call the user's function with proxy objects
-instead of numbers, so `p.scale(...)` records into a graph rather than
-computing. This genuinely works and is ergonomic. It is also not
-JS-specific: the C++ equivalent is a symbolic scalar type substituted for
-`T`, which is the roadmap's "an IR evaluable in `Dual<T>`" note. If tracing
-gets built it should be built for both, not bolted onto one.
+```js
+const donut = scene.torus(1.0, 0.4);        // -> 7   index into the C++ trace
+const iced  = scene.offset(donut, 0.08);    // -> 8
+scene.scatter(iced, sprinkle, 11000, 42);   // -> 9
+```
 
-**Let JS construct, cook and render on its own.** Then WASM is not needed —
-and the JS thing is a reimplementation rather than a binding, with only the
-scene format shared between them. That is a legitimate architecture, it is
-roughly what glTF is, and it is a different project. Worth naming so it is
-chosen deliberately rather than arrived at.
+Each call reaches an `extern "C"` entry point, appends to the same `Trace`
+the C++ API appends to, and returns an integer. Only integers and doubles
+cross. There is no second implementation of anything: the trace is built by
+the same code that has always built it, so the JS API matches the C++ one
+because it *is* the C++ one. It also disposes of a problem that would
+otherwise need solving — `VecField` is move-only, and ownership simply
+never leaves C++.
+
+**The cost is a wrapper per builder**, which is mechanical but numerous and
+should be generated from a list rather than typed. This is where the old
+"manifest" idea finally earns its place: it was a solution without a
+problem when it was about exporting algorithms, and it is the right shape
+here. `T` is pinned to `double` at the boundary.
+
+**The limit is that a JS lambda cannot be passed.** A callback from WASM
+into JS is technically possible and would be ruinous per vertex, so in
+practice the browser has no escape hatch and the vocabulary *is* the
+language there. That makes the missing structural factor above hurt more in
+JS than in C++, where a lambda is at least available.
+
+**And performance, without illusions:** WASM runs perhaps 1.5–3x slower
+than native, threads need `SharedArrayBuffer` with COOP/COEP headers, and
+the renderer here is CPU ray tracing. A two-million-instance frame would
+take minutes in a browser. A live browser demo is a small scene, not this
+one.
+
+### Two alternatives, named so they are chosen rather than drifted into
+
+**Trace, the way JAX does** — call the user's function with proxy objects
+so `p.scale(...)` records into a graph instead of computing. Ergonomic and
+real, and *not JS-specific*: the C++ equivalent is a symbolic scalar
+substituted for `T`, which is the roadmap's "IR evaluable in `Dual<T>`"
+note. If tracing is built it should be built for both rather than bolted
+onto one.
+
+**Let JS construct, cook and render alone.** Then WASM is not needed, and
+the JS thing is a reimplementation rather than a binding, sharing only a
+scene format. That is a legitimate architecture — roughly what glTF is —
+and it is a different project.
 
 ### The first step is a proof, not a backend
 
