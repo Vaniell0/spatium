@@ -307,22 +307,28 @@ So: the items we are actually steering by, with their state. Everything below th
 
 | Item | State | What would unblock it | Where |
 |---|---|---|---|
-| Renderer consuming `cook()` | **in flight** | — | Declarative scene DSL |
-| Per-instance parameters (`MotionEnv::origin`) | **next** | the row above | Declarative scene DSL |
-| Scatter's fixed axis binding (local z to the normal) | **next** | nothing; a fix, and one of two preconditions for instancing scattered items | Object model as manifold substrate |
-| Structural motions in the demo (`grow_scale` and friends) | **next** | nothing; the other precondition, and a matter of spelling | Object model as manifold substrate |
-| A refusal that explains itself (and `is_placement()`'s name) | **next** | nothing; rewriting the demo fixes one user, not the trap | Object model as manifold substrate |
-| Scatter's arbitrary in-plane directions | parked | a consumer — "follows the flow" is its own design, not this fix | Object model as manifold substrate |
+| Renderer consuming `cook()` | **done 2026-09-17** | — | Declarative scene DSL |
+| Per-instance parameters (`MotionEnv::origin`) | **done 2026-09-17** | — | Declarative scene DSL |
+| Scatter's fixed axis binding (local z to the normal) | **done 2026-09-17** | — | Object model as manifold substrate |
+| Structural motions in the demo (`grow_scale` and friends) | **done 2026-09-17** | — | Object model as manifold substrate |
+| Rewrite `docs/gpu-abi-design.md` | **done 2026-09-18** | — | GPU rendering |
+| `field_report()`'s blind spots | **done 2026-09-18** | — it was printing 7 opaque leaves where there are 32, and `is_structural()` was returning true for fields holding a lambda | Declarative scene DSL |
+| A factor with no structural form (`scaled`/`rotated` take callables only) | **next** | nothing; one overload family taking a `Field<T>`. Blocks export, because a scene cannot be closure-free while the combinators demand closures | Declarative scene DSL |
+| Name the 32 opaque leaves against a vocabulary | **next** | nothing; `unknown = 0` says every leaf has a `type_index`, not that every leaf is a known operation | GPU rendering |
+| POD interpreter, bit-exact against `eval_into` | **next** | the two rows above. The proof that a scene exports, and the same artifact grades an IR rewrite | GPU rendering |
+| The description door (`scene.hpp`'s registry, objects → trace nodes) | **next** | nothing, and it is cheaper than an ABI: one entry point reading a description instead of a wrapper per builder | Interop / ecosystem |
+| C ABI for the DSL (CUDA) | parked | the three rows above. Not needed for a browser (WASM is compiled C++) nor for GPU *traversal* (`Cooked<T>` is already flat POD) | GPU rendering |
+| RSC as search | **measured 2026-09-18, not parked on the ABI** | a value head, before anything larger. Substantially checked: scalar chains collapse and geometry chains do not, a policy is an anti-heuristic on small spaces, and transfer between spaces is free under a relative spec | RSC as search |
+| Learned split policy over a bound concept | parked | the bound concept itself. The one target where all three measured conditions line up: state does not collapse, expanding a node costs milliseconds, and the reward is a timing | Interop / ecosystem |
+| Ball tree on a manifold | parked | nothing. The bound concept is the shared prerequisite with the row above | Interop / ecosystem |
+| `is_placement()`'s name, and a refusal that explains itself | parked | nothing. Half addressed — the report no longer lies — but the name still answers two questions with one flag: affine in the point, and made of known operations | Object model as manifold substrate |
 | One object deforming another | parked | an index over the `(u,v)` domain — and a decision about the cycle it introduces, below | Object model as manifold substrate |
 | `ball_pit_demo` cleanup | parked | nothing; it is just work | Object model as manifold substrate |
 | Offset self-intersection, in the library | parked | nothing; a thickness check against the base's minimum radius of curvature | Analytical rendering |
+| Scatter's arbitrary in-plane directions | parked | a consumer — "follows the flow" is its own design, not this fix | Object model as manifold substrate |
 | Full `EdgeRule` (`RoundCap`, `FlatCap`, `ExtendTo`) | parked | nothing | Declarative scene DSL |
-| C ABI for the DSL (CUDA / WASM / JS) | next | **the field work, not RSC** — a scene exports only as far as its fields are structural; the donut measures 32 opaque leaves across 107 fields, and whether they fall into a closed vocabulary is the open question | GPU rendering |
-| Rewrite `docs/gpu-abi-design.md` | **done 2026-09-18** | — | GPU rendering |
-| RSC as search | parked | the ABI, by our own ordering | RSC as search |
-| Ball tree on a manifold | parked | nothing. Note the dependency runs *backwards* from how it reads: the tree is what gives RSC a second method to choose between | Interop / ecosystem |
 | Vulkan live display | parked | traversal getting cheaper — a four-second frame makes a live window a slideshow | Declarative scene DSL |
-| Sound from geometry | parked | sparse linear algebra, of which there is not a line in the tree | Sound synthesis |
+| Sound from geometry | parked | a three-way dependency decision: ARPACK, a vendored Spectra, or hand-rolled shift-invert Lanczos. The heat-method shortcut is refuted | Sound synthesis |
 | Time as a property of the space | parked | a scene where the difference is visible | Declarative scene DSL |
 | A rainbow, then interference | parked | the sound work; they share the machinery | Analytical rendering |
 

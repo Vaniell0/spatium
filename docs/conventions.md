@@ -668,3 +668,95 @@ warrants it, not something every file needs to match. What isn't
 acceptable is the current gradient, where comment density tracks how
 novel or difficult a file felt to write rather than any judgment about
 what a reader needs.
+
+## An instrument that errs in your favour is the one nobody re-checks
+
+`field_report()` printed "66 of 73 fields structural". The honest figure
+was 77 of 107, and the count of embedded closures was out by more than
+four times — 7 reported against 32 real. Every claim about what a scene
+could export had come out of that report.
+
+It failed in two places at once and both failed the same direction. The
+walk never visited a node's emission slot, so an opaque glow was invisible
+rather than unclassified — a missed *slot* is worse than a missed leaf,
+because the field cannot even be reported as unknown. And `accumulate`
+only inspected nodes tagged `Opaque`, while `scaled`/`rotated` keep their
+factor closures in `scale_fn`/`rot_fn`, so those were counted nowhere and
+never cleared `structural_`.
+
+The rule is not "check your instruments". It is narrower and more useful:
+**errors that make you look worse surface on their own, because someone
+goes looking for them. Errors that flatter do not.** A number nobody is
+unhappy with is a number nobody re-derives. So the instrument measuring
+whether a claim holds deserves the scrutiny the claim would get, and it
+will not receive that scrutiny from the person the number pleases.
+
+## A peak is a sample; a bound is not
+
+Deciding whether a bloom threshold could separate fire from highlight, the
+first approach was to render frames and take the maximum. It gave 0.979,
+then 1.263 once more frames were sampled, and the number would have kept
+climbing — an extreme value grows with the sample, so "the highest seen so
+far" answers a different question from "the highest possible".
+
+The specular term is `(1 - roughness) * 0.6` at most, by construction.
+That put a white sprinkle at 1.37 and settled the question in one line,
+against a threshold that sampling had suggested was safe.
+
+**When the question is "can it ever", compute a bound. Sample only when
+asking "does it typically".** Six frames had already been rendered before
+the arithmetic that made them unnecessary.
+
+## Clamping is an operator, not a safety net
+
+`clamp(c, 0, 1)` at the end of a renderer looks like protection against
+overflow. It is a choice about what to discard, and it discards exactly
+the information distinguishing a light from a paint: above 1, a hot core
+and a merely bright one become the same pixel.
+
+Replacing it with a tone curve then failed a different way, and the check
+that caught it is the one worth keeping: **render with the effect removed
+and compare**. Any tone curve must place its knee below 1, this scene's
+own shading reaches 1.263, so no neutral curve exists for it — a fact that
+argument would not have produced.
+
+## A measurement that costs more than the thing it measures
+
+One line of console reporting in the donut demo walked every object and
+called `mesh()` to sum vertices and faces. At two million particles that
+built 64 million vertices, held 2.70 GB, took twenty seconds, and threw
+them away — 2.88 GB of a measured 2.88 GB peak, before the renderer had
+started, and paid even by a run that produced no image.
+
+The number it computed was "vertices without instancing" — the figure
+quoted to show that instancing works, obtained by performing in full the
+work instancing exists to avoid. It was also redundant; `cook()` reports
+the same total from the shape table.
+
+**A diagnostic is code and pays the same rent as code.** Before adding one,
+ask what it costs when the thing being diagnosed is at its largest, which
+is exactly when someone will want to read it.
+
+## Two changes cannot be told apart afterwards
+
+A bloom pass and a change in where the clamp sits — per sample or after
+the average — went in together. The frame moved, and nothing said which
+had moved it. Untangling them meant reverting one and rendering again.
+
+The second change was defensible on its own: averaging before clamping is
+the right way to antialias an overbright edge. That is why it was
+tempting, and why it had to wait. **A change worth making is worth being
+able to attribute**; riding in on another's diff spends its evidence.
+
+## Name the state type before blaming the algorithm
+
+A search over chains of arithmetic looked like a search problem and was
+not. Numbers collide — `10+3+3` and `2*8` reach the same place — so
+9 765 625 paths at depth 10 folded into 13 836 states, an effective
+branching factor of 2.13 out of 5. Nothing can be learned about ordering a
+space that small; breadth-first exhausts it.
+
+The same measurement over meshes gives 4.66 out of 6, because geometries
+collide about four times less. The algorithm was never the variable. **The
+state type decides whether a space is worth searching**, and it is cheap to
+measure before any of the machinery above it gets built.
