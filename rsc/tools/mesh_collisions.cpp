@@ -27,6 +27,8 @@
 
 #include "mesh_toy.hpp"
 
+#include <chrono>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -48,13 +50,14 @@ int main() {
     for (const auto& o : meshtoy::ops()) std::print(" {}", o.name);
     std::println("\n");
 
-    std::println("  {:>5} | {:>12} | {:>10} | {:>12} | {:>10} | {:>12}",
-                 "depth", "sequences", "exact", "collapse", "rounded 1e-9", "collapse");
+    std::println("  {:>5} | {:>12} | {:>10} | {:>12} | {:>10} | {:>12} | {:>10}",
+                 "depth", "sequences", "exact", "collapse", "rounded 1e-9", "collapse", "wall (s)");
 
     std::vector<meshtoy::MeshT> frontier{start};
     std::size_t sequences = 1;
 
-    for (std::size_t depth = 1; depth <= 6; ++depth) {
+    for (std::size_t depth = 1; depth <= 7; ++depth) {
+        const auto t0 = std::chrono::steady_clock::now();
         std::vector<meshtoy::MeshT> next;
         std::size_t attempted = 0;
         for (const auto& m : frontier) {
@@ -73,11 +76,13 @@ int main() {
             rounded.insert(meshtoy::fingerprint(m, 9));
         }
 
-        std::println("  {:>5} | {:>12} | {:>10} | {:>11.1f}x | {:>12} | {:>11.1f}x",
+        const auto t1 = std::chrono::steady_clock::now();
+        std::println("  {:>5} | {:>12} | {:>10} | {:>11.1f}x | {:>12} | {:>11.1f}x | {:>10.2f}",
                      depth, sequences, exact.size(),
                      static_cast<double>(sequences) / static_cast<double>(exact.size()),
                      rounded.size(),
-                     static_cast<double>(sequences) / static_cast<double>(rounded.size()));
+                     static_cast<double>(sequences) / static_cast<double>(rounded.size()),
+                     std::chrono::duration<double>(t1 - t0).count());
 
         // Deduplicate the frontier by exact identity, the same way the
         // integer search deduplicated states -- otherwise the count grows
@@ -89,6 +94,11 @@ int main() {
         frontier = std::move(deduped);
     }
 
+    std::println("");
+    std::println("The wall column is the one that decides when a learned heuristic earns");
+    std::println("its place. Below the depth where an exhaustive pass stops being");
+    std::println("affordable, breadth-first wins and a policy is measured overhead; above");
+    std::println("it, there is nothing to be exhaustive with.");
     std::println("");
     std::println("Against numbers, for scale: five integer operations collapse 9 765 625");
     std::println("paths into 13 836 states by depth 10 -- 706x, effective branching 2.13");
