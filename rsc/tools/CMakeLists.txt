@@ -69,3 +69,11 @@ target_include_directories(transfer PRIVATE
 )
 target_link_libraries(transfer PRIVATE spatium_core)
 target_compile_options(transfer PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(tessellation_error tessellation_error.cpp)
+target_include_directories(tessellation_error PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(tessellation_error PRIVATE spatium_core)
+target_compile_options(tessellation_error PRIVATE -Wall -Wextra -Wpedantic)
