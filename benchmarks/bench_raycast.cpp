@@ -426,12 +426,19 @@ BENCHMARK(BM_Dough_RayCast_ExactTorus);
 
 namespace {
 
+// Was a constant at 64, which is why this benchmark produced a single
+// point and the roadmap ended up with three isolated numbers from three
+// different scenes -- exact 20% slower on 19 800 specks, 2x faster on one
+// dough, level on 64 tori -- and no boundary between them. A dispatcher
+// needs the boundary, not the anecdotes, so the count is an argument now
+// and the crossover is something that can be looked at rather than
+// inferred.
 constexpr std::size_t kTori = 64;
 
-bd::Trace<double> tori_trace(bool force_tessellation) {
+bd::Trace<double> tori_trace(bool force_tessellation, std::size_t n = kTori) {
     bd::Trace<double> scene;
     std::vector<bd::Handle<double>> handles;
-    for (std::size_t i = 0; i < kTori; ++i) {
+    for (std::size_t i = 0; i < n; ++i) {
         auto h = scene.torus(0.22, 0.07);
         if (force_tessellation) h.rendered_as(bd::RenderLevel::Tessellated);
         handles.push_back(h);
@@ -452,12 +459,12 @@ bd::Trace<double> tori_trace(bool force_tessellation) {
 // first version of this benchmark laid the tori out on a 42-unit grid
 // and reported the exact path as slower; that number was measuring the
 // layout, not the level.
-std::vector<Vec3> tori_centers() {
+std::vector<Vec3> tori_centers(std::size_t n = kTori) {
     std::mt19937 rng(7);
     std::uniform_real_distribution<double> u(-1.0, 1.0);
     std::vector<Vec3> c;
-    c.reserve(kTori);
-    while (c.size() < kTori) {
+    c.reserve(n);
+    while (c.size() < n) {
         Vec3 p{u(rng), u(rng), u(rng)};
         if (p.norm() <= 1.0) c.push_back(p);
     }
@@ -467,10 +474,11 @@ std::vector<Vec3> tori_centers() {
 } // namespace
 
 static void BM_DSL_Tori_Exact(benchmark::State& state) {
-    auto scene = tori_trace(false);
+    const auto n = static_cast<std::size_t>(state.range(0));
+    auto scene = tori_trace(false, n);
     auto placed = bd::materialize(scene, scene.size() - 1);
 
-    auto centers = tori_centers();
+    auto centers = tori_centers(n);
     std::vector<Torus<double>> tori;
     std::size_t i = 0;
     for (const auto& obj : placed) {
@@ -485,13 +493,14 @@ static void BM_DSL_Tori_Exact(benchmark::State& state) {
     for (auto _ : state) benchmark::DoNotOptimize(bvh.ray_cast(rays[r++ % rays.size()]));
     state.counters["leaves"] = static_cast<double>(tori.size());
 }
-BENCHMARK(BM_DSL_Tori_Exact);
+BENCHMARK(BM_DSL_Tori_Exact)->Arg(1)->Arg(4)->Arg(16)->Arg(64)->Arg(256)->Arg(1024);
 
 static void BM_DSL_Tori_Tessellated(benchmark::State& state) {
-    auto scene = tori_trace(true);
+    const auto n = static_cast<std::size_t>(state.range(0));
+    auto scene = tori_trace(true, n);
     auto placed = bd::materialize(scene, scene.size() - 1);
 
-    auto centers = tori_centers();
+    auto centers = tori_centers(n);
     std::vector<Triangle3> tris;
     std::size_t i = 0;
     for (const auto& obj : placed) {
@@ -508,11 +517,12 @@ static void BM_DSL_Tori_Tessellated(benchmark::State& state) {
     for (auto _ : state) benchmark::DoNotOptimize(bvh.ray_cast(rays[r++ % rays.size()]));
     state.counters["leaves"] = static_cast<double>(tris.size());
 }
-BENCHMARK(BM_DSL_Tori_Tessellated);
+BENCHMARK(BM_DSL_Tori_Tessellated)->Arg(1)->Arg(4)->Arg(16)->Arg(64)->Arg(256)->Arg(1024);
 
 static void BM_DSL_Tori_Build_Exact(benchmark::State& state) {
-    auto scene = tori_trace(false);
-    auto centers = tori_centers();
+    const auto n = static_cast<std::size_t>(state.range(0));
+    auto scene = tori_trace(false, n);
+    auto centers = tori_centers(n);
     for (auto _ : state) {
         auto placed = bd::materialize(scene, scene.size() - 1);
         std::vector<Torus<double>> tori;
@@ -527,11 +537,12 @@ static void BM_DSL_Tori_Build_Exact(benchmark::State& state) {
         benchmark::DoNotOptimize(bvh);
     }
 }
-BENCHMARK(BM_DSL_Tori_Build_Exact)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DSL_Tori_Build_Exact)->Arg(64)->Arg(256)->Arg(1024)->Unit(benchmark::kMillisecond);
 
 static void BM_DSL_Tori_Build_Tessellated(benchmark::State& state) {
-    auto scene = tori_trace(true);
-    auto centers = tori_centers();
+    const auto n = static_cast<std::size_t>(state.range(0));
+    auto scene = tori_trace(true, n);
+    auto centers = tori_centers(n);
     for (auto _ : state) {
         auto placed = bd::materialize(scene, scene.size() - 1);
         std::vector<Triangle3> tris;
@@ -548,4 +559,4 @@ static void BM_DSL_Tori_Build_Tessellated(benchmark::State& state) {
         benchmark::DoNotOptimize(bvh);
     }
 }
-BENCHMARK(BM_DSL_Tori_Build_Tessellated)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DSL_Tori_Build_Tessellated)->Arg(64)->Arg(256)->Arg(1024)->Unit(benchmark::kMillisecond);

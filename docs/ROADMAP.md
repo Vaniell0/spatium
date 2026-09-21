@@ -464,6 +464,26 @@ thousand times the build cost in the DSL row, ~8× the memory in the
 speck row. An animated scene pays the build on every frame while the
 per-ray cost is paid once per pixel, and that is the whole case.
 
+**Measured 2026-09-22: those three rows are three points, and there is a crossover between them.** The benchmark's tori count was a constant, which is why this entry had anecdotes from three different scenes and no boundary. Parameterised, per ray:
+
+| tori | exact | tessellated |
+|---|---|---|
+| 1 | 22.3 ns | 29.8 ns |
+| 16 | 40.3 | 42.1 |
+| 64 | 57.4 | 57.5 |
+| 256 | 76.5 | **61.1** |
+| 1024 | 95.1 | **67.8** |
+
+The crossover sits near a hundred objects, and the reason is in the growth rates: exact rises 4.3× across the sweep against tessellation's 2.3×. A ray-torus test is a quartic solve where a ray-triangle test is not, and a BVH saves a logarithm of the *number* of leaves, never the cost of one.
+
+Build across the same sweep: 0.011 / 0.052 / 0.338 ms exact against 80.6 / 391 / 1822 ms tessellated, at 64 / 256 / 1024. So tessellation's per-ray saving pays its build back in **2.3 frames at 256 tori and 6.0 at 1024**, against the demo's own frame of 960×720 at 16 samples per pixel — 11.1 M rays.
+
+**Which makes the rule in the code measurably wrong for large static scenes.** `Placed::render_level()` returns `exact.has_value() ? Exact : Tessellated` — a decision by availability. For a thousand static objects rendered for longer than six frames, availability picks the slower path.
+
+Memory stays on exact's side and does not go away: 1024 tori is 2.36 M triangles, on the order of 170 MB against roughly a hundred kilobytes of closed forms.
+
+So the decision has **three** features — object count, frame count, memory budget — and a rule reading only one of them cannot be right by construction. That is a dispatch problem with numbers attached, which is what `rsc/` is for and has never been pointed at.
+
 A finding from the demo, kept because it is the mechanism working:
 `donut_demo` reports `0 exact, 19 809 tessellated, 0 newton`. The dough
 is an `Offset` carrying a noise bump, so it stopped being a torus the
