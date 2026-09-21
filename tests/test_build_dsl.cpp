@@ -1104,3 +1104,77 @@ TEST_CASE("The report walks every field-bearing slot, emission included",
     CHECK(after.structural_fields + after.opaque_fields == after.fields);
     CHECK(after.recognized_leaves + after.unknown_leaves == after.opaque_leaves);
 }
+
+// The render-level rule, and the three cases that make it a rule rather
+// than a preference.
+//
+// `render_level()` answers "what can this node serve", which is a fact
+// about the node. `choose_render_levels()` answers "what should it serve
+// here", which is a fact about the scene and the caller — object count,
+// how many frames it will be rendered for, and what memory is available.
+// Measurement says availability alone picks the slower path for a large
+// static scene: past roughly a hundred objects tessellation wins per ray,
+// and it repays its build inside six frames.
+TEST_CASE("Render level follows the scene and the caller, not just availability",
+          "[build][dsl][render-level]") {
+    // A single torus is rendered for a long time. Small, so exact wins on
+    // rays, build and memory at once and there is nothing to weigh.
+    {
+        bd::Trace<double> trace;
+        trace.torus(1.0, 0.3);
+        const std::size_t changed = bd::choose_render_levels(trace, {.frames = 1000});
+        CHECK(changed == 0);
+        auto placed = bd::materialize(trace, trace.size() - 1);
+        CHECK(placed.front().render_level() == bd::RenderLevel::Exact);
+    }
+
+    // Many instances, but rendered once: the build is never amortised, so
+    // tessellation cannot repay itself however fast its rays are.
+    {
+        bd::Trace<double> trace;
+        auto item = trace.torus(0.05, 0.02);
+        auto target = trace.torus(1.0, 0.3);
+        trace.scatter(item, target, /*count=*/512, /*seed=*/7);
+        const std::size_t changed = bd::choose_render_levels(trace, {.frames = 1});
+        CHECK(changed == 0);
+    }
+
+    // Many instances and many frames: this is the case availability gets
+    // wrong, and the one the rule exists for.
+    {
+        bd::Trace<double> trace;
+        auto item = trace.torus(0.05, 0.02, /*u*/12, /*v*/6);
+        auto target = trace.torus(1.0, 0.3);
+        trace.scatter(item, target, /*count=*/512, /*seed=*/7);
+        const std::size_t changed = bd::choose_render_levels(trace, {.frames = 60});
+        CHECK(changed == 1);
+        // The level lands on the *item*, which is where the closed form
+        // is, not on the Scatter that counted the instances.
+        CHECK(trace.node(item.index).level.value() == bd::RenderLevel::Tessellated);
+    }
+
+    // Same scene, no memory for it. Speed does not get to overrule the
+    // budget — a scene that does not fit is not faster, it is absent.
+    {
+        bd::Trace<double> trace;
+        auto item = trace.torus(0.05, 0.02, 12, 6);
+        auto target = trace.torus(1.0, 0.3);
+        trace.scatter(item, target, 512, 7);
+        const std::size_t changed =
+            bd::choose_render_levels(trace, {.frames = 60, .memory_budget_bytes = 1024});
+        CHECK(changed == 0);
+    }
+
+    // An explicit .rendered_as() is the caller's decision and outranks the
+    // policy, which is why the policy skips nodes that already have one.
+    {
+        bd::Trace<double> trace;
+        auto item = trace.torus(0.05, 0.02, 12, 6);
+        auto target = trace.torus(1.0, 0.3);
+        trace.scatter(item, target, 512, 7);
+        item.rendered_as(bd::RenderLevel::Exact);
+        const std::size_t changed = bd::choose_render_levels(trace, {.frames = 60});
+        CHECK(changed == 0);
+        CHECK(trace.node(item.index).level.value() == bd::RenderLevel::Exact);
+    }
+}

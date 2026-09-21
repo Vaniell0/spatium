@@ -733,6 +733,99 @@ Handle<T> Handle<T>::rendered_as(RenderLevel level) const {
     return *this;
 }
 
+// ── Choosing a render level, from measurements rather than availability ──
+//
+// `Placed::render_level()` answers "is there a closed form" and calls that
+// a decision. It is not one, and measurement says it picks wrong for large
+// static scenes: tori through this DSL, per ray, run 22.3 / 40.3 / 57.4 /
+// 76.5 / 95.1 ns exact at 1 / 16 / 64 / 256 / 1024 objects against 29.8 /
+// 42.1 / 57.5 / 61.1 / 67.8 ns tessellated. Exact wins small, loses above
+// roughly a hundred, and the gap widens — a ray-torus test is a quartic
+// solve where a ray-triangle test is not, and a BVH saves a logarithm of
+// the number of leaves, never the cost of one.
+//
+// Build over the same sweep is 0.011 / 0.052 / 0.338 ms exact against
+// 80.6 / 391 / 1822 ms tessellated, so tessellation repays its build in
+// about 2.3 frames at 256 objects and 6.0 at 1024, against a 960x720 frame
+// at 16 samples per pixel. Memory stays on exact's side throughout: 1024
+// tori is 2.36 M triangles, on the order of 170 MB, against roughly a
+// hundred kilobytes of closed forms.
+//
+// **This rule is deliberately crude, and its crudeness is the point.** The
+// thresholds below are the measured points for *one shape at one
+// tessellation*, used as a step table rather than fitted into a curve —
+// three points do not make a curve, and this entry already spent a while
+// being three anecdotes. Applying them to a cylinder (a quadric, not a
+// quartic) or to a different tessellation density is an assumption, and it
+// is exactly the assumption a trained dispatcher would replace: the
+// features are cheap and known at cook() time, so the model would be
+// consulted once per scene rather than once per ray.
+struct RenderPolicy {
+    // How many times this scene will be rendered. One means the build cost
+    // is never amortised and exact always wins; the caller knows this and
+    // nothing else can.
+    std::size_t frames = 1;
+
+    // Tessellation is refused past this regardless of speed.
+    std::size_t memory_budget_bytes = std::size_t{512} << 20;
+
+    // Below this many instances, exact wins on rays, build and memory at
+    // once, so there is nothing to weigh.
+    std::size_t small_scene_objects = 128;
+
+    // Frames needed before tessellation's per-ray saving repays its build,
+    // measured at 1024 objects and rounded up. Below `small_scene_objects`
+    // it never repays at all.
+    std::size_t payback_frames = 6;
+
+    // Rays per frame, for the caller whose frame is not the demo's.
+    std::size_t rays_per_frame = 960 * 720 * 16;
+};
+
+// Sets an explicit level on every node the policy has an opinion about,
+// and returns how many it changed. Nodes with no closed form are left
+// alone: they have no choice to make.
+//
+// Deliberately separate from `render_level()` rather than replacing its
+// default. The default is "what can this node serve", which is a fact
+// about the node; this is "what should it serve here", which is a fact
+// about the scene and the caller. Collapsing the two would make a node's
+// answer depend on who asked.
+template<Scalar T>
+std::size_t choose_render_levels(Trace<T>& trace, const RenderPolicy& policy = {}) {
+    // The feature and the decision live on different nodes, which is worth
+    // stating because the first version of this function got it wrong and
+    // a test caught it. A `Scatter` carries the instance count and has no
+    // closed form; the closed form belongs to the *item* it scatters. So
+    // "how many of these will exist" has to be gathered from every Scatter
+    // that names a node before that node can be asked to choose.
+    std::vector<std::size_t> instances(trace.size(), 1);
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+        const auto& n = trace.node(i);
+        if (n.kind == Kind::Scatter && n.count) instances[n.item] += n.count - 1;
+    }
+
+    std::size_t changed = 0;
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+        auto& n = trace.node(i);
+        if (n.kind == Kind::Compose) continue;
+        if (!n.exact.has_value()) continue;   // no choice to make
+        if (n.level) continue;                // the caller asked for one already
+
+        const std::size_t count = instances[i];
+        RenderLevel want = RenderLevel::Exact;
+        if (count >= policy.small_scene_objects && policy.frames >= policy.payback_frames) {
+            // Triangles per instance, from the node's own tessellation.
+            const std::size_t tris = 2 * n.u_steps * n.v_steps;
+            const std::size_t bytes = count * tris * sizeof(Vec<T, 3>) * 3;
+            if (bytes <= policy.memory_budget_bytes) want = RenderLevel::Tessellated;
+        }
+
+        if (want != RenderLevel::Exact) { n.level = want; ++changed; }
+    }
+    return changed;
+}
+
 // Last call wins, deliberately: a color is a value a point maps to, and
 // two such maps have no meaningful composition (unlike motion below).
 template<Scalar T>
