@@ -366,6 +366,53 @@ Both rules exist because a claim decays in three different places with three dif
 
   `build_laplacian()` and `build_mass_matrix()` in `mesh/differential.hpp` return `Eigen::SparseMatrix` and need no conversion; what they need is a fresh factorisation of `K − σM` at a small negative shift, since `K` is exactly singular.
 
+## Tessellation density, and the rule that is not the obvious one
+
+Measured 2026-09-22, `rsc/tools/tessellation_error.cpp`. The second
+dispatch point after render level, and it is decided today by numbers
+placed by hand: 240x120 for the donut's dough, 8x2 for its sprinkles,
+48x24 and 12x4 as library defaults.
+
+**For a surface with no displacement the rule is straightforward and
+measurable.** A tessellation is wrong when its deviation from the true
+surface is visible, so the quantity is the largest gap between the flat
+mesh and the real surface, in pixels rather than in triangles. Against the
+donut camera's pixel of 5.4e-3 world units, a plain torus 2.0/1.0 runs
+123.5 / 37.2 / 9.7 / 2.5 / 0.62 / 0.099 pixels at 4x2 through 240x120, so a
+half-pixel target lands near 120x60 and everything finer is paid for and
+not delivered. The deviation is exact rather than estimated, since the
+surface can project a point onto itself.
+
+**For a displaced surface that rule does not apply, and the reason is
+worth keeping.** The donut's dough is a torus under a noise offset, which
+is a perfectly well-defined continuous surface -- `offset_surface`
+evaluates its thickness field at (u, v), so it is approximated by a mesh
+rather than defined by one. But it converges only once the tessellation
+resolves the *displacement field's* frequency, not the base surface's
+curvature, and the demo does not:
+
+| dough tessellation | against 240x120 |
+|---|---|
+| 120x60 | 44.45 dB |
+| 360x180 | 44.93 dB |
+
+Going up changes the picture as much as going down, which is what
+non-convergence looks like. The cause is in the field: the pore noise is
+`pore_noise(u * 11.0, v * 4.5)` over a domain of 0..2π, so the argument
+runs to 69 and there are about 69 pores across u. At 240 steps that is 3.5
+samples per pore against a Nyquist minimum of two, so every density in the
+range draws a different bread and none is near a limit.
+
+**So the rule for a displaced surface is set by the displacement field,
+and the frequency is already written down in the field itself** -- it does
+not have to be guessed, which is exactly what hand-tuning a number by eye
+is doing in its absence.
+
+Not acted on for the demo: its numbers were tuned by eye and the picture
+is what ships, so lowering the dough to 120x60 -- 78 104 triangles to
+34 904, and the storage ratio from 36.4x to 79.7x -- changes the bread for
+a 2.2x saving, which is a look decision rather than a correctness one.
+
 ## Calculus
 
 - **[course]** Region-aware integration over Spatium's own geometry (Box/Sphere/Polygon volumes, intersection overlap) — `integrate()` in `algebra/calculus.hpp` is deliberately scoped to 1-D; this is the next step the function's own docstring already flags.
