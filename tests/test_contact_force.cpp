@@ -3,6 +3,8 @@
 
 #include <spatium/physics/mechanics/contact_force.hpp>
 #include <spatium/physics/mechanics/integrator.hpp>
+#include <spatium/physics/mechanics/symplectic.hpp>
+#include <spatium/spaces/euclidean.hpp>
 #include <spatium/spaces/chart.hpp>
 #include <spatium/spaces/sphere.hpp>
 
@@ -87,4 +89,59 @@ TEST_CASE("The barrier is silent outside its band", "[physics][contact]") {
     const auto f = contact(near, 0.0);
     CHECK(f.norm() > 0.0);
     CHECK(f[2] > 0.0);
+}
+
+// Whether the assembled force is still symplectic, which is the oracle a
+// search over compositions would depend on and which had never been run.
+//
+// The claim inherited from the parts is that a barrier force composed into
+// a symplectic integrator stays symplectic, because a barrier is a
+// potential and `verlet_step` is symplectic for any potential. Inherited
+// claims are the ones worth measuring: a barrier is a *stiff* potential,
+// and stiffness is exactly what breaks explicit integrators at a given
+// step size. So the interesting number is not whether it holds but where
+// it stops holding.
+TEST_CASE("The assembled contact force keeps the symplectic form",
+          "[physics][contact][symplectic]") {
+    using Bundle = CotangentBundle<Euclidean<3, double>>;
+    const auto ball = chart_of(Sphere<2, double>{1.0});
+
+    // Inside the barrier's active band, where the force is not zero and
+    // there is therefore something to measure. Outside it the map is
+    // trivially symplectic and the check would pass without meaning.
+    const Bundle::State s0{{0.0, 0.0, 1.08}, {0.0, 0.0, -0.4}};
+
+    auto drift_at = [&](double kappa, double eps) {
+        auto contact = surface_contact_force<double>(ball, /*d_hat=*/0.2, kappa);
+        auto step = [&](const Bundle::State& s, double h) {
+            PointMass<3, double> body{1.0, s.q, s.p};
+            for (int i = 0; i < 100; ++i) verlet_step(body, contact, h, i * h);
+            return Bundle::State{body.state.position, body.state.velocity};
+        };
+        return verify_symplecticity_drift<Bundle>(s0, step, eps, 2e-3);
+    };
+
+    // The assertion is about *scaling*, not about an absolute bound, and
+    // the difference matters. `verify_symplecticity_drift` estimates the
+    // differential by finite difference, so a symplectic map reports O(eps)
+    // -- its own truncation error -- and a map that fails to preserve the
+    // form reports something independent of eps.
+    //
+    // A stiff barrier makes that truncation term large: measured here at
+    // 3.2 * eps, which at eps = 1e-4 is 3.2e-4 and would fail any
+    // plausible absolute threshold while being entirely correct. Halving
+    // eps has to halve the drift; that is what symplectic means for this
+    // probe, and it is a claim a non-symplectic map cannot satisfy.
+    const double d1 = drift_at(200.0, 1e-4);
+    const double d2 = drift_at(200.0, 1e-5);
+    const double d3 = drift_at(200.0, 1e-6);
+
+    CHECK(d1 / d2 > 8.0);    // an order of magnitude down in eps ...
+    CHECK(d1 / d2 < 12.0);   // ... is an order of magnitude down in drift
+    CHECK(d2 / d3 > 8.0);
+    CHECK(d2 / d3 < 12.0);
+
+    // Free flight, where the force is identically zero, is exactly
+    // symplectic and pins the other end of the scale.
+    CHECK(drift_at(0.0, 1e-4) < 1e-10);
 }

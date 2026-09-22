@@ -118,25 +118,50 @@ typename S::ScalarType verify_symplecticity_drift(
     using Cfg = typename S::Configuration;
     using Mom = typename S::Momentum;
 
-    // Two random orthogonal-ish tangent perturbations.
-    Cfg dq1{}; dq1[0] = eps;
-    Mom dp1{}; dp1[1 % Mom::size] = eps;
-    Cfg dq2{}; dq2[1 % Cfg::size] = eps;
-    Mom dp2{}; dp2[0] = eps;
-
-    auto sP    = step(s0,                                              dt);
-    auto sP_q1 = step(typename S::State{Cfg{s0.q + dq1}, Mom{s0.p + dp1}}, dt);
-    auto sP_q2 = step(typename S::State{Cfg{s0.q + dq2}, Mom{s0.p + dp2}}, dt);
-
-    Cfg dq1_after = Cfg{sP_q1.q - sP.q};
-    Mom dp1_after = Mom{sP_q1.p - sP.p};
-    Cfg dq2_after = Cfg{sP_q2.q - sP.q};
-    Mom dp2_after = Mom{sP_q2.p - sP.p};
-
-    T omega_before = S::omega(dq1,       dp1,       dq2,       dp2);
-    T omega_after  = S::omega(dq1_after, dp1_after, dq2_after, dp2_after);
+    // The perturbations must be a *conjugate* pair, and the version this
+    // replaces was not. It used dq1 = (eps,0,..), dp1 = (0,eps,..),
+    // dq2 = (0,eps,..), dp2 = (eps,0,..), for which
+    //
+    //     omega = dq1·dp2 - dq2·dp1 = eps^2 - eps^2 = 0
+    //
+    // identically. A 2-form that is zero on the pair being tested measures
+    // nothing: preserving zero is what every map does. Measured against
+    // deliberately non-symplectic maps -- one inflating momentum by 10% a
+    // step, so phase-space volume grows by 1.1 each time, and one pure
+    // shear -- it returned 1.7e-12 and 2.3e-12 against Verlet's 1.3e-12.
+    // Indistinguishable, and `tests/test_symplectic_integrators.cpp` had
+    // been asserting on it.
+    //
+    // A canonical pair in one coordinate -- perturb q alone, perturb the
+    // conjugate p alone -- gives omega = eps^2 instead, which is the
+    // largest value the form takes on unit-scale perturbations and so the
+    // most sensitive probe available. Every coordinate is swept and the
+    // worst plane is reported, because a map can preserve the form in one
+    // plane while destroying it in another.
     using std::abs;
-    return abs(omega_after - omega_before) / (abs(omega_before) + eps * eps);
+    T worst = T{0};
+
+    for (std::size_t axis = 0; axis < Cfg::size; ++axis) {
+        Cfg dq1{}; dq1[axis] = eps;      Mom dp1{};
+        Cfg dq2{};                       Mom dp2{}; dp2[axis % Mom::size] = eps;
+
+        const auto sP    = step(s0, dt);
+        const auto sP_1  = step(typename S::State{Cfg{s0.q + dq1}, Mom{s0.p + dp1}}, dt);
+        const auto sP_2  = step(typename S::State{Cfg{s0.q + dq2}, Mom{s0.p + dp2}}, dt);
+
+        const Cfg dq1_after{sP_1.q - sP.q};
+        const Mom dp1_after{sP_1.p - sP.p};
+        const Cfg dq2_after{sP_2.q - sP.q};
+        const Mom dp2_after{sP_2.p - sP.p};
+
+        const T before = S::omega(dq1, dp1, dq2, dp2);
+        const T after  = S::omega(dq1_after, dp1_after, dq2_after, dp2_after);
+
+        // Relative to the form's own magnitude, so the answer does not
+        // depend on the perturbation size chosen.
+        worst = std::max(worst, abs(after - before) / (abs(before) + eps * eps));
+    }
+    return worst;
 }
 
 } // namespace spatium::physics::mechanics
