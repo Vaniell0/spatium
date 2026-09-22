@@ -139,7 +139,7 @@ build it never asked for -- see "Using in Your Project" below.
 include(FetchContent)
 FetchContent_Declare(spatium
     GIT_REPOSITORY https://github.com/Vaniell0/spatium.git
-    GIT_TAG main
+    GIT_TAG v1.0.0
 )
 FetchContent_MakeAvailable(spatium)
 

@@ -40,7 +40,10 @@ elseif(SPATIUM_CONSUME STREQUAL "fetchcontent")
     include(FetchContent)
     FetchContent_Declare(spatium
         GIT_REPOSITORY https://github.com/Vaniell0/spatium.git
-        GIT_TAG main
+        # A tag rather than a branch, deliberately. `main` is a moving
+        # target: two people who build a week apart get different code,
+        # and a bug report against "main" cannot be pinned to anything.
+        GIT_TAG v1.0.0
     )
     FetchContent_MakeAvailable(spatium)
 else()
