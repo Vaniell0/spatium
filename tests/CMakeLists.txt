@@ -66,6 +66,7 @@ add_executable(spatium_tests
     test_variational.cpp
     test_symplectic_integrators.cpp
     test_geometric_mechanics.cpp
+    test_contact_force.cpp
     test_contact_xpbd.cpp
     test_ipc_toolkit.cpp
     test_narrow_phase.cpp

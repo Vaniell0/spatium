@@ -32,6 +32,7 @@
 #include <spatium/physics/mechanics/manifold_body.hpp>
 #include <spatium/physics/mechanics/contact.hpp>
 #include <spatium/physics/mechanics/continuum.hpp>
+#include <spatium/physics/mechanics/contact_force.hpp>
 #include <spatium/physics/mechanics/narrow_phase.hpp>
 #include <spatium/physics/mechanics/xpbd.hpp>
 #include <spatium/physics/relativity/schwarzschild.hpp>
