@@ -1384,6 +1384,46 @@ The check is also the compiler's: the operations are templates over `Surface S` 
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 
+## Where Newton is not needed, measured
+
+The argument, recorded before it could be tested: while a Newton step is
+in the pipeline the IR does not compress and there is no interactivity,
+because a Newton step is `solve_linear(H, g)` then a line search then an
+update — a long chain whose control flow depends on its own intermediate
+values, which lowers to no kernel and serialises into nothing. Newton is
+the largest opaque leaf in the physics path.
+
+**The alternative now exists and is a composition of pieces the library
+already had separately:** `point_to`, then `ipc_contact_force`, then
+`verlet_step`. No Hessian, no linear system, no backtracking. Every step
+is arithmetic, so the chain is expressible as operations — which is the
+same property the closed-form section above is about.
+
+So the question is not whether Newton can be replaced but where the
+boundary lies, and `rsc/tools/explicit_contact_window.cpp` sweeps it.
+Dropping a body onto a unit sphere, reporting penetration or energy
+growth over six seconds:
+
+| approach | kappa 1 | 100 | 10⁴ | 10⁶ |
+|---|---|---|---|---|
+| v = 0 | through at every dt | ok at every dt | ok at every dt | 396× at dt 1e-2, ok below |
+| v = 5 | through | through | ok below dt 3e-3 | 240× at 1e-2, ok below 1e-3 |
+| v = 50 | through | through | ok only at dt 1e-3 | ok below dt 1e-3 |
+
+**Two failures close in from opposite sides** — a barrier too weak to stop
+the body, and a barrier too stiff for the step — and between them is a
+window that narrows as the approach speed rises.
+
+**Which reframes what a dispatcher is for here.** It does not replace
+Newton. It decides *where Newton is not needed*, and inside that region
+the description becomes processable: no linear solve, no data-dependent
+control flow, an IR that compresses. The features are cheap and all three
+are already to hand — approach speed, stiffness, step size.
+
+One cell is not explained and is left visible rather than smoothed: at
+v = 50 and kappa 10⁴, dt 1e-3 holds while the *smaller* 3e-4 penetrates.
+Non-monotonic in the step size, which nothing above predicts.
+
 ## A closed form is not only faster — it is the only thing that fits in an IR
 
 Named 2026-09-22, after the same decision arrived twice in one session

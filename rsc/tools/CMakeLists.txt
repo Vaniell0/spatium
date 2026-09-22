@@ -77,3 +77,11 @@ target_include_directories(tessellation_error PRIVATE
 )
 target_link_libraries(tessellation_error PRIVATE spatium_core)
 target_compile_options(tessellation_error PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(explicit_contact_window explicit_contact_window.cpp)
+target_include_directories(explicit_contact_window PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(explicit_contact_window PRIVATE spatium_core)
+target_compile_options(explicit_contact_window PRIVATE -Wall -Wextra -Wpedantic)
