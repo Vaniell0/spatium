@@ -41,15 +41,74 @@ More in [`gallery/`](gallery/).
 
 ## Features
 
-- **Space hierarchy as concepts** — Set, TopologicalSpace, MetricSpace, NormedSpace, InnerProductSpace, Manifold, RiemannianManifold, Surface
-- **Concrete spaces** — Euclidean\<N\>, Sphere\<N\>, Hyperbolic\<N\>, ParametricSurface, ImplicitSurface
-- **Geometric primitives & operations** — Line/Ray/Segment/Hyperplane/Triangle/Polygon/Circle/Disk/Box/Simplex; intersection (Moller-Trumbore, slab method, analytical ray-quadric), distance, boolean ops, clipping
-- **Mesh & geodesics** — Mesh\<Surface\>, subdivision with surface projection, LOD chains, geodesic distance (Dijkstra + heat method), geodesic Voronoi, discrete exterior calculus
-- **Morphisms** — typed maps between spaces with pipe composition: `point | scale | shift | project`
-- **Declarative scene DSL** (`io::build`) — `torus()`/`offset()`/`scatter()`/`compose()` build a flat, inspectable `Trace`, not a tree of opaque closures; analytic until the last mile (offset surfaces and area-weighted placement are real function composition, no mesh anywhere until something actually needs triangles). Getting-started tutorial: [`docs/getting-started-dsl.md`](docs/getting-started-dsl.md), runnable in [`examples/donut_demo.cpp`](examples/donut_demo.cpp)
-- **Arbitrary precision** — Boost.Multiprecision (Real50, Real100, any digit count), same generic algorithms; optional, `-DSPATIUM_BOOST=ON`
-- **Physics & relativity research track** — geometric-mechanics integrators (symplectic, Lie-group, variational), metric-agnostic geodesic integration (Schwarzschild/Kerr), and RSC — a trained dispatcher that picks which method/precision to use per problem, not hand-tuned; see [Roadmap](docs/ROADMAP.md)
-- **N-dimensional, zero-cost** — templated on dimension and scalar type, concepts checked at compile time, no virtual dispatch
+**Spaces.** The concept hierarchy — Set, TopologicalSpace, MetricSpace,
+NormedSpace, InnerProductSpace, Manifold, RiemannianManifold, Surface — and
+the spaces that satisfy it: Euclidean\<N\>, Sphere\<N\>, Hyperbolic\<N\>,
+ParametricSurface, ImplicitSurface, product spaces. `chart_of()` is the ADL
+extension point that lets a space declared outside this library into the
+scene DSL.
+
+**Lie groups and matrix manifolds.** SO(3) via Rodrigues, SE(3) for
+rigid-body motions, and SPD(n) — the manifold of symmetric positive-definite
+matrices — under two metrics, log-Euclidean and affine-invariant. All
+templated on the scalar type.
+
+**Geometry.** Line, Ray, Segment, Hyperplane, Triangle, Polygon, Circle,
+Disk, Box, Simplex, Quadric. Intersection (Möller–Trumbore, slab method,
+analytical ray–quadric and ray–torus), distance between every shape pair,
+polygon booleans, clipping, and a `|` pipe syntax for composing them.
+
+**Mesh and geodesics.** `Mesh<Surface>` for any surface, subdivision with
+surface projection, LOD chains, geodesic distance by Dijkstra or the heat
+method (Crane 2013), geodesic Voronoi, parallel transport, and discrete
+exterior calculus — cotangent Laplacian, mass matrix, face gradients,
+divergence.
+
+**Spatial acceleration.** BVH with SAH construction, ray casting, nearest
+queries, box queries, over triangles or over analytic primitives directly.
+
+**Numerics.** `Dual<T>` forward-mode autodiff that satisfies `Scalar` and so
+substitutes into ordinary code; polynomial solvers through the quartic;
+native SVD and symmetric eigendecomposition; N×N linear solve; ODE
+integrators; `Complex<T>`; calculus over plain callables — gradient,
+integrate, minimize. Arbitrary precision through Boost.Multiprecision
+(`Real50`, `Real100`, any digit count), optional.
+
+**Riemannian optimization.** Index-raise an ambient covector through the
+space's own metric, project to the tangent space, retract by `exp_map` — so
+gradient descent works on any RiemannianManifold that is also a Surface.
+
+**Physics.** Compile-time SI units, point masses and rigid bodies,
+symplectic and Lie-group and variational integrators, geometric continuum
+mechanics, the IPC contact barrier with continuous collision detection
+against any Surface, XPBD, wave PDEs for strings and membranes, and
+metric-agnostic geodesic integration with exact Christoffel symbols —
+Schwarzschild and Kerr, with the accretion-disk redshift for both.
+
+**Declarative scene DSL** (`io::build`). `torus()`/`offset()`/`scatter()`/
+`compose()` build a flat, inspectable `Trace` rather than a tree of opaque
+closures, analytic until the last mile: offset surfaces and area-weighted
+placement are real function composition, and no mesh exists until something
+asks for triangles. Tutorial in [`docs/getting-started-dsl.md`](docs/getting-started-dsl.md),
+runnable in [`examples/donut_demo.cpp`](examples/donut_demo.cpp).
+
+**Rendering and I/O.** A CPU ray tracer — pinhole camera, row-parallel
+work stealing, jittered supersampling, PNG output, physical blackbody
+colour — plus a Vulkan viewer with ImGui. Hand-rolled readers and writers
+with no external dependency: JSON, WAV, OBJ, STL, SVG.
+
+**RSC.** A trained dispatcher that picks which implementation to use for a
+problem — Newton or bisection, double or fifty digits, analytic or
+tessellated — with ground truth generated by running the candidates rather
+than hand-labelled. Seven domains; see the [roadmap](docs/ROADMAP.md) for
+what is and is not connected.
+
+**Verification.** `verify_metric`, `verify_inner_product`, `verify_exp_log`
+and a symplecticity check, so a space you define yourself can be tested
+against the axioms it claims.
+
+**N-dimensional and zero-cost.** Templated on dimension and scalar type,
+concepts checked at compile time, no virtual dispatch anywhere.
 
 ## Quick Start
 
