@@ -367,4 +367,70 @@ broad_phase_aabb_pairs(const std::vector<::spatium::geometry::Box<3, T>>& aabbs)
     return pairs;
 }
 
+
+// ── Point ↔ any Surface, continuous ────────────────────────────
+//
+// Conservative advancement: step forward by a distance that provably
+// cannot reach the surface, ask again, repeat. It needs nothing from the
+// surface but `point_to`, which already has a generic overload over
+// `project` and `normal`, so this is continuous collision detection
+// against a parametric surface, an implicit one, or a user's own type --
+// where `sweep_sphere_sphere` above covers only two spheres.
+//
+// Why it exists, since it is not an end in itself: a search over
+// compositions verifies non-penetration by sampling signed distance, and
+// sampling is unsound over a step. A body moving fast enough is outside
+// at the start, outside at the end, and through the wall in between, so a
+// candidate chain passes a check it should fail. This makes that check
+// true for the whole step rather than for its two ends.
+//
+// The safe bound is `distance / |disp|`: the point cannot travel further
+// than its own displacement, so it cannot reach the surface before that
+// fraction of the step whatever the surface does in between. That holds
+// for any shape, which is the point -- IPC's own CCD is robust and is
+// specialised to simplices.
+//
+// `convex` swaps in `distance / (-v_n)`, the time to contact if the point
+// kept closing along the current normal. That is larger, so it converges
+// in fewer iterations, and it is a *bound* only where the surface does not
+// curve away from the ray -- true for a convex target, false in general.
+// Off by default: a faster answer that can be wrong is not an
+// optimisation of a collision test.
+//
+// Out of iterations reports a hit rather than a miss. Conservative
+// advancement slows down as it approaches a grazing contact, so exhausting
+// the budget means "could not prove it misses", and for a collision query
+// the safe answer to that is that it touches.
+template<Scalar T, typename S>
+SweptContact<T> sweep_point_surface(const Vec<T, 3>& p0, const Vec<T, 3>& disp,
+                                    const S& surface, bool convex = false,
+                                    int max_iterations = 16) {
+    auto q = point_to(p0, surface);
+    if (q.inside || q.distance <= epsilon<T>() * T{100})
+        return SweptContact<T>{true, T{0}, q};
+
+    const T speed = disp.norm();
+    if (speed <= epsilon<T>()) return SweptContact<T>{false, T{1}, q};
+
+    T t = T{0};
+    for (int i = 0; i < max_iterations; ++i) {
+        const Vec<T, 3> p{p0 + disp * t};
+        q = point_to(p, surface);
+        if (q.inside || q.distance <= epsilon<T>() * T{100})
+            return SweptContact<T>{true, t, q};
+
+        T advance = q.distance / speed;           // safe for any surface
+        if (convex) {
+            const T closing = -disp.dot(q.normal);
+            if (closing <= T{0}) return SweptContact<T>{false, T{1}, q};
+            advance = q.distance / closing;
+        }
+
+        t += advance;
+        if (t >= T{1}) return SweptContact<T>{false, T{1}, q};
+    }
+    return SweptContact<T>{true, t, q};
+}
+
+
 } // namespace spatium::physics::mechanics

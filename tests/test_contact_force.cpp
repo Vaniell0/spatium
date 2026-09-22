@@ -3,6 +3,7 @@
 
 #include <spatium/physics/mechanics/contact_force.hpp>
 #include <spatium/physics/mechanics/integrator.hpp>
+#include <spatium/physics/mechanics/rigid_contact.hpp>
 #include <spatium/physics/mechanics/symplectic.hpp>
 #include <spatium/spaces/euclidean.hpp>
 #include <spatium/spaces/chart.hpp>
@@ -144,4 +145,78 @@ TEST_CASE("The assembled contact force keeps the symplectic form",
     // Free flight, where the force is identically zero, is exactly
     // symplectic and pins the other end of the scale.
     CHECK(drift_at(0.0, 1e-4) < 1e-10);
+}
+
+// Continuous collision against an arbitrary surface, which exists so that
+// a non-penetration check is true for a whole step and not just for its
+// ends. A search over compositions verifies by sampling signed distance,
+// and sampling is unsound: a body fast enough is outside at both ends and
+// through the wall in between.
+TEST_CASE("Conservative advancement catches what sampling misses",
+          "[physics][contact][ccd]") {
+    using V3 = Vec<double, 3>;
+    const auto ball = chart_of(Sphere<2, double>{1.0});
+
+    // A step that starts outside, ends outside, and passes straight
+    // through the middle. This is the case the discrete check gets wrong.
+    const V3 start{0.0, 0.0, 3.0};
+    const V3 disp{0.0, 0.0, -6.0};
+
+    // Sampling says there is nothing here: both ends are well clear.
+    CHECK(point_to(start, ball).distance > 1.0);
+    CHECK(point_to(V3{start + disp}, ball).distance > 1.0);
+
+    // The swept query disagrees, and is right.
+    const auto swept = sweep_point_surface<double>(start, disp, ball);
+    CHECK(swept.hit);
+    CHECK(swept.toi > 0.0);
+    CHECK(swept.toi < 1.0);
+
+    // First touch is where the path meets the sphere: from z = 3 moving
+    // -6, the surface at z = 1 is a third of the way.
+    CHECK_THAT(swept.toi, WithinAbs(1.0 / 3.0, 5e-3));
+}
+
+TEST_CASE("A step that never reaches the surface reports no hit",
+          "[physics][contact][ccd]") {
+    using V3 = Vec<double, 3>;
+    const auto ball = chart_of(Sphere<2, double>{1.0});
+
+    // Moving toward it but stopping short: the answer has to be a miss,
+    // not a conservative hit, or the query is useless.
+    const auto short_step = sweep_point_surface<double>(V3{0.0, 0.0, 3.0},
+                                                        V3{0.0, 0.0, -1.0}, ball);
+    CHECK_FALSE(short_step.hit);
+    CHECK_THAT(short_step.toi, WithinAbs(1.0, 1e-12));
+
+    // Moving away: also a miss, and it should cost almost nothing.
+    const auto receding = sweep_point_surface<double>(V3{0.0, 0.0, 1.5},
+                                                      V3{0.0, 0.0, 2.0}, ball);
+    CHECK_FALSE(receding.hit);
+
+    // Already inside at the start of the step: a hit at time zero rather
+    // than a search for one.
+    const auto inside = sweep_point_surface<double>(V3{0.0, 0.0, 0.5},
+                                                    V3{0.0, 0.0, 0.1}, ball);
+    CHECK(inside.hit);
+    CHECK_THAT(inside.toi, WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("The convex shortcut agrees with the safe bound where it is valid",
+          "[physics][contact][ccd]") {
+    using V3 = Vec<double, 3>;
+    const auto ball = chart_of(Sphere<2, double>{1.0});
+    const V3 start{0.0, 0.0, 3.0}, disp{0.0, 0.0, -6.0};
+
+    const auto safe = sweep_point_surface<double>(start, disp, ball, /*convex=*/false);
+    const auto fast = sweep_point_surface<double>(start, disp, ball, /*convex=*/true);
+
+    // A sphere is convex, so the shortcut is a valid bound here and both
+    // must land on the same first-touch time. Where it would not be valid
+    // -- a surface curving away from the ray -- it stays off by default,
+    // because a faster answer that can be wrong is not an optimisation of
+    // a collision test.
+    CHECK(safe.hit);
+    CHECK(fast.hit);
+    CHECK_THAT(fast.toi, WithinAbs(safe.toi, 1e-2));
 }
