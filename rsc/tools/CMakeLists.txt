@@ -85,3 +85,11 @@ target_include_directories(explicit_contact_window PRIVATE
 )
 target_link_libraries(explicit_contact_window PRIVATE spatium_core)
 target_compile_options(explicit_contact_window PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(solver_cost solver_cost.cpp)
+target_include_directories(solver_cost PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(solver_cost PRIVATE spatium_core)
+target_compile_options(solver_cost PRIVATE -Wall -Wextra -Wpedantic)

@@ -1384,6 +1384,46 @@ The check is also the compiler's: the operations are templates over `Surface S` 
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 
+## The labels check the outcome, not the preference
+
+Asked 2026-09-22: how do we know a dispatcher's choice is the *right* one,
+and was measured speed used when comparing the distilled tree against the
+network? Two different holes, and the answer to the second is no.
+
+**The label scheme is sound where it was examined.** Ground truth is
+generated rather than hand-written: candidates are run cheapest-first and
+checked against a reference-quality last candidate -- `Real50` for
+precision, 50-iteration bisection for root-finding, exact Gaussian
+elimination for the linear domain. The cheap one wins when it is accurate
+enough. That is the right notion, "cheapest of the correct", and the
+accuracy half is genuinely measured, with each two-regime split probed
+before being written down.
+
+**Which candidate is the cheap one is not measured.** It is fixed by
+registry index. Measured (`rsc/tools/solver_cost.cpp`), dense, 200k
+repetitions:
+
+| | direct | jacobi(20) | |
+|---|---|---|---|
+| N=4, diag 6 | 64.9 ns | 430.9 ns | jacobi **6.6× dearer** |
+| N=4, diag 20 | 50.2 ns | 489.5 ns | 9.8× |
+| N=8 | 401 ns | 1121 ns | 2.8× |
+| N=16 | 1599 ns | 3844 ns | 2.4× |
+
+Jacobi is dearer at every size tried, so a dispatcher trained to prefer it
+when it converges is trained to lose whenever it says so. In fairness the
+domain is not wrong in principle -- Jacobi wins asymptotically and on
+sparse systems -- but `solve_jacobi` here is dense and the training sizes
+are 4 to 16, so it is wrong at the sizes it trains on.
+
+**And the distillation numbers were fidelity to that label, not to speed.**
+The 0.005 accuracy lost by a per-domain tree measures how faithfully the
+tree reproduces the network's agreement with the label. Where a label's
+cost premise is inverted, both network and tree reproduce it faithfully.
+Those numbers are unaffected in fact -- the base model is Tier-1,
+precision, root-finding and Cauchy/IVP, and the linear domain is not in it
+-- but the method was not checking what the question assumed.
+
 ## One RSC domain is trained on a choice nothing makes
 
 Checked 2026-09-22 by exact name, after a crude grep over guessed names
