@@ -1384,6 +1384,33 @@ The check is also the compiler's: the operations are templates over `Surface S` 
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 
+## One RSC domain is trained on a choice nothing makes
+
+Checked 2026-09-22 by exact name, after a crude grep over guessed names
+produced a confident wrong answer for the other domains -- `lgvi` is
+called from `tumbling_body_demo` and three tests, and bisection lives in
+`ode.hpp` and `spherical_polygon.hpp`, neither of which the first pass
+found. Only the row below was verified properly, and only it is claimed.
+
+**`solve_jacobi` has no callers anywhere outside RSC's own training, and
+`solve_direct` survives only in comments** -- the code that used to call it
+now calls `invert()`, after profiling showed four independent solves at
+~1 µs/step against ~0.3 µs for one inverse. So `rsc/include/linear_ops.hpp`
+trains a dispatcher to choose between two implementations the library does
+not choose between anywhere.
+
+That is not an argument against the domain: it is a reasonable thing to
+have trained, and the registry is meant to hold operations whether or not
+the rest of the tree calls them. It is an argument about what "connect RSC
+to the pipeline" can mean. A dispatcher needs a call site with a real
+alternative, and this one has none, so connecting it would mean inventing
+the consumer first.
+
+The two places that *do* have the shape are recorded above: the
+render-level choice, where the rule reads one feature of three and is
+measurably wrong past a hundred objects, and `RenderLevel::Newton`, a
+third option the automatic rule cannot produce at all.
+
 ## Where Newton is not needed, measured
 
 The argument, recorded before it could be tested: while a Newton step is
