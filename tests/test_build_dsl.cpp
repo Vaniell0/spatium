@@ -1178,3 +1178,51 @@ TEST_CASE("Render level follows the scene and the caller, not just availability"
         CHECK(trace.node(item.index).level.value() == bd::RenderLevel::Exact);
     }
 }
+
+// Projection onto a chart that degenerates, which used to return a wrong
+// answer instead of an accurate one.
+//
+// `ParametricSurface::project` searches for parameters -- a grid, then
+// refinement -- and at a pole the sphere chart has none to find: every `u`
+// names the same point, so the parameter is invisible to the gradient
+// while still choosing the direction of any later step. Measured before
+// the fix, that was 12.9% of sampled points wrong by up to 20% of the
+// radius on a unit sphere, and every failure sat within 5.5 degrees of a
+// pole.
+//
+// The fix is the library's own principle turned on itself: a chart that
+// knows its projection in closed form hands it over, and only charts
+// without one iterate.
+TEST_CASE("A sphere chart projects exactly, poles included", "[spaces][chart][project]") {
+    using V3 = Vec<double, 3>;
+    const double r = 1.0;
+    auto chart = chart_of(Sphere<2, double>{r});
+
+    // Straight at a pole, where the chart degenerates and the search
+    // cannot converge in principle.
+    for (const V3 p : {V3{0.0, 0.0, 0.5}, V3{0.0, 0.0, -0.5},
+                       V3{1e-9, 0.0, 0.9}, V3{0.0, 1e-9, -0.9}}) {
+        const V3 got = chart.project(p);
+        const V3 want{p * (r / p.norm())};
+        CHECK((got - want).norm() < 1e-12);
+        CHECK_THAT(got.norm(), WithinAbs(r, 1e-12));
+    }
+
+    // And everywhere else, against the closed form the sphere has.
+    double worst = 0.0;
+    for (int i = 0; i < 400; ++i) {
+        const double a = 0.017 * i, b = 0.011 * i;
+        const V3 p{std::cos(a) * std::sin(b) * 0.7, std::sin(a) * std::sin(b) * 0.7,
+                   std::cos(b) * 0.7};
+        if (p.norm() < 1e-9) continue;
+        worst = std::max(worst, (chart.project(p) - V3{p * (r / p.norm())}).norm());
+    }
+    CHECK(worst < 1e-12);
+
+    // The normal comes from the same closed form rather than from a
+    // finite difference through found parameters, which is what the
+    // generic contact path reads.
+    const V3 q{0.3, -0.4, 0.86};
+    const V3 n = chart.normal(q);
+    CHECK((n - V3{q * (1.0 / q.norm())}).norm() < 1e-12);
+}

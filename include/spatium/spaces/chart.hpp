@@ -95,12 +95,30 @@ ParametricSurface<T> chart_of(const Sphere<2, T>& sphere) {
     using std::sin, std::cos, std::acos;
     const T r  = sphere.radius;
     const T pi = acos(T{-1});
+    // The closed forms are handed over because this chart degenerates at
+    // its poles and the generic search cannot converge there -- see
+    // `ParametricSurface::with_closed_forms`. A sphere's projection and
+    // normal are one line each, so searching for them was always the
+    // wrong trade even where the search happened to work.
     return ParametricSurface<T>(
-        [r](T u, T v) -> Vec<T, 3> {
-            return {r * sin(v) * cos(u), r * sin(v) * sin(u), r * cos(v)};
-        },
-        {T{0}, T{2} * pi, T{0}, pi},
-        /*periodic_u=*/true, /*periodic_v=*/false);
+               [r](T u, T v) -> Vec<T, 3> {
+                   return {r * sin(v) * cos(u), r * sin(v) * sin(u), r * cos(v)};
+               },
+               {T{0}, T{2} * pi, T{0}, pi},
+               /*periodic_u=*/true, /*periodic_v=*/false)
+        .with_closed_forms(
+            [r](const Vec<T, 3>& p) -> Vec<T, 3> {
+                const T n = p.norm();
+                // The centre projects nowhere in particular; the pole is
+                // as good an answer as any and keeps this total.
+                if (n <= epsilon<T>()) return {T{0}, T{0}, r};
+                return Vec<T, 3>{p * (r / n)};
+            },
+            [](const Vec<T, 3>& p) -> Vec<T, 3> {
+                const T n = p.norm();
+                if (n <= epsilon<T>()) return {T{0}, T{0}, T{1}};
+                return Vec<T, 3>{p * (T{1} / n)};
+            });
 }
 
 // Anything the DSL can take: a chart, or a space that has one written
