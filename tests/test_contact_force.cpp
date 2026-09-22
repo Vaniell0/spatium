@@ -3,6 +3,7 @@
 
 #include <spatium/physics/mechanics/contact_force.hpp>
 #include <spatium/physics/mechanics/integrator.hpp>
+#include <spatium/geometry/ray_surface.hpp>
 #include <spatium/physics/mechanics/rigid_contact.hpp>
 #include <spatium/physics/mechanics/symplectic.hpp>
 #include <spatium/spaces/euclidean.hpp>
@@ -219,4 +220,45 @@ TEST_CASE("The convex shortcut agrees with the safe bound where it is valid",
     CHECK(safe.hit);
     CHECK(fast.hit);
     CHECK_THAT(fast.toi, WithinAbs(safe.toi, 1e-2));
+}
+
+// The closed-form swept query against the iterative one, which is the
+// same choice `project` faced this morning: search only what is not
+// already known.
+//
+// It is not only a speed question. A quadratic solve is arithmetic and can
+// be written down as operations; a convergence loop whose exit depends on
+// its own data cannot, so it lowers to no kernel and serialises into
+// nothing. The closed form is what makes the operation *exportable*, and
+// the iterative path is opaque in the same sense a lambda is.
+TEST_CASE("A swept quadric is solved, not searched", "[physics][contact][ccd]") {
+    using V3 = Vec<double, 3>;
+    const auto q = geometry::Quadric<double>::sphere(1.0);
+    const auto chart = chart_of(Sphere<2, double>{1.0});
+
+    const V3 start{0.0, 0.0, 3.0}, disp{0.0, 0.0, -6.0};
+
+    const auto exact = sweep_point_quadric<double>(start, disp, q);
+    const auto iterative = sweep_point_surface<double>(start, disp, chart);
+
+    CHECK(exact.hit);
+    CHECK(iterative.hit);
+
+    // Both find the same first touch, and the exact one is exact: from
+    // z = 3 moving -6, the surface at z = 1 is a third of the way, and
+    // that is a root of a quadratic rather than the limit of a sequence.
+    CHECK_THAT(exact.toi, WithinAbs(1.0 / 3.0, 1e-12));
+    CHECK_THAT(iterative.toi, WithinAbs(exact.toi, 5e-3));
+
+    // A miss is a miss in both.
+    const auto short_exact = sweep_point_quadric<double>(start, V3{0.0, 0.0, -1.0}, q);
+    CHECK_FALSE(short_exact.hit);
+
+    // Starting inside is time zero rather than a search for an exit: the
+    // ray would leave the sphere at a positive t, and reporting that as a
+    // first touch would be a tunnel read backwards.
+    const auto within = sweep_point_quadric<double>(V3{0.0, 0.0, 0.2}, V3{0.0, 0.0, 2.0}, q);
+    CHECK(within.hit);
+    CHECK_THAT(within.toi, WithinAbs(0.0, 1e-12));
+    CHECK(within.contact.inside);
 }

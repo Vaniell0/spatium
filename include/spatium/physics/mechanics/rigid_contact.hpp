@@ -433,4 +433,56 @@ SweptContact<T> sweep_point_surface(const Vec<T, 3>& p0, const Vec<T, 3>& disp,
 }
 
 
+// ── The same, in closed form where the shape has one ───────────
+//
+// `sweep_point_surface` above iterates because a general `Surface` offers
+// nothing but `point_to`. A quadric offers a great deal more: a point
+// swept over one tick is a *segment*, a segment is a ray clipped to its
+// own length, and `ray_quadric` already solves ray-versus-quadric exactly
+// and returns every crossing rather than the first. So where the shape
+// has a closed form there is nothing to iterate toward -- the answer is a
+// quadratic.
+//
+// This is the same principle that fixed `ParametricSurface::project`
+// earlier: search only what is not already known. The iterative version
+// stays as the fallback for surfaces with no closed form, which is what it
+// was always for.
+//
+// It also answers a question the iterative one cannot: `ray_quadric`
+// returns up to two crossings and `ray_torus` up to four, so a caller who
+// needs to know that a body entered *and left* within one step -- a tunnel
+// rather than a resting contact -- can read them directly instead of
+// asking this for a first touch it would then have to chase.
+template<Scalar T>
+SweptContact<T> sweep_point_quadric(const Vec<T, 3>& p0, const Vec<T, 3>& disp,
+                                    const geometry::Quadric<T>& q) {
+    const auto inside_at = [&q](const Vec<T, 3>& p) { return q(p) < T{0}; };
+
+    auto query_at = [&q](const Vec<T, 3>& p, const Vec<T, 3>& n, bool in) {
+        return ContactQuery<T>{T{0}, p, n, in};
+    };
+
+    if (inside_at(p0))
+        return SweptContact<T>{true, T{0}, query_at(p0, q.normal(p0), true)};
+
+    const T length = disp.norm();
+    if (length <= epsilon<T>()) {
+        const bool in = inside_at(p0);
+        return SweptContact<T>{in, in ? T{0} : T{1}, query_at(p0, q.normal(p0), in)};
+    }
+
+    // `Ray::direction` is a unit vector by contract, so `t` comes back in
+    // world units and the step fraction is t / |disp|.
+    const geometry::Ray<3, T> ray{p0, Vec<T, 3>{disp * (T{1} / length)}};
+    const auto hits = geometry::ray_quadric(ray, q);
+
+    for (std::size_t i = 0; i < hits.size(); ++i) {
+        const auto& h = hits[i];
+        if (h.t < T{0} || h.t > length) continue;
+        return SweptContact<T>{true, h.t / length, query_at(h.point, h.normal, false)};
+    }
+    const Vec<T, 3> end{p0 + disp};
+    return SweptContact<T>{false, T{1}, query_at(end, q.normal(end), false)};
+}
+
 } // namespace spatium::physics::mechanics

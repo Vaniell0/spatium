@@ -1384,6 +1384,39 @@ The check is also the compiler's: the operations are templates over `Surface S` 
 
 Related and already in this file: manifold-native RL (Object model section), Fisher-Rao as a `RiemannianManifold` (Manifold applications) — the closest to buildable, since it needs no new abstraction — stochastic processes on manifolds, and hyperbolic embeddings for hierarchical data (Discrete / graph geometry).
 
+## A closed form is not only faster — it is the only thing that fits in an IR
+
+Named 2026-09-22, after the same decision arrived twice in one session
+from unrelated directions.
+
+`ParametricSurface::project` searched for parameters where a sphere's
+projection is `p·r/|p|`, and was wrong on 12.9% of points because a search
+cannot converge at a degenerate chart point. `sweep_point_surface` advanced
+conservatively toward a first contact where a quadric's answer is a root of
+a quadratic, `ray_quadric` having solved it exactly for years. Both were
+fixed the same way: use the closed form where the shape has one, iterate
+only where it does not.
+
+**The speed is the lesser half.** A quadratic solve is arithmetic and can
+be written down as a sequence of operations. A convergence loop whose exit
+condition depends on its own intermediate values cannot: it lowers to no
+kernel, and it serialises into nothing. So an iterative implementation is
+**opaque in exactly the sense an opaque leaf is** — the thing this file
+already measures when it counts what a scene can export.
+
+Which joins two halves of the project that had been discussed separately.
+Dispatch picks an implementation; the implementations that are closed forms
+are IR-expressible and the iterative ones are not; so **dispatching toward
+a closed form is simultaneously a performance decision and an
+exportability decision**, and a search that finds a shorter chain has also
+found a more exportable one.
+
+It also gives the exportability measurement a second lever. Until now the
+only way to raise the structural count was to rewrite opaque leaves in the
+vocabulary. This is another: wherever an operation has a closed form and
+takes the iterative path anyway, that is a leaf that did not have to be
+opaque.
+
 ## Two searchable domains, and why owning the library is what makes them searchable
 
 Recorded 2026-09-18, pulling together threads that were already here separately.
