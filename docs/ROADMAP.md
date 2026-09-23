@@ -408,6 +408,18 @@ and the frequency is already written down in the field itself** -- it does
 not have to be guessed, which is exactly what hand-tuning a number by eye
 is doing in its absence.
 
+With one catch, and it is the same catch as everywhere else on this page.
+The frequency is written down in the *source*, not in the field object.
+The dough's `dough_surface` in `examples/donut_demo.cpp` is a single
+`ScalarField` holding one opaque leaf, so `u * 11.0` lives inside a lambda
+and nothing can read it back out: `field_report()` sees a closure, not a
+frequency. Deriving this rule mechanically therefore needs the
+displacement written structurally, which needs a noise operation in the
+vocabulary -- the "Name the 32 opaque leaves against a vocabulary" row of
+the index above. Until then the rule is derivable by a person reading the
+code and not by the library, which is a weaker claim than the sentence
+above makes on its own.
+
 Not acted on for the demo: its numbers were tuned by eye and the picture
 is what ships, so lowering the dough to 120x60 -- 78 104 triangles to
 34 904, and the storage ratio from 36.4x to 79.7x -- changes the bread for
