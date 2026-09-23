@@ -684,7 +684,20 @@ auto motion = VecField<double>::opaque_of_time(where_it_flies)   // reads t, nev
                       [](double t) { return Vec<double, 3>{0, 0, spin * t}; });
 ```
 
-`point()`, `constant(v)`, `opaque_of_time(f)`, `opaque(f)`, `scaled(field, s(t))`, `rotated(field, r(t))` and `+`/`-` are the vocabulary; `rotated` takes either a matrix or an axis-angle vector, exponentiating the latter through `SO3`. `is_placement()` walks the expression to decide whether the object can be instanced, and `placement_at(env)` returns the `{translation, rotation, scale}` it amounts to at one moment.
+`point()`, `constant(v)`, `opaque_of_time(f)`, `opaque(f)`, `scaled(field, s)`, `rotated(field, r)` and `+`/`-` are the vocabulary; `rotated` takes either a matrix or an axis-angle vector, exponentiating the latter through `SO3`. `is_placement()` walks the expression to decide whether the object can be instanced, and `placement_at(env)` returns the `{translation, rotation, scale}` it amounts to at one moment.
+
+A factor may be a callable of time, or a `ScalarField<T>` — an expression. The expression form is what lets a growing or spinning object stay structural, and therefore readable, exportable and rewritable; a callable factor is an opaque leaf like any other. **A factor reads time as the field's first parameter**, spelled `ScalarField<T>::t()` at a call site. `rotated` takes the axis-angle form as three fields, one per component, because a factor that could read the point would be a deformation and three scalars cannot express that mistake.
+
+```cpp
+using F = ScalarField<double>;
+// Grows in over [start, end], structurally -- no lambda, so field_report()
+// counts no opaque leaf and the node keeps its instancing.
+auto grow = scaled(VecField<double>::point(),
+                   smoothstep((F::t() - F{start}) / F{end - start}));
+auto spin = rotated(VecField<double>::point(), F{0.0}, F{0.0}, F{rate} * F::t());
+```
+
+The scalar vocabulary is `Const`, `U`, `V`, `Add`, `Sub`, `Mul`, `Div`, `Min`, `Max` and `Opaque`. `min`, `max` and `clamp` build the first two; `smoothstep(x)` is `clamp(x, 0, 1)` followed by `e * e * (3 - 2 * e)` and is not an op of its own.
 
 Free functions `resolve_surface(trace, idx)` (Space/Offset only, throws otherwise), `materialize_mesh(trace, idx, t)`, `materialize(trace, idx, t)`, `cook(trace, root, t)`, `kind_name(kind)`.
 
