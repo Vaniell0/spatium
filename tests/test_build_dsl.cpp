@@ -1074,6 +1074,103 @@ TEST_CASE("A factor closure is opaque, and a field holding one is not structural
     CHECK(plain.is_structural());
 }
 
+// The counterpart, and the reason the expression overloads exist. With
+// only callable factors, "this scene is made of known operations" is not
+// a claim that happens to be false for a growing object -- it is one that
+// cannot be made about one, however the scene is written. These are the
+// same two motions as above, saying the same thing, readable.
+TEST_CASE("A factor written as an expression stays structural and keeps the placement",
+          "[build][dsl][field][report]") {
+    using bd::VecField;
+    using F = bd::ScalarField<double>;
+    using V3 = spatium::Vec<double, 3>;
+
+    auto spin = scaled(VecField<double>::point(), F{1.0} + F::t());
+    CHECK(spin.is_placement());
+    CHECK(spin.is_structural());
+
+    auto turn = rotated(VecField<double>::point(), F{0.0}, F{0.0}, F::t());
+    CHECK(turn.is_placement());
+    CHECK(turn.is_structural());
+
+    // The values, not just the flags -- and specifically that time is the
+    // field's *first* parameter. That binding is a convention rather than
+    // a consequence, so it is the one thing here a reader cannot derive
+    // and the one thing that must not drift.
+    CHECK_THAT(spin.placement_at(bd::MotionEnv<double>{V3{}, 0.25}).scale,
+               WithinAbs(1.25, 1e-12));
+
+    const double quarter = std::numbers::pi / 2;
+    auto pl = turn.placement_at(bd::MotionEnv<double>{V3{}, quarter});
+    V3 turned{pl.rotation * V3{1.0, 0.0, 0.0}};
+    CHECK_THAT(turned[0], WithinAbs(0.0, 1e-12));
+    CHECK_THAT(turned[1], WithinAbs(1.0, 1e-12));
+    CHECK_THAT(turned[2], WithinAbs(0.0, 1e-12));
+}
+
+// Min and Max were added for one reason: without them the vocabulary
+// cannot clamp, and without a clamp it cannot write a smoothstep -- which
+// is what twenty of the donut's twenty-four motion factors are. The
+// polynomial half was always expressible; `std::clamp` in front of it was
+// the whole of why those factors had to be closures.
+TEST_CASE("Min, Max, and the clamp they exist for", "[build][dsl][field]") {
+    using F = bd::ScalarField<double>;
+
+    CHECK(min(F::u(), F::v()).is_structural());
+    CHECK(max(F::u(), F::v()).is_structural());
+    CHECK_THAT(min(F::u(), F::v())(2.0, 5.0), WithinAbs(2.0, 1e-15));
+    CHECK_THAT(max(F::u(), F::v())(2.0, 5.0), WithinAbs(5.0, 1e-15));
+
+    // clamp lowers to the two above rather than being a third op, so a
+    // consumer that knows Min and Max needs to learn nothing to read one.
+    auto c = clamp(F::u(), F{0.0}, F{1.0});
+    CHECK(c.is_structural());
+    CHECK_THAT(c(-0.5, 0.0), WithinAbs(0.0, 1e-15));
+    CHECK_THAT(c(0.5, 0.0), WithinAbs(0.5, 1e-15));
+    CHECK_THAT(c(1.5, 0.0), WithinAbs(1.0, 1e-15));
+
+    // Against the hand-written curve it replaced, including outside [0, 1]
+    // where the clamp is the only thing doing any work.
+    auto s = smoothstep(F::u());
+    CHECK(s.is_structural());
+    for (double t : {-1.0, 0.0, 0.25, 0.5, 0.75, 1.0, 2.0}) {
+        const double e = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+        CHECK_THAT(s(t, 0.0), WithinAbs(e * e * (3.0 - 2.0 * e), 1e-15));
+    }
+}
+
+// The overload does not *promise* structurality, it propagates it, and
+// the difference is the whole value of the thing: any (u, v) callable
+// converts to a Field implicitly, so an opaque leaf can still arrive this
+// way. If the report called such a factor structural because it came in
+// through the expression door, the instrument would be lying again --
+// which is the exact failure the factor accounting was fixed for once.
+TEST_CASE("An opaque callable reaching a factor through Field is still counted",
+          "[build][dsl][field][report]") {
+    using bd::VecField;
+    using F = bd::ScalarField<double>;
+
+    auto sneaky = scaled(VecField<double>::point(),
+                         F{[](double t, double) { return 1.0 + t; }});
+    CHECK(sneaky.is_placement());
+    CHECK_FALSE(sneaky.is_structural());
+
+    // And at the report level: a structural factor adds no leaf, an opaque
+    // one adds exactly its own.
+    bd::Trace<double> trace;
+    auto ball = trace.sphere(1.0, 8, 4);
+    const auto before = bd::field_report(trace);
+
+    ball.moving(scaled(VecField<double>::point(), F{1.0} + F::t()));
+    const auto plain = bd::field_report(trace);
+    CHECK(plain.opaque_leaves == before.opaque_leaves);
+
+    ball.moving(scaled(VecField<double>::point(),
+                       F{[](double t, double) { return 1.0 + t; }}));
+    const auto opaque = bd::field_report(trace);
+    CHECK(opaque.opaque_leaves == before.opaque_leaves + 1);
+}
+
 TEST_CASE("The report walks every field-bearing slot, emission included",
           "[build][dsl][field][report]") {
     bd::Trace<double> trace;

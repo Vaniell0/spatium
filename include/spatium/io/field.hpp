@@ -100,6 +100,19 @@ enum class Op : std::uint8_t {
     U,       // the first parameter
     V,       // the second parameter
     Add, Sub, Mul, Div,
+
+    // Min and Max, and they earn their place rather than rounding out a
+    // set. Without them the vocabulary cannot clamp, and without a clamp
+    // it cannot write a smoothstep -- which is what twenty of the donut's
+    // twenty-four motion factors are. The arithmetic half of a smoothstep
+    // (`e * e * (3 - 2 * e)`) was always expressible; `std::clamp` in
+    // front of it was the entire reason those factors had to be closures.
+    //
+    // They are also the right kind of addition: total on every input,
+    // needing no branch a consumer has to model, and a single native
+    // instruction on every target an export would aim at.
+    Min, Max,
+
     Opaque,  // a callable leaf -- the escape hatch, kept first-class
 };
 
@@ -112,13 +125,16 @@ inline const char* op_name(Op o) {
         case Op::Sub:    return "Sub";
         case Op::Mul:    return "Mul";
         case Op::Div:    return "Div";
+        case Op::Min:    return "Min";
+        case Op::Max:    return "Max";
         case Op::Opaque: return "Opaque";
     }
     return "?";
 }
 
 inline bool is_binary(Op o) {
-    return o == Op::Add || o == Op::Sub || o == Op::Mul || o == Op::Div;
+    return o == Op::Add || o == Op::Sub || o == Op::Mul || o == Op::Div ||
+           o == Op::Min || o == Op::Max;
 }
 
 template<Scalar T = double>
@@ -162,6 +178,16 @@ public:
 
     static Field u() { Field f; f.ops_.clear(); f.push(Op::U); return f; }
     static Field v() { Field f; f.ops_.clear(); f.push(Op::V); return f; }
+
+    // The same slot as `u()`, named for what a motion factor binds it to.
+    //
+    // `scaled` and `rotated` read the first parameter as time, and that is
+    // a convention rather than something a reader can derive -- so a call
+    // site that says `t()` states it where the reader meets it, instead of
+    // relying on them having read the overload. `docs/gpu-abi-design.md`
+    // wrote this spelling down before the overloads existed, which is a
+    // decent sign it is the one people reach for.
+    static Field t() { return u(); }
 
     // The escape hatch, and deliberately as ordinary to write as the
     // structural builders. An IR whose hatch is second-class becomes a
@@ -229,6 +255,31 @@ public:
     friend Field operator*(Field x, const Field& y) { x.append(Op::Mul, y); return x; }
     friend Field operator/(Field x, const Field& y) { x.append(Op::Div, y); return x; }
 
+    // Hidden friends, like the operators above, so they are found by ADL
+    // on a Field and do not sit in the enclosing namespace waiting to be
+    // confused with `std::min`.
+    friend Field min(Field x, const Field& y) { x.append(Op::Min, y); return x; }
+    friend Field max(Field x, const Field& y) { x.append(Op::Max, y); return x; }
+
+    // Written once here rather than at each call site, because `min(max(x,
+    // lo), hi)` is the kind of thing that is spelled backwards eventually.
+    // Not a new op: it lowers to the two above, so a consumer that knows
+    // Min and Max needs to learn nothing to read a clamp.
+    friend Field clamp(Field x, const Field& lo, const Field& hi) {
+        return min(max(std::move(x), lo), hi);
+    }
+
+    // The smoothstep the scene's motion factors are made of, as one
+    // expression: `e = clamp(x, 0, 1)`, then `e * e * (3 - 2 * e)`.
+    //
+    // It lives here rather than in a demo because it is the shape a growth
+    // curve takes every time, and because a factor written by hand each
+    // time is a factor that becomes a lambda the moment it gets long.
+    friend Field smoothstep(Field x) {
+        Field e = clamp(std::move(x), Field{T{0}}, Field{T{1}});
+        return e * e * (Field{T{3}} - Field{T{2}} * e);
+    }
+
     // The accumulating form. Appends into this field's own pool, so
     // building a field term by term is linear rather than quadratic:
     // nothing else can observe this pool mid-expression, so appending to
@@ -277,6 +328,10 @@ private:
                 case Op::Sub:    s[i] = s[n.a] - s[n.b]; break;
                 case Op::Mul:    s[i] = s[n.a] * s[n.b]; break;
                 case Op::Div:    s[i] = s[n.a] / s[n.b]; break;
+                // ADL-friendly like the rest of the library's math, so a
+                // Field over a user scalar picks up that type's own min.
+                case Op::Min:    { using std::min; s[i] = min(s[n.a], s[n.b]); break; }
+                case Op::Max:    { using std::max; s[i] = max(s[n.a], s[n.b]); break; }
                 case Op::Opaque: s[i] = n.fn(u, v); break;
             }
         }
@@ -398,13 +453,14 @@ inline const char* payload_verdict(std::size_t payload_bytes) {
     return "small against L3";
 }
 
+// The leaf half of a field's accounting, on its own. Split out because a
+// factor written as an expression has leaves to report -- it may itself
+// hold an opaque one -- but is not a field in its own right: it is part of
+// the motion it scales, and counting it separately would make `fields`
+// grow when a scene is rewritten more structurally, which is backwards.
 template<Scalar T>
-void accumulate(FieldStats& stats, const Field<T>& f,
-                std::vector<std::type_index>& seen) {
-    ++stats.fields;
-    if (f.is_structural()) ++stats.structural_fields;
-    else                   ++stats.opaque_fields;
-
+void accumulate_leaves(FieldStats& stats, const Field<T>& f,
+                       std::vector<std::type_index>& seen) {
     for (std::size_t i = 0; i < f.size(); ++i) {
         const auto& n = f.op(i);
         if (n.op != Op::Opaque) continue;
@@ -418,6 +474,16 @@ void accumulate(FieldStats& stats, const Field<T>& f,
         if (std::find(seen.begin(), seen.end(), n.type) == seen.end())
             seen.push_back(n.type);
     }
+}
+
+template<Scalar T>
+void accumulate(FieldStats& stats, const Field<T>& f,
+                std::vector<std::type_index>& seen) {
+    ++stats.fields;
+    if (f.is_structural()) ++stats.structural_fields;
+    else                   ++stats.opaque_fields;
+
+    accumulate_leaves(stats, f, seen);
     stats.distinct_types = seen.size();
 }
 
@@ -539,6 +605,24 @@ struct VecFieldOp {
     // overload that exponentiates through SO3, so nothing is lost at the
     // authoring end and no exp() runs per vertex.
     std::move_only_function<Matrix<T, 3, 3>(const MotionEnv<T>&) const> rot_fn;
+
+    // The same factor, written as an expression instead of as a closure --
+    // empty when the caller passed a callable, which is what the two
+    // erasures above have always held.
+    //
+    // One entry for a Scale (the scalar), three for a Rotate (the
+    // axis-angle components, in order). The closures above are still the
+    // evaluation path even when this is populated: they are then thin
+    // wrappers around these, so nothing in eval, in `is_placement()` or in
+    // `placement_at()` has to learn a second way to read a factor. What
+    // this buys is not speed but *readability by the library* -- a factor
+    // in here can be inspected, exported and rewritten, and a factor in a
+    // closure cannot be any of the three.
+    //
+    // Twenty of the donut's twenty-four factors are one stateless
+    // `smoothstep` of time. They were opaque for want of somewhere to
+    // write them down, not for want of structure.
+    std::vector<Field<T>> factor_fields;
 
     // **The distinction that decides whether a motion can be instanced**,
     // and it is not "structural versus opaque". A leaf may be as opaque as
@@ -697,6 +781,49 @@ public:
         return x;
     }
 
+    // The same factor, written as an expression rather than as a callable,
+    // and the overload that makes a growing object structural.
+    //
+    // It exists because the two above cannot be fixed by writing a scene
+    // more carefully. With only callable factors, any scene that grows or
+    // spins holds a closure *by construction*, so "the scene exports" is
+    // not a claim that is currently false -- it is one that cannot become
+    // true. That is the difference between a gap and a locked door.
+    //
+    // **The convention, and it is a choice rather than a consequence: the
+    // factor reads time as the field's first parameter, and its second is
+    // zero.** `Field` names its inputs "first" and "second" instead of u
+    // and v exactly so they can be bound to something that is not a
+    // surface domain, and this is that something. The second is zero and
+    // not also t, so that nothing reads as meaningful by accident.
+    //
+    // A factor that must differ between instances stays a callable, and
+    // that is not a temporary shortfall: the only such factor in the donut
+    // scene picks its axis through an integer hash and a modulo, which
+    // Add/Sub/Mul/Div/Const cannot express and which would therefore stay
+    // an opaque leaf under any widening of this signature.
+    friend VecField scaled(VecField x, Field<T> s) {
+        VecFieldOp<T> n{};
+        n.op = VecOp::Scale;
+        n.a  = static_cast<std::uint32_t>(x.ops_.size() - 1);
+
+        const bool structural = s.is_structural();
+        n.factor_fields.push_back(s);
+        n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(e.t, T{0}); };
+
+        // No note_factor here, deliberately. The identity of a factor that
+        // has an expression behind it *is* the expression, and the report
+        // reads it out of `factor_fields` rather than out of a typeid.
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+
+        // Structural unless the expression itself holds an opaque leaf --
+        // which it can, since any (u, v) callable converts to a Field. So
+        // this overload does not promise structurality, it *propagates* it.
+        if (!structural) x.structural_ = false;
+        return x;
+    }
+
     // `R(t) * field`. The companion to `scaled`, and the op that turns a
     // placement from "somewhere else" into "somewhere else, facing
     // somewhere else" -- without it every instance of a shared geometry
@@ -766,6 +893,42 @@ public:
         });
         note_factor<R>(f.ops_.back());
         return f;
+    }
+
+    // The turn as an expression: the axis-angle vector, one field per
+    // component, under the same convention as `scaled` -- time is the
+    // first parameter and the second is zero.
+    //
+    // Three fields rather than one vector-valued field because `Field` is
+    // scalar-valued and `VecField` is the wrong shape here: a VecField
+    // reads a point, and a factor that read the point would be a
+    // deformation, which is the one thing this whole distinction exists to
+    // keep out. Three scalars cannot express that mistake.
+    //
+    // Exponentiated through SO3 exactly as the callable axis-angle
+    // overload above does, so a constant orientation is
+    // `rotated(f, 0, 0, yaw)` and a spin is `rotated(f, 0, 0, w *
+    // Field<T>::u())` -- both structural, neither needing a lambda.
+    friend VecField rotated(VecField x, Field<T> ax, Field<T> ay, Field<T> az) {
+        VecFieldOp<T> n{};
+        n.op = VecOp::Rotate;
+        n.a  = static_cast<std::uint32_t>(x.ops_.size() - 1);
+
+        const bool structural =
+            ax.is_structural() && ay.is_structural() && az.is_structural();
+        n.factor_fields.push_back(ax);
+        n.factor_fields.push_back(ay);
+        n.factor_fields.push_back(az);
+        n.rot_fn = [ax = std::move(ax), ay = std::move(ay), az = std::move(az)](
+                       const MotionEnv<T>& e) {
+            return algebra::SO3<T>{}.exp(
+                Vec<T, 3>{ax(e.t, T{0}), ay(e.t, T{0}), az(e.t, T{0})});
+        };
+
+        assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
+        x.ops_.push_back(std::move(n));
+        if (!structural) x.structural_ = false;
+        return x;
     }
 
     // A callable leaf. Accepts either shape: a function of the whole
@@ -1078,6 +1241,18 @@ void accumulate(FieldStats& stats, const VecField<T>& f,
         // it report as structural.
         const bool factor = (n.op == VecOp::Scale  && n.scale_fn) ||
                             (n.op == VecOp::Rotate && n.rot_fn);
+
+        // A factor with an expression behind it is not a leaf, and the
+        // closure holding it is a wrapper rather than a subject. Report
+        // what the expression itself contains -- usually nothing, which is
+        // the entire point of writing it as an expression, but not always:
+        // any (u, v) callable converts to a Field, so an opaque leaf can
+        // still arrive this way and must still be counted.
+        if (factor && !n.factor_fields.empty()) {
+            for (const auto& g : n.factor_fields) accumulate_leaves(stats, g, seen);
+            continue;
+        }
+
         if (n.op != VecOp::Opaque && !factor) continue;
         ++stats.opaque_leaves;
         if (n.type == std::type_index(typeid(void))) { ++stats.unknown_leaves; continue; }
