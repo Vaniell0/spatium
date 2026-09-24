@@ -193,19 +193,35 @@ the C++ side answers it by naming things well — `scaled(point(), ...)`
 reads fine. Where it stops reading fine is exactly where the vocabulary has
 a hole, because then there is nothing to reach for but a lambda.
 
-### The hole, found while writing this
+### The hole, found while writing this — closed 2026-09-23
 
-**There is no structural way to express a scale or rotation factor.** Both
-`scaled` overloads take a callable, both `rotated` overloads take a
-callable, and no overload takes a `Field<T>`. So today even the structural
-path bottoms out in a closure the moment anything changes over time — which
-is why the donut's report shows the factor closures it does, and why
+**There was no structural way to express a scale or rotation factor.** Both
+`scaled` overloads took a callable, both `rotated` overloads took a
+callable, and no overload took a `Field<T>`. So even the structural path
+bottomed out in a closure the moment anything changed over time — which is
+why the donut's report showed the factor closures it did, and why
 `scaled`/`rotated` had to be taught to declare themselves opaque at all.
 
-The fix is one overload family: `scaled(point(), smoothstep(Field::t()))`,
-with the factor as a scalar field rather than a callable. It is the same
-missing piece in both languages, and it is a precondition for the export
-question rather than a nicety.
+The fix proposed here was one overload family:
+`scaled(point(), smoothstep(Field::t()))`. That is now what it is, spelling
+included — which is worth noting, because the spelling was written down
+before anything existed to spell.
+
+What the proposal did not see is that the family alone converts almost
+nothing. The factors it was aimed at are smoothsteps, a smoothstep is a
+clamp followed by a cubic, and the vocabulary had no `Min` and no `Max`:
+the cubic was expressible and the clamp was not. With the overloads and
+without the two ops, exactly one leaf in the scene converts. With them,
+the donut goes from 32 opaque leaves to 10 and from 77 structural fields
+of 107 to 98, with a byte-identical frame.
+
+So this section's claim — that the missing factor form is a precondition
+for the export question rather than a nicety — held. Its implied estimate
+of what the fix costs did not, and the gap was the vocabulary rather than
+the signature. The remaining ten leaves are the subject of "name each leaf
+against a vocabulary", and two of them are deliberate: a hard step needs a
+comparison, and the dust's tumble axis is an integer hash that no
+arithmetic vocabulary expresses.
 
 ### If a JS binding is built: handles, not an IR
 

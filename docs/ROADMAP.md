@@ -313,8 +313,8 @@ So: the items we are actually steering by, with their state. Everything below th
 | Structural motions in the demo (`grow_scale` and friends) | **done 2026-09-17** | — | Object model as manifold substrate |
 | Rewrite `docs/gpu-abi-design.md` | **done 2026-09-18** | — | GPU rendering |
 | `field_report()`'s blind spots | **done 2026-09-18** | — it was printing 7 opaque leaves where there are 32, and `is_structural()` was returning true for fields holding a lambda | Declarative scene DSL |
-| A factor with no structural form (`scaled`/`rotated` take callables only) | **next** | nothing; one overload family taking a `Field<T>`. Blocks export, because a scene cannot be closure-free while the combinators demand closures | Declarative scene DSL |
-| Name the 32 opaque leaves against a vocabulary | **next** | nothing; `unknown = 0` says every leaf has a `type_index`, not that every leaf is a known operation | GPU rendering |
+| A factor with no structural form (`scaled`/`rotated` take callables only) | **done 2026-09-23** | — and it cost two vocabulary ops the estimate had missed, see below. 32 opaque leaves to 10; structural fields 77/107 to 98/107; frame byte-identical | Declarative scene DSL |
+| Name the remaining 10 opaque leaves against a vocabulary | **next** | nothing; `unknown = 0` says every leaf has a `type_index`, not that every leaf is a known operation. Was 32 before the factors were written as expressions | GPU rendering |
 | POD interpreter, bit-exact against `eval_into` | **next** | the two rows above. The proof that a scene exports, and the same artifact grades an IR rewrite | GPU rendering |
 | The description door (`scene.hpp`'s registry, objects → trace nodes) | **next** | nothing, and it is cheaper than an ABI: one entry point reading a description instead of a wrapper per builder | Interop / ecosystem |
 | C ABI for the DSL (CUDA) | parked | the three rows above. Not needed for a browser (WASM is compiled C++) nor for GPU *traversal* (`Cooked<T>` is already flat POD) | GPU rendering |
@@ -615,6 +615,64 @@ mesh merge, whose result is a new analytic surface not expressible as any
 of the five. It is not planned: `geometry/boolean.hpp` does this for
 polygons, not surfaces, and there is no consumer. Recorded here so the
 question is not reopened from scratch in a month.
+
+### A factor as an expression, and the two ops nobody costed (2026-09-23)
+
+`scaled()` and `rotated()` now take a `Field<T>` as well as a callable,
+and a node stores that expression beside the closure rather than instead
+of it -- the closure stays the evaluation path, so nothing in `eval`, in
+`is_placement()` or in `placement_at()` learned a second way to read a
+factor. What the expression buys is not speed. It is that a factor in a
+field can be read, exported and rewritten, and a factor in a closure can
+be none of the three.
+
+The convention is a choice and not a consequence, so it is written down
+here as well as in the header: **a factor reads time as the field's first
+parameter, and its second is zero.** `Field` names its inputs "first" and
+"second" rather than u and v precisely so they can be bound to something
+that is not a surface domain.
+
+**The part that was missed in the estimate, which is the part worth
+keeping.** The plan said these factors were "arithmetic in pure form" and
+predicted 23 of 32 leaves would convert. The actual factors are
+`smoothstep01`, and a smoothstep is `std::clamp` followed by a cubic: the
+cubic was always expressible and the clamp was not, because the
+vocabulary had no `Min` and no `Max`. With the overload alone, exactly one
+leaf converts -- the table's constant yaw. The claim had been checked at
+the level of "what kind of function is this" and not at the level of
+reading it.
+
+So `Min` and `Max` are now ops. They are the right kind of addition --
+total on every input, no branch for a consumer to model, one native
+instruction on every target an export would aim at -- and `clamp` and
+`smoothstep` are built on them rather than being ops of their own.
+
+Measured before and after, same scene, same configuration:
+
+| | before | after |
+|---|---|---|
+| structural fields | 77 / 107 | **98 / 107** |
+| opaque fields | 30 | **9** |
+| opaque leaves | 32 | **10** |
+| distinct closure types | 11 | 8 |
+| placements / deformations | 33 / 0 | 33 / 0 |
+
+The rendered frame is byte-identical to the baseline built from the
+pre-change sources, which is the check this edit had to pass: it was
+supposed to change what the library can *read*, and nothing else.
+
+Two factors stay closures and neither is a shortfall to be fixed later.
+The cube's `time < 0.12 ? 1.0 : 0.0` is a hard step, which needs a
+comparison and therefore a decision about booleans in the IR. The dust's
+tumble picks its axis through an integer hash and a modulo, which no
+widening of an arithmetic vocabulary will ever express -- it is a leaf on
+purpose, and `opaque_of_time` exists to say so.
+
+One thing removed rather than translated: `dust_shrink`'s
+`if (t < T_HOLD) return 1.0` guard. Below `T_HOLD` the argument is
+negative, the clamp takes it to zero and the smoothstep with it, so the
+branch and the expression agree -- checked over [-1, 5] at two million
+points, difference exactly zero, rather than argued.
 
 ### Open items
 

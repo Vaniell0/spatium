@@ -1009,9 +1009,13 @@ int main(int argc, char* argv[]) {
     // A field is move-only, so each node gets its own rather than sharing
     // one; the closure is stateless, so that costs nothing worth naming.
     auto grow_scale = [] {
-        return scaled(bd::VecField<double>::point(), [](double time) {
-            return smoothstep01((time - T_DONUT_START) / (T_DONUT_END - T_DONUT_START));
-        });
+        // Written as an expression rather than as a lambda, which is what
+        // makes these twenty nodes structural: the same smoothstep, in the
+        // field vocabulary, with time as the first parameter.
+        using F = bd::ScalarField<double>;
+        return scaled(bd::VecField<double>::point(),
+                      smoothstep((F::t() - F{T_DONUT_START}) /
+                                 F{T_DONUT_END - T_DONUT_START}));
     };
 
     // Step 0 -- the default cube. Visible briefly, static, then it's
@@ -1199,8 +1203,19 @@ int main(int argc, char* argv[]) {
                             // centre rather than swinging it round the
                             // origin. Per-instance, or every flake in the
                             // cloud would tumble in lockstep.
+                            // The shrink is `dust_shrink` as an expression.
+                            // Its `if (t < T_HOLD) return 1.0` is dropped
+                            // rather than modelled: below T_HOLD the
+                            // argument is negative, the clamp takes it to
+                            // zero and the smoothstep with it, so the
+                            // branch and the expression agree bit for bit
+                            // -- checked over [-1, 5], not assumed.
                             + rotated(scaled(bd::VecField<double>::point(),
-                                             [](double time) { return dust_shrink(time); }),
+                                             bd::ScalarField<double>{1.0} -
+                                                 smoothstep((bd::ScalarField<double>::t() -
+                                                             bd::ScalarField<double>{T_HOLD}) /
+                                                            bd::ScalarField<double>{T_DISSOLVE -
+                                                                                    T_HOLD})),
                                       [unit_from](const Vec<double, 3>& o, double time) {
                                           Vec<double, 3> axis{
                                               Vec<double, 3>{unit_from(o, 17u) * 2.0 - 1.0,
@@ -1438,7 +1453,9 @@ int main(int argc, char* argv[]) {
                      .colored(Material<double>{.base_color = {0.80, 0.76, 0.70},
                                                .roughness = 0.88})
                      .moving(rotated(bd::VecField<double>::point(),
-                                     [](double) { return Vec<double, 3>{0.0, 0.0, table_yaw}; })
+                                     bd::ScalarField<double>{0.0},
+                                     bd::ScalarField<double>{0.0},
+                                     bd::ScalarField<double>{table_yaw})
                              + bd::VecField<double>::constant({0.0, 0.0, -1.10}));
 
     std::vector<bd::Handle<double>> scene_children{table, cube, dough, icing};
