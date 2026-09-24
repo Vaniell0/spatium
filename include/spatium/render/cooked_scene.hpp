@@ -24,32 +24,64 @@
 #  include <any>
 #  include <array>
 #  include <cstddef>
+#  include <cstdint>
 #  include <utility>
 #  include <vector>
 #endif
 
 namespace spatium::render {
 
-// Smooth per-vertex normals (area-weighted face-normal average) -- flat
-// per-triangle normals on a coarse tessellation read as faceted plastic;
-// this is the standard fix, needs nothing beyond the mesh's own topology.
+// Smooth normals per face *corner*, not per vertex, so an edge can stay
+// sharp. Flat per-triangle normals on a coarse tessellation read as
+// faceted plastic, and averaging every face around a vertex -- what this
+// did until the cube's diagonal bands were noticed -- smooths across edges
+// that are meant to be there: a cube's corner normal came out pointing
+// along the diagonal, and each face shaded as a gradient between three.
+//
+// So a corner averages only the faces around its vertex that lie within
+// `crease_cos` of its own face (60 degrees by default). A smooth surface's
+// neighbours are all well inside that, and for it the result is the
+// area-weighted average it always was, summed in the same face order and
+// therefore to the same bits; a cube's are at 90 degrees and drop out.
 template<Scalar T = double>
-std::vector<Vec<T, 3>> smooth_normals(const mesh::Mesh<Euclidean<3, T>>& m) {
-    std::vector<Vec<T, 3>> n(m.vertex_count(), Vec<T, 3>{0, 0, 0});
-    for (const auto& f : m.faces) {
-        auto& a = m.vertices[f[0]];
-        auto& b = m.vertices[f[1]];
-        auto& c = m.vertices[f[2]];
-        Vec<T, 3> face_n{Vec<T, 3>{b - a}.cross(Vec<T, 3>{c - a})}; // area-weighted (unnormalized)
-        n[f[0]] = Vec<T, 3>{n[f[0]] + face_n};
-        n[f[1]] = Vec<T, 3>{n[f[1]] + face_n};
-        n[f[2]] = Vec<T, 3>{n[f[2]] + face_n};
+std::vector<std::array<Vec<T, 3>, 3>> corner_normals(const mesh::Mesh<Euclidean<3, T>>& m,
+                                                     T crease_cos = T{0.5}) {
+    const std::size_t F = m.faces.size(), V = m.vertex_count();
+    std::vector<Vec<T, 3>> area_n(F), unit_n(F);
+    for (std::size_t f = 0; f < F; ++f) {
+        const auto& a = m.vertices[m.faces[f][0]];
+        const auto& b = m.vertices[m.faces[f][1]];
+        const auto& c = m.vertices[m.faces[f][2]];
+        area_n[f] = Vec<T, 3>{Vec<T, 3>{b - a}.cross(Vec<T, 3>{c - a})};  // area-weighted
+        const T len = area_n[f].norm();
+        unit_n[f] = len > T{0} ? Vec<T, 3>{area_n[f] / len} : Vec<T, 3>{};
     }
-    for (auto& v : n) {
-        T len = v.norm();
-        v = len > T{1e-12} ? Vec<T, 3>{v / len} : Vec<T, 3>{0, 0, 1};
-    }
-    return n;
+
+    // Faces around each vertex, as one flat array with offsets, filled in
+    // face order so the sums below run in the order the old per-vertex
+    // accumulation did.
+    std::vector<std::uint32_t> start(V + 1, 0), around;
+    for (const auto& face : m.faces)
+        for (auto v : face) ++start[v + 1];
+    for (std::size_t v = 0; v < V; ++v) start[v + 1] += start[v];
+    around.resize(start[V]);
+    std::vector<std::uint32_t> fill(start.begin(), start.end() - 1);
+    for (std::size_t f = 0; f < F; ++f)
+        for (auto v : m.faces[f]) around[fill[v]++] = static_cast<std::uint32_t>(f);
+
+    std::vector<std::array<Vec<T, 3>, 3>> out(F);
+    for (std::size_t f = 0; f < F; ++f)
+        for (std::size_t k = 0; k < 3; ++k) {
+            const auto v = m.faces[f][k];
+            Vec<T, 3> sum{0, 0, 0};
+            for (auto i = start[v]; i < start[v + 1]; ++i) {
+                const auto g = around[i];
+                if (unit_n[g].dot(unit_n[f]) >= crease_cos) sum = Vec<T, 3>{sum + area_n[g]};
+            }
+            const T len = sum.norm();
+            out[f][k] = len > T{1e-12} ? Vec<T, 3>{sum / len} : Vec<T, 3>{0, 0, 1};
+        }
+    return out;
 }
 
 // A triangle as the shader sees it. No opacity, and that is the current
@@ -123,7 +155,7 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
     // instance below holds a pointer into it.
     out.quadrics.resize(cooked.shape_count());
     std::vector<char> has_quadric(cooked.shape_count(), 0);
-    std::vector<std::vector<Vec<T, 3>>> shape_normals(cooked.shape_count());
+    std::vector<std::vector<std::array<Vec<T, 3>, 3>>> shape_normals(cooked.shape_count());
     for (std::size_t i = 0; i < cooked.shape_count(); ++i) {
         const auto& sh = cooked.shapes()[i];
         if (const auto* q = std::any_cast<Quadric>(&sh.exact)) {
@@ -146,19 +178,20 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
     };
 
     auto emit_triangles = [&](const mesh::Mesh<Euclidean<3, T>>& m,
-                              const std::vector<Vec<T, 3>>& vn,
+                              const std::vector<std::array<Vec<T, 3>, 3>>& cn,
                               const io::build::Object<T>& o, const Matrix<T, 3, 3>& R,
                               const io::Material<T>& mat) {
-        for (const auto& f : m.faces) {
+        for (std::size_t i = 0; i < m.faces.size(); ++i) {
+            const auto& f = m.faces[i];
             Tri t(to_world(m.vertices[f[0]], R, o), to_world(m.vertices[f[1]], R, o),
                   to_world(m.vertices[f[2]], R, o));
             tris.push_back(t);
             // Normals turn by the rotation alone: the scale is uniform, so
             // it divides out of the inverse transpose.
             out.prims.push_back(ShadedTriangle<T>{t,
-                                                  {Vec<T, 3>{R * vn[f[0]]},
-                                                   Vec<T, 3>{R * vn[f[1]]},
-                                                   Vec<T, 3>{R * vn[f[2]]}},
+                                                  {Vec<T, 3>{R * cn[i][0]},
+                                                   Vec<T, 3>{R * cn[i][1]},
+                                                   Vec<T, 3>{R * cn[i][2]}},
                                                   mat.base_color, mat.roughness, mat.emissive});
         }
     };
@@ -169,6 +202,13 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
         // instance, whose rotation stays a matrix precisely so the
         // traversal never has to unpack anything.
         const Matrix<T, 3, 3> R = obj.rotation_q.to_matrix();
+
+        // Scaled to nothing is not there. The donut's dust dissolves by
+        // scaling to zero, so at t=3.9 35 200 of its 46 192 objects were
+        // still in the instance tree as points: never hit -- `ray_hit`
+        // refuses a zero scale -- and still walked, 31 nodes a pixel
+        // against 4.6 for a scene without them.
+        if (obj.scale == T{0}) continue;
 
         // Two conditions, and neither is a guess about what the object
         // looks like: the shape must carry a closed form, and the object's
@@ -185,19 +225,20 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
         // normals a thousand times, through a merged mesh that had to be
         // built first.
         auto& vn = shape_normals[obj.shape];
-        if (vn.empty()) vn = smooth_normals(cooked.shapes()[obj.shape].geometry);
+        if (vn.empty()) vn = corner_normals(cooked.shapes()[obj.shape].geometry);
         emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, R, mat);
     }
 
     for (const auto& g : extra) {
         auto m = g.mesh();
-        auto vn = smooth_normals(m);
+        auto cn = corner_normals(m);
         auto mat = g.material();
-        for (const auto& f : m.faces) {
+        for (std::size_t i = 0; i < m.faces.size(); ++i) {
+            const auto& f = m.faces[i];
             Tri t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
             tris.push_back(t);
-            out.prims.push_back(ShadedTriangle<T>{t, {vn[f[0]], vn[f[1]], vn[f[2]]},
-                                                  mat.base_color, mat.roughness, mat.emissive});
+            out.prims.push_back(ShadedTriangle<T>{t, cn[i], mat.base_color, mat.roughness,
+                                                  mat.emissive});
         }
     }
 
