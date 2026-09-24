@@ -986,7 +986,8 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
         for (std::size_t i = 0; i < scatter_seats.size(); ++i)
             for (std::size_t k = 0; k < per; ++k) {
                 auto& v = out.vertices[i * per + k];
-                v = n.transform(MotionEnv<T>{v, t, scatter_seats[i]});
+                v = n.transform(MotionEnv<T>{v, t, scatter_seats[i],
+                                             static_cast<std::uint32_t>(i)});
             }
         return out;
     }
@@ -1082,14 +1083,14 @@ std::optional<ParametricSurface<T>> Placed<T>::surface() const {
 // quietly growing into two different materials.
 template<Scalar T>
 Material<T> resolve_material(const TraceNode<T>& n, const Vec<T, 3>& at, T t,
-                             const Vec<T, 3>& origin = {}) {
+                             const Vec<T, 3>& origin = {}, std::uint32_t id = 0) {
     // The origin travels with the point for the same reason it travels
     // with a motion: a colour that must differ between the instances of
     // one node has nothing else to differ by. A scatter's colour field
     // reads `origin`; a node that is its own object passes zero and is
     // unaffected.
     Material<T> mat = n.material;
-    MotionEnv<T> env{at, t, origin};
+    MotionEnv<T> env{at, t, origin, id};
     if (n.color_fn)    mat.base_color = n.color_fn(env);
     if (n.emissive_fn) mat.emissive   = n.emissive_fn(env);
     return mat;
@@ -1516,13 +1517,15 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         // items at the wrong distance -- invisible until now only because
         // nothing consumed the cooked scene and every scattering scene so
         // far had scale 1.
-        for (const auto& p : placements) {
+        for (std::size_t site = 0; site < placements.size(); ++site) {
+            const auto& p = placements[site];
+            const auto id = static_cast<std::uint32_t>(site);
             // Resolved per instance, with that instance's seat as its
             // origin -- which is what lets one motion field send every
             // scattered item somewhere different while staying a
             // placement. For a node that is its own object the seat is
             // the origin and this reduces to what it was.
-            const auto pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t, p.position});
+            const auto pl = n.transform.placement_at(MotionEnv<T>{Vec<T, 3>{}, t, p.position, id});
 
             Object<T> o{.shape = shape_index,
                         .source_node = idx,
@@ -1544,7 +1547,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             // differently.
             o.material = resolve_material(
                 n, Vec<T, 3>{world_rotation * Vec<T, 3>{rest_centroid * o.scale} + o.translation},
-                t, p.position);
+                t, p.position, id);
             out.objects_.push_back(std::move(o));
             ++out.shapes_[shape_index].instances;
         }
