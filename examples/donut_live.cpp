@@ -11,6 +11,12 @@
 //
 //   donut_live [--t seconds] [--photo PATH] [--runs N]
 //
+// And with --live, the same shader in a window: fly with WASD, Q/E for
+// down and up, Shift to go faster, right mouse to look; the `t` slider
+// re-cooks the scene on the host when it is let go.
+//
+//   donut_live --live [--t seconds] [--frames N] [--screenshot PATH]
+//
 // Shading is primary rays with the demo's key and fill lights -- no
 // shadows, highlights, reflections or see-through dust yet -- so this is
 // a check of the traversal and not the finished picture; `donut_demo
@@ -25,10 +31,20 @@
 #include <spatium/render/write_image.hpp>
 #include <spatium/viewer/compute.hpp>
 
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+#if SPATIUM_HAS_IMGUI
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_vulkan.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
+#include <numbers>
 #include <print>
 #include <string>
 #include <string_view>
@@ -75,18 +91,223 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
 
+
+// ── Live ────────────────────────────────────────────────────────────
+
+// The scene's arrays on the device, rebuilt as a unit when `t` changes.
+struct SceneBuffers {
+    vc::Buffer tri_nodes, tris, inst_nodes, quads, insts;
+    SceneBuffers(vc::Context& ctx, const gpu::Scene& p)
+        : tri_nodes(vc::Buffer::from(ctx, std::span<const gpu::Node>(p.tri_nodes))),
+          tris(vc::Buffer::from(ctx, std::span<const gpu::Triangle>(p.triangles))),
+          inst_nodes(vc::Buffer::from(ctx, std::span<const gpu::Node>(p.inst_nodes))),
+          quads(vc::Buffer::from(ctx, std::span<const gpu::Quadric>(p.quadrics))),
+          insts(vc::Buffer::from(ctx, std::span<const gpu::Instance>(p.instances))) {}
+};
+
+gpu::Scene scene_at(const bd::Trace<double>& scene, std::size_t root, double t, double& ms) {
+    const auto t0 = std::chrono::steady_clock::now();
+    auto packed = gpu::pack(render::lay_out(bd::cook(scene, root, t)));
+    ms = ms_since(t0);
+    return packed;
+}
+
+// A free-flying camera: a position and two angles, z up. Kept as angles
+// rather than as a basis so that looking around never rolls the horizon.
+struct FlyCamera {
+    Vec<double, 3> pos;
+    double yaw = 0, pitch = 0;
+    double fov_deg = 38;
+
+    static FlyCamera from(const render::Camera<double>& c) {
+        const Vec<double, 3> d = Vec<double, 3>{(c.target - c.position).normalized()};
+        return {c.position, std::atan2(d[1], d[0]), std::asin(std::clamp(d[2], -1.0, 1.0)), c.fov_deg};
+    }
+    Vec<double, 3> forward() const {
+        return {std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), std::sin(pitch)};
+    }
+    render::Camera<double> camera() const {
+        return {.position = pos, .target = Vec<double, 3>{pos + forward()}, .up = {0, 0, 1},
+                .fov_deg = fov_deg};
+    }
+};
+
+void fill_push(Push& pc, const render::Camera<double>& cam, std::uint32_t W, std::uint32_t H,
+               bool bgra, const gpu::Scene& packed) {
+    const auto basis = render::make_camera_basis(cam);
+    const Vec<double, 3> key = Vec<double, 3>{Vec<double, 3>{0.85, 0.45, 0.55}.normalized()};
+    const Vec<double, 3> fill = Vec<double, 3>{Vec<double, 3>{0.62, -0.70, 0.35}.normalized()};
+    gpu::detail::put3(pc.cam_pos, cam.position, static_cast<float>(basis.tan_half));
+    gpu::detail::put3(pc.fwd, basis.fwd, static_cast<float>(W) / static_cast<float>(H));
+    gpu::detail::put3(pc.right, basis.right);
+    gpu::detail::put3(pc.up, basis.up);
+    gpu::detail::put3(pc.key, key, 0.38f);
+    gpu::detail::put3(pc.fill, fill);
+    gpu::detail::put3(pc.background, Vec<double, 3>{0.04, 0.04, 0.05}, bgra ? 1.0f : 0.0f);
+    pc.size[0] = W;
+    pc.size[1] = H;
+    pc.size[2] = static_cast<std::uint32_t>(packed.tri_nodes.size());
+    pc.size[3] = static_cast<std::uint32_t>(packed.inst_nodes.size());
+}
+
+int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Scene packed,
+             int max_frames, const std::string& screenshot) {
+    if (!glfwInit()) {
+        std::println(stderr, "donut_live: glfwInit failed");
+        return 1;
+    }
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    GLFWwindow* window = glfwCreateWindow(1280, 800, "donut_live", nullptr, nullptr);
+    if (!window) {
+        std::println(stderr, "donut_live: could not open a window");
+        glfwTerminate();
+        return 1;
+    }
+    int status = 0;
+    {
+        vc::Context ctx("donut_live", window);
+        vc::Presenter present(ctx, window);
+        auto sb = std::make_unique<SceneBuffers>(ctx, packed);
+        std::uint32_t W = present.width(), H = present.height();
+        auto pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+        auto ids = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+        vc::Kernel kernel(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 7, sizeof(Push));
+        auto rebind = [&] {
+            vc::Buffer* bufs[] = {&sb->tri_nodes, &sb->tris, &sb->inst_nodes, &sb->quads,
+                                  &sb->insts, pixels.get(), ids.get()};
+            kernel.bind(bufs);
+        };
+        rebind();
+
+        FlyCamera cam = FlyCamera::from(donut::hero_camera());
+        const FlyCamera home = cam;
+        float speed = 2.0f;
+        float t_ui = static_cast<float>(t);
+        double gpu_ms = 0, recook_ms = 0, fps = 0;
+        double last_x = 0, last_y = 0;
+        bool dragging = false;
+        auto t_prev = std::chrono::steady_clock::now();
+        std::println("device: {} -- WASD to fly, Q/E down/up, Shift faster, "
+                     "right mouse to look", ctx.device_name());
+
+        for (int frame = 0; !glfwWindowShouldClose(window); ++frame) {
+            if (max_frames > 0 && frame >= max_frames) break;
+            glfwPollEvents();
+            const auto now = std::chrono::steady_clock::now();
+            const double dt = std::chrono::duration<double>(now - t_prev).count();
+            t_prev = now;
+            fps = fps == 0 ? 1.0 / std::max(dt, 1e-6) : 0.9 * fps + 0.1 / std::max(dt, 1e-6);
+
+            bool ui_mouse = false, ui_keys = false;
+#if SPATIUM_HAS_IMGUI
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            ui_mouse = ImGui::GetIO().WantCaptureMouse;
+            ui_keys = ImGui::GetIO().WantCaptureKeyboard;
+            ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+            ImGui::Begin("donut_live");
+            ImGui::Text("%s", ctx.device_name().c_str());
+            ImGui::Text("trace %.2f ms, %.0f fps, %ux%u", gpu_ms, fps, W, H);
+            ImGui::Text("%zu triangles, %zu instances", packed.triangles.size(),
+                        packed.instances.size());
+            ImGui::SliderFloat("t", &t_ui, 0.0f, 4.0f, "%.2f s");
+            // Re-cooking costs a few hundred milliseconds on the host, so it
+            // happens when the slider is let go rather than on every tick.
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                packed = scene_at(scene, root, t_ui, recook_ms);
+                vkDeviceWaitIdle(ctx.device());
+                sb = std::make_unique<SceneBuffers>(ctx, packed);
+                rebind();
+            }
+            if (recook_ms > 0) ImGui::Text("last re-cook %.0f ms (host)", recook_ms);
+            ImGui::SliderFloat("speed", &speed, 0.1f, 20.0f, "%.1f /s", ImGuiSliderFlags_Logarithmic);
+            if (ImGui::Button("reset camera")) cam = home;
+            ImGui::Text("camera %.2f %.2f %.2f", cam.pos[0], cam.pos[1], cam.pos[2]);
+            ImGui::End();
+            ImGui::Render();
+#endif
+            double mx = 0, my = 0;
+            glfwGetCursorPos(window, &mx, &my);
+            const bool look = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+            if (look && !ui_mouse) {
+                if (dragging) {
+                    cam.yaw -= (mx - last_x) * 0.003;
+                    cam.pitch = std::clamp(cam.pitch - (my - last_y) * 0.003, -1.55, 1.55);
+                }
+                dragging = true;
+            } else {
+                dragging = false;
+            }
+            last_x = mx;
+            last_y = my;
+            if (!ui_keys) {
+                auto down = [&](int k) { return glfwGetKey(window, k) == GLFW_PRESS; };
+                const Vec<double, 3> f = cam.forward();
+                const Vec<double, 3> r = Vec<double, 3>{f.cross(Vec<double, 3>{0, 0, 1}).normalized()};
+                const double step = speed * dt * (down(GLFW_KEY_LEFT_SHIFT) ? 4.0 : 1.0);
+                Vec<double, 3> move{};
+                if (down(GLFW_KEY_W)) move = Vec<double, 3>{move + f};
+                if (down(GLFW_KEY_S)) move = Vec<double, 3>{move - f};
+                if (down(GLFW_KEY_D)) move = Vec<double, 3>{move + r};
+                if (down(GLFW_KEY_A)) move = Vec<double, 3>{move - r};
+                if (down(GLFW_KEY_E)) move = Vec<double, 3>{move + Vec<double, 3>{0, 0, 1}};
+                if (down(GLFW_KEY_Q)) move = Vec<double, 3>{move - Vec<double, 3>{0, 0, 1}};
+                cam.pos = Vec<double, 3>{cam.pos + move * step};
+                if (down(GLFW_KEY_ESCAPE)) glfwSetWindowShouldClose(window, 1);
+            }
+
+            Push pc{};
+            fill_push(pc, cam.camera(), W, H, present.bgra(), packed);
+            const bool ok = present.frame(*pixels, [&](VkCommandBuffer cmd) {
+                kernel.dispatch(cmd, &pc, (W + 7) / 8, (H + 7) / 8);
+            }, gpu_ms);
+            if (!ok && (present.width() != W || present.height() != H)) {
+                W = present.width();
+                H = present.height();
+                pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+                ids = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+                rebind();
+            }
+        }
+
+        if (!screenshot.empty()) {
+            vkDeviceWaitIdle(ctx.device());
+            const auto* px = static_cast<const std::uint32_t*>(pixels->data());
+            std::vector<std::uint8_t> rgb(std::size_t{W} * H * 3);
+            for (std::size_t i = 0; i < std::size_t{W} * H; ++i)
+                for (int c = 0; c < 3; ++c) {
+                    const int src = present.bgra() ? 2 - c : c;
+                    rgb[i * 3 + c] = static_cast<std::uint8_t>((px[i] >> (8 * src)) & 0xffu);
+                }
+            render::write_png_rgb(screenshot, static_cast<int>(W), static_cast<int>(H), rgb);
+            std::println("  -> {} (trace {:.2f} ms at {}x{})", screenshot, gpu_ms, W, H);
+        }
+    }
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return status;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     double t = 1.5;
     std::string photo;
     int runs = 5;
+    bool live = false;
+    int frames = 0;
+    std::string screenshot;
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
         if (a == "--t" && i + 1 < argc) { t = std::atof(argv[++i]); continue; }
         if (a == "--photo" && i + 1 < argc) { photo = argv[++i]; continue; }
         if (a == "--runs" && i + 1 < argc) { runs = std::max(1, std::atoi(argv[++i])); continue; }
-        std::print("donut_live [--t seconds] [--photo PATH] [--runs N]\n");
+        if (a == "--live") { live = true; continue; }
+        if (a == "--frames" && i + 1 < argc) { frames = std::atoi(argv[++i]); continue; }
+        if (a == "--screenshot" && i + 1 < argc) { screenshot = argv[++i]; continue; }
+        std::print("donut_live [--t seconds] [--photo PATH] [--runs N]\n"
+                   "donut_live --live [--t seconds] [--frames N] [--screenshot PATH]\n");
         return a == "--help" ? 0 : 1;
     }
 
@@ -113,6 +334,8 @@ int main(int argc, char** argv) {
                  "instances, {:.1f} MB on the device",
                  t, ms_cook, ms_lay, ms_pack, packed.triangles.size(), packed.instances.size(),
                  static_cast<double>(packed.bytes()) / 1e6);
+
+    if (live) return run_live(scene, root, t, packed, frames, screenshot);
 
     constexpr int W = 960, H = 720;
     const auto cam = donut::hero_camera();

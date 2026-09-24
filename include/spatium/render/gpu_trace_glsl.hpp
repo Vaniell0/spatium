@@ -246,6 +246,9 @@ void main() {
     vec3 c = clamp(shade(d, h), 0.0, 1.0);
     uvec3 b = uvec3(c * 255.0 + 0.5);
     uint i = px.y * W + px.x;
+    // background.w says the target image stores B,G,R,A; writing in its
+    // order here keeps the copy into a swapchain a plain copy.
+    if (pc.background.w > 0.5) b = b.bgr;
     pixels[i] = b.r | (b.g << 8) | (b.b << 16) | (255u << 24);
     hit_ids[i] = (h.kind << 30) | h.index;
 }

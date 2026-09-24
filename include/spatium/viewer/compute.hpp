@@ -15,11 +15,14 @@
 
 #include <vulkan/vulkan.h>
 
+struct GLFWwindow;
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace spatium::viewer::compute {
 
@@ -29,6 +32,11 @@ public:
     // implementation (llvmpipe) unless SPATIUM_VK_ALLOW_CPU is set -- a
     // software device would pass every check here and measure nothing.
     explicit Context(const char* app_name);
+
+    // The same, able to present into `window`: the instance gets the
+    // surface extensions, the device the swapchain one, and the queue is
+    // one that can compute, draw (ImGui) and present.
+    Context(const char* app_name, GLFWwindow* window);
     ~Context();
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
@@ -36,6 +44,10 @@ public:
     VkDevice device() const { return device_; }
     VkPhysicalDevice physical() const { return physical_; }
     const std::string& device_name() const { return name_; }
+    VkInstance instance() const { return instance_; }
+    VkQueue queue() const { return queue_; }
+    std::uint32_t queue_family() const { return family_; }
+    VkSurfaceKHR surface() const { return surface_; }
 
     // Records through `record`, submits, and waits. Returns the GPU time
     // between the two timestamps written around the recording, in ms.
@@ -49,11 +61,14 @@ public:
 private:
     friend class Buffer;
     friend class Kernel;
+    friend class Presenter;
+    void init_(const char* app_name, GLFWwindow* window);
     std::uint32_t memory_type_(std::uint32_t bits) const;
     void begin_();
     double end_and_wait_();
 
     VkInstance instance_{};
+    VkSurfaceKHR surface_{};
     VkPhysicalDevice physical_{};
     VkDevice device_{};
     VkQueue queue_{};
@@ -118,6 +133,65 @@ private:
     VkDescriptorPool pool_{};
     VkDescriptorSet set_{};
     std::uint32_t buffers_ = 0, push_bytes_ = 0;
+};
+
+// A window's swapchain, fed by a compute kernel's pixel buffer.
+//
+// Each frame: the kernel writes RGBA8 into a storage buffer, the buffer is
+// copied into the acquired swapchain image, and ImGui draws on top in a
+// render pass that loads rather than clears -- so the traced picture is
+// the background and the controls are the only thing rasterized. One frame
+// in flight: the trace dominates the frame, and a second in flight would
+// only queue a second trace behind the first.
+class Presenter {
+public:
+    Presenter(Context& ctx, GLFWwindow* window);
+    ~Presenter();
+    Presenter(const Presenter&) = delete;
+    Presenter& operator=(const Presenter&) = delete;
+
+    std::uint32_t width() const { return extent_.width; }
+    std::uint32_t height() const { return extent_.height; }
+    // True when the swapchain stores B,G,R,A, so the kernel can write
+    // pixels in the order the image expects and the copy stays a copy.
+    bool bgra() const { return bgra_; }
+
+    // Records `trace` (which must fill `pixels`, width*height uint32),
+    // copies, draws the ImGui frame the caller has already built, presents.
+    // Returns false when the swapchain had to be rebuilt -- the caller
+    // then resizes its pixel buffer to the new extent and tries again.
+    // `gpu_ms` receives the time of the trace alone.
+    template<typename F>
+    bool frame(Buffer& pixels, F&& trace, double& gpu_ms) {
+        if (!begin_frame_()) return false;
+        trace(cmd_);
+        return end_frame_(pixels, gpu_ms);
+    }
+
+private:
+    bool begin_frame_();
+    bool end_frame_(Buffer& pixels, double& gpu_ms);
+    void create_swapchain_();
+    void create_framebuffers_();
+    void destroy_swapchain_();
+
+    Context& ctx_;
+    GLFWwindow* window_ = nullptr;
+    VkSwapchainKHR swapchain_{};
+    VkFormat format_{};
+    bool bgra_ = false;
+    VkExtent2D extent_{};
+    std::vector<VkImage> images_;
+    std::vector<VkImageView> views_;
+    std::vector<VkFramebuffer> framebuffers_;
+    std::vector<VkSemaphore> finished_;   // one per image, signalled by the submit
+    VkRenderPass render_pass_{};
+    VkSemaphore acquired_{};
+    VkFence fence_{};
+    VkCommandBuffer cmd_{};
+    VkQueryPool timestamps_{};
+    VkDescriptorPool imgui_pool_{};
+    std::uint32_t image_ = 0;
 };
 
 }  // namespace spatium::viewer::compute
