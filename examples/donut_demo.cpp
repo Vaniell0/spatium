@@ -58,6 +58,7 @@
 #include <spatium/geometry/triangle.hpp>
 #include <spatium/io/build.hpp>
 #include <spatium/render/camera.hpp>
+#include <spatium/render/cooked_scene.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/supersample.hpp>
 #include <spatium/render/write_image.hpp>
@@ -225,43 +226,6 @@ const std::vector<bd::Placed<double>>& axes_placed(double length = 3.5, double r
     return out;
 }
 
-// Smooth per-vertex normals (area-weighted face-normal average) -- flat
-// per-triangle normals on a coarse tessellation read as faceted plastic;
-// this is the standard fix, needs nothing beyond the mesh's own topology.
-std::vector<Vec<double, 3>> smooth_normals(const mesh::Mesh<Euclidean<3, double>>& m) {
-    std::vector<Vec<double, 3>> n(m.vertex_count(), Vec<double, 3>{0, 0, 0});
-    for (const auto& f : m.faces) {
-        auto& a = m.vertices[f[0]];
-        auto& b = m.vertices[f[1]];
-        auto& c = m.vertices[f[2]];
-        Vec<double, 3> face_n{Vec<double, 3>{b - a}.cross(Vec<double, 3>{c - a})}; // area-weighted (unnormalized)
-        n[f[0]] = Vec<double, 3>{n[f[0]] + face_n};
-        n[f[1]] = Vec<double, 3>{n[f[1]] + face_n};
-        n[f[2]] = Vec<double, 3>{n[f[2]] + face_n};
-    }
-    for (auto& v : n) {
-        double len = v.norm();
-        v = len > 1e-12 ? Vec<double, 3>{v / len} : Vec<double, 3>{0, 0, 1};
-    }
-    return n;
-}
-
-struct Prim {
-    Triangle3 tri;
-    std::array<Vec<double, 3>, 3> vertex_normals;
-    Vec<double, 3> color;
-    double roughness;
-    Vec<double, 3> emissive;
-};
-
-// One instanced object: which shared shape, where, and what colour.
-struct DustInstance {
-    Vec<double, 3> color;
-    double roughness;
-    Vec<double, 3> emissive;
-    double opacity;
-};
-
 // The halo around something that emits, which is what actually reads as
 // light. Brightness alone does not: a clamped hot core and a merely
 // bright one arrive at the same pixel value, and the eye reads both as
@@ -326,132 +290,15 @@ std::vector<std::uint8_t> render_frame(const bd::Trace<double>& trace,
                                         const bd::Cooked<double>& cooked,
                                         const std::vector<bd::Placed<double>>& gizmos,
                                         const Camera<double>& cam, int W, int H) {
-    // Two trees, because the scene has two kinds of object in it.
-    //
-    // Most of it is ordinary geometry: a torus, a shell, sprinkles --
-    // each a handful of triangles, each different, and a triangle tree is
-    // the right home for them.
-    //
-    // The dust is not that. It is thousands of copies of one little cube,
-    // and flattening it puts a quarter of a million identical triangles
-    // into the tree, where every one of them costs a leaf. An instance
-    // holds a *reference* to the one shape plus where this copy sits, so
-    // the tree holds thousands of leaves instead of hundreds of
-    // thousands -- and for a cube that never rotates the shape is a `Box`,
-    // which is not an approximation of it but literally it, tested in six
-    // slab comparisons rather than twelve Möller-Trumbore.
-    //
-    // What makes an object eligible is not that it looks small. It is
-    // that its motion is a *placement* -- affine in the point, so it moves
-    // the object without reshaping it (see VecField::is_placement). A
-    // motion that deforms per vertex cannot share geometry with anything,
-    // and those objects go through the triangle path unchanged.
-    std::vector<Triangle3> tris;
-    std::vector<Prim> prims;
-    std::vector<Instanced<geometry::BoundedQuadric<double>>> insts;
-    std::vector<DustInstance> inst_info;
-
-    // One quadric per distinct *shape*, not per object -- which is the
-    // whole point of reading a cooked scene rather than a list of
-    // materialized nodes. Sized up front and never grown, because every
-    // instance below holds a pointer into it.
-    std::vector<geometry::BoundedQuadric<double>> quadrics(cooked.shape_count());
-    std::vector<char> has_quadric(cooked.shape_count(), 0);
-    std::vector<std::vector<Vec<double, 3>>> shape_normals(cooked.shape_count());
-    for (std::size_t i = 0; i < cooked.shape_count(); ++i) {
-        const auto& sh = cooked.shapes()[i];
-        if (const auto* q = std::any_cast<geometry::BoundedQuadric<double>>(&sh.exact)) {
-            quadrics[i] = *q;
-            has_quadric[i] = 1;
-        }
-    }
-
-    // A shape's geometry is its *rest* form when the object placing it is
-    // instanceable, and its *placed* form when the object deforms -- in
-    // which case cook() hands back an identity transform. So one formula
-    // covers both, and the deforming case is not a special case here.
-    // Takes the rotation already expanded, rather than reaching into the
-    // object for it: this runs per *vertex*, and a quaternion unpacked
-    // here would spend the arithmetic the compact storage was supposed to
-    // be paying for. The expansion happens once per object, below.
-    auto to_world = [](const Vec<double, 3>& v, const Matrix<double, 3, 3>& R,
-                       const bd::Object<double>& o) {
-        return Vec<double, 3>{R * Vec<double, 3>{v * o.scale} + o.translation};
-    };
-
-    auto emit_triangles = [&](const mesh::Mesh<Euclidean<3, double>>& m,
-                              const std::vector<Vec<double, 3>>& vn,
-                              const bd::Object<double>& o, const Matrix<double, 3, 3>& R,
-                              const Material<double>& mat) {
-        for (const auto& f : m.faces) {
-            Triangle3 t(to_world(m.vertices[f[0]], R, o), to_world(m.vertices[f[1]], R, o),
-                        to_world(m.vertices[f[2]], R, o));
-            tris.push_back(t);
-            // Normals turn by the rotation alone: the scale is uniform, so
-            // it divides out of the inverse transpose.
-            prims.push_back(Prim{t,
-                                 {Vec<double, 3>{R * vn[f[0]]},
-                                  Vec<double, 3>{R * vn[f[1]]},
-                                  Vec<double, 3>{R * vn[f[2]]}},
-                                 mat.base_color, mat.roughness, mat.emissive});
-        }
-    };
-
-    for (const auto& obj : cooked.objects()) {
-        const auto& mat = obj.material;
-        // Once per object. Everything below uses this, including the
-        // instance, whose rotation stays a matrix precisely so the
-        // traversal never has to unpack anything.
-        const Matrix<double, 3, 3> R = obj.rotation_q.to_matrix();
-
-        // Two conditions, and neither is a guess about what the object
-        // looks like: the shape must carry a closed form, and the object's
-        // motion must be a placement so copies differ only by where they
-        // are.
-        if (obj.instanceable && has_quadric[obj.shape]) {
-            insts.push_back({&quadrics[obj.shape], obj.translation, obj.scale, R});
-            inst_info.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
-            continue;
-        }
-
-        // Smooth normals once per shape rather than once per object: a
-        // thousand instances of one sprinkle used to recompute the same
-        // normals a thousand times, through a merged mesh that had to be
-        // built first.
-        auto& vn = shape_normals[obj.shape];
-        if (vn.empty()) vn = smooth_normals(cooked.shapes()[obj.shape].geometry);
-        emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, R, mat);
-    }
-
-    // The gizmos are not in the scene and must not be: they are the
-    // editor, not the subject. They arrive as Placed views onto their own
-    // little Trace, and they are drawn here because forgetting them is the
-    // easy mistake in this refactor -- the build-up frames simply lose
-    // their axes and grid and nothing else changes.
-    for (const auto& g : gizmos) {
-        auto m = g.mesh();
-        auto vn = smooth_normals(m);
-        auto mat = g.material();
-        for (const auto& f : m.faces) {
-            Triangle3 t(m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]);
-            tris.push_back(t);
-            prims.push_back(Prim{t, {vn[f[0]], vn[f[1]], vn[f[2]]}, mat.base_color, mat.roughness,
-                                 mat.emissive});
-        }
-    }
-
-    // Counted before the move, because a moved-from vector is empty and
-    // the report below would have quietly started printing zeros. Found
-    // by checking what still reads these after this line rather than by
-    // assuming nothing did.
-    const std::size_t n_inst = insts.size(), n_tris = tris.size();
-
-    // Moved, not copied. `build` takes its shapes by value and keeps
-    // them, so handing it an lvalue leaves two copies of the array alive
-    // for the rest of the frame -- 112 bytes per instance, which is 214 MB
-    // at two million and was simply being spent.
-    auto bvh = BVH<Triangle3>::build(std::move(tris));
-    auto inst_bvh = BVH<Instanced<geometry::BoundedQuadric<double>>>::build(std::move(insts));
+    // Two trees, one of world-space triangles and one of instanced closed
+    // forms; see render/cooked_scene.hpp for why the scene splits that way
+    // and what makes an object eligible for the second.
+    auto laid = render::lay_out(cooked, gizmos);
+    const auto& bvh = laid.triangles;
+    const auto& inst_bvh = laid.instances;
+    const auto& prims = laid.prims;
+    const auto& inst_info = laid.looks;
+    const std::size_t n_inst = inst_info.size(), n_tris = prims.size();
 
     // Reported rather than assumed, and the last pair is the whole reason
     // a cooked scene exists: what a renderer would have held if every
