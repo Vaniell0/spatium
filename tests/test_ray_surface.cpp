@@ -445,6 +445,31 @@ TEST_CASE("Quadric::sphere(center, radius) puts the center in the linear terms",
     CHECK_THAT(q(c), WithinAbs(-2.25, 1e-12));
 }
 
+TEST_CASE("BoundedQuadric: a closed cylinder has caps, an open one is a tube",
+          "[ray_surface]") {
+    // Straight down the axis: parallel to the wall, so an open tube is
+    // never hit at all, and a closed rod is hit on its top face.
+    const Ray<3, double> down{Vec<double, 3>{0.0, 0.0, 5.0}, Vec<double, 3>{0.0, 0.0, -1.0}};
+    auto tube = BoundedQuadric<>::cylinder_z(0.5, 0.0, 2.0);
+    CHECK_FALSE(ray_hit(down, tube).has_value());
+
+    auto rod = tube;
+    rod.closed = true;
+    auto h = ray_hit(down, rod);
+    REQUIRE(h.has_value());
+    CHECK_THAT(h->t, WithinAbs(3.0, 1e-12));
+    CHECK_THAT(h->normal[2], WithinAbs(1.0, 1e-12));
+
+    // From the side the wall is nearer than any cap, and closing the
+    // rod must not change that hit.
+    const Ray<3, double> side{Vec<double, 3>{5.0, 0.0, 1.0}, Vec<double, 3>{-1.0, 0.0, 0.0}};
+    auto a = ray_hit(side, tube), b = ray_hit(side, rod);
+    REQUIRE(a.has_value());
+    REQUIRE(b.has_value());
+    CHECK_THAT(b->t, WithinAbs(a->t, 1e-12));
+    CHECK_THAT(b->normal[0], WithinAbs(1.0, 1e-12));
+}
+
 TEST_CASE("BoundedQuadric sphere: box is the surface's own extent", "[ray_surface]") {
     Vec<double, 3> c{2.0, 0.0, 0.0};
     auto s = BoundedQuadric<>::sphere(c, 0.5);

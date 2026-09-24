@@ -512,8 +512,13 @@ public:
     Handle<T> cylinder(T radius, T height, std::size_t u_steps = 12, std::size_t v_steps = 4) {
         auto h = space(make_cylinder<T>(radius, height), u_steps, v_steps);
         // make_cylinder puts v in [0, height], so the clip matches the map.
-        node(h.index).exact =
-            geometry::BoundedQuadric<T>::cylinder_z(radius, T{0}, height);
+        // Closed: a cylinder here is a rod, not a tube. The chart is still
+        // only the side wall, so a tessellated cylinder is open where the
+        // exact one is capped -- the same kind of disagreement the flake's
+        // skirt was, and recorded rather than left to be rediscovered.
+        auto exact = geometry::BoundedQuadric<T>::cylinder_z(radius, T{0}, height);
+        exact.closed = true;
+        node(h.index).exact = exact;
         return h;
     }
 

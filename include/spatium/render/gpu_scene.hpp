@@ -72,7 +72,7 @@ static_assert(sizeof(Triangle) == 128);
 // instance.
 struct Quadric {
     float q[16];      // column-major, so a GLSL mat4 reads it unchanged
-    float lo[4];      // clip box
+    float lo[4];      // clip box; lo.w = 1 when the box closes it into a solid
     float hi[4];
 };
 static_assert(sizeof(Quadric) == 96);
@@ -174,7 +174,7 @@ inline Scene pack(const CookedScene<double>& laid) {
         for (std::size_t c = 0; c < 4; ++c)
             for (std::size_t r = 0; r < 4; ++r)
                 out.quadrics[i].q[c * 4 + r] = static_cast<float>(bq.surface.Q(r, c));
-        detail::put3(out.quadrics[i].lo, Vec<double, 3>{bq.clip.min_corner});
+        detail::put3(out.quadrics[i].lo, Vec<double, 3>{bq.clip.min_corner}, bq.closed ? 1.0f : 0.0f);
         detail::put3(out.quadrics[i].hi, Vec<double, 3>{bq.clip.max_corner});
     }
 
@@ -312,6 +312,48 @@ inline bool hit_instance(const Ray32& r, const Instance& g, const Quadric& qd, H
 
     const float* Q = qd.q;   // column-major: Q(r, c) = Q[c * 4 + r]
     auto Qm = [Q](int row, int col) { return Q[col * 4 + row]; };
+    auto value = [&](V3 p) {
+        const float ph[4] = {p.x, p.y, p.z, 1.0f};
+        float v = 0.0f;
+        for (int row = 0; row < 4; ++row)
+            v += ph[row] * (Qm(row, 0) * ph[0] + Qm(row, 1) * ph[1] + Qm(row, 2) * ph[2] +
+                            Qm(row, 3) * ph[3]);
+        return v;
+    };
+
+    // A closed quadric's cap, as `ray_hit` on a `BoundedQuadric` finds it:
+    // entering the clip box at a point inside the surface. The entry face
+    // is the axis whose slab was entered last, and its normal faces the ray.
+    if (qd.lo[3] > 0.5f) {
+        const float oc[3] = {o.x, o.y, o.z}, dc[3] = {d.x, d.y, d.z};
+        float lo = -std::numeric_limits<float>::max(), hi = std::numeric_limits<float>::max();
+        int axis = -1;
+        for (int i = 0; i < 3; ++i) {
+            if (std::abs(dc[i]) < epsilon<float>()) {
+                if (oc[i] < qd.lo[i] || oc[i] > qd.hi[i]) return false;
+                continue;
+            }
+            const float inv = 1.0f / dc[i];
+            float t1 = (qd.lo[i] - oc[i]) * inv, t2 = (qd.hi[i] - oc[i]) * inv;
+            if (t1 > t2) std::swap(t1, t2);
+            if (t1 > lo) { lo = t1; axis = i; }
+            hi = std::min(hi, t2);
+        }
+        if (lo > hi) return false;
+        const float t = lo + t_shift;
+        if (axis >= 0 && t > 0.0f && t < h.t) {
+            const V3 p = o + d * lo;
+            if (value(p) <= 0.0f) {
+                float nl[3] = {0.0f, 0.0f, 0.0f};
+                nl[axis] = dc[axis] > 0.0f ? -1.0f : 1.0f;
+                const V3 n{nl[0], nl[1], nl[2]};
+                h.t = t; h.u = h.v = 0.0f;
+                h.normal = V3{dot(r0, n), dot(r1, n), dot(r2, n)};
+                return true;
+            }
+        }
+    }
+
     const V3 Qd{Qm(0, 0) * d.x + Qm(0, 1) * d.y + Qm(0, 2) * d.z,
                 Qm(1, 0) * d.x + Qm(1, 1) * d.y + Qm(1, 2) * d.z,
                 Qm(2, 0) * d.x + Qm(2, 1) * d.y + Qm(2, 2) * d.z};

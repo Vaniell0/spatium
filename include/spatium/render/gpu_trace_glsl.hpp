@@ -98,6 +98,35 @@ bool hit_instance(vec3 ro, vec3 rd, Instance g, Quadric qd, inout Hit h) {
     o = o + d * t_shift;
 
     mat4 Q = qd.q;                            // column-major, Q[c][r]
+
+    // A closed quadric's cap: the clip box entered at a point inside it.
+    if (qd.lo.w > 0.5) {
+        float lo = -FLT_MAX, hi = FLT_MAX;
+        int axis = -1;
+        for (int i = 0; i < 3; ++i) {
+            if (abs(d[i]) < EPS) {
+                if (o[i] < qd.lo[i] || o[i] > qd.hi[i]) return false;
+                continue;
+            }
+            float inv = 1.0 / d[i];
+            float t1 = (qd.lo[i] - o[i]) * inv, t2 = (qd.hi[i] - o[i]) * inv;
+            if (t1 > t2) { float sw = t1; t1 = t2; t2 = sw; }
+            if (t1 > lo) { lo = t1; axis = i; }
+            hi = min(hi, t2);
+        }
+        if (lo > hi) return false;
+        float t = lo + t_shift;
+        if (axis >= 0 && t > 0.0 && t < h.t) {
+            vec4 ph = vec4(o + d * lo, 1.0);
+            if (dot(ph, Q * ph) <= 0.0) {
+                vec3 n = vec3(0.0);
+                n[axis] = d[axis] > 0.0 ? -1.0 : 1.0;
+                h.t = t; h.u = 0.0; h.v = 0.0;
+                h.normal = vec3(dot(r0, n), dot(r1, n), dot(r2, n));
+                return true;
+            }
+        }
+    }
     vec3 Qd = mat3(Q) * d;
     vec4 oh = vec4(o, 1.0);
     vec4 Qo = Q * oh;
