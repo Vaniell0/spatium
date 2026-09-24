@@ -6,11 +6,14 @@
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/groups/so3.hpp>
+#  include <spatium/algebra/noise.hpp>
 #  include <cassert>
 #  include <algorithm>
+#  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
 #  include <functional>
+#  include <memory>
 #  include <string>
 #  include <type_traits>
 #  include <typeindex>
@@ -113,6 +116,31 @@ enum class Op : std::uint8_t {
     // instruction on every target an export would aim at.
     Min, Max,
 
+    // The rest were each found by reading a leaf that could not be written
+    // without them, not by filling out a list. See `docs/gpu-abi-design.md`
+    // for the vocabulary they were checked against.
+    //
+    // Sin and Cos, because the icing's drip is noise sampled around the
+    // ring at (cos u, sin u) -- a circle, so that the field closes on
+    // itself where u wraps. One child each.
+    Sin, Cos,
+
+    // 1 where the first child is less than the second, 0 otherwise.
+    //
+    // This is the decision about booleans the cube's hard step was waiting
+    // on, and the decision is to not have them: a comparison yields a
+    // scalar that is exactly 0 or exactly 1, the way GLSL's `step` does,
+    // so the IR keeps one value type and a select is a multiply. The
+    // cube's `time < 0.12 ? 1.0 : 0.0` is then `less(t, 0.12)`, the same
+    // two values bit for bit.
+    Less,
+
+    // Perlin noise of three children, from the table carried in `noise`.
+    // Every field on the donut's surfaces is built on it, and a noise
+    // table is data -- 512 bytes fixed by a seed -- so it does not need to
+    // be a closure to be carried along.
+    Noise,
+
     Opaque,  // a callable leaf -- the escape hatch, kept first-class
 };
 
@@ -127,6 +155,10 @@ inline const char* op_name(Op o) {
         case Op::Div:    return "Div";
         case Op::Min:    return "Min";
         case Op::Max:    return "Max";
+        case Op::Sin:    return "Sin";
+        case Op::Cos:    return "Cos";
+        case Op::Less:   return "Less";
+        case Op::Noise:  return "Noise";
         case Op::Opaque: return "Opaque";
     }
     return "?";
@@ -134,7 +166,16 @@ inline const char* op_name(Op o) {
 
 inline bool is_binary(Op o) {
     return o == Op::Add || o == Op::Sub || o == Op::Mul || o == Op::Div ||
-           o == Op::Min || o == Op::Max;
+           o == Op::Min || o == Op::Max || o == Op::Less;
+}
+
+// How many children an op reads, named once for the three places that
+// shift indices, check order and lower -- each of which would otherwise
+// have to learn separately that Sin has one child and Noise three.
+inline std::uint32_t arity(Op o) {
+    if (o == Op::Sin || o == Op::Cos) return 1;
+    if (o == Op::Noise)               return 3;
+    return is_binary(o) ? 2 : 0;
 }
 
 template<Scalar T = double>
@@ -142,7 +183,13 @@ struct FieldOp {
     Op op = Op::Const;
 
     T value{};                          // Const
-    std::uint32_t a = 0, b = 0;         // child indices, both < this index
+    std::uint32_t a = 0, b = 0, c = 0;  // child indices, all < this index
+
+    // Noise: the table. Shared rather than held by value because a Field
+    // copies its ops whenever it is composed, and 512 bytes per copy is
+    // what the capture accounting below exists to catch. Never mutated
+    // after construction, so sharing it is not aliasing anything.
+    std::shared_ptr<const algebra::PerlinNoise> noise;
 
     // Opaque leaf. The callable itself, plus what can be known about it
     // without asking the user for a name.
@@ -280,6 +327,32 @@ public:
         return e * e * (Field{T{3}} - Field{T{2}} * e);
     }
 
+    friend Field sin(Field x) { x.push_unary(Op::Sin); return x; }
+    friend Field cos(Field x) { x.push_unary(Op::Cos); return x; }
+
+    // `less(a, b)` is 1 where a < b and 0 elsewhere -- a scalar, not a
+    // boolean, so the result composes with everything else here by
+    // multiplication. See Op::Less for why there is no boolean type.
+    friend Field less(Field x, const Field& y) { x.append(Op::Less, y); return x; }
+
+    // Noise over three fields. The table is copied once into shared
+    // storage here, so the caller's PerlinNoise can go out of scope and
+    // every later copy of this field costs a reference count, not 512
+    // bytes.
+    friend Field noise(const algebra::PerlinNoise& n, Field x, const Field& y, const Field& z) {
+        const auto xr = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        const auto yr = x.append_operand(y);
+        const auto zr = x.append_operand(z);
+        FieldOp<T> parent{};
+        parent.op    = Op::Noise;
+        parent.a     = xr;
+        parent.b     = yr;
+        parent.c     = zr;
+        parent.noise = std::make_shared<const algebra::PerlinNoise>(n);
+        x.ops_.push_back(std::move(parent));
+        return x;
+    }
+
     // The accumulating form. Appends into this field's own pool, so
     // building a field term by term is linear rather than quadratic:
     // nothing else can observe this pool mid-expression, so appending to
@@ -295,8 +368,9 @@ public:
     bool topologically_ordered() const {
         for (std::size_t i = 0; i < ops_.size(); ++i) {
             const auto& n = ops_[i];
-            if (!is_binary(n.op)) continue;
-            if (n.a >= i || n.b >= i) return false;
+            const auto k = arity(n.op);
+            if ((k > 0 && n.a >= i) || (k > 1 && n.b >= i) || (k > 2 && n.c >= i))
+                return false;
         }
         return true;
     }
@@ -332,6 +406,10 @@ private:
                 // Field over a user scalar picks up that type's own min.
                 case Op::Min:    { using std::min; s[i] = min(s[n.a], s[n.b]); break; }
                 case Op::Max:    { using std::max; s[i] = max(s[n.a], s[n.b]); break; }
+                case Op::Sin:    { using std::sin; s[i] = sin(s[n.a]); break; }
+                case Op::Cos:    { using std::cos; s[i] = cos(s[n.a]); break; }
+                case Op::Less:   s[i] = s[n.a] < s[n.b] ? T{1} : T{0}; break;
+                case Op::Noise:  s[i] = (*n.noise)(s[n.a], s[n.b], s[n.c]); break;
                 case Op::Opaque: s[i] = n.fn(u, v); break;
             }
         }
@@ -351,8 +429,32 @@ private:
     // 21% of the build time of a 4 000-term field -- measured, not guessed,
     // and the other 79% was the copying that `operator+=` now avoids.
     void append(Op o, const Field& y) {
-        const auto shift  = static_cast<std::uint32_t>(ops_.size());
-        const auto x_root = shift - 1;
+        const auto x_root = static_cast<std::uint32_t>(ops_.size() - 1);
+        const auto y_root = append_operand(y);
+
+        FieldOp<T> parent{};
+        parent.op = o;
+        parent.a  = x_root;
+        parent.b  = y_root;
+        assert(parent.a < ops_.size() && parent.b < ops_.size() &&
+               "Field: a child must precede its parent");
+        ops_.push_back(std::move(parent));
+    }
+
+    // One child, which is always the current root -- so there is nothing
+    // to shift and nothing that could land out of order.
+    void push_unary(Op o) {
+        FieldOp<T> n{};
+        n.op = o;
+        n.a  = static_cast<std::uint32_t>(ops_.size() - 1);
+        ops_.push_back(std::move(n));
+    }
+
+    // y's ops, shifted, and the index its root landed at. The half of
+    // `append` that does not know how many operands the parent will have,
+    // split out so a three-child op appends two of them the same way.
+    std::uint32_t append_operand(const Field& y) {
+        const auto shift = static_cast<std::uint32_t>(ops_.size());
 
         // Reserve only past the current capacity, and then geometrically.
         // A bare `reserve(size() + k)` on every append reallocates every
@@ -366,22 +468,18 @@ private:
 
         for (const auto& n : y.ops_) {
             FieldOp<T> c = n;
-            if (is_binary(c.op)) { c.a += shift; c.b += shift; }
-            assert((!is_binary(c.op) ||
-                    (c.a < ops_.size() && c.b < ops_.size())) &&
+            const auto k = arity(c.op);
+            if (k > 0) c.a += shift;
+            if (k > 1) c.b += shift;
+            if (k > 2) c.c += shift;
+            assert((k < 1 || c.a < ops_.size()) && (k < 2 || c.b < ops_.size()) &&
+                   (k < 3 || c.c < ops_.size()) &&
                    "Field: a child must precede its parent");
             ops_.push_back(std::move(c));
         }
 
-        FieldOp<T> parent{};
-        parent.op = o;
-        parent.a  = x_root;
-        parent.b  = static_cast<std::uint32_t>(ops_.size() - 1);
-        assert(parent.a < ops_.size() && parent.b < ops_.size() &&
-               "Field: a child must precede its parent");
-        ops_.push_back(std::move(parent));
-
         structural_ = structural_ && y.structural_;
+        return static_cast<std::uint32_t>(ops_.size() - 1);
     }
 
 };

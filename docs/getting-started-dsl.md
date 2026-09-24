@@ -7,7 +7,8 @@ the end you have dough, icing, and sprinkles. If you've never written C++
 before, you can still follow this — read each step, run it, see what
 changed.
 
-The full, runnable version of this file is `examples/donut_demo.cpp`.
+The full, runnable version of this file is `examples/donut_demo.cpp`, which
+renders the scene `examples/donut_scene.hpp` builds.
 
 ## Step 0: what you're building with
 
@@ -102,7 +103,7 @@ it's now something you asked for by name rather than something that
 happened to look right.
 
 The full demo takes the second path, because its icing sits on a band —
-look for `torus_cap` in `examples/donut_demo.cpp`. The simpler version
+look for `torus_cap` in `examples/donut_scene.hpp`. The simpler version
 here ices the whole donut and takes the first.
 
 ## Step 3: sprinkles scatter across the icing

@@ -34,8 +34,25 @@ public:
     }
 
     template<Scalar T>
-    T operator()(T x, T y, T z) const {
+    T operator()(T x, T y, T z) const { return sample(perm_.data(), x, y, z); }
+
+    template<Scalar T>
+    T operator()(const Vec<T, 3>& p) const { return (*this)(p[0], p[1], p[2]); }
+
+    // The table this seed produced, and the evaluation written against a
+    // bare table rather than against this object.
+    //
+    // Both exist for the same consumer: a field lowered to plain data
+    // carries noise as its 512 bytes, not as a PerlinNoise, and evaluates
+    // it without one. Routing `operator()` through the same function is
+    // what makes "the lowered field agrees with this object" a statement
+    // about one piece of code rather than about two that were kept in step.
+    const std::array<std::uint8_t, 512>& permutation() const { return perm_; }
+
+    template<Scalar T>
+    static T sample(const std::uint8_t* perm, T x, T y, T z) {
         using std::floor;
+        auto at = [perm](int i) -> int { return perm[static_cast<std::size_t>(i) & 511]; };
         int X = static_cast<int>(floor(x)) & 255;
         int Y = static_cast<int>(floor(y)) & 255;
         int Z = static_cast<int>(floor(z)) & 255;
@@ -54,13 +71,8 @@ public:
                     lerp(u, grad(at(AB + 1), x, y - T{1}, z - T{1}), grad(at(BB + 1), x - T{1}, y - T{1}, z - T{1}))));
     }
 
-    template<Scalar T>
-    T operator()(const Vec<T, 3>& p) const { return (*this)(p[0], p[1], p[2]); }
-
 private:
     std::array<std::uint8_t, 512> perm_{};
-
-    int at(int i) const { return perm_[static_cast<std::size_t>(i) & 511]; }
 
     template<Scalar T> static T fade(T t) { return t * t * t * (t * (t * T{6} - T{15}) + T{10}); }
     template<Scalar T> static T lerp(T t, T a, T b) { return a + t * (b - a); }
