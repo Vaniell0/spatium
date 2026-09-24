@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/catch_approx.hpp>
 #include <any>
+#include <bit>
 #include <concepts>
 #include <memory>
 #include <spatium/algebra/noise.hpp>
@@ -1137,6 +1138,64 @@ TEST_CASE("Min, Max, and the clamp they exist for", "[build][dsl][field]") {
         const double e = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
         CHECK_THAT(s(t, 0.0), WithinAbs(e * e * (3.0 - 2.0 * e), 1e-15));
     }
+}
+
+// The four ops the donut's remaining surface and step leaves needed, each
+// checked against the exact call it replaces -- with `==` on the bits, not
+// a tolerance, because the claim made for them is that the rendered frame
+// did not change, and that is a claim about bits.
+TEST_CASE("Sin, Cos, Less and Noise agree bit for bit with what they replace",
+          "[build][dsl][field]") {
+    using F = bd::ScalarField<double>;
+    auto bits = [](double x) { return std::bit_cast<std::uint64_t>(x); };
+
+    CHECK(sin(F::u()).is_structural());
+    CHECK(cos(F::u()).is_structural());
+    CHECK(less(F::u(), F::v()).is_structural());
+
+    for (double x : {-7.5, -1.0, -0.0, 0.0, 0.3, 1.0, 2.5, 100.0}) {
+        CHECK(bits(sin(F::u())(x, 0.0)) == bits(std::sin(x)));
+        CHECK(bits(cos(F::u())(x, 0.0)) == bits(std::cos(x)));
+    }
+
+    // A comparison yields exactly 1 or exactly 0, including at the edge
+    // and one ulp either side of it, which is where the cube's step lives.
+    auto step = less(F::t(), F{0.12});
+    for (double t : {-1.0, 0.0, std::nextafter(0.12, 0.0), 0.12,
+                     std::nextafter(0.12, 1.0), 3.9}) {
+        CHECK(bits(step(t, 0.0)) == bits(t < 0.12 ? 1.0 : 0.0));
+    }
+
+    // Noise composed *under* another op, so its three children are shifted
+    // on append. A third index that was not shifted would read whatever
+    // the left operand left in that slot, and the value would be wrong
+    // rather than the build failing.
+    algebra::PerlinNoise n(7);
+    auto f = F{0.25} + noise(n, F::u() * F{3.0}, F::v(), F{0.5});
+    CHECK(f.is_structural());
+    CHECK(f.topologically_ordered());
+    for (double u : {0.1, 1.7, 4.2})
+        for (double v : {-0.3, 0.9, 2.6})
+            CHECK(bits(f(u, v)) == bits(0.25 + n(u * 3.0, v, 0.5)));
+
+    // The table is copied in, so the field does not dangle when the
+    // PerlinNoise it was built from goes away.
+    auto g = [] {
+        algebra::PerlinNoise local(7);
+        return noise(local, F::u(), F::v(), F{0.5});
+    }();
+    CHECK(bits(g(1.7, 0.9)) == bits(n(1.7, 0.9, 0.5)));
+
+    // And none of them is a leaf: a field made of them reports nothing.
+    bd::Trace<double> trace;
+    auto ball = trace.sphere(1.0, 8, 4);
+    const auto before = bd::field_report(trace);
+    ball.moving(scaled(bd::VecField<double>::point(),
+                       less(F::t(), F{1.0}) * (F{1.0} + F{0.1} * sin(F::t()) +
+                                               noise(n, cos(F::t()), F{0.0}, F{0.0}))));
+    const auto after = bd::field_report(trace);
+    CHECK(after.opaque_leaves == before.opaque_leaves);
+    CHECK(after.structural_fields == before.structural_fields);
 }
 
 // The overload does not *promise* structurality, it propagates it, and
