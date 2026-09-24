@@ -76,6 +76,7 @@ add_executable(spatium_tests
     test_scene.cpp
     test_wav.cpp
     test_build_dsl.cpp
+    test_field_pod.cpp
     test_chart.cpp
 )
 
@@ -83,6 +84,13 @@ target_include_directories(spatium_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/rsc/include
     ${CMAKE_BINARY_DIR}/generated
     ${CMAKE_SOURCE_DIR}/gpu
+    # test_field_pod.cpp builds the donut demo's own scene rather than a
+    # copy of it, and reads the letterform points that scene is made of.
+    ${CMAKE_SOURCE_DIR}/examples
+)
+
+target_compile_definitions(spatium_tests PRIVATE
+    SPATIUM_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 target_link_libraries(spatium_tests PRIVATE
