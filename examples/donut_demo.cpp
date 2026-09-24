@@ -1024,9 +1024,12 @@ int main(int argc, char* argv[]) {
     auto cube = scene.cube({0.9, 0.9, 0.9})
                     .colored(Material<double>{.base_color = {0.55, 0.55, 0.58}})
                     // Same reason as grow_scale: a uniform scale, spelled so
-                    // that it can be recognised as one.
+                    // that it can be recognised as one. The factor is a hard
+                    // step -- 1 until t = 0.12, then 0 -- and `less` is
+                    // exactly that, both values bit for bit.
                     .moving(scaled(bd::VecField<double>::point(),
-                                   [](double time) { return time < 0.12 ? 1.0 : 0.0; }));
+                                   less(bd::ScalarField<double>::t(),
+                                        bd::ScalarField<double>{0.12})));
 
     // Step 0.5 -- delete the cube by *exploding* it: not a shrink this
     // time, real dust -- ~220 tiny cubes flying from the cube's own
@@ -1241,10 +1244,16 @@ int main(int argc, char* argv[]) {
     // real icing covers almost the entire top uniformly, edge mostly
     // clean along the torus's natural equator, with a *few* localized
     // drips past it, not an all-over ragged boundary.
+    //
+    // Every surface field below is an expression rather than a lambda, and
+    // each reads exactly as the lambda it replaced did, operation for
+    // operation -- which is what keeps the frame byte-identical, and why
+    // `0.0 - n` stands where `-n` did: the two differ only in the sign of
+    // a zero, and subtracting 0.18 next erases it.
+    using F = bd::ScalarField<double>;
     algebra::PerlinNoise surface_noise(2);
-    auto dough_bump = bd::ScalarField<double>{[surface_noise](double u, double v) {
-        return 0.020 * surface_noise(u * 3.0, v * 3.0, 0.0); // visible but still broad, not fine-grain
-    }};
+    auto dough_bump = F{0.020} * noise(surface_noise, F::u() * F{3.0}, F::v() * F{3.0},
+                                       F{0.0}); // visible but still broad, not fine-grain
     // The crumb: sparse pits, and the shape of the field is the whole
     // point. The note above records that an earlier pass added symmetric
     // fine-grain noise and it read as sandpaper rather than as bread --
@@ -1259,16 +1268,16 @@ int main(int argc, char* argv[]) {
     // that field is also the icing's base -- glaze pools over the crumb
     // and hides it, so pores pushing through the icing would be wrong.
     algebra::PerlinNoise pore_noise(11);
-    auto dough_surface = bd::ScalarField<double>{[surface_noise, pore_noise](double u, double v) {
-        double broad = 0.020 * surface_noise(u * 3.0, v * 3.0, 0.0);
+    auto dough_surface = [&] {
+        F broad = F{0.020} * noise(surface_noise, F::u() * F{3.0}, F::v() * F{3.0}, F{0.0});
         // u runs around the major circle and v around the tube, so a
         // radian of u covers ~2.5x the arc a radian of v does; the
         // frequencies are in that ratio so the pits come out round
         // rather than smeared along the ring.
-        double n = pore_noise(u * 11.0, v * 4.5, 0.0);
-        double pit = std::max(0.0, -n - 0.18);
-        return broad - 0.075 * pit * pit;
-    }};
+        F n = noise(pore_noise, F::u() * F{11.0}, F::v() * F{4.5}, F{0.0});
+        F pit = max(F{0.0}, F{0.0} - n - F{0.18});
+        return broad - F{0.075} * pit * pit;
+    }();
     auto dough_base = scene.torus(2.0, 1.0, 240, 120);
     auto dough = scene.offset(dough_base, dough_surface)
                      .colored(Material<double>{.base_color = {0.87, 0.58, 0.27}, .roughness = 0.92})
@@ -1302,8 +1311,9 @@ int main(int argc, char* argv[]) {
     auto icing_base = scene.offset_shell(
         scene.space(torus_cap(2.0, 1.0, std::numbers::pi * 0.02, icing_rim), 160, 64),
         dough_bump, bd::EdgeRule::ZeroThickness);
-    auto icing = scene.offset_shell(icing_base, bd::ScalarField<double>{[icing_noise](double u, double v) {
+    auto icing = scene.offset_shell(icing_base, [&] {
                         constexpr double pi = std::numbers::pi;
+                        const F u = F::u(), v = F::v();
                         // The two rims are not interchangeable. v -> 0 is
                         // the outer equator and v -> pi is the wall of the
                         // hole, and glaze runs off the outside; it does not
@@ -1316,13 +1326,15 @@ int main(int argc, char* argv[]) {
                         // self-intersecting, not a shading artefact. So the
                         // drip is added to the outer distance only, which
                         // is both the cheap fix and the correct one.
-                        double outer = v - pi * 0.02;      // toward the outer equator
-                        double inner = icing_rim - v;      // toward the hole
-                        double wobble = icing_noise(std::cos(u) * 2.0, std::sin(u) * 2.0, 0.0) * (pi * 0.03);
-                        double drip = std::max(0.0, icing_noise(std::cos(u) * 1.3, std::sin(u) * 1.3, 8.0) - 0.35) * (pi * 0.35);
-                        double edge_dist = std::min(outer + drip, inner);
-                        double falloff = std::clamp((edge_dist + wobble) / (pi * 0.09), 0.0, 1.0);
-                        falloff = falloff * falloff * (3.0 - 2.0 * falloff); // soft, not torn
+                        F outer = v - F{pi * 0.02};        // toward the outer equator
+                        F inner = F{icing_rim} - v;        // toward the hole
+                        F wobble = noise(icing_noise, cos(u) * F{2.0}, sin(u) * F{2.0}, F{0.0}) *
+                                   F{pi * 0.03};
+                        F drip = max(F{0.0}, noise(icing_noise, cos(u) * F{1.3}, sin(u) * F{1.3},
+                                                   F{8.0}) - F{0.35}) *
+                                 F{pi * 0.35};
+                        F edge_dist = min(outer + drip, inner);
+                        F falloff = smoothstep((edge_dist + wobble) / F{pi * 0.09}); // soft, not torn
                         // 0.045 until 2026-09-17, tuned when offset()
                         // silently rendered this at 48x24 and the waves
                         // were under-sampled into near-smoothness. With
@@ -1331,9 +1343,10 @@ int main(int argc, char* argv[]) {
                         // thickness reads as lumps rather than as glaze
                         // settling. The field did not change; what
                         // changed is that it is now being listened to.
-                        double pooling = icing_noise(u * 3.0, v * 3.0, 4.0) * 0.016; // broad, gentle waves
-                        return (0.10 + pooling) * falloff;
-                    }}, bd::EdgeRule::ZeroThickness)
+                        F pooling = noise(icing_noise, u * F{3.0}, v * F{3.0}, F{4.0}) *
+                                    F{0.016}; // broad, gentle waves
+                        return (F{0.10} + pooling) * falloff;
+                    }(), bd::EdgeRule::ZeroThickness)
                      .colored(Material<double>{.base_color = {0.98, 0.55, 0.68}, .roughness = 0.40})
                      .moving(grow_scale());
 
