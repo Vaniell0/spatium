@@ -16,6 +16,7 @@
 // re-cooks the scene on the host when it is let go.
 //
 //   donut_live --live [--t seconds] [--frames N] [--screenshot PATH]
+//   either one: [--camera px py pz tx ty tz]
 //
 // Shading is primary rays with the demo's key and fill lights -- no
 // shadows, highlights, reflections or see-through dust yet -- so this is
@@ -151,7 +152,7 @@ void fill_push(Push& pc, const render::Camera<double>& cam, std::uint32_t W, std
 }
 
 int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Scene packed,
-             int max_frames, const std::string& screenshot) {
+             int max_frames, const std::string& screenshot, const render::Camera<double>& start) {
     if (!glfwInit()) {
         std::println(stderr, "donut_live: glfwInit failed");
         return 1;
@@ -179,7 +180,7 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
         };
         rebind();
 
-        FlyCamera cam = FlyCamera::from(donut::hero_camera());
+        FlyCamera cam = FlyCamera::from(start);
         const FlyCamera home = cam;
         float speed = 2.0f;
         float t_ui = static_cast<float>(t);
@@ -298,16 +299,23 @@ int main(int argc, char** argv) {
     bool live = false;
     int frames = 0;
     std::string screenshot;
+    render::Camera<double> start = donut::hero_camera();
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
         if (a == "--t" && i + 1 < argc) { t = std::atof(argv[++i]); continue; }
         if (a == "--photo" && i + 1 < argc) { photo = argv[++i]; continue; }
         if (a == "--runs" && i + 1 < argc) { runs = std::max(1, std::atoi(argv[++i])); continue; }
         if (a == "--live") { live = true; continue; }
+        if (a == "--camera" && i + 6 < argc) {
+            for (std::size_t k = 0; k < 3; ++k) start.position[k] = std::atof(argv[++i]);
+            for (std::size_t k = 0; k < 3; ++k) start.target[k] = std::atof(argv[++i]);
+            continue;
+        }
         if (a == "--frames" && i + 1 < argc) { frames = std::atoi(argv[++i]); continue; }
         if (a == "--screenshot" && i + 1 < argc) { screenshot = argv[++i]; continue; }
         std::print("donut_live [--t seconds] [--photo PATH] [--runs N]\n"
-                   "donut_live --live [--t seconds] [--frames N] [--screenshot PATH]\n");
+                   "donut_live --live [--t seconds] [--frames N] [--screenshot PATH]\n"
+                   "  --camera px py pz tx ty tz   start from this position, looking at t\n");
         return a == "--help" ? 0 : 1;
     }
 
@@ -335,10 +343,10 @@ int main(int argc, char** argv) {
                  t, ms_cook, ms_lay, ms_pack, packed.triangles.size(), packed.instances.size(),
                  static_cast<double>(packed.bytes()) / 1e6);
 
-    if (live) return run_live(scene, root, t, packed, frames, screenshot);
+    if (live) return run_live(scene, root, t, packed, frames, screenshot, start);
 
     constexpr int W = 960, H = 720;
-    const auto cam = donut::hero_camera();
+    const auto cam = start;
     const auto basis = render::make_camera_basis(cam);
     const Vec<double, 3> key = Vec<double, 3>{Vec<double, 3>{0.85, 0.45, 0.55}.normalized()};
     const Vec<double, 3> fill = Vec<double, 3>{Vec<double, 3>{0.62, -0.70, 0.35}.normalized()};
