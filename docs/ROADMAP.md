@@ -317,6 +317,10 @@ So: the items we are actually steering by, with their state. Everything below th
 | Name the remaining 10 opaque leaves against a vocabulary | **next** | nothing; `unknown = 0` says every leaf has a `type_index`, not that every leaf is a known operation. Was 32 before the factors were written as expressions | GPU rendering |
 | POD interpreter, bit-exact against `eval_into` | **next** | the two rows above. The proof that a scene exports, and the same artifact grades an IR rewrite | GPU rendering |
 | The description door (`scene.hpp`'s registry, objects → trace nodes) | **next** | nothing, and it is cheaper than an ABI: one entry point reading a description instead of a wrapper per builder | Interop / ecosystem |
+| Traverse `Cooked<T>` in a Vulkan compute shader, fp32, on the local Iris Xe | **next** | nothing: `Cooked<T>` is already flat POD, so traversal needs no IR. The device has neither fp64 nor hardware ray tracing, and needs neither — fp32 already passed the black hole's precision gate | GPU rendering |
+| RSC in the scene pipeline | **next** | nothing. Its first real call site is the render-level choice — exact, tessellated or Newton — where the current rule reads one feature of three and is measurably wrong past a hundred objects | RSC as search |
+| Newton's cradle demo | **next** | its legend, and pairwise contact between moving bodies plus a string: `contact_force.hpp` pushes a body out of a *static* surface, and `verlet_step` moves one `PointMass` | Contact physics / RSC |
+| Interactive voxel raytracing — free flight, the scene described in the DSL | parked | the compute-shader row; a voxel grid is walked by DDA in a compute shader, not by RT hardware | Declarative scene DSL |
 | C ABI for the DSL (CUDA) | parked | the three rows above. Not needed for a browser (WASM is compiled C++) nor for GPU *traversal* (`Cooked<T>` is already flat POD) | GPU rendering |
 | RSC as search | **measured 2026-09-18, not parked on the ABI** | a value head, before anything larger. Substantially checked: scalar chains collapse and geometry chains do not, a policy is an anti-heuristic on small spaces, and transfer between spaces is free under a relative spec | RSC as search |
 | Learned split policy over a bound concept | parked | the bound concept itself. The one target where all three measured conditions line up: state does not collapse, expanding a node costs milliseconds, and the reward is a timing | Interop / ecosystem |
@@ -327,7 +331,7 @@ So: the items we are actually steering by, with their state. Everything below th
 | Offset self-intersection, in the library | parked | nothing; a thickness check against the base's minimum radius of curvature | Analytical rendering |
 | Scatter's arbitrary in-plane directions | parked | a consumer — "follows the flow" is its own design, not this fix | Object model as manifold substrate |
 | Full `EdgeRule` (`RoundCap`, `FlatCap`, `ExtendTo`) | parked | nothing | Declarative scene DSL |
-| Vulkan live display | parked | traversal getting cheaper — a four-second frame makes a live window a slideshow | Declarative scene DSL |
+| Vulkan live display | parked | traversal getting cheaper — a four-second frame makes a live window a slideshow. The compute-shader row is that | Declarative scene DSL |
 | Sound from geometry | parked | a three-way dependency decision: ARPACK, a vendored Spectra, or hand-rolled shift-invert Lanczos. The heat-method shortcut is refuted | Sound synthesis |
 | Time as a property of the space | parked | a scene where the difference is visible | Declarative scene DSL |
 | A rainbow, then interference | parked | the sound work; they share the machinery | Analytical rendering |
@@ -339,6 +343,16 @@ So: the items we are actually steering by, with their state. Everything below th
 **An abandoned item is struck through *with the reason*.** The convention already exists here — see the scattered-items entry under Object model — and simply was not applied everywhere. An item that vanishes silently is indistinguishable from one nobody got to.
 
 Both rules exist because a claim decays in three different places with three different mechanisms, and none of them is visible from the other two: a comment citing a line number rots when the line moves, a ROADMAP sentence rots when the code catches up with it, and a task in an external tracker rots by being invisible. Three scripts in CI catch the first kind. Nothing catches the second, which is what these rules are for.
+
+### One chain, not four tracks (2026-09-22)
+
+The rows above marked **next** are one line of work, not a menu. RSC is where it starts, physics continues it rather than being a separate subject, and an interactive voxel raytracer is the finale that consumes both. It was written down only outside this repository for two days, which is the failure the index exists to prevent.
+
+The finale has two real claims, and one that must not be made. *Interactive with free flight*, and *the scene is described rather than loaded* — voxels as spaces in the DSL, which makes the raytracer a runtime consumer of the scene format and is the actual reason to build it. Not "the first software ray tracing of Minecraft worlds": Chunky has done CPU path tracing of them since 2010.
+
+The local device decides the shape. Checked 2026-09-24 with `vulkaninfo`: Intel Iris Xe, Mesa, Vulkan 1.4, no `VK_KHR_ray_query`, no `shaderFloat64`. Neither is a loss. A voxel grid is walked by DDA, which is a loop, not a BVH query; and fp32 already passed the black hole's precision gate on all 22 cross-validated cases, worst 3.5e-4 relative at the critical curve against 3.9e-3 for one step of an 8-bit pixel. Where `double` does matter — long integrations whose error accumulates, near-degenerate roots — the work stays on the host.
+
+Newton's cradle belongs in the middle rather than beside it. It is the canonical case where a naive integrator *visibly* fails, so it is the first demo in the tree that shows an invariant rather than a motion.
 
 ## Mesh processing
 
