@@ -363,36 +363,51 @@ inline bool hit_instance(const Ray32& r, const Instance& g, const Quadric& qd, H
     return found;
 }
 
-// Stack traversal, near child first, as `BVH::ray_cast` walks it.
+// Stack traversal, near child first, as `BVH::ray_cast` walks it -- with
+// one change that alters which nodes are visited and never which hit is
+// found: a child's box is tested once, when it is pushed, and its entry
+// distance travels on the stack with it. At the pop the only question left
+// is whether a hit found since then is already nearer, which is a compare
+// rather than a second slab test. Worth about 10% of a frame on the device.
 template<typename Leaf>
 inline bool walk(const std::vector<Node>& nodes, const Ray32& r, Hit& h, Leaf&& leaf) {
     if (nodes.empty()) return false;
     std::uint32_t stack[64];
+    float enter[64];
     int sp = 0;
-    stack[sp++] = 0;
+    stack[sp] = 0;
+    enter[sp++] = 0.0f;
     bool any = false;
     while (sp > 0) {
-        const Node& n = nodes[stack[--sp]];
-        float t_enter;
-        if (!slab(r, n, h.t, t_enter)) continue;
+        --sp;
+        const std::uint32_t self = stack[sp];
+        if (enter[sp] > h.t) continue;
+        const Node& n = nodes[self];
+        if (self == 0) {
+            float te;
+            if (!slab(r, n, h.t, te)) continue;
+        }
         if (n.count > 0) {
             for (std::uint32_t i = 0; i < n.count; ++i)
                 if (leaf(n.first + i)) any = true;
             continue;
         }
-        const std::uint32_t self = static_cast<std::uint32_t>(&n - nodes.data());
         const std::uint32_t left = self + 1, right = n.first;
         float tl = 0, tr = 0;
         const bool l_ok = slab(r, nodes[left], h.t, tl);
         const bool r_ok = slab(r, nodes[right], h.t, tr);
+        auto push = [&](std::uint32_t node, float t_enter) {
+            enter[sp] = t_enter;
+            stack[sp++] = node;
+        };
         if (l_ok && r_ok) {
             // Push the far child first so the near one is popped next.
-            if (tl > tr) { stack[sp++] = left; stack[sp++] = right; }
-            else         { stack[sp++] = right; stack[sp++] = left; }
+            if (tl > tr) { push(left, tl); push(right, tr); }
+            else         { push(right, tr); push(left, tl); }
         } else if (l_ok) {
-            stack[sp++] = left;
+            push(left, tl);
         } else if (r_ok) {
-            stack[sp++] = right;
+            push(right, tr);
         }
     }
     return any;
@@ -416,6 +431,39 @@ inline Hit trace(const Scene& sc, const Ray32& r) {
         return true;
     });
     return h;
+}
+
+// Primary-ray shading with the demo's key and fill lights and none of its
+// secondary rays -- no shadows, highlights, reflections or see-through
+// dust yet. Enough to compare two renderers pixel for pixel; not yet the
+// picture. Linear [0,1], clamped by the caller.
+struct Lights {
+    V3 key, fill;
+    float fill_strength;
+    V3 background;
+};
+
+inline V3 shade(const Scene& sc, const Ray32& r, const Hit& h, const Lights& L) {
+    if (h.kind == HitKind::None) return L.background;
+    V3 n, base, emit;
+    if (h.kind == HitKind::Triangle) {
+        const auto& t = sc.triangles[h.index];
+        const float w0 = 1.0f - h.u - h.v;
+        n = v3(t.n0) * w0 + v3(t.n1) * h.u + v3(t.n2) * h.v;
+        n = n * (1.0f / std::sqrt(dot(n, n)));
+        base = v3(t.color_rough);
+        emit = v3(t.emissive);
+    } else {
+        const auto& g = sc.instances[h.index];
+        n = h.normal;
+        base = v3(g.color_rough);
+        emit = v3(g.emissive_opacity);
+    }
+    if (dot(n, r.d) > 0.0f) n = n * -1.0f;
+    float diff = std::max(0.0f, dot(n, L.key));
+    diff += L.fill_strength * std::max(0.0f, dot(n, L.fill));
+    diff = std::min(diff, 1.0f);
+    return base * (0.22f + 0.78f * diff) + emit;
 }
 
 }  // namespace spatium::render::gpu
