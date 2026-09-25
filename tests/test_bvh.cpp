@@ -390,3 +390,55 @@ TEST_CASE("BVH any-hit works for every shape first-hit works for", "[bvh]") {
     CHECK_FALSE(bvh.ray_test(Ray<3, double>{{-5.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}, 3.0));
     CHECK(bvh.ray_cast(Ray<3, double>{{-5.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}));
 }
+
+// ── The same tree over balls ────────────────────────────────────
+//
+// One hierarchy, the bound swapped: a ball tree must give the answers the
+// box tree gives, which are the brute-force answers. First hit by ray and
+// nearest point, over random rays and points, on a scene with both
+// scattered triangles and a flat grid.
+TEST_CASE("A BVH over balls answers as the BVH over boxes does", "[bvh][bound]") {
+    std::vector<Triangle3> tris = make_grid_triangles(12, 12);
+    std::uint64_t state = 12345;
+    auto uniform = [&state] {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<double>(state >> 11) / static_cast<double>(1ull << 53);
+    };
+    for (int i = 0; i < 400; ++i) {
+        const double x = uniform() * 12, y = uniform() * 12, z = uniform() * 4;
+        tris.push_back(Triangle3({x, y, z}, {x + 0.4, y, z + 0.1}, {x, y + 0.4, z + 0.3}));
+    }
+    const auto boxes = BVH<Triangle3>::build(tris);
+    const auto balls = BVH<Triangle3, Ball<3, double>>::build(tris);
+
+    for (int i = 0; i < 2000; ++i) {
+        const Vec<double, 3> o{uniform() * 12, uniform() * 12, 6.0};
+        const Vec<double, 3> d{uniform() - 0.5, uniform() - 0.5, -1.0};
+        const auto ray = *Ray<3, double>::from(o, d);
+        const auto a = boxes.ray_cast(ray);
+        const auto b = balls.ray_cast(ray);
+        REQUIRE(a.has_value() == b.has_value());
+        if (a) {
+            CHECK(a->index == b->index);
+            CHECK(a->t == b->t);
+        }
+        CHECK(boxes.ray_test(ray, 3.0) == balls.ray_test(ray, 3.0));
+
+        const Vec<double, 3> p{uniform() * 14 - 1, uniform() * 14 - 1, uniform() * 6 - 1};
+        const auto na = boxes.nearest(p);
+        const auto nb = balls.nearest(p);
+        REQUIRE(na);
+        REQUIRE(nb);
+        CHECK_THAT(nb->distance, WithinAbs(na->distance, 1e-12));
+    }
+}
+
+TEST_CASE("A merged ball contains both of its children", "[bvh][bound]") {
+    using B = Ball<3, double>;
+    const B a{{0.0, 0.0, 0.0}, 1.0}, b{{3.0, 0.0, 0.0}, 0.5}, inner{{0.2, 0.0, 0.0}, 0.1};
+    const auto m = merge(a, b);
+    CHECK(Vec<double, 3>{a.c - m.c}.norm() + a.r <= m.r);
+    CHECK(Vec<double, 3>{b.c - m.c}.norm() + b.r <= m.r);
+    CHECK(merge(a, inner).r == a.r);   // one inside the other: the outer one
+    CHECK_THAT(m.r, WithinAbs(2.25, 1e-12));
+}

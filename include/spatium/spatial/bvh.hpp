@@ -8,6 +8,7 @@
 #  include <spatium/geometry/intersection.hpp>
 #  include <spatium/geometry/ray_hit.hpp>
 #  include <spatium/geometry/triangle.hpp>
+#  include <spatium/spatial/bound.hpp>
 #  include <algorithm>
 #  include <array>
 #  include <cstdint>
@@ -20,12 +21,17 @@
 
 SPATIUM_EXPORT namespace spatium::spatial {
 
-template<geometry::Bounded Shape>
+// `B` is what a node is bounded by -- see bound.hpp. The default is the
+// axis-aligned box the tree has always used, and with it the tree builds
+// and walks exactly as before; a Ball gives the same tree over spheres.
+template<geometry::Bounded Shape,
+         Bound B = geometry::Box<Shape::ambient_dimension, typename Shape::ScalarType>>
 struct BVH {
     using T = typename Shape::ScalarType;
     static constexpr std::size_t N = Shape::ambient_dimension;
     using PointType = Vec<T, N>;
     using BoxType = geometry::Box<N, T>;
+    using BoundType = B;
 
     // BVH itself requires `Bounded` (above) — the Shape must supply
     // `bounding_box()`. When the Shape ALSO satisfies `RayHittable`,
@@ -66,11 +72,11 @@ struct BVH {
         bvh.shapes_ = std::move(shapes);
         if (bvh.shapes_.empty()) return bvh;
 
-        std::vector<BoxType> boxes(bvh.shapes_.size());
+        std::vector<B> boxes(bvh.shapes_.size());
         std::vector<PointType> centroids(bvh.shapes_.size());
         for (std::size_t i = 0; i < bvh.shapes_.size(); ++i) {
-            boxes[i] = bvh.shapes_[i].bounding_box();
-            centroids[i] = boxes[i].centroid();
+            boxes[i] = bound_of<B>(bvh.shapes_[i]);
+            centroids[i] = center(boxes[i]);
         }
 
         std::vector<std::size_t> indices(bvh.shapes_.size());
@@ -101,8 +107,7 @@ struct BVH {
                 auto node_idx = stack[--sp];
                 auto& node = nodes_[node_idx];
 
-                auto box_hit = geometry::intersect_parameters(ray, node.bounds);
-                if (!box_hit || box_hit->first > best_t) continue;
+                if (!ray_interval(ray, node.bounds, best_t)) continue;
 
                 if (node.count > 0) {
                     for (std::uint32_t i = 0; i < node.count; ++i) {
@@ -139,11 +144,11 @@ struct BVH {
                 } else {
                     auto left = node_idx + 1;
                     auto right = node.first;
-                    auto left_t = geometry::intersect_parameters(ray, nodes_[left].bounds);
-                    auto right_t = geometry::intersect_parameters(ray, nodes_[right].bounds);
+                    auto left_t = ray_interval(ray, nodes_[left].bounds, best_t);
+                    auto right_t = ray_interval(ray, nodes_[right].bounds, best_t);
 
-                    bool left_ok = left_t && left_t->first <= best_t;
-                    bool right_ok = right_t && right_t->first <= best_t;
+                    bool left_ok = left_t.has_value();
+                    bool right_ok = right_t.has_value();
 
                     // Push far first, near second (near popped first)
                     if (left_ok && right_ok) {
@@ -180,8 +185,7 @@ struct BVH {
                 auto node_idx = stack[--sp];
                 auto& node = nodes_[node_idx];
 
-                auto box_hit = geometry::intersect_parameters(ray, node.bounds);
-                if (!box_hit || box_hit->first > t_max) continue;
+                if (!ray_interval(ray, node.bounds, t_max)) continue;
 
                 if (node.count > 0) {
                     for (std::uint32_t i = 0; i < node.count; ++i) {
@@ -221,7 +225,7 @@ struct BVH {
                 auto node_idx = stack[--sp];
                 auto& node = nodes_[node_idx];
 
-                T box_dist = node.bounds.distance(p);
+                T box_dist = lower_distance(node.bounds, p);
                 if (box_dist >= best_dist) continue;
 
                 if (node.count > 0) {
@@ -237,8 +241,8 @@ struct BVH {
                 } else {
                     auto left = node_idx + 1;
                     auto right = node.first;
-                    T dl = nodes_[left].bounds.distance(p);
-                    T dr = nodes_[right].bounds.distance(p);
+                    T dl = lower_distance(nodes_[left].bounds, p);
+                    T dr = lower_distance(nodes_[right].bounds, p);
 
                     if (dl < dr) {
                         if (dr < best_dist) stack[sp++] = right;
@@ -265,7 +269,7 @@ struct BVH {
                 auto node_idx = stack[--sp];
                 auto& node = nodes_[node_idx];
 
-                if (!node.bounds.intersects(query)) continue;
+                if (!overlaps(node.bounds, query)) continue;
 
                 if (node.count > 0) {
                     for (std::uint32_t i = 0; i < node.count; ++i) {
@@ -296,7 +300,7 @@ struct BVH {
     // a GPU copy of the tree is these two arrays converted, not a second
     // build that could split differently.
     struct Node {
-        BoxType bounds;
+        B bounds;
         std::uint32_t first{};
         std::uint32_t count{};
     };
@@ -333,16 +337,16 @@ private:
 
     std::uint32_t build_recursive(std::vector<std::size_t>& indices,
                                    std::size_t begin, std::size_t end,
-                                   const std::vector<BoxType>& boxes,
+                                   const std::vector<B>& boxes,
                                    const std::vector<PointType>& centroids,
                                    std::size_t depth) {
         auto node_idx = static_cast<std::uint32_t>(nodes_.size());
         nodes_.push_back({});
         depth_ = std::max(depth_, depth);
 
-        BoxType bounds = boxes[indices[begin]];
+        B bounds = boxes[indices[begin]];
         for (std::size_t i = begin + 1; i < end; ++i)
-            bounds = bounds.union_with(boxes[indices[i]]);
+            bounds = merge(bounds, boxes[indices[i]]);
 
         std::size_t count = end - begin;
 
@@ -365,9 +369,9 @@ private:
         T best_cost = std::numeric_limits<T>::max();
         std::size_t best_axis = 0;
         std::size_t best_split_bin = 0;
-        T parent_area = bounds.surface_measure();
+        T parent_area = sah_measure(bounds);
 
-        struct Bin { BoxType bounds{}; std::uint32_t n{}; bool init{}; };
+        struct Bin { B bounds{}; std::uint32_t n{}; bool init{}; };
 
         for (std::size_t axis = 0; axis < N; ++axis) {
             T ext = cbounds.max_corner[axis] - cbounds.min_corner[axis];
@@ -382,7 +386,7 @@ private:
                 int b = std::clamp(int((centroids[idx][axis] - lo) * inv * T(NUM_BINS)),
                                    0, NUM_BINS - 1);
                 if (!bins[b].init) { bins[b].bounds = boxes[idx]; bins[b].init = true; }
-                else bins[b].bounds = bins[b].bounds.union_with(boxes[idx]);
+                else bins[b].bounds = merge(bins[b].bounds, boxes[idx]);
                 bins[b].n++;
             }
 
@@ -390,22 +394,22 @@ private:
             std::array<T, NUM_BINS - 1> la{};
             std::array<std::uint32_t, NUM_BINS - 1> lc{};
             {
-                BoxType run{}; bool ri = false; std::uint32_t cn = 0;
+                B run{}; bool ri = false; std::uint32_t cn = 0;
                 for (int i = 0; i < NUM_BINS - 1; ++i) {
-                    if (bins[i].init) { run = ri ? run.union_with(bins[i].bounds) : bins[i].bounds; ri = true; }
+                    if (bins[i].init) { run = ri ? merge(run, bins[i].bounds) : bins[i].bounds; ri = true; }
                     cn += bins[i].n;
                     lc[i] = cn;
-                    la[i] = ri ? run.surface_measure() : T{0};
+                    la[i] = ri ? sah_measure(run) : T{0};
                 }
             }
 
             // Right sweep + cost
             {
-                BoxType run{}; bool ri = false; std::uint32_t cn = 0;
+                B run{}; bool ri = false; std::uint32_t cn = 0;
                 for (int i = NUM_BINS - 1; i >= 1; --i) {
-                    if (bins[i].init) { run = ri ? run.union_with(bins[i].bounds) : bins[i].bounds; ri = true; }
+                    if (bins[i].init) { run = ri ? merge(run, bins[i].bounds) : bins[i].bounds; ri = true; }
                     cn += bins[i].n;
-                    T ra = ri ? run.surface_measure() : T{0};
+                    T ra = ri ? sah_measure(run) : T{0};
                     T cost = T{1} + (lc[i - 1] * la[i - 1] + cn * ra) / parent_area;
                     if (cost < best_cost) {
                         best_cost = cost;
@@ -448,7 +452,7 @@ private:
         return node_idx;
     }
 
-    void make_leaf(std::uint32_t node_idx, const BoxType& bounds,
+    void make_leaf(std::uint32_t node_idx, const B& bounds,
                    const std::vector<std::size_t>& indices,
                    std::size_t begin, std::size_t end) {
         auto offset = static_cast<std::uint32_t>(prim_indices_.size());
