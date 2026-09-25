@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <spatium/algebra/noise.hpp>
 #include <spatium/io/build.hpp>
+#include <spatium/io/field_glsl.hpp>
 #include <spatium/io/field_pod.hpp>
 
 #include "donut_scene.hpp"
@@ -217,4 +218,31 @@ TEST_CASE("Every structural field in the donut scene interprets bit for bit",
     CHECK(refused.size() == report.opaque_fields);
     CHECK(evaluations > 0);
     CHECK(mismatches == 0);
+}
+
+// The GLSL emitter refuses what lowering refuses, and a deformation has no
+// placement to emit. What it produces is compiled and checked on a device
+// by `donut_live --dust-check`; here only the refusals and the data it
+// carries, which need no GPU.
+TEST_CASE("GLSL emission refuses a closure and a deformation, and carries the tables",
+          "[field][pod][glsl]") {
+    using F = bd::ScalarField<double>;
+    using V = bd::VecField<double>;
+    bd::GlslModule m;
+    CHECK_FALSE(bd::emit_vector(m, V::opaque_of_time([](double t) { return Vec<double, 3>{t, 0, 0}; }),
+                                "a").has_value());
+    CHECK_FALSE(bd::emit_placement(m, V::make(F::point(0), F{0.0}, F{0.0}) + V::point(), "b")
+                    .has_value());
+
+    algebra::PerlinNoise n(3);
+    auto table = std::make_shared<const std::vector<Vec<double, 3>>>(
+        std::vector<Vec<double, 3>>{{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}});
+    auto motion = V::point() + V::make(noise(n, F::hash(1u), F::t(), F{0.0}),
+                                       gather(table, F::hash(2u) * F{2.0}, 1), F{0.0});
+    REQUIRE(motion.is_placement());
+    REQUIRE(bd::emit_placement(m, motion, "c").has_value());
+    CHECK(m.perm.size() == 512);
+    CHECK(m.points.size() == 6);
+    CHECK(m.code.find("void c_place(") != std::string::npos);
+    CHECK(m.code.find("field_noise(0u") != std::string::npos);
 }
