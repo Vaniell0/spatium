@@ -81,6 +81,7 @@ add_executable(spatium_tests
     test_ccd_certified.cpp
     test_geodesic_ball.cpp
     test_metric_field.cpp
+    test_spacetime_scene.cpp
     test_chart.cpp
 )
 
