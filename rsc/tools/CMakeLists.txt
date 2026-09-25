@@ -93,3 +93,11 @@ target_include_directories(solver_cost PRIVATE
 )
 target_link_libraries(solver_cost PRIVATE spatium_core)
 target_compile_options(solver_cost PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(supervised_vs_reinforce supervised_vs_reinforce.cpp)
+target_include_directories(supervised_vs_reinforce PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(supervised_vs_reinforce PRIVATE spatium_core)
+target_compile_options(supervised_vs_reinforce PRIVATE -Wall -Wextra -Wpedantic)
