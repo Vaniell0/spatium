@@ -62,10 +62,13 @@
 #  include <spatium/geometry/ray_surface.hpp>
 #  include <spatium/physics/mechanics/narrow_phase.hpp>
 #  include <spatium/physics/mechanics/xpbd.hpp>
+#  include <spatium/spatial/bound.hpp>
 #  include <algorithm>
 #  include <cmath>
 #  include <cstddef>
+#  include <cstdint>
 #  include <limits>
+#  include <queue>
 #  include <utility>
 #  include <vector>
 #endif
@@ -440,6 +443,246 @@ SweptContact<T> sweep_sphere_surface(const Vec<T, 3>& c0, T radius, const Vec<T,
     }
     out.toi = t;
     return out;
+}
+
+// ── The search in time, for a chart ────────────────────────────
+//
+// Advancement alone crawls at a graze: along a tangent the distance falls
+// as x^2, each step is a fraction of the last, and the iteration cap ends
+// it with a contact up to a percent of the step early -- and with a
+// contact where the path in fact passes by. A chart is searched instead
+// over cells of parameters x time, earliest time first.
+//
+// A cell -- a rectangle of parameters and an interval [t0, t1] -- holds no
+// contact if |p(t_mid) - f(centre)| minus the cell's reach on the surface
+// minus half the distance the ball moves over the interval is above the
+// tolerance, and is dropped. When the earliest cell left shows a real
+// contact at its centre and is short, every earlier moment is already
+// covered by dropped cells, so its start is a certified time of impact.
+// An empty queue is a proved miss; a spent budget reports the earliest open
+// moment as a contact, early and never late.
+//
+// Advancement still does the first moves, because far from the surface it
+// clears most of the step in a few, which the search would otherwise
+// prove empty cell by cell. Both read the same tree of cells.
+//
+// Measured against advancement alone on 150 random grazes of a unit sphere
+// (no late answer and no miss at any budget; advancement is ~9k
+// evaluations a graze, up to 9.6e-3 of the step early, and reports nearly
+// every grazing miss as a contact):
+//
+//   budget   worst early   grazing misses proved   evaluations   ms
+//   2^12       3.2e-3            7 of 76              2.7k       0.7
+//   2^14       8.0e-4           20 of 76             10.6k       2.5
+//   2^16       2.0e-4           26 of 76             38.8k       8.5
+//   2^20       5.3e-5           41 of 76              312k        90
+//
+// A torus (R 1, r 0.3) is harder: at 2^14, 98 of 617 grazes more than 1e-3
+// early against 493 for advancement at a like cost, and the worst, 0.38 of
+// the step, is shared by both -- a path that first passes the tube by a
+// hair and only later touches it. The spike of test_ccd_certified.cpp
+// costs 842k evaluations against 13.3M for advancement alone. What this does not change is a ball against a
+// chart: the ball's distance has a flat minimum, which a bound of first
+// order needs cells as 1/gap to certify.
+
+// The spatial half of the search, which does not depend on the query:
+// cells of a chart's parameter rectangle, each a ball -- the image of its
+// centre and how far the image of the cell can reach from it. Built
+// lazily, a cell's halves the first time something asks for them, and
+// kept, so the next query against the same surface, or the same query
+// next step, walks what is already there.
+template<Scalar T>
+class ChartCellTree {
+public:
+    struct Cell {
+        T u0, u1, v0, v1;
+        spatial::Ball<3, T> ball;
+        std::int32_t first_child = -1;   // two children at first_child and first_child + 1
+    };
+
+    explicit ChartCellTree(LipschitzChart<T> chart) : chart_(std::move(chart)) {
+        const auto& d = chart_.chart.domain();
+        cells_.push_back(make(d.u_min, d.u_max, d.v_min, d.v_max));
+    }
+
+    const Cell& cell(std::size_t i) const { return cells_[i]; }
+    std::size_t size() const { return cells_.size(); }
+
+    // The two halves of cell i, made if they are not yet: the side whose
+    // halving shrinks the reach more.
+    std::uint32_t children(std::size_t i) {
+        if (cells_[i].first_child >= 0) return static_cast<std::uint32_t>(cells_[i].first_child);
+        const Cell c = cells_[i];
+        const T um = (c.u0 + c.u1) / T{2}, vm = (c.v0 + c.v1) / T{2};
+        const auto first = static_cast<std::int32_t>(cells_.size());
+        if (reach(c.u0, um, c.v0, c.v1) <= reach(c.u0, c.u1, c.v0, vm)) {
+            cells_.push_back(make(c.u0, um, c.v0, c.v1));
+            cells_.push_back(make(um, c.u1, c.v0, c.v1));
+        } else {
+            cells_.push_back(make(c.u0, c.u1, c.v0, vm));
+            cells_.push_back(make(c.u0, c.u1, vm, c.v1));
+        }
+        cells_[i].first_child = first;
+        return static_cast<std::uint32_t>(first);
+    }
+
+    // Forget every cell but the root once the tree holds more than a caller
+    // wants to keep. What it forgets is work, never an answer.
+    void trim(std::size_t max_cells) {
+        if (cells_.size() <= max_cells) return;
+        cells_.resize(1);
+        cells_[0].first_child = -1;
+    }
+
+    Vec<T, 3> normal(std::size_t i) const {
+        const auto& c = cells_[i];
+        return chart_.chart.normal_at((c.u0 + c.u1) / T{2}, (c.v0 + c.v1) / T{2});
+    }
+
+private:
+    T reach(T u0, T u1, T v0, T v1) const {
+        using std::sqrt;
+        if (chart_.cell_radius) return chart_.cell_radius(u0, u1, v0, v1);
+        const T du = u1 - u0, dv = v1 - v0;
+        return chart_.lipschitz * sqrt(du * du + dv * dv) / T{2};
+    }
+    Cell make(T u0, T u1, T v0, T v1) const {
+        const Vec<T, 3> x = chart_.chart((u0 + u1) / T{2}, (v0 + v1) / T{2});
+        return Cell{u0, u1, v0, v1, spatial::Ball<3, T>{x, reach(u0, u1, v0, v1)}, -1};
+    }
+
+    LipschitzChart<T> chart_;
+    std::vector<Cell> cells_;
+};
+
+namespace detail {
+
+// A floor on the distance from `p` to the chart and the best real distance
+// found, by branch and bound over the tree, keeping what it splits. Stops
+// once the floor above `floor` is at least half the gap of the best, as
+// distance_bound() does, or when it has made `budget` new cells.
+template<Scalar T>
+std::pair<T, T> tree_distance_bound(const Vec<T, 3>& p, ChartCellTree<T>& tree, T floor,
+                                    std::size_t budget) {
+    struct Item { std::uint32_t cell; T lower; };
+    const auto worse = [](const Item& a, const Item& b) { return a.lower > b.lower; };
+    std::priority_queue<Item, std::vector<Item>, decltype(worse)> open(worse);
+    const T ulp = std::numeric_limits<T>::epsilon() * T{8};
+    const std::size_t before = tree.size();
+    T best = std::numeric_limits<T>::infinity();
+    auto push = [&](std::uint32_t i) {
+        const auto& b = tree.cell(i).ball;
+        const T d = Vec<T, 3>{p - b.c}.norm();
+        best = std::min(best, d);
+        open.push(Item{i, d - b.r - ulp * (p.norm() + b.c.norm())});
+    };
+    push(0);
+    std::size_t pops = 0;
+    T lower = open.top().lower;
+    while (true) {
+        const Item it = open.top();
+        lower = it.lower;
+        if (best <= floor || lower - floor >= (best - floor) / T{2}) break;
+        if (tree.size() - before + 2 > budget || ++pops > 4 * budget) break;
+        open.pop();
+        const auto first = tree.children(it.cell);
+        push(first);
+        push(first + 1);
+    }
+    return {std::max(lower, T{0}), best};
+}
+
+}  // namespace detail
+
+// The first time a ball of `radius`, moving by `disp` over the step, comes
+// within the contact tolerance of the chart the tree was built on. `budget`
+// caps the new cells the query makes -- the evaluations of the chart --
+// across advancement and search together. See the header of this section
+// for what each budget buys.
+template<Scalar T>
+SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& disp,
+                              ChartCellTree<T>& tree, std::size_t budget = std::size_t{1} << 20,
+                              int advance_moves = 8) {
+    using std::max; using std::sqrt;
+    const T speed = disp.norm();
+    const T scale = max({c0.norm(), Vec<T, 3>{c0 + disp}.norm(), radius});
+    const T tol = sqrt(std::numeric_limits<T>::epsilon()) * scale;
+    const T ulp = std::numeric_limits<T>::epsilon() * T{8};
+    const std::size_t before = tree.size();
+    const auto spent = [&] { return tree.size() - before; };
+
+    SweptContact<T> out{false, T{1}, {}, true, 0};
+    const auto finish = [&](bool hit, T toi, ContactQuery<T> contact) {
+        out.hit = hit;
+        out.toi = toi;
+        out.contact = contact;
+        out.evaluations = spent();
+        return out;
+    };
+
+    T start = T{0};
+    for (int k = 0; k < advance_moves && speed > T{0}; ++k) {
+        if (spent() >= budget) break;
+        const Vec<T, 3> p{c0 + disp * start};
+        const auto [lower, best] = detail::tree_distance_bound(p, tree, tol + radius, budget - spent());
+        if (best - radius <= tol) return finish(true, start, ContactQuery<T>{T{0}, p, {}, false});
+        const T step = (lower - radius) / speed;
+        if (step <= T{0}) break;
+        if (start + step >= T{1}) return finish(false, T{1}, {});   // the rest is proved clear
+        start += step;
+    }
+
+    struct Item { std::uint32_t cell; T t0, t1, lower; };
+    const auto later = [](const Item& a, const Item& b) {
+        return a.t0 != b.t0 ? a.t0 > b.t0 : a.lower > b.lower;
+    };
+    std::priority_queue<Item, std::vector<Item>, decltype(later)> open(later);
+    const auto gap_at = [&](std::uint32_t cell, T t) {
+        const auto& b = tree.cell(cell).ball;
+        const Vec<T, 3> p{c0 + disp * t};
+        return std::pair{Vec<T, 3>{p - b.c}.norm() - radius, ulp * (p.norm() + b.c.norm())};
+    };
+    const auto push = [&](std::uint32_t cell, T t0, T t1) {
+        const auto [dc, pad] = gap_at(cell, (t0 + t1) / T{2});
+        const T lower = dc - tree.cell(cell).ball.r - speed * (t1 - t0) / T{2} - pad;
+        if (lower > tol) return;   // proved empty
+        open.push(Item{cell, t0, t1, lower});
+    };
+
+    push(0, start, T{1});
+    std::size_t pops = 0;
+    while (!open.empty()) {
+        const Item it = open.top();
+        const auto& cell = tree.cell(it.cell);
+        if (spent() + 2 > budget || ++pops > 4 * budget)   // could not prove it clear past here
+            return finish(true, it.t0, ContactQuery<T>{T{0}, cell.ball.c, tree.normal(it.cell), false});
+        open.pop();
+        const T tc = (it.t0 + it.t1) / T{2};
+        const T dc = gap_at(it.cell, tc).first;
+        const T drift = speed * (it.t1 - it.t0);
+        if (dc <= tol && drift <= tol)
+            return finish(true, it.t0, ContactQuery<T>{max(dc, T{0}), cell.ball.c, tree.normal(it.cell), false});
+        // Split what contributes more to the gap between floor and truth.
+        if (drift / T{2} >= cell.ball.r) {
+            push(it.cell, it.t0, tc);
+            push(it.cell, tc, it.t1);
+        } else {
+            const auto first = tree.children(it.cell);
+            push(first, it.t0, it.t1);
+            push(first + 1, it.t0, it.t1);
+        }
+    }
+    return finish(false, T{1}, {});
+}
+
+// A chart goes through the search above; `max_iterations` is how many
+// moves of advancement it makes before the search takes over.
+template<Scalar T>
+SweptContact<T> sweep_sphere_surface(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& disp,
+                                     const LipschitzChart<T>& chart, int max_iterations = 8,
+                                     std::size_t budget = std::size_t{1} << 20) {
+    ChartCellTree<T> tree(chart);
+    return first_contact(c0, radius, disp, tree, budget, max_iterations);
 }
 
 template<Scalar T, typename S>
