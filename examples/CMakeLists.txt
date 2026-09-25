@@ -131,6 +131,12 @@ if(SPATIUM_HAS_VIEWER)
     # times it. The first step towards a live window.
     spatium_add_example(NAME donut_live LIBS spatium_viewer OPTIONS -O3 -march=native)
 
+    # Black holes described in the scene language and traced on the
+    # device -- one program for one hole or a pair. `--check` sends rays
+    # through the scene's metric on the device, on the host in float and in
+    # double, and reports how far their end points are apart.
+    spatium_add_example(NAME blackhole_live LIBS spatium_viewer OPTIONS -O3 -march=native)
+
     # Burning Ship fractal — Vulkan window with a fragment-shader
     # iterator and Jacobian-based distance estimation.  Deliberately
     # standalone (no spatium_viewer dep) so it can later double as a

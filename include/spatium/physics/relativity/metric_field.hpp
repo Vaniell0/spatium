@@ -134,6 +134,8 @@ public:
     // All ten in one pool with every repeated op kept once, and where each
     // entry's value lands in it. What operator() evaluates.
     const std::vector<io::build::PodOp<T>>& pool() const { return pool_; }
+    // Where entry e's value lands in the pool.
+    std::uint32_t root(std::size_t e) const { return root_[e]; }
 
 private:
     // The ten entries share most of their arithmetic -- Kerr's Sigma, sin
