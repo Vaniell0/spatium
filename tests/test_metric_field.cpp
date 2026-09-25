@@ -162,3 +162,73 @@ TEST_CASE("Kerr-Schild and Boyer-Lindquist agree on the equator", "[relativity][
         CHECK_THAT(ks(V4{0.0, rho, 0.0, 0.0})(0, 0), WithinAbs(bl(V4{0.0, r, std::numbers::pi / 2, 0.0})(0, 0), 1e-13));
     }
 }
+
+// ── One clock ────────────────────────────────────────────────────
+//
+// A motion reads time as its first parameter, a metric as coordinate 0;
+// `in_spacetime()` is the same field on the metric's clock. It must mean
+// the same thing on both -- through the field and through its lowered
+// form -- and it is what lets a hole's path, written as a motion, enter
+// the metric that hole makes.
+TEST_CASE("A motion field reads the same on the metric's clock", "[relativity][metric_field][clock]") {
+    using F = io::build::Field<double>;
+    const F t = F::t();
+    const F e = min(max(t * F(0.5), F(0.0)), F(1.0));
+    const F motion = F(3.0) * cos(F(0.7) * t) + e * e * (F(3.0) - F(2.0) * e) + sqrt(t * t + F(1.0));
+    const auto clock = motion.in_spacetime();
+    REQUIRE(clock);
+    const auto pod = io::build::lower(motion), pod_clock = io::build::lower(*clock);
+    REQUIRE(pod);
+    REQUIRE(pod_clock);
+    std::vector<double> s0(pod->ops.size()), s1(pod_clock->ops.size());
+    for (double time : {-2.0, 0.0, 0.37, 1.5, 4.0, 11.0}) {
+        io::build::FieldInputs<double> as_motion{};
+        as_motion.u = time;
+        io::build::FieldInputs<double> as_event{};
+        as_event.x = V4{time, 5.0, -2.0, 7.0};   // the spatial coordinates must not matter
+        const double a = io::build::interpret(pod->ops.data(), static_cast<std::uint32_t>(pod->ops.size()),
+                                              pod->tables.data(), pod->points.data(), s0.data(), as_motion);
+        const double b = io::build::interpret(pod_clock->ops.data(), static_cast<std::uint32_t>(pod_clock->ops.size()),
+                                              pod_clock->tables.data(), pod_clock->points.data(), s1.data(), as_event);
+        CHECK(a == b);
+    }
+}
+
+TEST_CASE("A field that reads what an event has not cannot join the metric's clock",
+          "[relativity][metric_field][clock]") {
+    using F = io::build::Field<double>;
+    const auto surface = (F::t() + F::v()).in_spacetime();
+    REQUIRE_FALSE(surface);
+    CHECK(surface.error().message.find("is V") != std::string::npos);
+    CHECK_FALSE((F::t() * F::point(0)).in_spacetime());
+    CHECK_FALSE(F([](double u, double) { return u; }).in_spacetime());
+}
+
+// A non-spinning hole on a circular path, its path written as a motion:
+// at every event its metric is the static hole's metric at the offset from
+// where the hole is at that event's time.
+TEST_CASE("A hole whose path is a motion field makes the metric of a hole at that point",
+          "[relativity][metric_field][clock]") {
+    using F = io::build::Field<double>;
+    const double M = 1.0, R = 12.0, w = 0.02;
+    const F cx = *(F(R) * cos(F(w) * F::t())).in_spacetime();
+    const F cy = *(F(R) * sin(F(w) * F::t())).in_spacetime();
+    const F x = F::coord(1) - cx, y = F::coord(2) - cy, z = F::coord(3);
+    const F r = sqrt(x * x + y * y + z * z);
+    const std::array<F, 4> l{F(1.0), x / r, y / r, z / r};
+    std::array<F, 10> g;
+    for (std::size_t e = 0; e < 10; ++e) {
+        const auto [i, j] = MetricField<double>::kEntries[e];
+        g[e] = F(i != j ? 0.0 : (i == 0 ? -1.0 : 1.0)) + F(2.0 * M) / r * l[i] * l[j];
+    }
+    const auto moving = *MetricField<double>::make(g);
+    const auto at_rest = kerr_schild(M, 0.0);
+    for (double time : {0.0, 40.0, 157.0, 300.0})
+        for (const V4 ev : {V4{time, 3.0, 4.0, 1.0}, V4{time, -20.0, 2.0, -3.0}}) {
+            const V4 offset{time, ev[1] - R * std::cos(w * time), ev[2] - R * std::sin(w * time), ev[3]};
+            const auto a = moving(ev), b = at_rest(offset);
+            for (std::size_t i = 0; i < 4; ++i)
+                for (std::size_t j = 0; j < 4; ++j)
+                    CHECK_THAT(a(i, j), WithinAbs(b(i, j), 1e-12));
+        }
+}
