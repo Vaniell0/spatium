@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <spatium/spatial/ball_tree.hpp>
 #include <spatium/spatial/geodesic_ball.hpp>
 
 #include <cmath>
@@ -191,4 +192,47 @@ static void check_merge(const G& g) {
 TEST_CASE("A merged geodesic ball contains both of its children", "[spatial][geodesic_ball]") {
     SECTION("Sphere 2") { check_merge(Sph<2>{}); }
     SECTION("Hyperbolic 3") { check_merge(Hyp<3>{}); }
+}
+
+// The tree answers what checking every item answers: the same first item a
+// ray enters, at the same parameter, and the same nearest item -- on a
+// sphere, where merged nodes can pass the injectivity radius, in
+// hyperbolic space, and in the flat case.
+template<typename G>
+static void check_tree(const G& g, const char* name) {
+    std::mt19937_64 rng(11);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    std::vector<GeodesicBall<typename G::S>> items;
+    for (int i = 0; i < 600; ++i) items.push_back({g.point(rng), 0.02 + 0.1 * unit(rng)});
+    const auto tree = GeodesicBallTree<typename G::S>::build(g.space, items);
+    int hits = 0;
+    for (int k = 0; k < 1500; ++k) {
+        const auto p = g.point(rng);
+        const auto v = g.unit_tangent(p, rng);
+        const double tmax = g.reach() * unit(rng);
+        std::optional<std::pair<std::size_t, double>> brute;
+        for (std::size_t i = 0; i < items.size(); ++i)
+            if (auto in = ray_interval(g.space, p, v, items[i], tmax); in && (!brute || in->first < brute->second))
+                brute = std::pair{i, in->first};
+        const auto got = tree.ray_cast(p, v, tmax);
+        INFO(std::format("{} ray {}", name, k));
+        REQUIRE(got.has_value() == brute.has_value());
+        if (got) {
+            ++hits;
+            CHECK(got->t == brute->second);
+        }
+        double best = std::numeric_limits<double>::infinity();
+        for (const auto& b : items) best = std::min(best, lower_distance(g.space, b, p));
+        const auto near = tree.nearest(p);
+        REQUIRE(near);
+        CHECK(near->distance == best);
+    }
+    INFO(std::format("{}: {} rays hit", name, hits));
+    CHECK(hits > 100);
+}
+
+TEST_CASE("A geodesic ball tree answers as checking every ball does", "[spatial][geodesic_ball]") {
+    SECTION("Euclidean 3") { check_tree(Euc<3>{}, "E3"); }
+    SECTION("Sphere 2") { check_tree(Sph<2>{}, "S2"); }
+    SECTION("Hyperbolic 3") { check_tree(Hyp<3>{}, "H3"); }
 }
