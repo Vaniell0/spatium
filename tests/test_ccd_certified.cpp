@@ -182,13 +182,12 @@ Path random_path(Rng& rng, double reach, const V3& foot, const V3& normal) {
 // route to the same answer: a quadric's first root for the sphere and the
 // exact torus distance, advanced by, for the torus. The one-sided rule is
 // the whole correctness check -- a late time or a miss where the oracle
-// hits fails. Tightness is asked of the straight-through paths only: at a
-// graze, advancement crawls (the distance falls as x^2 along the tangent)
-// and the iteration cap ends it with an early contact, which is the
-// honest answer and is only counted here. Measured on the sphere at 64
-// iterations: every graze early by up to 0.0096 of the step; at 1024, none
-// beyond 6e-4 but 235k evaluations a query. Closing that is the search in
-// time, not more iterations.
+// hits fails. Tightness is asked of every path now, grazes included: a
+// chart is searched in parameters x time (rigid_contact.hpp), and at a
+// budget of 2^14 evaluations no graze of the sphere came back more than
+// 8e-4 of the step early, where advancement alone -- the path this test
+// first checked -- ended every graze by its iteration cap, up to 9.6e-3
+// early.
 TEST_CASE("A chart sweep never answers later than the closed form",
           "[physics][ccd][certified][fuzz]") {
     std::mt19937_64 rng(20260925);
@@ -207,7 +206,8 @@ TEST_CASE("A chart sweep never answers later than the closed form",
             const auto path = random_path(rng, 3.0, V3{n * r}, n);
             if (path.start.norm() <= r * (1 + 1e-6)) continue;   // a chart has no inside
             const auto exact = sweep_point_quadric<double>(path.start, path.disp, q);
-            const auto swept = sweep_point_surface<double>(path.start, path.disp, bound);
+            const auto swept = sweep_sphere_surface<double>(path.start, 0.0, path.disp, bound, 8,
+                                                            std::size_t{1} << 14);
             INFO(std::format("query {} exact hit={} toi={:.12f}; swept hit={} toi={:.12f}", i,
                              exact.hit, exact.toi, swept.hit, swept.toi));
             if (exact.hit) {
@@ -222,7 +222,8 @@ TEST_CASE("A chart sweep never answers later than the closed form",
                          oracle_hits, early, grazes, grazes_early));
         CHECK(oracle_hits > kQueries / 20);
         CHECK(grazes > kQueries / 4);
-        CHECK(early <= oracle_hits / 20);   // measured 2-3%: random paths that happen to graze
+        CHECK(early == 0);
+        CHECK(grazes_early == 0);
     }
 
     SECTION("torus") {
@@ -244,8 +245,16 @@ TEST_CASE("A chart sweep never answers later than the closed form",
             const V3 foot{V3{std::cos(u), std::sin(u), 0.0} * R + n * r};
             const auto path = random_path(rng, 2.0, foot, n);
             if (point_to(path.start, torus).inside || point_to(path.start, torus).distance < 1e-6) continue;
-            const auto exact = sweep_sphere_surface<double>(path.start, 0.0, path.disp, torus);
-            const auto swept = sweep_point_surface<double>(path.start, path.disp, bound);
+            // Advancement on the exact distance is the oracle, and at a
+            // graze it crawls, so it is given iterations enough to reach
+            // the contact rather than stop short of it: with the default
+            // 64 it ended one graze at 0.4975 where a dense walk of the
+            // exact distance finds 0.49993, and the search below -- closer
+            // to the truth than that oracle -- read as late against it.
+            const auto exact =
+                sweep_sphere_surface<double>(path.start, 0.0, path.disp, torus, 1 << 18);
+            const auto swept = sweep_sphere_surface<double>(path.start, 0.0, path.disp, bound, 8,
+                                                            std::size_t{1} << 14);
             // Both stop within sqrt(eps) * scale of the surface, so either
             // may be that much earlier than the other.
             const double slack = 2.0 * std::sqrt(std::numeric_limits<double>::epsilon()) *
@@ -265,7 +274,14 @@ TEST_CASE("A chart sweep never answers later than the closed form",
                          oracle_hits, early, grazes, grazes_early));
         CHECK(oracle_hits > kQueries / 20);
         CHECK(grazes > kQueries / 4);
-        CHECK(early <= oracle_hits / 20);   // measured 2-3%: random paths that happen to graze
+        CHECK(early == 0);
+        // Measured at this budget: 98 of 617 grazes more than 1e-3 early,
+        // the worst 0.38 of the step -- a path that first passes the tube
+        // by a hair and only later touches it. Proving that near miss
+        // empty is the flat-minimum case a first-order bound pays for in
+        // cells; advancement alone, on the same paths, is early on 493
+        // and just as far on that one.
+        CHECK(grazes_early * 5 <= grazes);
     }
 }
 
@@ -303,4 +319,22 @@ TEST_CASE("A swept ball touches when its centre is a radius away", "[physics][cc
                                                      Sphere<2, double>{1.0});
     CHECK_FALSE(beside.hit);
     CHECK(beside.certified);
+}
+
+// The cells a query splits are kept, so the next query against the same
+// surface starts from them: the spike's second pass gives the same answer
+// without evaluating the chart once more.
+TEST_CASE("A chart's cell tree is reused across queries", "[physics][ccd][certified]") {
+    const double h = 2.0, sigma = 0.005, c = 0.06;
+    const auto surf = spike(h, sigma, c);
+    const double L = std::sqrt(1.0 + std::pow(h * std::sqrt(2.0 / std::numbers::e) / sigma, 2));
+    ChartCellTree<double> tree(LipschitzChart<double>{surf, L});
+    const V3 start{c + 0.3, c, 1.0}, disp{-0.6, 0.0, 0.0};
+    const auto first = first_contact<double>(start, 0.0, disp, tree);
+    const auto again = first_contact<double>(start, 0.0, disp, tree);
+    REQUIRE(first.hit);
+    REQUIRE(again.hit);
+    CHECK(again.toi == first.toi);
+    CHECK(first.evaluations > 0);
+    CHECK(again.evaluations == 0);
 }

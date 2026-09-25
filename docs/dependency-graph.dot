@@ -29,6 +29,7 @@ digraph spatium_dependencies {
     "physics" -> "io";
     "physics" -> "mesh";
     "physics" -> "spaces";
+    "physics" -> "spatial";
     "physics" -> "spatium";
     "render" -> "algebra";
     "render" -> "core";
