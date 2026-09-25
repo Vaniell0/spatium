@@ -136,6 +136,14 @@ inline void radix_sort(std::vector<std::uint64_t>& keys, int passes) {
     }
 }
 
+// The same sort over keys held elsewhere -- a mapped device buffer -- read
+// once into host memory, where the passes run, and written back once.
+inline void radix_sort(std::uint64_t* data, std::size_t n, int passes) {
+    std::vector<std::uint64_t> keys(data, data + n);
+    radix_sort(keys, passes);
+    std::copy(keys.begin(), keys.end(), data);
+}
+
 }  // namespace detail
 
 // The tree over `instances`, whose shapes are `quadrics`. Instances scaled

@@ -33,6 +33,7 @@
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/write_image.hpp>
 #include <spatium/viewer/compute.hpp>
+#include <spatium/viewer/gpu_lbvh.hpp>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -96,23 +97,37 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 
 
 // ── Live ────────────────────────────────────────────────────────────
+//
+// Two sources of instances in one array. Scatters whose fields are all
+// structural are moved by their generated kernels every frame; everything
+// else -- the donut's dough and icing, which are triangles -- is cooked on
+// the host, and only when `t` is let go, because cooking it costs hundreds
+// of milliseconds. The instance tree is rebuilt on the device whenever the
+// moved instances change.
 
-// The scene's arrays on the device, rebuilt as a unit when `t` changes.
-struct SceneBuffers {
-    vc::Buffer tri_nodes, tris, inst_nodes, quads, insts;
-    SceneBuffers(vc::Context& ctx, const gpu::Scene& p)
-        : tri_nodes(vc::Buffer::from(ctx, std::span<const gpu::Node>(p.tri_nodes))),
-          tris(vc::Buffer::from(ctx, std::span<const gpu::Triangle>(p.triangles))),
-          inst_nodes(vc::Buffer::from(ctx, std::span<const gpu::LNode>(p.inst_nodes))),
-          quads(vc::Buffer::from(ctx, std::span<const gpu::Quadric>(p.quadrics))),
-          insts(vc::Buffer::from(ctx, std::span<const gpu::Instance>(p.instances))) {}
+// One Scatter the device moves: its kernel, its tables, where its slots go.
+struct MovedNode {
+    std::unique_ptr<vc::Kernel> kernel;
+    std::unique_ptr<vc::Buffer> perm, points, sites;
+    gpu::InstancePush push{};
+    std::uint32_t count = 0;
 };
 
-gpu::Scene scene_at(const bd::Trace<double>& scene, std::size_t root, double t, double& ms) {
+// The host-cooked part: triangles, and whatever instances no kernel moves.
+struct StaticPart {
+    gpu::Scene packed;
+    std::unique_ptr<vc::Buffer> tri_nodes, tris;
+};
+
+StaticPart static_part(vc::Context& ctx, const bd::Cooked<double>& cooked,
+                       const std::vector<char>& moved, double& ms) {
     const auto t0 = std::chrono::steady_clock::now();
-    auto packed = gpu::pack(render::lay_out(bd::cook(scene, root, t)));
+    StaticPart s;
+    s.packed = gpu::pack(render::lay_out(cooked, {}, &moved));
+    s.tri_nodes = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const gpu::Node>(s.packed.tri_nodes)));
+    s.tris = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const gpu::Triangle>(s.packed.triangles)));
     ms = ms_since(t0);
-    return packed;
+    return s;
 }
 
 // A free-flying camera: a position and two angles, z up. Kept as angles
@@ -136,7 +151,7 @@ struct FlyCamera {
 };
 
 void fill_push(Push& pc, const render::Camera<double>& cam, std::uint32_t W, std::uint32_t H,
-               bool bgra, const gpu::Scene& packed) {
+               bool bgra, std::size_t tri_nodes, std::size_t inst_nodes) {
     const auto basis = render::make_camera_basis(cam);
     const Vec<double, 3> key = Vec<double, 3>{Vec<double, 3>{0.85, 0.45, 0.55}.normalized()};
     const Vec<double, 3> fill = Vec<double, 3>{Vec<double, 3>{0.62, -0.70, 0.35}.normalized()};
@@ -149,12 +164,12 @@ void fill_push(Push& pc, const render::Camera<double>& cam, std::uint32_t W, std
     gpu::detail::put3(pc.background, Vec<double, 3>{0.04, 0.04, 0.05}, bgra ? 1.0f : 0.0f);
     pc.size[0] = W;
     pc.size[1] = H;
-    pc.size[2] = static_cast<std::uint32_t>(packed.tri_nodes.size());
-    pc.size[3] = static_cast<std::uint32_t>(packed.inst_nodes.size());
+    pc.size[2] = static_cast<std::uint32_t>(tri_nodes);
+    pc.size[3] = static_cast<std::uint32_t>(inst_nodes);
 }
 
-int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Scene packed,
-             int max_frames, const std::string& screenshot, const render::Camera<double>& start) {
+int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max_frames,
+             const std::string& screenshot, const render::Camera<double>& start) {
     if (!glfwInit()) {
         std::println(stderr, "donut_live: glfwInit failed");
         return 1;
@@ -170,28 +185,100 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
     {
         vc::Context ctx("donut_live", window);
         vc::Presenter present(ctx, window);
-        auto sb = std::make_unique<SceneBuffers>(ctx, packed);
+
+        // Which Scatters the device can move, decided once from a cook: an
+        // instanced exact form, and fields a kernel can be generated from.
+        const auto first = bd::cook(scene, root, t);
+        std::vector<char> moved(scene.size(), 0);
+        std::vector<MovedNode> nodes;
+        std::uint32_t moved_total = 0;
+        for (std::size_t n = 0; n < scene.size(); ++n) {
+            if (scene.node(n).kind != bd::Kind::Scatter) continue;
+            const bd::Object<double>* o = nullptr;
+            for (const auto& x : first.objects())
+                if (x.source_node == n) { o = &x; break; }
+            if (!o || !o->instanceable || !first.shapes()[o->shape].exact.has_value()) continue;
+            auto k = gpu::make_instance_kernel(scene, n, Vec<double, 3>{first.shapes()[o->shape].geometry.centroid()},
+                                               static_cast<std::uint32_t>(o->shape));
+            if (!k) continue;
+            MovedNode m;
+            m.kernel = std::make_unique<vc::Kernel>(ctx, k->source.c_str(), "instances.comp", 4,
+                                                    sizeof(gpu::InstancePush));
+            m.perm = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(k->module.perm)));
+            m.points = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const float>(k->module.points)));
+            m.sites = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const gpu::Site>(k->sites)));
+            m.push = k->push;
+            m.count = static_cast<std::uint32_t>(k->sites.size());
+            moved[n] = 1;
+            nodes.push_back(std::move(m));
+            moved_total += nodes.back().count;
+        }
+
+        double recook_ms = 0;
+        auto part = static_part(ctx, first, moved, recook_ms);
+        // Quadrics are one per shape and do not change with time.
+        auto quads = vc::Buffer::from(ctx, std::span<const gpu::Quadric>(part.packed.quadrics));
+
+        // One instance array: the host's static instances first, then each
+        // moved node's slots.
+        std::uint32_t static_count = static_cast<std::uint32_t>(part.packed.instances.size());
+        const std::uint32_t total = static_count + moved_total;
+        auto insts = std::make_unique<vc::Buffer>(ctx, std::size_t{std::max(total, 1u)} * sizeof(gpu::Instance));
+        auto write_static = [&] {
+            std::memcpy(insts->data(), part.packed.instances.data(),
+                        part.packed.instances.size() * sizeof(gpu::Instance));
+        };
+        write_static();
+        {
+            std::uint32_t base = static_count;
+            for (auto& m : nodes) {
+                m.push.base[0] = base;
+                base += m.count;
+                vc::Buffer* b[] = {m.perm.get(), m.points.get(), m.sites.get(), insts.get()};
+                m.kernel->bind(b);
+            }
+        }
+
+        vc::DeviceLbvh tree(ctx);
         std::uint32_t W = present.width(), H = present.height();
         auto pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
         auto ids = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
-        vc::Kernel kernel(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 7, sizeof(Push));
+        vc::Kernel trace(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 7, sizeof(Push));
         auto rebind = [&] {
-            vc::Buffer* bufs[] = {&sb->tri_nodes, &sb->tris, &sb->inst_nodes, &sb->quads,
-                                  &sb->insts, pixels.get(), ids.get()};
-            kernel.bind(bufs);
+            vc::Buffer* bufs[] = {part.tri_nodes.get(), part.tris.get(), &tree.nodes(), &quads,
+                                  insts.get(), pixels.get(), ids.get()};
+            trace.bind(bufs);
         };
+
+        // Move every moved node to time `at`, then rebuild the tree.
+        double move_ms = 0;
+        vc::DeviceLbvh::Timing tree_ms{};
+        auto move_to = [&](double at) {
+            move_ms = ctx.run([&](VkCommandBuffer cmd) {
+                for (auto& m : nodes) {
+                    auto p = m.push;
+                    p.rest_centroid_t[3] = static_cast<float>(at);
+                    m.kernel->dispatch(cmd, &p, (m.count + 63) / 64, 1);
+                }
+            });
+            tree_ms = tree.build(*insts, quads, total);
+        };
+        move_to(t);
         rebind();
 
         FlyCamera cam = FlyCamera::from(start);
         const FlyCamera home = cam;
         float speed = 2.0f;
         float t_ui = static_cast<float>(t);
-        double gpu_ms = 0, recook_ms = 0, fps = 0;
+        float play_rate = 0.25f;
+        bool playing = false;
+        double gpu_ms = 0, fps = 0;
         double last_x = 0, last_y = 0;
         bool dragging = false;
         auto t_prev = std::chrono::steady_clock::now();
-        std::println("device: {} -- WASD to fly, Q/E down/up, Shift faster, "
-                     "right mouse to look", ctx.device_name());
+        std::println("device: {} -- {} instances moved on the device by {} kernels, {} static; "
+                     "WASD to fly, Q/E down/up, Shift faster, right mouse to look",
+                     ctx.device_name(), moved_total, nodes.size(), static_count);
 
         for (int frame = 0; !glfwWindowShouldClose(window); ++frame) {
             if (max_frames > 0 && frame >= max_frames) break;
@@ -201,7 +288,12 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
             t_prev = now;
             fps = fps == 0 ? 1.0 / std::max(dt, 1e-6) : 0.9 * fps + 0.1 / std::max(dt, 1e-6);
 
-            bool ui_mouse = false, ui_keys = false;
+            bool ui_mouse = false, ui_keys = false, t_changed = false, t_released = false;
+            if (playing) {
+                t_ui += static_cast<float>(dt) * play_rate;
+                if (t_ui > 4.0f) t_ui = 0.0f;
+                t_changed = true;
+            }
 #if SPATIUM_HAS_IMGUI
             ImGui_ImplVulkan_NewFrame();
             ImGui_ImplGlfw_NewFrame();
@@ -211,25 +303,47 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
             ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
             ImGui::Begin("donut_live");
             ImGui::Text("%s", ctx.device_name().c_str());
-            ImGui::Text("trace %.2f ms, %.0f fps, %ux%u", gpu_ms, fps, W, H);
-            ImGui::Text("%zu triangles, %zu instances", packed.triangles.size(),
-                        packed.instances.size());
-            ImGui::SliderFloat("t", &t_ui, 0.0f, 4.0f, "%.2f s");
-            // Re-cooking costs a few hundred milliseconds on the host, so it
-            // happens when the slider is let go rather than on every tick.
-            if (ImGui::IsItemDeactivatedAfterEdit()) {
-                packed = scene_at(scene, root, t_ui, recook_ms);
-                vkDeviceWaitIdle(ctx.device());
-                sb = std::make_unique<SceneBuffers>(ctx, packed);
-                rebind();
-            }
-            if (recook_ms > 0) ImGui::Text("last re-cook %.0f ms (host)", recook_ms);
+            ImGui::Text("%.0f fps, %ux%u", fps, W, H);
+            ImGui::Text("trace %.2f ms", gpu_ms);
+            ImGui::Text("move %.2f ms  (%u instances)", move_ms, moved_total);
+            ImGui::Text("tree %.2f + sort %.1f (host) + %.2f ms", tree_ms.boxes_keys_ms,
+                        tree_ms.read_sort_ms, tree_ms.tree_ms);
+            ImGui::Text("%zu triangles, %u static instances", part.packed.triangles.size(), static_count);
+            if (ImGui::SliderFloat("t", &t_ui, 0.0f, 4.0f, "%.2f s")) t_changed = true;
+            if (ImGui::IsItemDeactivatedAfterEdit()) t_released = true;
+            ImGui::Checkbox("play", &playing);
+            ImGui::SameLine();
+            ImGui::SliderFloat("rate", &play_rate, 0.05f, 1.0f, "%.2fx");
+            if (recook_ms > 0) ImGui::Text("last host re-cook %.0f ms", recook_ms);
             ImGui::SliderFloat("speed", &speed, 0.1f, 20.0f, "%.1f /s", ImGuiSliderFlags_Logarithmic);
             if (ImGui::Button("reset camera")) cam = home;
             ImGui::Text("camera %.2f %.2f %.2f", cam.pos[0], cam.pos[1], cam.pos[2]);
             ImGui::End();
             ImGui::Render();
 #endif
+            // The moved instances follow `t` every frame it changes; the
+            // host part only when the slider is let go or play stops, since
+            // it costs a re-cook.
+            static bool was_playing = false;
+            if (t_changed) move_to(t_ui);
+            if (t_released || (was_playing && !playing)) {
+                vkDeviceWaitIdle(ctx.device());
+                const auto c0 = std::chrono::steady_clock::now();
+                const auto cooked = bd::cook(scene, root, static_cast<double>(t_ui));
+                part = static_part(ctx, cooked, moved, recook_ms);
+                recook_ms += ms_since(c0) - recook_ms;   // the cook and the lay-out together
+                if (part.packed.instances.size() != static_count) {
+                    // A different number of static instances would shift every
+                    // moved node's slots; the donut has none, so this is a
+                    // statement rather than a code path.
+                    std::println(stderr, "donut_live: static instance count changed with t");
+                }
+                write_static();
+                tree_ms = tree.build(*insts, quads, total);
+                rebind();
+            }
+            was_playing = playing;
+
             double mx = 0, my = 0;
             glfwGetCursorPos(window, &mx, &my);
             const bool look = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
@@ -261,9 +375,10 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
             }
 
             Push pc{};
-            fill_push(pc, cam.camera(), W, H, present.bgra(), packed);
+            const std::size_t inst_nodes = tree.leaves() == 0 ? 0 : 2 * std::size_t{tree.leaves()} - 1;
+            fill_push(pc, cam.camera(), W, H, present.bgra(), part.packed.tri_nodes.size(), inst_nodes);
             const bool ok = present.frame(*pixels, [&](VkCommandBuffer cmd) {
-                kernel.dispatch(cmd, &pc, (W + 7) / 8, (H + 7) / 8);
+                trace.dispatch(cmd, &pc, (W + 7) / 8, (H + 7) / 8);
             }, gpu_ms);
             if (!ok && (present.width() != W || present.height() != H)) {
                 W = present.width();
@@ -284,14 +399,15 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
                     rgb[i * 3 + c] = static_cast<std::uint8_t>((px[i] >> (8 * src)) & 0xffu);
                 }
             render::write_png_rgb(screenshot, static_cast<int>(W), static_cast<int>(H), rgb);
-            std::println("  -> {} (trace {:.2f} ms at {}x{})", screenshot, gpu_ms, W, H);
+            std::println("  -> {} (trace {:.2f} ms, move {:.2f} ms, tree {:.2f}+{:.1f}+{:.2f} ms at {}x{})",
+                         screenshot, gpu_ms, move_ms, tree_ms.boxes_keys_ms, tree_ms.read_sort_ms,
+                         tree_ms.tree_ms, W, H);
         }
     }
     glfwDestroyWindow(window);
     glfwTerminate();
     return status;
 }
-
 
 // ── The dust moved on the device ────────────────────────────────────
 
@@ -383,6 +499,44 @@ int run_dust_check(const bd::Trace<double>& scene, std::size_t root, double t, i
                          tree.culled, tree.nodes.size());
             std::println("    boxes {:.1f}, keys {:.1f}, sort {:.1f}, hierarchy {:.1f}, bounds {:.1f} ms",
                          tree.ms[0], tree.ms[1], tree.ms[2], tree.ms[3], tree.ms[4]);
+
+            // The same tree built on the device over the slots it just wrote,
+            // judged the way the host tree is in tests/test_lbvh.cpp: its
+            // nearest hit against brute force over every instance, to the bit.
+            auto b_quads = vc::Buffer::from(ctx, std::span<const gpu::Quadric>(packed.quadrics));
+            vc::DeviceLbvh dev_tree(ctx);
+            vc::DeviceLbvh::Timing tm{};
+            for (int r = 0; r < runs; ++r) tm = dev_tree.build(b_out, b_quads, static_cast<std::uint32_t>(count));
+            const auto nn = dev_tree.leaves() == 0 ? 0 : 2 * std::size_t{dev_tree.leaves()} - 1;
+            const auto* dn = static_cast<const gpu::LNode*>(dev_tree.nodes().data());
+            std::vector<gpu::LNode> nodes(dn, dn + nn);
+            std::println("  LBVH on the device: boxes+keys {:.2f} ms, read+sort {:.1f} ms (host), "
+                         "tree {:.2f} ms -- {} leaves",
+                         tm.boxes_keys_ms, tm.read_sort_ms, tm.tree_ms, dev_tree.leaves());
+            std::size_t agree = 0, rays = 0, hits = 0;
+            const auto cam = donut::hero_camera();
+            const auto basis = render::make_camera_basis(cam);
+            for (int y = 0; y < 720; y += 90)
+                for (int x = 0; x < 960; x += 120) {
+                    const auto d = render::camera_pixel_dir(cam, basis, x, y, 960, 720);
+                    const gpu::Ray32 ray{{float(cam.position[0]), float(cam.position[1]), float(cam.position[2])},
+                                         {float(d[0]), float(d[1]), float(d[2])}};
+                    gpu::Hit brute;
+                    for (std::uint32_t k = 0; k < count; ++k)
+                        if (gpu::hit_instance(ray, copy[k], packed.quadrics[gpu::detail::bits_of(copy[k].scale_quadric[1])], brute)) {
+                            brute.kind = gpu::HitKind::Instance;
+                            brute.index = k;
+                        }
+                    gpu::Hit fast;
+                    gpu::trace_lbvh(nodes, copy, packed.quadrics, ray, fast);
+                    ++rays;
+                    if (brute.kind != gpu::HitKind::None) ++hits;
+                    if (fast.kind == brute.kind && (brute.kind == gpu::HitKind::None ||
+                        (fast.index == brute.index && gpu::detail::bits_of(fast.t) == gpu::detail::bits_of(brute.t))))
+                        ++agree;
+                }
+            std::println("  device tree against brute force: {} of {} rays agree ({} hit something)",
+                         agree, rays, hits);
         }
         std::println("node {}: {} instances moved in {:.2f} ms (median of {}), {} lines of generated GLSL",
                      node, count, ms[ms.size() / 2], runs,
@@ -438,6 +592,7 @@ int main(int argc, char** argv) {
     bd::Trace<double> scene;
     const auto root = donut::build_scene(scene, 11000, dust, boom);
     if (dust_check) return run_dust_check(scene, root, t, runs);
+    if (live) return run_live(scene, root, t, frames, screenshot, start);
 
     auto t0 = std::chrono::steady_clock::now();
     const auto cooked = bd::cook(scene, root, t);
@@ -452,8 +607,6 @@ int main(int argc, char** argv) {
                  "instances, {:.1f} MB on the device",
                  t, ms_cook, ms_lay, ms_pack, packed.triangles.size(), packed.instances.size(),
                  static_cast<double>(packed.bytes()) / 1e6);
-
-    if (live) return run_live(scene, root, t, packed, frames, screenshot, start);
 
     constexpr int W = 960, H = 720;
     const auto cam = start;

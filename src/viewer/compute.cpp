@@ -196,8 +196,10 @@ Buffer::Buffer(Context& ctx, std::size_t bytes) : device_(ctx.device_), bytes_(b
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = bytes;
     // Transfer-source too, so a pixel buffer can be copied into a swapchain
-    // image; it costs nothing on a buffer that is never copied.
-    bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    // image, and transfer-destination, so a buffer can be cleared by the
+    // device; neither costs anything on a buffer that is never used so.
+    bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+               VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     check(vkCreateBuffer(device_, &bi, nullptr, &buffer_), "vkCreateBuffer");
     VkMemoryRequirements req;

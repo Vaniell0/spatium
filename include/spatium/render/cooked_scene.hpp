@@ -139,9 +139,14 @@ struct CookedScene {
 // Lay a cooked scene out for tracing. `extra` is geometry that is drawn
 // but is not in the scene -- the build-up frames' gizmos are the editor,
 // not the subject, and arrive as Placed views onto their own Trace.
+//
+// `skip_nodes`, when given, is indexed by trace node: objects from a node
+// marked in it are left out -- the instances a device kernel moves itself,
+// which would otherwise be laid out twice.
 template<Scalar T = double>
 CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
-                       const std::vector<io::build::Placed<T>>& extra = {}) {
+                       const std::vector<io::build::Placed<T>>& extra = {},
+                       const std::vector<char>* skip_nodes = nullptr) {
     using Tri = geometry::Triangle<3, T>;
     using Quadric = geometry::BoundedQuadric<T>;
 
@@ -197,6 +202,8 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
     };
 
     for (const auto& obj : cooked.objects()) {
+        if (skip_nodes && obj.source_node < skip_nodes->size() && (*skip_nodes)[obj.source_node])
+            continue;
         const auto& mat = obj.material;
         // Once per object. Everything below uses this, including the
         // instance, whose rotation stays a matrix precisely so the

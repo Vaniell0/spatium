@@ -44,8 +44,9 @@ struct InstancePush {
     float color_rough[4];         // material constants when no colour field
     float emissive_opacity[4];
     std::uint32_t info[4];        // site count, quadric index, has colour field, has glow field
+    std::uint32_t base[4];        // where in the instance array this node's slots start
 };
-static_assert(sizeof(InstancePush) == 64);
+static_assert(sizeof(InstancePush) == 80);
 
 struct InstanceKernel {
     std::string source;           // a complete compute shader
@@ -117,6 +118,7 @@ layout(push_constant) uniform InstancePush {
     vec4 color_rough;
     vec4 emissive_opacity;
     uvec4 info;
+    uvec4 base;
 } pc;
 
 void main() {
@@ -137,7 +139,7 @@ void main() {
 
     FieldIn cin = fin;
     cin.p = W * (pc.rest_centroid_t.xyz * s) + T;
-    vec3 base = pc.info.z != 0u ? colour(cin) : pc.color_rough.xyz;
+    vec3 col = pc.info.z != 0u ? colour(cin) : pc.color_rough.xyz;
     vec3 emit = pc.info.w != 0u ? glow(cin) : pc.emissive_opacity.xyz;
 
     Instance o;
@@ -147,9 +149,9 @@ void main() {
     o.r1 = vec4(W[0][1], W[1][1], W[2][1], T.y);
     o.r2 = vec4(W[0][2], W[1][2], W[2][2], T.z);
     o.scale_quadric = vec4(s, uintBitsToFloat(pc.info.y), 0.0, 0.0);
-    o.color_rough = vec4(base, pc.color_rough.w);
+    o.color_rough = vec4(col, pc.color_rough.w);
     o.emissive_opacity = vec4(emit, pc.emissive_opacity.w);
-    insts[i] = o;
+    insts[pc.base.x + i] = o;
 }
 )GLSL";
     return k;
