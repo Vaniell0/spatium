@@ -773,6 +773,31 @@ but wasn't where the actual fix lived. `tests/test_rsc_base.cpp`'s
 per-domain thresholds reflect this final, measured result with real
 margin.
 
+**Measured 2026-09-25: the label makes REINFORCE unnecessary here.** Every
+dispatch task carries its label -- `task.op_index`, the cheapest correct op
+found against a reference -- and REINFORCE with reward "the sampled action
+equals the label" only estimates, noisily, the gradient that cross-entropy
+on that label gives exactly. The batch of 32, the per-domain baselines and
+the entropy bonus above were each a measured fix for that noise.
+`rsc/tools/supervised_vs_reinforce.cpp` trains both on the same generator,
+features, model and step size (lr 0.1, batch 32, 4 seeds, one held-out set
+of 8000):
+
+| updates | Tier-1, REINFORCE h64 (train_base) | Tier-1, cross-entropy h64 | Tier-1, cross-entropy h16 |
+|---|---|---|---|
+| 1000 | 0.517 | 0.912 | 0.872 |
+| 2000 | 0.551 | 0.955 | 0.928 |
+| 8000 | 0.845 | 0.955 | 0.954 |
+| 16000 | 0.935 | 0.974 | 0.906 |
+
+Cross-entropy reaches in 2000 updates what REINFORCE reaches in 16000, with
+none of the three fixes. The other domains end at the same ceilings either
+way (precision 0.99, ode 0.98, root-finding 0.96 -- the last flat in every
+configuration, so likely a label the features do not fully determine), and
+16 hidden units come close to 64, so capacity was not what limited it.
+REINFORCE belongs where there is a reward and no label -- the cost a search
+spends -- not on a choice whose answer the generator already knows.
+
 **Separately investigated while diagnosing why a diagnostic sweep felt
 slow, corrected after checking properly:** a standalone `-O0` compile of
 the training loop measured ~130s against a standalone `-O2` compile's
