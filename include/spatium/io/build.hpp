@@ -13,8 +13,11 @@
 #  include <spatium/algebra/quaternion.hpp>
 #  include <spatium/geometry/ray_surface.hpp>
 #  include <spatium/io/field.hpp>
+#  include <spatium/io/field_pod.hpp>
 #  include <any>
+#  include <bit>
 #  include <cstdint>
+#  include <map>
 #  include <functional>
 #  include <initializer_list>
 #  include <optional>
@@ -196,6 +199,14 @@ struct TraceNode {
     // is correct for the shape and wrong for the scene, silently, which
     // is the same class of defect as a NaN walking through a filter.
     std::any exact;
+
+    // What a factory built this node from -- which factory, and its
+    // parameters as bits -- so two nodes are recognised as one shape by
+    // what they are rather than by sampling what they evaluate to. Empty
+    // for a chart handed to space(), which is a (u,v) map and nothing more:
+    // such a node is its own shape. It describes the rest shape, which a
+    // motion never changes, since the motion lives in `transform`.
+    std::vector<std::uint64_t> recipe;
 
     // Unset means "infer from what this node is" -- see
     // Placed::render_level(). Set by .rendered_as(), which refuses on the
@@ -465,6 +476,29 @@ mesh::Mesh<Euclidean<3, T>> materialize_mesh(const Trace<T>& trace, std::size_t 
 template<Scalar T>
 std::vector<Placed<T>> materialize(const Trace<T>& trace, std::size_t idx, T t = T{0});
 
+// A scalar as the bits that identify it, for keys that must compare
+// exactly. Only for the IEEE types, where equal bits are equal values and
+// the reverse holds up to the sign of zero and NaN payloads, neither of
+// which a shape parameter carries; any other scalar has no key, and a
+// node without a key is simply never merged with another.
+template<Scalar T>
+std::optional<std::uint64_t> exact_bits(T v) {
+    if constexpr (std::is_same_v<T, double>) return std::bit_cast<std::uint64_t>(v);
+    else if constexpr (std::is_same_v<T, float>) return std::bit_cast<std::uint32_t>(v);
+    else return std::nullopt;
+}
+
+template<Scalar T>
+std::vector<std::uint64_t> make_recipe(std::uint64_t factory, std::initializer_list<T> params) {
+    std::vector<std::uint64_t> r{factory};
+    for (T p : params) {
+        auto b = exact_bits(p);
+        if (!b) return {};
+        r.push_back(*b);
+    }
+    return r;
+}
+
 template<Scalar T>
 class Trace {
 public:
@@ -506,6 +540,7 @@ public:
         auto h = space(make_torus<T>(major_r, minor_r), u_steps, v_steps);
         node(h.index).exact =
             geometry::Torus<T>{.major_radius = major_r, .minor_radius = minor_r};
+        node(h.index).recipe = make_recipe<T>(1, {major_r, minor_r});
         return h;
     }
 
@@ -519,6 +554,7 @@ public:
         auto exact = geometry::BoundedQuadric<T>::cylinder_z(radius, T{0}, height);
         exact.closed = true;
         node(h.index).exact = exact;
+        node(h.index).recipe = make_recipe<T>(2, {radius, height});
         return h;
     }
 
@@ -534,6 +570,7 @@ public:
     Handle<T> sphere(T radius, std::size_t u_steps = 24, std::size_t v_steps = 12) {
         auto h = space(chart_of(Sphere<2, T>{radius}), u_steps, v_steps);
         node(h.index).exact = geometry::BoundedQuadric<T>::sphere(radius);
+        node(h.index).recipe = make_recipe<T>(3, {radius});
         return h;
     }
 
@@ -569,6 +606,7 @@ public:
                            /*periodic_u=*/true, /*periodic_v=*/false),
                        u_steps, v_steps);
         node(h.index).exact = geometry::BoundedQuadric<T>::flake(half, bulge);
+        node(h.index).recipe = make_recipe<T>(4, {half[0], half[1], half[2], bulge});
         return h;
     }
 
@@ -625,7 +663,7 @@ public:
     }
 
     Handle<T> offset(Handle<T> base, T thickness) {
-        return offset(base, ScalarField<T>{[thickness](T, T) { return thickness; }});
+        return offset(base, ScalarField<T>(thickness));
     }
 
     // A shell over any base, open or closed, with the rim rule stated.
@@ -646,7 +684,7 @@ public:
     }
 
     Handle<T> offset_shell(Handle<T> base, T thickness, EdgeRule edge) {
-        return offset_shell(base, ScalarField<T>{[thickness](T, T) { return thickness; }}, edge);
+        return offset_shell(base, ScalarField<T>(thickness), edge);
     }
 
     // The target must be a surface, for the same reason and with the
@@ -1259,7 +1297,7 @@ struct Shape {
     // `Scatter` -- the one operation whose entire meaning is "N of
     // these" -- came out of cook() as N meshes of one mesh, with the
     // BoundedQuadric that `cylinder()` had carefully recorded nowhere to
-    // be found. The dedup key is `content_hash` of the geometry node, so
+    // be found. The dedup key is `content_key` of the geometry node, so
     // two objects sharing a shape share its exact form too, by the same
     // argument that lets them share the mesh.
     std::any exact;
@@ -1321,72 +1359,92 @@ private:
 // the result of the same `dust_speck(0.014)` call -- equal without being
 // the same object.
 //
-// Three kinds of node, three different keys, and they cost different
-// things:
+// The key is the node's description, compared in full, not a hash of
+// samples of what it evaluates to. It used to be the latter -- a chart at
+// a 4 x 4 grid, a thickness at a 5 x 5 grid over [0, 1]^2 whatever the
+// domain, a mesh's vertices without its faces -- and a matching hash was
+// taken as the same shape with nothing rechecked, so two shapes that
+// agreed at the samples were cooked as one and one of them was drawn
+// wrong. Three such cases are in tests/test_build_dsl.cpp.
 //
-//   Literal   the mesh's own content. O(vertices) per node, which is the
-//             expensive one -- ~158 000 vertices hashed across the
-//             donut's dust. Acceptable because cook() runs once per
-//             scene; if it ever runs per frame, this is the line to look
-//             at first.
-//   Space     the exact analytic form's *type* plus the chart sampled at
-//             fixed (u,v), plus the tessellation steps. Sampling the
-//             chart rather than reading parameters back out of the node
-//             is deliberate: it hashes what the geometry will actually
-//             be, so it cannot drift away from what gets tessellated the
-//             way a reconstructed parameter list could. The exact form's
-//             type is folded in so two nodes with the same chart but
-//             different closed forms never merge.
-//   Offset    the base's key, plus the thickness field sampled the same
-//             way. An offset of the same base by the same thickness is
-//             the same shape.
+//   Literal   the mesh itself, vertices and faces, as bits.
+//   Space     the recipe its factory recorded. A chart handed to space()
+//             has none -- a (u,v) map cannot be compared with another
+//             except by evaluating it everywhere -- so it has no key.
+//   Offset    the base's key, the edge rule, and the thickness field
+//             lowered to plain data; a thickness with an opaque leaf
+//             lowers to nothing and so has no key.
+//   Scatter   its item, its target, and how it scatters.
+//
+// No key means the node is its own shape: never merged, which costs a
+// mesh and is never wrong.
 template<Scalar T>
-inline std::size_t content_hash(const Trace<T>& trace, std::size_t idx) {
-    std::size_t h = 1469598103934665603ull;
-    auto mix = [&h](std::size_t v) { h = (h ^ v) * 1099511628211ull; };
-    auto mix_scalar = [&](T v) { mix(std::hash<double>{}(static_cast<double>(v))); };
-
+std::optional<std::vector<std::uint64_t>> content_key(const Trace<T>& trace, std::size_t idx) {
+    using Key = std::vector<std::uint64_t>;
+    Key k;
     const auto& n = trace.node(idx);
-    mix(static_cast<std::size_t>(n.kind));
-    mix(n.u_steps);
-    mix(n.v_steps);
+    k.push_back(static_cast<std::uint64_t>(n.kind));
+    k.push_back(n.u_steps);
+    k.push_back(n.v_steps);
+    auto push_scalar = [&k](T v) {
+        const auto b = exact_bits(v);
+        if (b) k.push_back(*b);
+        return b.has_value();
+    };
+    auto append = [&k](const std::optional<Key>& sub) {
+        if (!sub) return false;
+        k.push_back(sub->size());
+        k.insert(k.end(), sub->begin(), sub->end());
+        return true;
+    };
 
-    if (n.kind == Kind::Literal) {
+    switch (n.kind) {
+    case Kind::Literal: {
         const auto& m = *n.literal_mesh;
-        mix(m.vertex_count());
-        mix(m.face_count());
+        k.push_back(m.vertex_count());
+        k.push_back(m.face_count());
         for (const auto& v : m.vertices)
-            for (std::size_t i = 0; i < 3; ++i) mix_scalar(v[i]);
-        return h;
+            for (std::size_t i = 0; i < 3; ++i)
+                if (!push_scalar(v[i])) return std::nullopt;
+        for (const auto& f : m.faces)
+            for (auto i : f) k.push_back(i);
+        return k;
     }
-
-    if (n.kind == Kind::Offset) {
-        mix(content_hash(trace, n.base));
-        for (int i = 0; i <= 4; ++i)
-            for (int j = 0; j <= 4; ++j)
-                mix_scalar(n.thickness(T(i) * T{0.25}, T(j) * T{0.25}));
-        return h;
+    case Kind::Space:
+        if (n.recipe.empty()) return std::nullopt;
+        k.insert(k.end(), n.recipe.begin(), n.recipe.end());
+        return k;
+    case Kind::Offset: {
+        if (!append(content_key(trace, n.base))) return std::nullopt;
+        k.push_back(static_cast<std::uint64_t>(n.edge));
+        const auto pod = lower(n.thickness);
+        if (!pod) return std::nullopt;
+        k.push_back(pod->ops.size());
+        for (const auto& op : pod->ops) {
+            k.push_back(op.code);
+            k.push_back((std::uint64_t{op.a} << 32) | op.b);
+            k.push_back((std::uint64_t{op.c} << 32) | op.table);
+            k.push_back((std::uint64_t{op.extent} << 32) | op.k);
+            if (!push_scalar(op.value)) return std::nullopt;
+        }
+        k.push_back(pod->tables.size());
+        for (auto byte : pod->tables) k.push_back(byte);
+        k.push_back(pod->points.size());
+        for (T p : pod->points)
+            if (!push_scalar(p)) return std::nullopt;
+        return k;
     }
-
-    if (n.kind == Kind::Space) {
-        if (n.exact.has_value()) mix(n.exact.type().hash_code());
-        const auto& s = *n.surface;
-        auto [u0, u1, v0, v1] = s.domain();
-        mix_scalar(u0); mix_scalar(u1); mix_scalar(v0); mix_scalar(v1);
-        for (int i = 0; i <= 3; ++i)
-            for (int j = 0; j <= 3; ++j) {
-                auto p = s.evaluate(u0 + (u1 - u0) * T(i) / T{3}, v0 + (v1 - v0) * T(j) / T{3});
-                for (std::size_t k = 0; k < 3; ++k) mix_scalar(p[k]);
-            }
-        return h;
+    case Kind::Scatter:
+        if (!append(content_key(trace, n.item)) || !append(content_key(trace, n.target)))
+            return std::nullopt;
+        k.push_back(n.count);
+        k.push_back(n.seed);
+        k.push_back(static_cast<std::uint64_t>(n.seat_axis));
+        if (!push_scalar(n.seat)) return std::nullopt;
+        return k;
+    default:
+        return std::nullopt;
     }
-
-    // Scatter: keyed by its item, since that is the geometry being
-    // repeated; the placements are what differ and they live on objects.
-    mix(content_hash(trace, n.item));
-    mix(n.count);
-    mix(n.seed);
-    return h;
 }
 
 // Where a Scatter's instances sit before its motion moves them: the seat
@@ -1418,7 +1476,7 @@ std::vector<ScatterSpot<T>> scatter_spots(const Trace<T>& trace, std::size_t idx
 template<Scalar T = double>
 Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
     Cooked<T> out;
-    std::unordered_map<std::size_t, std::size_t> shape_of_key;
+    std::map<std::vector<std::uint64_t>, std::size_t> shape_of_key;
 
     // Where one instance of an operation sits and which way it faces. The
     // frame is carried alongside the position rather than recomputed
@@ -1507,8 +1565,8 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             return;
         }
 
-        const auto key = content_hash(trace, geometry_node);
-        auto it = shape_of_key.find(key);
+        const auto key = content_key(trace, geometry_node);
+        auto it = key ? shape_of_key.find(*key) : shape_of_key.end();
         std::size_t shape_index;
         if (it == shape_of_key.end()) {
             shape_index = out.shapes_.size();
@@ -1518,7 +1576,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             out.shapes_.push_back(
                 Shape<T>{materialize_mesh(trace, geometry_node, t, /*placed=*/false), 0,
                          trace.node(geometry_node).exact});
-            shape_of_key.emplace(key, shape_index);
+            if (key) shape_of_key.emplace(*key, shape_index);
         } else {
             shape_index = it->second;
         }
