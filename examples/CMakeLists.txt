@@ -126,6 +126,11 @@ if(SPATIUM_HAS_VIEWER)
     #   --scene klein                  Klein bottle R⁴ → R³, animated
     spatium_add_example(NAME primitives_demo LIBS spatium_viewer)
 
+    # The donut scene traced by a Vulkan compute shader, headless: checks
+    # the shader against the host's fp32 trace and the fp64 trees, and
+    # times it. The first step towards a live window.
+    spatium_add_example(NAME donut_live LIBS spatium_viewer OPTIONS -O3 -march=native)
+
     # Burning Ship fractal — Vulkan window with a fragment-shader
     # iterator and Jacobian-based distance estimation.  Deliberately
     # standalone (no spatium_viewer dep) so it can later double as a

@@ -217,6 +217,19 @@ struct BoundedQuadric {
     Quadric<T> surface{};
     Box<3, T> clip{};
 
+    // Whether the clip closes the surface into a solid. Two shapes want
+    // opposite answers, which is why it is a flag and not a rule: a
+    // sprinkle is a rod, and seen end-on an open tube shows its hollow
+    // inside -- noticed the first time a camera could fly up to one --
+    // while a flake is one curved sheet and must stay one, since closing
+    // it would turn it into a lens.
+    //
+    // Closed means the solid {surface <= 0} cut by the box, so a ray that
+    // enters the box at a point inside the surface has hit a cap: the box
+    // face, with that face's normal. Every factory here puts the inside
+    // on the negative side, which is what makes that test mean "inside".
+    bool closed = false;
+
     PointType centroid() const { return clip.centroid(); }
     Box<3, T> bounding_box() const { return clip; }
 

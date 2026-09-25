@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <spatium/algebra/noise.hpp>
 #include <spatium/io/build.hpp>
+#include <spatium/io/field_glsl.hpp>
 #include <spatium/io/field_pod.hpp>
 
 #include "donut_scene.hpp"
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <memory>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -73,8 +75,13 @@ TEST_CASE("The interpreter covers every op, bit for bit", "[field][pod]") {
     using F = bd::ScalarField<double>;
     algebra::PerlinNoise n(5);
 
+    auto table = std::make_shared<const std::vector<Vec<double, 3>>>(
+        std::vector<Vec<double, 3>>{{1.0, 2.0, 3.0}, {-4.0, 5.5, 0.25}, {7.0, -8.0, 9.5}});
     auto f = min(F::u(), F::v()) + max(F::u(), F{0.5}) * sin(F::u()) -
-             cos(F::v()) / F{3.0} + less(F::u(), F::v()) * noise(n, F::u(), F::v(), F{0.25});
+             cos(F::v()) / F{3.0} + less(F::u(), F::v()) * noise(n, F::u(), F::v(), F{0.25}) +
+             F::id() * F{1e-3} + F::origin(1) - F::point(2) * F::hash(7u) +
+             sqrt(F::hash(11u) + F{0.5}) + gather(table, F::hash(3u) * F{3.0}, 2) +
+             gather(table, F::u(), 0);
 
     auto lowered = bd::lower(f);
     REQUIRE(lowered.has_value());
@@ -85,9 +92,39 @@ TEST_CASE("The interpreter covers every op, bit for bit", "[field][pod]") {
         CHECK(present);
     }
 
+    // Past both ends of the gather's table on purpose (u from -2 to 3.7
+    // over three points), where the clamp is what is being tested.
     for (double u : {-2.0, -0.5, 0.0, 0.25, 1.0, 3.7})
         for (double v : {-1.0, 0.0, 0.25, 2.0, 5.5})
-            CHECK(bits(bd::interpret(*lowered, u, v)) == bits(f(u, v)));
+            for (std::uint32_t id : {0u, 1u, 41u, 1999999u}) {
+                bd::FieldInputs<double> in{u, v, id, {0.1 * u, -v, 2.0}, {v, u, 0.5 * id}};
+                CHECK(bits(bd::interpret(*lowered, in)) == bits(f(in)));
+            }
+}
+
+// A vector made of three scalar fields lowers and interprets like a
+// Rotate's three factors do -- in component order, from one shared pool.
+TEST_CASE("A Make of three scalar fields interprets bit for bit", "[field][pod]") {
+    using F = bd::ScalarField<double>;
+    using V = bd::VecField<double>;
+    auto m = V::make(F::hash(1u) * F::origin(0), F::t() + F::hash(2u), F::point(1) * F{2.0}) +
+             V::point();
+    CHECK(m.is_structural());
+    CHECK_FALSE(m.is_placement());   // one component reads the point
+
+    auto pod = bd::lower(m);
+    REQUIRE(pod.has_value());
+    for (double t : {-1.0, 0.0, 0.7, 3.2})
+        for (std::uint32_t id : {0u, 5u, 123456u}) {
+            bd::MotionEnv<double> env{{0.3, -1.2, 2.0}, t, {0.5, 0.25, -0.75}, id};
+            CHECK(same(bd::interpret(*pod, env), m(env)));
+        }
+
+    // Without the point it is a translation per instance, and stays a
+    // placement -- which is what lets a particle cloud built from it
+    // instance.
+    auto moved = V::point() + V::make(F::hash(1u), F::hash(2u), F::t());
+    CHECK(moved.is_placement());
 }
 
 // The test `docs/gpu-abi-design.md` calls the first step, run over the
@@ -152,11 +189,12 @@ TEST_CASE("Every structural field in the donut scene interprets bit for bit",
         ++lowered;
         for (double t : ts)
             for (const auto& p : points)
-                for (const auto& o : origins) {
-                    bd::MotionEnv<double> env{p, t, o};
-                    ++evaluations;
-                    if (!same(bd::interpret(*pod, env), f(env))) ++mismatches;
-                }
+                for (const auto& o : origins)
+                    for (std::uint32_t id : {0u, 1u, 35199u}) {
+                        bd::MotionEnv<double> env{p, t, o, id};
+                        ++evaluations;
+                        if (!same(bd::interpret(*pod, env), f(env))) ++mismatches;
+                    }
     };
 
     // The same slots `field_report()` walks, in the same order. A slot
@@ -180,4 +218,31 @@ TEST_CASE("Every structural field in the donut scene interprets bit for bit",
     CHECK(refused.size() == report.opaque_fields);
     CHECK(evaluations > 0);
     CHECK(mismatches == 0);
+}
+
+// The GLSL emitter refuses what lowering refuses, and a deformation has no
+// placement to emit. What it produces is compiled and checked on a device
+// by `donut_live --dust-check`; here only the refusals and the data it
+// carries, which need no GPU.
+TEST_CASE("GLSL emission refuses a closure and a deformation, and carries the tables",
+          "[field][pod][glsl]") {
+    using F = bd::ScalarField<double>;
+    using V = bd::VecField<double>;
+    bd::GlslModule m;
+    CHECK_FALSE(bd::emit_vector(m, V::opaque_of_time([](double t) { return Vec<double, 3>{t, 0, 0}; }),
+                                "a").has_value());
+    CHECK_FALSE(bd::emit_placement(m, V::make(F::point(0), F{0.0}, F{0.0}) + V::point(), "b")
+                    .has_value());
+
+    algebra::PerlinNoise n(3);
+    auto table = std::make_shared<const std::vector<Vec<double, 3>>>(
+        std::vector<Vec<double, 3>>{{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}});
+    auto motion = V::point() + V::make(noise(n, F::hash(1u), F::t(), F{0.0}),
+                                       gather(table, F::hash(2u) * F{2.0}, 1), F{0.0});
+    REQUIRE(motion.is_placement());
+    REQUIRE(bd::emit_placement(m, motion, "c").has_value());
+    CHECK(m.perm.size() == 512);
+    CHECK(m.points.size() == 6);
+    CHECK(m.code.find("void c_place(") != std::string::npos);
+    CHECK(m.code.find("field_noise(0u") != std::string::npos);
 }

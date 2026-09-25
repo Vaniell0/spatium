@@ -370,6 +370,8 @@ if(SPATIUM_BUILD_VIEWER)
         add_library(spatium_viewer SHARED
             src/viewer/app.cpp
             src/viewer/camera.cpp
+            src/viewer/compute.cpp
+            src/viewer/gpu_lbvh.cpp
         )
         add_library(Spatium::viewer ALIAS spatium_viewer)
         set_target_properties(spatium_viewer PROPERTIES

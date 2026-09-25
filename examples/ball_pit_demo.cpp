@@ -89,6 +89,7 @@
 //   ffmpeg -framerate 30 -i ball_pit_frames/frame_%04d.png -pix_fmt yuv420p ball_pit.mp4
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
 
 #include "io_helpers.hpp"
 
@@ -101,6 +102,7 @@
 #include <spatium/render/color.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/supersample.hpp>
+#include <spatium/render/texture.hpp>
 #include <spatium/render/write_image.hpp>
 
 #include <algorithm>
@@ -115,6 +117,7 @@
 #include <numeric>
 #include <print>
 #include <random>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -132,6 +135,7 @@ using spatium::render::hsv_to_rgb255;
 using spatium::render::make_camera_basis;
 using spatium::render::parallel_for_rows;
 using spatium::render::supersample_pixel;
+using spatium::render::Texture;
 using spatium::render::write_png_rgb;
 
 namespace {
@@ -139,9 +143,9 @@ namespace {
 constexpr int W = 960;
 constexpr int H = 540;
 
-constexpr int    N_SPHERES          = 64;
+constexpr int    N_SPHERES          = 120;
 constexpr double DT_PHYSICS         = 5e-4;
-constexpr int    SUBSTEPS_PER_FRAME = 32;
+constexpr int    SUBSTEPS_PER_FRAME = 66;   // 66 x DT_PHYSICS = one 30 fps frame: real time
 constexpr int    N_FRAMES           = 280;
 constexpr int    XPBD_ITERS         = 8;    // more than native_collision_demo's 6 -- up
                                              // to N_SPHERES bodies plus 5 walls means more
@@ -178,32 +182,33 @@ constexpr double MAX_SPEED        = 15.0;   // per-substep speed clamp -- see st
                                              // own comment for why this is needed at this
                                              // body count.
 
-constexpr double VAT_HALF_EXTENT = 1.3;    // vat interior spans [-R, R] in x and y --
-                                            // small enough relative to N_SPHERES/radius
-                                            // that a single floor layer can't hold every
-                                            // sphere (the footprint's area is well under
-                                            // N_SPHERES times an average sphere's cross-
-                                            // section at random-packing density), so the
-                                            // pile is forced to build upward once the
-                                            // floor fills in -- see make_scene's release-
-                                            // schedule comment for how spheres reach a
-                                            // small vat like this without an unphysical
-                                            // spawn-time pileup.
+constexpr double VAT_HALF_EXTENT = 2.2;    // vat interior spans [-R, R] in x and y. Big
+                                            // enough that the pour spreads into a heap
+                                            // rather than filling wall to wall; the pile
+                                            // still builds upward because every sphere
+                                            // falls from one point -- see SPAWN_XY.
 constexpr double VAT_WALL_HEIGHT = 1.3;    // rendered wall height above the floor
 
 constexpr double MIN_RADIUS   = 0.14;
 constexpr double MAX_RADIUS   = 0.22;
-constexpr double SPAWN_MARGIN = 0.28;      // drop-point inset from the walls, comfortably
-                                            // more than MAX_RADIUS so a sphere's release
-                                            // point doesn't start already overlapping a
-                                            // wall
-constexpr double DROP_HEIGHT        = 2.0; // height each sphere is released from --
-                                            // comfortably above VAT_WALL_HEIGHT so the
-                                            // drop is visibly "in from above the rim"
-constexpr double DROP_HEIGHT_JITTER = 0.3;
-constexpr double RELEASE_WINDOW_FRACTION = 0.62;  // fraction of the run's total substeps
-                                                   // over which spheres are released --
-                                                   // see make_scene's comment
+// Every sphere falls from one point, a stream rather than a scatter, and
+// the next one appears only when the last has cleared it -- see
+// activate_due_bodies. Off centre, so the heap it builds leans toward one
+// wall and the pour reads as a pour.
+const Vec<double, 3> SPAWN_POINT{0.7, -0.5, 2.6};
+constexpr double SPAWN_JITTER = 0.35;      // the spawn is a small disc, not a point: every
+                                            // sphere whose spot in it is clear comes out,
+                                            // so the pour keeps pace instead of waiting
+                                            // for one sphere at a time to fall clear
+constexpr double SPAWN_SPEED  = 3.0;       // downward speed at release
+constexpr double SPAWN_SPRAY  = 0.9;       // sideways speed at release, in a random direction.
+                                            // Needed, not decoration: dropped straight down
+                                            // from one point, spheres stacked into a column
+                                            // that stood -- XPBD pushes along the line of
+                                            // centres, and nothing tipped it -- and the top
+                                            // sphere sat in the spawn point so no more came.
+constexpr double RELEASE_WINDOW_FRACTION = 0.7;   // fraction of the run's substeps over which
+                                                  // the stream runs
 
 constexpr double FOV_DEG = 36.0;
 
@@ -218,12 +223,12 @@ constexpr double FOV_DEG = 36.0;
 // to CAM_TARGET clears the rim by ~0.18-0.2 units at both ends of the
 // dolly, and the ray to a point just inside the near wall lands ~0.86
 // units below the rim.
-constexpr double CAM_HEIGHT       = 4.3;
-constexpr double CAM_RADIUS_START = 7.0;
-constexpr double CAM_RADIUS_END   = 6.3;
+constexpr double CAM_HEIGHT       = 6.6;
+constexpr double CAM_RADIUS_START = 10.6;
+constexpr double CAM_RADIUS_END   = 9.6;
 constexpr double CAM_AZ_START_DEG = -18.0;
 constexpr double CAM_AZ_END_DEG   = 16.0;
-const Vec<double, 3> CAM_TARGET{0.0, 0.0, 0.75};
+const Vec<double, 3> CAM_TARGET{0.0, 0.0, 0.55};
 
 // "Parking" spot for a not-yet-released sphere -- stacked far above and
 // well clear of both the vat and each other (spaced more than any
@@ -265,6 +270,7 @@ struct SphereBody {
     bool active;
     long long release_substep;
     Vec<double, 3> drop_pos;
+    std::array<double, 2> spray{};   // sideways velocity at release -- see SPAWN_SPRAY
 };
 
 // Activate every sphere whose release time has arrived: move it from
@@ -274,12 +280,28 @@ struct SphereBody {
 // TIME rather than by spawning every sphere at once at different
 // heights.
 void activate_due_bodies(std::vector<SphereBody>& bodies, long long substep_index) {
-    for (auto& b : bodies) {
-        if (b.active || substep_index < b.release_substep) continue;
-        b.active = true;
-        b.particle.w = 1.0;
-        b.particle.x = b.drop_pos;
-        b.particle.x_prev = b.drop_pos;
+    // Every parked sphere whose turn has come and whose spot in the spawn
+    // disc is clear of every sphere already out -- two spheres born
+    // overlapping would start inside each other, and XPBD would pry them
+    // apart with a kick no drop produces. Checked against the ones released
+    // in this same pass too.
+    for (auto& next : bodies) {
+        if (next.active || substep_index < next.release_substep) continue;
+        bool clear = true;
+        for (const auto& b : bodies) {
+            if (!b.active) continue;
+            if (Vec<double, 3>{b.particle.x - next.drop_pos}.norm() < b.radius + next.radius + 0.02) {
+                clear = false;
+                break;
+            }
+        }
+        if (!clear) continue;
+        next.active = true;
+        next.particle.w = 1.0;
+        next.particle.x = next.drop_pos;
+        // Released moving, as from a chute: x_prev behind x by one substep.
+        const Vec<double, 3> v{next.spray[0], next.spray[1], -SPAWN_SPEED};
+        next.particle.x_prev = Vec<double, 3>{next.drop_pos - v * DT_PHYSICS};
     }
 }
 
@@ -354,8 +376,17 @@ void step_physics(std::vector<SphereBody>& bodies,
         auto& p = bodies[i].particle;
         if (p.w <= 0.0) { p.x_prev = p.x; continue; }
         Vec<double, 3> a{0.0, 0.0, GRAVITY_Z};
-        for (auto& w : walls)
-            a = Vec<double, 3>{a + wall_accel(w, p.x, bodies[i].radius, p.w)};
+        // The floor everywhere; a side wall only where the wall is. Above
+        // the rim there is no wall to push, so a sphere flung over the edge
+        // falls out instead of bouncing off something no one can see.
+        a = Vec<double, 3>{a + wall_accel(walls[0], p.x, bodies[i].radius, p.w)};
+        for (std::size_t k = 1; k < walls.size(); ++k) {
+            const std::size_t lateral = k <= 2 ? 1 : 0;   // x-walls span y, y-walls span x
+            const double r = bodies[i].radius;
+            if (p.x[2] - r > VAT_WALL_HEIGHT) continue;
+            if (std::abs(p.x[lateral]) > VAT_HALF_EXTENT + r) continue;
+            a = Vec<double, 3>{a + wall_accel(walls[k], p.x, r, p.w)};
+        }
         Vec<double, 3> v = Vec<double, 3>{(p.x - p.x_prev) / dt};
         Vec<double, 3> v_pred = Vec<double, 3>{(v + a * dt) * VELOCITY_DAMPING};
 
@@ -408,6 +439,15 @@ void step_physics(std::vector<SphereBody>& bodies,
         auto& bj = bodies[pr.second];
         Vec<double, 3> disp_i = bi.particle.x - bi.particle.x_prev;
         Vec<double, 3> disp_j = bj.particle.x - bj.particle.x_prev;
+        // Only a pair that was apart at the start of the substep is swept.
+        // The rewind below sends both spheres back to the moment of touch,
+        // tangential motion included, so applied to a pair already resting
+        // on each other it forbids them to slide -- and spheres poured onto
+        // spheres stood in a column instead of rolling off. Touching pairs
+        // are XPBD's to keep apart; CCD is for the ones arriving.
+        const double gap0 = Vec<double, 3>{bi.particle.x_prev - bj.particle.x_prev}.norm() -
+                            (bi.radius + bj.radius);
+        if (gap0 <= 0.01) continue;
         auto sweep = sweep_sphere_sphere(bi.particle.x_prev, bi.radius, disp_i,
                                          bj.particle.x_prev, bj.radius, disp_j);
         if (sweep.hit && sweep.toi < 1.0) {
@@ -470,7 +510,6 @@ std::vector<SphereBody> make_scene(int n_frames) {
     std::iota(order.begin(), order.end(), 0);
     std::shuffle(order.begin(), order.end(), rng);
 
-    double inset = VAT_HALF_EXTENT - SPAWN_MARGIN;
 
     std::vector<SphereBody> bodies;
     bodies.reserve(N_SPHERES);
@@ -490,10 +529,12 @@ std::vector<SphereBody> make_scene(int n_frames) {
             static_cast<double>(release_span)) + jitter;
         if (b.release_substep < 0) b.release_substep = 0;
 
-        double dx = (u01(rng) * 2.0 - 1.0) * inset;
-        double dy = (u01(rng) * 2.0 - 1.0) * inset;
-        double dz = DROP_HEIGHT + (u01(rng) - 0.5) * DROP_HEIGHT_JITTER;
-        b.drop_pos = Vec<double, 3>{dx, dy, dz};
+        const double spot_r = SPAWN_JITTER * std::sqrt(u01(rng)), spot_a = u01(rng) * 2.0 * std::numbers::pi;
+        b.drop_pos = Vec<double, 3>{SPAWN_POINT[0] + spot_r * std::cos(spot_a),
+                                    SPAWN_POINT[1] + spot_r * std::sin(spot_a), SPAWN_POINT[2]};
+        const double heading = u01(rng) * 2.0 * std::numbers::pi;
+        const double spray = SPAWN_SPRAY * (0.3 + 0.7 * u01(rng));
+        b.spray = {spray * std::cos(heading), spray * std::sin(heading)};
 
         Vec<double, 3> park{0.0, 0.0, PARK_BASE_Z + static_cast<double>(i) * PARK_SPACING};
         b.particle.x = park;
@@ -514,6 +555,86 @@ std::vector<SphereBody> make_scene(int n_frames) {
 // patch stays below the sightline into the vat across the whole
 // sweep; a bigger swing risks dipping the camera behind that rim at
 // one end).
+// ── The vat's UV unwrap ─────────────────────────────────────────────
+//
+// The floor and the four inner walls laid out flat as one net, the way a
+// box is cut from card: the floor in the middle, each wall folded out from
+// the floor edge it stands on. A point on a wall at height z lands z away
+// from that edge, so the net is continuous across every floor-to-wall
+// crease and a texture painted on it wraps the vat without a seam there.
+// The four corners of the square the net sits in belong to nothing.
+//
+// Net coordinates are in world units, the whole net a square of side
+// NET_SIZE; (u, v) = net / NET_SIZE indexes a Texture.
+constexpr double NET_SIZE = 2.0 * VAT_HALF_EXTENT + 2.0 * VAT_WALL_HEIGHT;
+
+enum class VatFace { Floor, WallXNeg, WallXPos, WallYNeg, WallYPos, Outside };
+
+// Where on the net a point on `face` goes.
+Vec<double, 2> vat_net(const Vec<double, 3>& p, VatFace face) {
+    constexpr double R = VAT_HALF_EXTENT, Hh = VAT_WALL_HEIGHT;
+    switch (face) {
+        case VatFace::Floor:    return {Hh + p[0] + R, Hh + p[1] + R};
+        case VatFace::WallXNeg: return {Hh - p[2], Hh + p[1] + R};
+        case VatFace::WallXPos: return {Hh + 2.0 * R + p[2], Hh + p[1] + R};
+        case VatFace::WallYNeg: return {Hh + p[0] + R, Hh - p[2]};
+        case VatFace::WallYPos: return {Hh + p[0] + R, Hh + 2.0 * R + p[2]};
+        case VatFace::Outside:  break;
+    }
+    return {};
+}
+
+// Which face a net point belongs to, and its height above the floor when
+// it is on a wall -- the inverse the default texture is drawn with.
+VatFace net_face(double nx, double ny, double& height) {
+    constexpr double R = VAT_HALF_EXTENT, Hh = VAT_WALL_HEIGHT;
+    const bool mid_x = nx >= Hh && nx <= Hh + 2.0 * R, mid_y = ny >= Hh && ny <= Hh + 2.0 * R;
+    height = 0.0;
+    if (mid_x && mid_y) return VatFace::Floor;
+    if (mid_y && nx < Hh)            { height = Hh - nx;            return VatFace::WallXNeg; }
+    if (mid_y && nx > Hh + 2.0 * R)  { height = nx - Hh - 2.0 * R;  return VatFace::WallXPos; }
+    if (mid_x && ny < Hh)            { height = Hh - ny;            return VatFace::WallYNeg; }
+    if (mid_x && ny > Hh + 2.0 * R)  { height = ny - Hh - 2.0 * R;  return VatFace::WallYPos; }
+    return VatFace::Outside;
+}
+
+// The default texture: pool tiles with grout, a mosaic band just under the
+// rim, one lane line across the floor. `outline` draws the net's cut lines
+// on top -- the template to paint a texture of one's own over.
+Texture pool_texture(int size, bool outline) {
+    constexpr double TILE = 0.24, GROUT = 0.018;
+    const double texel = NET_SIZE / size;
+    return Texture::generate(size, size, [&](int x, int y) {
+        const double nx = (x + 0.5) * texel, ny = (y + 0.5) * texel;
+        double height;
+        const VatFace face = net_face(nx, ny, height);
+        if (face == VatFace::Outside) return Vec<double, 3>{96.0, 96.0, 100.0};
+        if (outline) {
+            // One texel either side of every edge between faces.
+            double h2;
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dy = -1; dy <= 1; ++dy)
+                    if (net_face(nx + dx * texel, ny + dy * texel, h2) != face)
+                        return Vec<double, 3>{255.0, 0.0, 200.0};
+        }
+        const double gx = std::fmod(nx, TILE), gy = std::fmod(ny, TILE);
+        if (gx < GROUT || gy < GROUT) return Vec<double, 3>{226.0, 230.0, 226.0};
+        // A tile's own shade, from which tile it is, so the grid does not
+        // read as a printed pattern.
+        const auto ti = static_cast<std::uint32_t>(nx / TILE), tj = static_cast<std::uint32_t>(ny / TILE);
+        std::uint32_t h = (ti * 73856093u) ^ (tj * 19349663u);
+        h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+        const double jitter = (static_cast<double>(h % 1000u) / 1000.0 - 0.5) * 18.0;
+        Vec<double, 3> tile{84.0 + jitter, 174.0 + jitter, 196.0 + jitter * 0.6};
+        const bool band = face != VatFace::Floor && height > VAT_WALL_HEIGHT - 0.20 &&
+                          height < VAT_WALL_HEIGHT - 0.08;
+        const bool lane = face == VatFace::Floor &&
+                          std::abs(ny - (VAT_WALL_HEIGHT + VAT_HALF_EXTENT)) < 0.07;
+        if (band || lane) tile = Vec<double, 3>{28.0 + jitter, 64.0 + jitter, 138.0 + jitter};
+        return tile;
+    });
+}
+
 Camera<double> camera_for_frame(int frame, int n_frames) {
     double t = n_frames > 1 ? static_cast<double>(frame) / (n_frames - 1) : 0.0;
     double ease = t * t * (3.0 - 2.0 * t);
@@ -544,11 +665,14 @@ Vec<double, 3> backdrop_color(const Vec<double, 3>& dir) {
 
 void print_usage() {
     std::print(
-        "Usage: ball_pit_demo [--frames N] [--force] [--help]\n"
+        "Usage: ball_pit_demo [--frames N] [--texture PNG] [--unwrap-template PNG] [--force] [--help]\n"
         "  Ball pit -- native XPBD rigid-body collision (rigid_contact.hpp),\n"
         "  {} vividly-colored spheres poured into a five-wall vat, jostling\n"
         "  against each other and the walls before settling into a pile.\n"
         "  --frames N   frame count (default {})\n"
+        "  --texture PNG           paint the vat with an image laid on its UV net\n"
+        "  --unwrap-template PNG   write the default texture with the net's cut\n"
+        "                          lines drawn on it, to paint over, and exit\n"
         "  --force      overwrite existing output files\n"
         "  --help       show this message\n"
         "  Output:      ball_pit_frames/frame_%04d.png ({}x{} RGB)\n",
@@ -560,13 +684,30 @@ void print_usage() {
 int main(int argc, char** argv) {
     bool force = false;
     int n_frames = N_FRAMES;
+    std::string texture_path, template_path;
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
         if (a == "--help" || a == "-h") { print_usage(); return 0; }
         if (a == "--force") { force = true; continue; }
         if (a == "--frames" && i + 1 < argc) { n_frames = std::atoi(argv[++i]); continue; }
+        if (a == "--texture" && i + 1 < argc) { texture_path = argv[++i]; continue; }
+        if (a == "--unwrap-template" && i + 1 < argc) { template_path = argv[++i]; continue; }
         std::print(stderr, "unknown option: {}\n", a);
         return 1;
+    }
+
+    if (!template_path.empty()) {
+        const auto tpl = pool_texture(1024, true);
+        write_png_rgb(template_path, tpl.width, tpl.height, tpl.rgb);
+        std::print("unwrap template -> {} ({} x {} world units, floor in the middle, walls "
+                   "folded out)\n", template_path, NET_SIZE, NET_SIZE);
+        return 0;
+    }
+    Texture vat_texture = pool_texture(1024, false);
+    if (!texture_path.empty()) {
+        auto t = Texture::load(texture_path);
+        if (!t) { std::print(stderr, "{}\n", t.error().message); return 1; }
+        vat_texture = std::move(*t);
     }
 
     auto bodies = make_scene(n_frames);
@@ -579,7 +720,6 @@ int main(int argc, char** argv) {
     // deliberate object, not just undifferentiated background geometry,
     // while staying muted enough that the rainbow-hued spheres (full
     // saturated hue sweep, see make_scene) remain the visual focus.
-    const Vec<double, 3> wall_color{198.0, 118.0, 88.0};
     const Vec<double, 3> floor_checker_a{188.0, 187.0, 182.0};
     const Vec<double, 3> floor_checker_b{128.0, 127.0, 122.0};
 
@@ -624,9 +764,15 @@ int main(int argc, char** argv) {
                             best_t = t;
                             hit_point = *p;
                             hit_normal = floor_plane.normal;
-                            bool checker = (static_cast<long long>(std::floor(hit_point[0])) +
-                                           static_cast<long long>(std::floor(hit_point[1]))) % 2 == 0;
-                            base_color = checker ? floor_checker_a : floor_checker_b;
+                            if (std::abs(hit_point[0]) <= VAT_HALF_EXTENT &&
+                                std::abs(hit_point[1]) <= VAT_HALF_EXTENT) {
+                                const auto n = vat_net(hit_point, VatFace::Floor);
+                                base_color = vat_texture.sample(n[0] / NET_SIZE, n[1] / NET_SIZE);
+                            } else {
+                                bool checker = (static_cast<long long>(std::floor(hit_point[0])) +
+                                               static_cast<long long>(std::floor(hit_point[1]))) % 2 == 0;
+                                base_color = checker ? floor_checker_a : floor_checker_b;
+                            }
                             hit_is_sphere = false;
                             hit_is_wall = false;
                             hit_anything = true;
@@ -636,14 +782,17 @@ int main(int argc, char** argv) {
                     // Side walls -- same plane intersection, bounded to
                     // each wall's finite rendered patch (see
                     // on_wall_patch's comment for why).
-                    for (auto& sw : render_walls) {
+                    for (std::size_t wi = 0; wi < render_walls.size(); ++wi) {
+                        const auto& sw = render_walls[wi];
                         if (auto p = intersect(ray, sw.plane)) {
                             double t = (*p - ray.origin).dot(ray.direction);
                             if (t >= 0.0 && t < best_t && on_wall_patch(sw.lateral_axis, *p)) {
                                 best_t = t;
                                 hit_point = *p;
                                 hit_normal = sw.plane.normal;
-                                base_color = wall_color;
+                                const auto face = static_cast<VatFace>(1 + wi);   // same order as make_render_walls
+                                const auto n = vat_net(*p, face);
+                                base_color = vat_texture.sample(n[0] / NET_SIZE, n[1] / NET_SIZE);
                                 hit_is_sphere = false;
                                 hit_is_wall = true;
                                 hit_anything = true;

@@ -264,6 +264,23 @@ struct BVH {
     const std::vector<Shape>& shapes() const { return shapes_; }
     std::size_t node_count() const { return nodes_.size(); }
 
+    // Node layout:
+    //   leaf:     first = prim_indices_ offset, count > 0
+    //   internal: first = RIGHT child index, count = 0
+    //             LEFT child is always this_node + 1 (built immediately after)
+    //
+    // Public, with the arrays behind it, because the layout is already
+    // what a device wants -- flat, index-linked, walked with a stack -- and
+    // a GPU copy of the tree is these two arrays converted, not a second
+    // build that could split differently.
+    struct Node {
+        BoxType bounds;
+        std::uint32_t first{};
+        std::uint32_t count{};
+    };
+    const std::vector<Node>& nodes() const { return nodes_; }
+    const std::vector<std::size_t>& prim_indices() const { return prim_indices_; }
+
 private:
     static constexpr std::uint32_t LEAF_THRESHOLD = 4;
     static constexpr int NUM_BINS = 12;
@@ -271,16 +288,6 @@ private:
     // Near-first push is at most 2 per level → depth ≤ STACK_DEPTH/2 worst-case
     // for pathological unbalanced trees; 64 is safe for SAH-built trees up to 10M+ prims.
     static constexpr std::size_t STACK_DEPTH = 64;
-
-    // Node layout:
-    //   leaf:     first = prim_indices_ offset, count > 0
-    //   internal: first = RIGHT child index, count = 0
-    //             LEFT child is always this_node + 1 (built immediately after)
-    struct Node {
-        BoxType bounds;
-        std::uint32_t first{};
-        std::uint32_t count{};
-    };
 
     std::vector<Shape> shapes_;
     std::vector<Node> nodes_;

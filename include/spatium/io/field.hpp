@@ -141,8 +141,51 @@ enum class Op : std::uint8_t {
     // be a closure to be carried along.
     Noise,
 
+    // Inputs that are not a surface parameter, for fields evaluated per
+    // *instance*: which instance (`Id`), where it started (`Origin`, one
+    // component, `k`), and the point being coloured (`Point`, `k`). A
+    // field evaluated over (u, v) reads them as zero.
+    //
+    // They exist because the donut's dust is a million particles sharing
+    // one field, and every one of its four remaining closures began by
+    // telling the particles apart -- which, without these, only a closure
+    // could do.
+    Id, Origin, Point,
+
+    // A number in [0, 1) that is fixed per instance and per `salt` (in
+    // `k`): the instance index through FNV and an avalanche, reduced mod
+    // 10^6. Integer arithmetic only, so a host in fp64 and a device in fp32
+    // hash the same integers to the same bits before either converts.
+    Hash,
+
+    // One child. For the distance a colour fades over.
+    Sqrt,
+
+    // Component `k` of the point at `floor(child)` in `table`, the index
+    // clamped into range. The dust's targets are points on the BOOM
+    // letterforms, a fixed table like a noise permutation is; a gather is
+    // how a field reads one without a closure holding the table.
+    Gather,
+
     Opaque,  // a callable leaf -- the escape hatch, kept first-class
 };
+
+// The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
+// field, a POD interpreter and any shader written against it cannot drift.
+inline std::uint32_t instance_hash(std::uint32_t id, std::uint32_t salt) {
+    std::uint32_t h = 2166136261u ^ salt;
+    h ^= id;
+    h *= 16777619u;
+    h ^= h >> 13;
+    h *= 0x85ebca6bu;
+    h ^= h >> 16;
+    return h;
+}
+
+template<Scalar T>
+inline T instance_unit(std::uint32_t id, std::uint32_t salt) {
+    return static_cast<T>(instance_hash(id, salt) % 1000000u) / static_cast<T>(1000000);
+}
 
 inline const char* op_name(Op o) {
     switch (o) {
@@ -159,6 +202,12 @@ inline const char* op_name(Op o) {
         case Op::Cos:    return "Cos";
         case Op::Less:   return "Less";
         case Op::Noise:  return "Noise";
+        case Op::Id:     return "Id";
+        case Op::Origin: return "Origin";
+        case Op::Point:  return "Point";
+        case Op::Hash:   return "Hash";
+        case Op::Sqrt:   return "Sqrt";
+        case Op::Gather: return "Gather";
         case Op::Opaque: return "Opaque";
     }
     return "?";
@@ -173,7 +222,7 @@ inline bool is_binary(Op o) {
 // shift indices, check order and lower -- each of which would otherwise
 // have to learn separately that Sin has one child and Noise three.
 inline std::uint32_t arity(Op o) {
-    if (o == Op::Sin || o == Op::Cos) return 1;
+    if (o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Gather) return 1;
     if (o == Op::Noise)               return 3;
     return is_binary(o) ? 2 : 0;
 }
@@ -190,6 +239,14 @@ struct FieldOp {
     // what the capture accounting below exists to catch. Never mutated
     // after construction, so sharing it is not aliasing anything.
     std::shared_ptr<const algebra::PerlinNoise> noise;
+
+    // An integer immediate: the component for Origin, Point and Gather, the
+    // salt for Hash. Separate from the child indices so that an op with no
+    // children never has a number in a slot that means "child".
+    std::uint32_t k = 0;
+
+    // Gather: the table. Shared for the reason `noise` is.
+    std::shared_ptr<const std::vector<Vec<T, 3>>> table;
 
     // Opaque leaf. The callable itself, plus what can be known about it
     // without asking the user for a name.
@@ -217,6 +274,19 @@ struct FieldOp {
     bool stateless = false;
 };
 
+// What a field can read. A surface field reads (u, v) and nothing else;
+// a field evaluated per instance -- a motion factor, a colour -- also has
+// an instance, the point it started from and the point being coloured.
+// One record rather than a growing argument list, for the reason
+// `MotionEnv` is one.
+template<Scalar T = double>
+struct FieldInputs {
+    T u{}, v{};
+    std::uint32_t id = 0;
+    Vec<T, 3> origin{};
+    Vec<T, 3> p{};
+};
+
 template<Scalar T = double>
 class Field {
 public:
@@ -235,6 +305,19 @@ public:
     // wrote this spelling down before the overloads existed, which is a
     // decent sign it is the one people reach for.
     static Field t() { return u(); }
+
+    // Per-instance inputs; see Op::Id, Op::Origin, Op::Point.
+    static Field id() { Field f; f.ops_.clear(); f.push(Op::Id); return f; }
+    static Field origin(std::uint32_t k) { return input(Op::Origin, k); }
+    static Field point(std::uint32_t k) {
+        Field f = input(Op::Point, k);
+        f.reads_point_ = true;
+        return f;
+    }
+
+    // A fixed number in [0, 1) per instance; `salt` picks an independent
+    // one. See Op::Hash.
+    static Field hash(std::uint32_t salt) { return input(Op::Hash, salt); }
 
     // The escape hatch, and deliberately as ordinary to write as the
     // structural builders. An IR whose hatch is second-class becomes a
@@ -268,15 +351,22 @@ public:
 
     // ── Evaluation: one pass, children already computed ──────────
 
-    T operator()(T u, T v) const {
+    T operator()(T u, T v) const { return (*this)(FieldInputs<T>{u, v}); }
+
+    T operator()(const FieldInputs<T>& in) const {
         constexpr std::size_t kInline = 32;
         if (ops_.size() <= kInline) {
             T scratch[kInline];
-            return eval_into(scratch, u, v);
+            return eval_into(scratch, in);
         }
         std::vector<T> scratch(ops_.size());
-        return eval_into(scratch.data(), u, v);
+        return eval_into(scratch.data(), in);
     }
+
+    // Whether any op reads the point being coloured or moved. Derived like
+    // `is_structural()`: a factor that reads it varies per vertex, and a
+    // motion scaled by such a factor is a deformation however it is spelled.
+    bool reads_point() const { return reads_point_; }
 
     // Derived by construction, never declared: a field is structural iff
     // no op in it is opaque. Cached rather than walked, because this is a
@@ -335,6 +425,18 @@ public:
     // multiplication. See Op::Less for why there is no boolean type.
     friend Field less(Field x, const Field& y) { x.append(Op::Less, y); return x; }
 
+    friend Field sqrt(Field x) { x.push_unary(Op::Sqrt); return x; }
+
+    // Component `k` of `table[floor(index)]`. The table is shared, not
+    // copied into every field that gathers from it.
+    friend Field gather(std::shared_ptr<const std::vector<Vec<T, 3>>> table, Field index,
+                        std::uint32_t k) {
+        index.push_unary(Op::Gather);
+        index.ops_.back().table = std::move(table);
+        index.ops_.back().k = k;
+        return index;
+    }
+
     // Noise over three fields. The table is copied once into shared
     // storage here, so the caller's PerlinNoise can go out of scope and
     // every later copy of this field costs a reference count, not 512
@@ -377,6 +479,15 @@ public:
 private:
     std::vector<FieldOp<T>> ops_;
     bool structural_ = true;
+    bool reads_point_ = false;
+
+    static Field input(Op o, std::uint32_t k) {
+        Field f;
+        f.ops_.clear();
+        f.push(o);
+        f.ops_.back().k = k;
+        return f;
+    }
 
     void push_const(T value) {
         FieldOp<T> n{};
@@ -391,13 +502,13 @@ private:
         ops_.push_back(std::move(n));
     }
 
-    T eval_into(T* s, T u, T v) const {
+    T eval_into(T* s, const FieldInputs<T>& in) const {
         for (std::size_t i = 0; i < ops_.size(); ++i) {
             const auto& n = ops_[i];
             switch (n.op) {
                 case Op::Const:  s[i] = n.value; break;
-                case Op::U:      s[i] = u; break;
-                case Op::V:      s[i] = v; break;
+                case Op::U:      s[i] = in.u; break;
+                case Op::V:      s[i] = in.v; break;
                 case Op::Add:    s[i] = s[n.a] + s[n.b]; break;
                 case Op::Sub:    s[i] = s[n.a] - s[n.b]; break;
                 case Op::Mul:    s[i] = s[n.a] * s[n.b]; break;
@@ -410,11 +521,32 @@ private:
                 case Op::Cos:    { using std::cos; s[i] = cos(s[n.a]); break; }
                 case Op::Less:   s[i] = s[n.a] < s[n.b] ? T{1} : T{0}; break;
                 case Op::Noise:  s[i] = (*n.noise)(s[n.a], s[n.b], s[n.c]); break;
-                case Op::Opaque: s[i] = n.fn(u, v); break;
+                case Op::Id:     s[i] = static_cast<T>(in.id); break;
+                case Op::Origin: s[i] = in.origin[n.k]; break;
+                case Op::Point:  s[i] = in.p[n.k]; break;
+                case Op::Hash:   s[i] = instance_unit<T>(in.id, n.k); break;
+                case Op::Sqrt:   { using std::sqrt; s[i] = sqrt(s[n.a]); break; }
+                case Op::Gather: s[i] = gather_at(*n.table, s[n.a], n.k); break;
+                case Op::Opaque: s[i] = n.fn(in.u, in.v); break;
             }
         }
         return s[ops_.size() - 1];
     }
+
+public:
+    // The gather's arithmetic, public so an interpreter of the lowered form
+    // shares the rounding rather than repeating it: truncation toward zero
+    // is `static_cast` to an unsigned index, which for a non-negative index
+    // is a floor, then clamped into the table.
+    static T gather_at(const std::vector<Vec<T, 3>>& table, T index, std::uint32_t k) {
+        if (table.empty()) return T{0};
+        const T lo = index < T{0} ? T{0} : index;
+        auto i = static_cast<std::size_t>(lo);
+        if (i >= table.size()) i = table.size() - 1;
+        return table[i][k];
+    }
+
+private:
 
     // Append y's ops, with their child indices shifted, then the parent
     // naming both roots. This is the whole of composition: the parent can
@@ -479,6 +611,7 @@ private:
         }
 
         structural_ = structural_ && y.structural_;
+        reads_point_ = reads_point_ || y.reads_point_;
         return static_cast<std::uint32_t>(ops_.size() - 1);
     }
 
@@ -633,6 +766,16 @@ struct MotionEnv {
     // with it. `seat` and `local` arrive already summed into `p`;
     // separating them is exactly this field.
     Vec<T, 3> origin{};
+
+    // Which instance this is, counting a Scatter's sites in order: the
+    // integer a per-instance quantity is hashed from.
+    //
+    // The origin used to be that input, hashed through the bit patterns of
+    // its coordinates, and it cannot be on a GPU that has no fp64: the bits
+    // being hashed do not exist there, so the device would give every
+    // particle different parameters from the host. An index is the same
+    // integer on both. A node that is its own object is instance 0.
+    std::uint32_t id = 0;
 };
 
 enum class VecOp : std::uint8_t {
@@ -641,6 +784,10 @@ enum class VecOp : std::uint8_t {
     Add, Sub,
     Scale,     // child a, times a scalar read from the environment
     Rotate,    // child a, turned by a rotation read from the environment
+    // A vector made of three scalar fields, one per component, held in
+    // `factor_fields`. The way a scalar expression -- a hash, a gathered
+    // target, a noise -- becomes a position or a colour without a closure.
+    Make,
     Opaque,    // a callable leaf; `reads_point` says whether it uses p
 };
 
@@ -652,6 +799,7 @@ inline const char* vec_op_name(VecOp o) {
         case VecOp::Sub:    return "Sub";
         case VecOp::Scale:  return "Scale";
         case VecOp::Rotate: return "Rotate";
+        case VecOp::Make:   return "Make";
         case VecOp::Opaque: return "Opaque";
     }
     return "?";
@@ -753,6 +901,30 @@ public:
     VecField() { push(VecOp::Point); }
 
     static VecField point() { return VecField{}; }
+
+    // What a factor or a component field reads, from a motion's
+    // environment: time as the first parameter under the convention the
+    // factors have always used, then the instance, its origin and the point.
+    static FieldInputs<T> inputs_of(const MotionEnv<T>& e) {
+        return FieldInputs<T>{e.t, T{0}, e.id, e.origin, e.p};
+    }
+
+    // A vector from three scalar fields. Structural exactly when all three
+    // are, and reading the point exactly when one of them does -- which is
+    // what decides whether a motion built from it can still be a placement.
+    static VecField make(Field<T> x, Field<T> y, Field<T> z) {
+        VecField f;
+        f.ops_.clear();
+        VecFieldOp<T> n{};
+        n.op = VecOp::Make;
+        const bool structural = x.is_structural() && y.is_structural() && z.is_structural();
+        n.factor_fields.push_back(std::move(x));
+        n.factor_fields.push_back(std::move(y));
+        n.factor_fields.push_back(std::move(z));
+        f.ops_.push_back(std::move(n));
+        f.structural_ = structural;
+        return f;
+    }
 
     static VecField constant(const Vec<T, 3>& v) {
         VecField f;
@@ -907,7 +1079,7 @@ public:
 
         const bool structural = s.is_structural();
         n.factor_fields.push_back(s);
-        n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(e.t, T{0}); };
+        n.scale_fn = [s = std::move(s)](const MotionEnv<T>& e) { return s(inputs_of(e)); };
 
         // No note_factor here, deliberately. The identity of a factor that
         // has an expression behind it *is* the expression, and the report
@@ -1019,8 +1191,8 @@ public:
         n.factor_fields.push_back(az);
         n.rot_fn = [ax = std::move(ax), ay = std::move(ay), az = std::move(az)](
                        const MotionEnv<T>& e) {
-            return algebra::SO3<T>{}.exp(
-                Vec<T, 3>{ax(e.t, T{0}), ay(e.t, T{0}), az(e.t, T{0})});
+            const auto in = inputs_of(e);
+            return algebra::SO3<T>{}.exp(Vec<T, 3>{ax(in), ay(in), az(in)});
         };
 
         assert(n.a < x.ops_.size() && "VecField: a child must precede its parent");
@@ -1085,12 +1257,23 @@ public:
             case VecOp::Point:  return true;
             case VecOp::Const:  return false;
             case VecOp::Opaque: return n.reads_point;
+            case VecOp::Make:   return factor_reads_point(n);
             case VecOp::Scale:
-            case VecOp::Rotate: return reads_point(n.a);
+            case VecOp::Rotate: return reads_point(n.a) || factor_reads_point(n);
             case VecOp::Add:
             case VecOp::Sub:    return reads_point(n.a) || reads_point(n.b);
         }
         return true;
+    }
+
+    // A factor written as an expression can now read the point, and one
+    // that does varies per vertex -- so a Scale by it is a deformation.
+    // A closure factor cannot reach the point at all: its signatures take
+    // an origin and a time.
+    static bool factor_reads_point(const VecFieldOp<T>& n) {
+        for (const auto& g : n.factor_fields)
+            if (g.reads_point()) return true;
+        return false;
     }
 
     // A *placement* is a motion that is affine in the point: it moves the
@@ -1184,8 +1367,9 @@ private:
             case VecOp::Point:  return true;
             case VecOp::Const:  return true;
             case VecOp::Opaque: return !n.reads_point;
+            case VecOp::Make:   return !factor_reads_point(n);
             case VecOp::Scale:
-            case VecOp::Rotate: return affine_in_point(n.a);
+            case VecOp::Rotate: return !factor_reads_point(n) && affine_in_point(n.a);
             case VecOp::Add:
             case VecOp::Sub:
                 // Both sides affine, and at most one of them touching the
@@ -1280,6 +1464,12 @@ private:
                 case VecOp::Sub:    s[i] = Vec<T, 3>{s[n.a] - s[n.b]}; break;
                 case VecOp::Scale:  s[i] = Vec<T, 3>{s[n.a] * n.scale_fn(env)}; break;
                 case VecOp::Rotate: s[i] = Vec<T, 3>{n.rot_fn(env) * s[n.a]}; break;
+                case VecOp::Make: {
+                    const auto in = inputs_of(env);
+                    s[i] = Vec<T, 3>{n.factor_fields[0](in), n.factor_fields[1](in),
+                                     n.factor_fields[2](in)};
+                    break;
+                }
                 case VecOp::Opaque: s[i] = n.fn(env); break;
             }
         }
@@ -1338,7 +1528,8 @@ void accumulate(FieldStats& stats, const VecField<T>& f,
         // `Opaque` was the blind spot that let a field with a lambda in
         // it report as structural.
         const bool factor = (n.op == VecOp::Scale  && n.scale_fn) ||
-                            (n.op == VecOp::Rotate && n.rot_fn);
+                            (n.op == VecOp::Rotate && n.rot_fn) ||
+                            n.op == VecOp::Make;
 
         // A factor with an expression behind it is not a leaf, and the
         // closure holding it is a wrapper rather than a subject. Report

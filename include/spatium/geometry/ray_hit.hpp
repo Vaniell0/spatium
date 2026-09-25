@@ -73,6 +73,18 @@ inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
 template<Scalar T>
 inline std::optional<RayHit3<T>> ray_hit(const Ray<3, T>& ray,
                                          const BoundedQuadric<T>& bq) {
+    // A closed quadric's caps are the clip box's own faces, so the box
+    // test that ray_hit(ray, Box) already does is the cap test: entering
+    // the box at a point inside the surface is entering the solid there,
+    // and nothing along the ray can be nearer, because before the box
+    // there is nothing. From inside the box (t == 0) there is no entry
+    // face to be a cap, and the surface roots below decide as for an open
+    // quadric.
+    if (bq.closed) {
+        auto face = ray_hit(ray, bq.clip);
+        if (!face) return std::nullopt;
+        if (face->t > T{0} && bq.surface(face->point) <= T{0}) return face;
+    }
     auto [a, b, c] = detail::quadric_coeffs(ray, bq.surface);
     std::optional<RayHit3<T>> best;
     for (const auto& root : solve_quadratic(a, b, c)) {
