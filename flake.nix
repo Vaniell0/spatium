@@ -74,8 +74,7 @@
               install_demo examples/showcase                   showcase
               install_demo examples/sets_demo                  sets
               install_demo examples/parametric_analytical_demo parametric
-              install_demo examples/blackhole_demo             blackhole
-              install_demo examples/blackhole_gr_demo          blackhole-gr
+              install_demo examples/blackhole_live             blackhole
               install_demo examples/geodesic_curvature_grid_demo curvature-grid
               install_demo examples/geodesic_procgen_demo       geodesic-procgen
               install_demo examples/hyperbolic_tessellation_demo hyperbolic-tessellation

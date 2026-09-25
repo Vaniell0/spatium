@@ -18,31 +18,18 @@ spatium_add_example(NAME terminal_donut_demo OPTIONS -O3 -march=native)
 # benefits materially from optimization on top of those) -- 2026-08-25.
 spatium_add_example(NAME parametric_analytical_demo OPTIONS -O3 -march=native)
 
-# Schwarzschild geodesic ray-tracer — null-geodesic backward integration.
-# -O3 -march=native: same reasoning as parametric_analytical_demo above.
-spatium_add_example(NAME blackhole_demo OPTIONS -O3 -march=native)
-
-# Rigorous-GR Schwarzschild ray-tracer -- full 4-coordinate geodesic
-# integration via physics/relativity/ (Dual<T>-exact Christoffel
-# symbols), real tilted/lensed accretion disk, camera choreography
-# (frame sequence). Built alongside blackhole_demo.cpp, not replacing
-# it -- see this file's header comment for why. -O3 -march=native: same
-# reasoning as blackhole_demo above, multiplied by per-ray numerical
-# integration instead of a closed-form ODE.
-spatium_add_example(NAME blackhole_gr_demo OPTIONS -O3 -march=native)
-
 # Ray-bundle geodesic diagram -- not a shaded render, so no AA/-O3
 # tuning concerns on the level of the raytracers above, but still
 # benefits from -O3 given the geodesic integration itself.
 spatium_add_example(NAME geodesic_curvature_grid_demo OPTIONS -O3 -march=native)
 
 # Ellis/Morris-Thorne wormhole ray-tracer -- camera flythrough (frame
-# sequence). -O3 -march=native: same reasoning as blackhole_demo above,
-# multiplied by rendering N_FRAMES full images per run.
+# sequence). -O3 -march=native: same reasoning as parametric_analytical_demo
+# above, multiplied by rendering N_FRAMES full images per run.
 spatium_add_example(NAME wormhole_demo OPTIONS -O3 -march=native)
 
 # Dzhanibekov-effect rigid-body tumble (LGVI) -- camera-static frame
-# sequence. -O3 -march=native: same reasoning as blackhole_demo above.
+# sequence. -O3 -march=native: same reasoning as parametric_analytical_demo above.
 # Reference example for the render/ engine primitives (Camera,
 # parallel_for_rows, supersample_pixel, write_png_rgb) -- see file header.
 spatium_add_example(NAME tumbling_body_demo OPTIONS -O3 -march=native)

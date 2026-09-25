@@ -68,6 +68,8 @@ SKIP_DIRS = {".git", ".direnv", "result", "vendor"}
 NOT_IN_TREE = {
     # -- the doc records a deletion, so it has to name the deleted thing
     "CHANGELOG.md": "deleted by the 2026-08-26 audit; the entry naming it records the deletion",
+    "blackhole_gr_demo.cpp": "deleted 2026-09-26, replaced by blackhole_live.cpp; ROADMAP's history entries name it",
+    "blackhole_demo.cpp": "deleted 2026-09-26, replaced by blackhole_live.cpp; ROADMAP's history entries name it",
     "test_block_b_finish.cpp": "never existed; ROADMAP's correction entry names it to say so",
     "test_block_c_close.cpp": "never existed; ROADMAP's correction entry names it to say so",
     "test_block_d_start.cpp": "never existed; ROADMAP's correction entry names it to say so",
