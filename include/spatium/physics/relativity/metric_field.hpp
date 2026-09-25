@@ -14,7 +14,7 @@
 // `geodesic_step` take a MetricField unchanged.
 //
 // On the CPU the interpreted metric costs more than a hand-written one:
-// frame 40 of blackhole_gr_demo at 160x90 takes 5.8 s through the Boyer-
+// frame 40 of the since-removed blackhole_gr_demo at 160x90 took 5.8 s through the Boyer-
 // Lindquist fields against 3.1 s through KerrMetric, pixel for pixel the
 // same image; before the ten entries shared one pool it was 16 s. On the
 // device the same data is compiled, not interpreted.

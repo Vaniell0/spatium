@@ -51,6 +51,9 @@ target_link_libraries(verify_cuda_render PRIVATE spatium_gpu_render_kernel spati
 add_executable(verify_cuda_kerr_render verify_cuda_kerr_render.cpp)
 target_link_libraries(verify_cuda_kerr_render PRIVATE spatium_gpu_render_kernel spatium_sdk)
 
+# (examples/blackhole_gr_demo.cpp, which this CUDA path was transcribed from, was
+# removed 2026-09-26; blackhole_live renders the same scenes through Vulkan
+# from the scene language, `--video` for a frame sequence.)
 # The actual final-video render driver (examples/blackhole_gr_demo.cpp's
 # choreography, executed per-ray on GPU). Needs -O2: unoptimized host-side
 # per-pixel compositing/sky-lookup is the dominant cost at 1920x1080, not
