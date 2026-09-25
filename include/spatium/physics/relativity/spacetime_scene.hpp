@@ -128,6 +128,10 @@ public:
     DustSettings<T>& dust() { return dust_; }
     SkySettings<T>& sky() { return sky_; }
     CameraSettings<T>& camera() { return camera_; }
+    const DiskSettings<T>& disk() const { return disk_; }
+    const DustSettings<T>& dust() const { return dust_; }
+    const SkySettings<T>& sky() const { return sky_; }
+    const CameraSettings<T>& camera() const { return camera_; }
     const std::vector<HoleSpec<T>>& holes() const { return holes_; }
     T total_mass() const {
         T m{0};
@@ -137,7 +141,17 @@ public:
 
     // Minkowski plus one Kerr-Schild term per hole, each at its centre at
     // the event's time.
-    Result<MetricField<T>> metric() const {
+    //
+    // Which of Kerr-Schild's two forms: `ingoing` is regular across the
+    // future horizon, where a body or a photon falls in; `outgoing` across
+    // the past horizon, which is what a ray traced backwards from a camera
+    // approaches -- in the ingoing form it meets a coordinate singularity
+    // there, its tangent grows without bound and the step jumps the
+    // horizon. The outgoing form is the ingoing one with time reversed,
+    // and time reversal turns a hole's rotation around, so it is the
+    // ingoing form for spin -a with the sign of l's spatial part flipped.
+    enum class Form { ingoing, outgoing };
+    Result<MetricField<T>> metric(Form form = Form::ingoing) const {
         std::array<F, 10> g;
         for (std::size_t e = 0; e < 10; ++e) {
             const auto [i, j] = MetricField<T>::kEntries[e];
@@ -154,7 +168,11 @@ public:
             const F r2 = half * w + sqrt(quarter * w * w + a * a * z * z);
             const F r = sqrt(r2);
             const F den = r2 + a * a;
-            const std::array<F, 4> l{F(T{1}), (r * x + a * y) / den, (r * y - a * x) / den, z / r};
+            const bool out = form == Form::outgoing;
+            const F sa = out ? F(T{0}) - a : a;          // the spin the reversed form is written with
+            const F sign(out ? T{-1} : T{1});
+            const std::array<F, 4> l{F(T{1}), sign * (r * x + sa * y) / den, sign * (r * y - sa * x) / den,
+                                     sign * z / r};
             const F f = two * M * r2 * r / (r2 * r2 + a * a * z * z);
             for (std::size_t e = 0; e < 10; ++e) {
                 const auto [i, j] = MetricField<T>::kEntries[e];

@@ -36,6 +36,7 @@ digraph spatium_dependencies {
     "render" -> "geometry";
     "render" -> "io";
     "render" -> "mesh";
+    "render" -> "physics";
     "render" -> "spaces";
     "render" -> "spatial";
     "render" -> "spatium";

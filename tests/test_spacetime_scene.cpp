@@ -90,3 +90,22 @@ TEST_CASE("A superposed binary reports the residual it has", "[relativity][scene
     INFO(std::format("residual at the midpoint of a pair 40 M apart: {:.2e}", *r2));
     CHECK(*r2 > 1e-5);   // not a vacuum solution, and it says so
 }
+
+// The outgoing form is still Kerr: the same vacuum, the same g_tt on the
+// equator, only regular on the other horizon.
+TEST_CASE("The outgoing Kerr-Schild form is the same spacetime", "[relativity][scene]") {
+    SpacetimeScene<double> scene;
+    scene.hole(1.0, 0.8);
+    const auto in = scene.metric(SpacetimeScene<double>::Form::ingoing);
+    const auto out = scene.metric(SpacetimeScene<double>::Form::outgoing);
+    REQUIRE(in);
+    REQUIRE(out);
+    for (const V4 x : {V4{0.0, 5.0, 1.0, 2.0}, V4{0.0, -3.0, 4.0, -1.5}, V4{0.0, 2.0, -6.0, 0.7}}) {
+        INFO(std::format("at ({}, {}, {})", x[1], x[2], x[3]));
+        CHECK(vacuum_residual(*out, x) < 1e-7);
+    }
+    for (double r : {2.5, 5.0, 20.0}) {
+        const V4 eq{0.0, std::sqrt(r * r + 0.64), 0.0, 0.0};
+        CHECK_THAT((*out)(eq)(0, 0), WithinAbs((*in)(eq)(0, 0), 1e-13));
+    }
+}
