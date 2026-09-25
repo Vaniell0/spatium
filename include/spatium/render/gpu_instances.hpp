@@ -133,7 +133,13 @@ inline Result<InstanceKernel> make_instance_kernel(const io::build::Trace<double
     // applied to a site seated at `pos` and turned by `F` gives the
     // instance translation `tr + R (s pos)` and rotation `R F`, and the
     // material is resolved where the shape's centroid lands.
-    k.source = std::string("#version 450\nlayout(local_size_x = 64) in;\n") + k.module.code + R"GLSL(
+    // The noise tables into workgroup memory when they are small enough to
+    // sit there comfortably -- see field_perm_at in the prelude.
+    const std::size_t perm = k.module.perm.size();
+    const std::string shared_perm =
+        perm > 0 && perm <= 4096 ? std::format("#define FIELD_PERM_SHARED {}\n", perm) : "";
+    k.source = std::string("#version 450\n") + shared_perm + "layout(local_size_x = 64) in;\n" +
+               k.module.code + R"GLSL(
 struct Site { vec4 pos; vec4 c0; vec4 c1; vec4 c2; };
 struct Instance { vec4 r0, r1, r2, scale_quadric, color_rough, emissive_opacity; };
 layout(std430, binding = 2) readonly buffer Sites { Site sites[]; };
@@ -147,6 +153,9 @@ layout(push_constant) uniform InstancePush {
 } pc;
 
 void main() {
+    // Before the early return: the copy ends in a barrier every invocation
+    // of the workgroup must reach.
+    field_load_perm();
     uint i = gl_GlobalInvocationID.x;
     if (i >= pc.info.x) return;
     Site st = sites[i];

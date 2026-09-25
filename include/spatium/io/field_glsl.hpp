@@ -69,7 +69,23 @@ float field_instance_unit(uint id, uint salt) {{
 }}
 
 // PerlinNoise::sample in algebra/noise.hpp, over a table at `base`.
+//
+// A kernel that defines FIELD_PERM_SHARED to the table's length reads it
+// from workgroup memory instead, after field_load_perm() has copied it
+// there: sixteen dependent random loads per noise sample are what a
+// particle's motion spends most of its time on, and the table is 2 KB.
+#ifdef FIELD_PERM_SHARED
+shared uint field_perm_s[FIELD_PERM_SHARED];
+int field_perm_at(uint base, int i) {{ return int(field_perm_s[base + uint(i & 511)]); }}
+void field_load_perm() {{
+    for (uint k = gl_LocalInvocationIndex; k < uint(FIELD_PERM_SHARED); k += gl_WorkGroupSize.x * gl_WorkGroupSize.y)
+        field_perm_s[k] = field_perm[k];
+    barrier();
+}}
+#else
 int field_perm_at(uint base, int i) {{ return int(field_perm[base + uint(i & 511)]); }}
+void field_load_perm() {{}}
+#endif
 float field_fade(float t) {{ return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }}
 float field_lerp(float t, float a, float b) {{ return a + t * (b - a); }}
 float field_grad(int hash, float x, float y, float z) {{
