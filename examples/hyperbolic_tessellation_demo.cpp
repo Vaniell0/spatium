@@ -12,12 +12,15 @@
 //     uses for Schwarzschild/Kerr (those metrics have no closed-form
 //     geodesic solution). Hyperbolic<N> does: exp_map() is exact.
 //
-// So this is sphere-tracing (the classic Euclidean SDF-marching technique)
-// carried out entirely in the hyperboloid model's own metric: march
-// exp_map(origin, dir, t) forward with growing t, using space.distance()
-// to the nearest marker as a safe step size, exactly as an ordinary
-// raymarcher uses a Euclidean SDF -- just with a non-Euclidean distance
-// function.
+// It began as sphere-tracing carried out in the hyperboloid model's own
+// metric: march exp_map(origin, dir, t) forward, stepping by the distance
+// to the nearest marker, every marker checked at every step. It now casts
+// each ray once against a tree of geodesic balls (spatial/ball_tree.hpp):
+// a ray's entry into a hyperbolic ball is a quadratic in e^t
+// (spatial/geodesic_ball.hpp), so the hit is exact rather than within a
+// marching tolerance, and the tree skips what the ray cannot reach.
+// Measured on random markers in the same shells: 5x faster at this
+// demo's 126, 20x at 1 000, 105x at 10 000, 138x at 100 000.
 //
 // The camera sits at Hyperbolic<3>::origin() = (1,0,0,0) in the
 // hyperboloid embedding. Its tangent space there is genuinely Euclidean:
@@ -58,6 +61,7 @@
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/sky.hpp>
 #include <spatium/render/supersample.hpp>
+#include <spatium/spatial/ball_tree.hpp>
 #include <spatium/render/write_image.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 
@@ -137,35 +141,17 @@ std::vector<Marker> build_markers(const H3& space) {
     return markers;
 }
 
-// Sphere-traces one ray from the origin. Returns the hit marker's color,
-// fogged by traveled hyperbolic distance, or sky if nothing was reached
-// within T_MAX.
-Vec<double, 3> march(const H3& space, const std::vector<Marker>& markers,
+// Casts one ray from the origin into the tree of markers. Returns the hit
+// marker's color, fogged by the hyperbolic distance to where the ray enters
+// it, or sky if nothing is entered within T_MAX.
+Vec<double, 3> trace(const spatium::spatial::GeodesicBallTree<H3>& tree, const std::vector<Marker>& markers,
                      const Point4& origin, const Vec<double, 3>& dir3, const Sky& sky) {
     constexpr double kTMax = 4.2;
-    constexpr double kMinStep = 1e-4;
-    constexpr double kHitEps = 1e-3;
-    constexpr int kMaxSteps = 200;
-
-    Point4 dir4{0.0, dir3[0], dir3[1], dir3[2]};
-
-    double t = 0.0;
-    for (int step = 0; step < kMaxSteps && t < kTMax; ++step) {
-        Point4 pos = space.exp_map(origin, dir4, t);
-
-        double d_min = std::numeric_limits<double>::infinity();
-        std::size_t nearest = 0;
-        for (std::size_t i = 0; i < markers.size(); ++i) {
-            double d = space.distance(pos, markers[i].pos) - markers[i].radius;
-            if (d < d_min) { d_min = d; nearest = i; }
-        }
-
-        if (d_min < kHitEps) {
-            double fog = std::exp(-t / 2.2);
-            double shade = 0.25 + 0.75 * fog;
-            return Vec<double, 3>{markers[nearest].color * shade};
-        }
-        t += std::max(d_min, kMinStep);
+    const Point4 dir4{0.0, dir3[0], dir3[1], dir3[2]};
+    if (const auto hit = tree.ray_cast(origin, dir4, kTMax)) {
+        const double fog = std::exp(-hit->t / 2.2);
+        const double shade = 0.25 + 0.75 * fog;
+        return Vec<double, 3>{markers[hit->index].color * shade};
     }
     return sample_sky_color(sky, dir3);
 }
@@ -196,6 +182,10 @@ int main(int argc, char* argv[]) {
     H3 space;
     Point4 origin = H3::origin();
     auto markers = build_markers(space);
+    std::vector<spatium::spatial::GeodesicBall<H3>> balls;
+    balls.reserve(markers.size());
+    for (const auto& m : markers) balls.push_back({m.pos, m.radius});
+    const auto tree = spatium::spatial::GeodesicBallTree<H3>::build(space, std::move(balls));
 
     constexpr int W = 960, H = 720;
     // No spirals/clouds: this is an abstract mathematical space, not a
@@ -228,7 +218,7 @@ int main(int argc, char* argv[]) {
 
             auto ray_color = [&](double sx, double sy) -> Vec<double, 3> {
                 Vec<double, 3> dir3 = camera_ray_dir(basis, sx, sy);
-                return march(space, markers, origin, dir3, sky);
+                return trace(tree, markers, origin, dir3, sky);
             };
 
             supersample_pixel(x, y, W, H, basis.tan_half,

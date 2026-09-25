@@ -10,3 +10,4 @@ import spatium.spaces;
 #include <spatium/spatial/bound.hpp>
 #include <spatium/spatial/bvh.hpp>
 #include <spatium/spatial/geodesic_ball.hpp>
+#include <spatium/spatial/ball_tree.hpp>
