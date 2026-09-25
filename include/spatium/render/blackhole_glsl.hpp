@@ -93,9 +93,26 @@ std::array<Vec<double, 4>, 4> observer_tetrad(const Metric& metric, const Vec<do
     return {e0, right, up, fwd};
 }
 
-// The whole shader for `scene`. Bindings: 0 pixels (uint, RGBA8), 1 the
-// blackbody table, 2 and 3 the field tables the hole paths may read.
-inline Result<std::string> blackhole_shader(const physics::relativity::SpacetimeScene<double>& scene) {
+// Where the dust is counted: a box about the centre of mass, `n` cells a
+// side in the plane and `nz` across it, wide enough for the dust's outer
+// edge.
+struct DustGrid {
+    std::uint32_t nx = 256, ny = 256, nz = 32;
+    double half_width = 0, half_height = 0;
+    std::uint32_t cells() const { return nx * ny * nz; }
+};
+inline DustGrid dust_grid(const physics::relativity::SpacetimeScene<double>& scene) {
+    DustGrid g;
+    g.half_width = 1.1 * scene.dust().outer * scene.total_mass();
+    g.half_height = 0.12 * g.half_width;
+    return g;
+}
+
+// What every shader of a scene shares: the hole paths, the metric and its
+// geodesic step, the horizon test, integer hashes. `form` is the Kerr-
+// Schild form traced in; rays and dust both use the outgoing one, so their
+// coordinates agree.
+inline Result<std::string> scene_common_glsl(const physics::relativity::SpacetimeScene<double>& scene) {
     // Rays are traced backwards, towards the past horizon: the outgoing
     // form is the one regular there (see SpacetimeScene::metric).
     auto metric = scene.metric(physics::relativity::SpacetimeScene<double>::Form::outgoing);
@@ -124,16 +141,7 @@ inline Result<std::string> blackhole_shader(const physics::relativity::Spacetime
             io::build::detail::glsl_float(a * a));
     }
     const double M = scene.total_mass();
-
-    std::string src = "#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\n";
-    src += R"GLSL(
-layout(std430, binding = 0) writeonly buffer Image { uint pixels[]; };
-layout(std430, binding = 1) readonly buffer Blackbody { vec4 bb[256]; };
-layout(push_constant) uniform Push {
-    vec4 e0, e1, e2, e3, cam, view, disk; uvec4 flags;
-} pc;
-)GLSL";
-    src += mod.code;
+    std::string src = mod.code;
     src += physics::relativity::emit_metric_glsl(*metric, "metric");
     src += physics::relativity::geodesic_glsl("metric");
     src += std::format(R"GLSL(
@@ -144,17 +152,73 @@ float horizon_distance(vec3 p, float t) {{
     float best = 1e30;
 {1}    return best;
 }}
-)GLSL", io::build::detail::glsl_float(M), hole_data);
-    src += R"GLSL(
-// ── Noise and stars, from integer hashes only ────────────────────
-uint hash_u(uvec3 v) {
+
+uint hash_u(uvec3 v) {{
     v = v * 1664525u + 1013904223u;
     v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
     v ^= v >> 16u;
     v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
     return v.x ^ v.y ^ v.z;
+}}
+float hash_f(uvec3 v) {{ return float(hash_u(v) & 0xffffffu) / 16777216.0; }}
+)GLSL", io::build::detail::glsl_float(M), hole_data);
+    return src;
 }
-float hash_f(uvec3 v) { return float(hash_u(v) & 0xffffffu) / 16777216.0; }
+
+// The whole shader for `scene`. Bindings: 0 pixels (uint, RGBA8), 1 the
+// blackbody table, 2 and 3 the field tables the hole paths may read, 4 the
+// dust counts (dust_grid()).
+inline Result<std::string> blackhole_shader(const physics::relativity::SpacetimeScene<double>& scene) {
+    auto common = scene_common_glsl(scene);
+    if (!common) return std::unexpected(common.error());
+    const auto grid = dust_grid(scene);
+    const auto& dust = scene.dust();
+    // Counts to density: a cell holding the mean occupancy of the dust's
+    // own volume reads as 1.
+    const double volume_cells = 0.6 * grid.nx * grid.ny * 0.35 * grid.nz;
+    const double per_cell = dust.count > 0 ? double(dust.count) / volume_cells : 1.0;
+
+    std::string src = "#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\n";
+    src += R"GLSL(
+layout(std430, binding = 0) writeonly buffer Image { uint pixels[]; };
+layout(std430, binding = 1) readonly buffer Blackbody { vec4 bb[256]; };
+layout(std430, binding = 4) readonly buffer Dust { uint dust[]; };
+layout(push_constant) uniform Push {
+    vec4 e0, e1, e2, e3, cam, view, disk; uvec4 flags;
+} pc;
+)GLSL";
+    src += *common;
+    src += std::format(R"GLSL(
+const bool DUST_ON = {0};
+const uvec3 DUST_N = uvec3({1}u, {2}u, {3}u);
+const vec2 DUST_HALF = vec2({4}, {5});
+const float DUST_PER_CELL = {6};
+
+float dust_cell(ivec3 c) {{
+    if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, ivec3(DUST_N)))) return 0.0;
+    return float(dust[(uint(c.z) * DUST_N.y + uint(c.y)) * DUST_N.x + uint(c.x)]);
+}}
+// Dust density at p, 1 at the mean occupancy, interpolated between cell
+// centres: read from the nearest cell, a cell near the camera projects to
+// a block.
+float dust_at(vec3 p) {{
+    if (!DUST_ON) return 0.0;
+    vec3 u = (p / vec3(DUST_HALF.x, DUST_HALF.x, DUST_HALF.y)) * 0.5 + 0.5;
+    if (any(lessThan(u, vec3(-0.01))) || any(greaterThan(u, vec3(1.01)))) return 0.0;
+    vec3 g = u * vec3(DUST_N) - 0.5;
+    ivec3 i = ivec3(floor(g));
+    vec3 f = g - vec3(i);
+    float c00 = mix(dust_cell(i), dust_cell(i + ivec3(1, 0, 0)), f.x);
+    float c10 = mix(dust_cell(i + ivec3(0, 1, 0)), dust_cell(i + ivec3(1, 1, 0)), f.x);
+    float c01 = mix(dust_cell(i + ivec3(0, 0, 1)), dust_cell(i + ivec3(1, 0, 1)), f.x);
+    float c11 = mix(dust_cell(i + ivec3(0, 1, 1)), dust_cell(i + ivec3(1, 1, 1)), f.x);
+    return mix(mix(c00, c10, f.y), mix(c01, c11, f.y), f.z) / DUST_PER_CELL;
+}}
+)GLSL", dust.count > 0 ? "true" : "false", grid.nx, grid.ny, grid.nz,
+        io::build::detail::glsl_float(grid.half_width), io::build::detail::glsl_float(grid.half_height),
+        io::build::detail::glsl_float(per_cell));
+    src += R"GLSL(
+// ── Noise and stars, from integer hashes only ────────────────────
 float value_noise(vec3 p) {
     vec3 i = floor(p), f = fract(p);
     vec3 w = f * f * (3.0 - 2.0 * f);
@@ -283,13 +347,19 @@ void main() {
         // The step grows with the distance to the nearest horizon, in its
         // radii: fine near a hole, where the path bends, coarse far out.
         float dl = clamp(0.05 * hd, 0.01, 1.5);
+        float ds = dl * length(k.yzw);
         if (pc.flags.z != 0u) {
             float g[10]; vec4 dg[10];
             metric(x, g, dg);
             vec4 e = disk_at(x, k, g);
-            float ds = dl * length(k.yzw);
             light += trans * e.rgb * ds * 0.6;
             trans *= exp(-e.a * ds);
+        }
+        // Dust: warm grey, lit by nothing but itself, and absorbing a little.
+        float rho_d = dust_at(x.yzw);
+        if (rho_d > 0.0) {
+            light += trans * vec3(0.9, 0.75, 0.6) * rho_d * ds * 0.006;
+            trans *= exp(-rho_d * ds * 0.004);
         }
         geodesic_step(x, k, dl);
     }
@@ -311,6 +381,117 @@ void main() {
 }
 )GLSL";
     return src;
+}
+
+// ── Dust: test particles on the scene's geodesics ────────────────
+//
+// Each particle is (x, u), a timelike geodesic of the same metric the rays
+// are traced through -- in the same outgoing form, so a particle and a ray
+// agree on where it is. That form is singular on the future horizon,
+// which a falling particle approaches; a particle within 1.5 horizon radii
+// of a hole is born again at the dust's outer edge on a circular orbit, and
+// the ones lost that way are behind the shadow anyway. No gas: the dust
+// feels gravity and nothing else.
+
+// Advances every particle until its coordinate time reaches `target`, in
+// at most 32 RK4 steps. Binding 0 the particles (x, u per particle), 2 and
+// 3 the field tables. Push: target, count, frame, outer radius.
+inline Result<std::string> dust_move_shader(const physics::relativity::SpacetimeScene<double>& scene) {
+    auto common = scene_common_glsl(scene);
+    if (!common) return std::unexpected(common.error());
+    std::string src = "#version 450\nlayout(local_size_x = 64) in;\n";
+    src += R"GLSL(
+layout(std430, binding = 0) buffer Particles { vec4 s[]; };
+layout(push_constant) uniform Push { float target; uint count; uint frame; float outer; } pc;
+)GLSL";
+    src += *common;
+    src += R"GLSL(
+// A circular orbit about the total mass at radius R, angle phi, height z:
+// the Keplerian direction, normalised in the metric.
+void born(uint i, out vec4 x, out vec4 u) {
+    float a = hash_f(uvec3(i, pc.frame, 7u)), b = hash_f(uvec3(i, pc.frame, 13u)), c = hash_f(uvec3(i, pc.frame, 29u));
+    float R = pc.outer * sqrt(mix(0.5, 1.0, a));
+    float phi = 6.2831853 * b;
+    float z = (c - 0.5) * 0.04 * R;
+    x = vec4(pc.target, R * cos(phi), R * sin(phi), z);
+    float omega = sqrt(M_TOTAL / (R * R * R));
+    vec4 v = vec4(1.0, -omega * x.z, omega * x.y, 0.0);
+    float g[10]; vec4 dg[10];
+    metric(x, g, dg);
+    mat4 gm;
+    for (int p = 0; p < 4; ++p) for (int q = 0; q < 4; ++q) gm[p][q] = g[metric_entry(p, q)];
+    u = v / sqrt(max(1e-6, -dot(v, gm * v)));
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    vec4 x = s[2u * i], u = s[2u * i + 1u];
+    for (int k = 0; k < 32 && x.x < pc.target; ++k) {
+        float hd = horizon_distance(x.yzw, x.x);
+        if (hd < 1.5 || length(x.yzw) > 3.0 * pc.outer) { born(i, x, u); break; }
+        // The proper-time step, capped so the coordinate time lands on target.
+        float dl = min(clamp(0.05 * hd, 0.01, 1.5) * 4.0, (pc.target - x.x) / max(u.x, 1e-3));
+        geodesic_step(x, u, dl);
+    }
+    s[2u * i] = x;
+    s[2u * i + 1u] = u;
+}
+)GLSL";
+    return src;
+}
+
+// Counts every particle into its grid cell. Binding 0 the particles, 1 the
+// counts (cleared before). Push: count.
+inline std::string dust_deposit_shader(const DustGrid& grid) {
+    return std::format(R"GLSL(
+#version 450
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Particles {{ vec4 s[]; }};
+layout(std430, binding = 1) buffer Dust {{ uint dust[]; }};
+layout(push_constant) uniform Push {{ uint count; }} pc;
+void main() {{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    vec3 p = s[2u * i].yzw;
+    vec3 u = (p / vec3({3}, {3}, {4})) * 0.5 + 0.5;
+    if (any(lessThan(u, vec3(0.0))) || any(greaterThanEqual(u, vec3(1.0)))) return;
+    uvec3 c = uvec3(u * vec3({0}.0, {1}.0, {2}.0));
+    atomicAdd(dust[(c.z * {1}u + c.y) * {0}u + c.x], 1u);
+}}
+)GLSL", grid.nx, grid.ny, grid.nz, io::build::detail::glsl_float(grid.half_width),
+                       io::build::detail::glsl_float(grid.half_height));
+}
+
+// The particles' first state: circular orbits about the total mass between
+// half the dust's outer area and its edge, normalised in the metric.
+inline std::vector<float> dust_initial(const physics::relativity::SpacetimeScene<double>& scene) {
+    const auto& d = scene.dust();
+    const auto metric = *scene.metric(physics::relativity::SpacetimeScene<double>::Form::outgoing);
+    const double M = scene.total_mass(), outer = d.outer * M, inner = d.inner * M;
+    std::vector<float> s(8 * static_cast<std::size_t>(d.count));
+    std::uint64_t state = d.seed * 0x9E3779B97F4A7C15ull + 1;
+    auto uni = [&state] {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<double>(state >> 11) / static_cast<double>(1ull << 53);
+    };
+    for (std::uint32_t i = 0; i < d.count; ++i) {
+        const double R = std::sqrt(inner * inner + (outer * outer - inner * inner) * uni());
+        const double phi = 2 * std::numbers::pi * uni(), z = (uni() - 0.5) * 0.04 * R;
+        const Vec<double, 4> x{0.0, R * std::cos(phi), R * std::sin(phi), z};
+        const double omega = std::sqrt(M / (R * R * R));
+        const Vec<double, 4> v{1.0, -omega * x[2], omega * x[1], 0.0};
+        const auto g = metric(x);
+        double vv = 0;
+        for (std::size_t a = 0; a < 4; ++a)
+            for (std::size_t b = 0; b < 4; ++b) vv += g(a, b) * v[a] * v[b];
+        const double n = 1.0 / std::sqrt(std::max(1e-12, -vv));
+        for (int c = 0; c < 4; ++c) {
+            s[8 * i + c] = static_cast<float>(x[static_cast<std::size_t>(c)]);
+            s[8 * i + 4 + c] = static_cast<float>(v[static_cast<std::size_t>(c)] * n);
+        }
+    }
+    return s;
 }
 
 } // namespace spatium::render
