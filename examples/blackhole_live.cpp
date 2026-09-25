@@ -2,7 +2,15 @@
 // on the device. One program for one hole or a pair, replacing the two
 // demos that each hard-coded a metric.
 //
-// Modes, all headless so far:
+// Modes:
+//
+//   --live [--frames N] [--screenshot PATH]
+//       A window: the scene rendered at a chosen resolution (144p by
+//       default, the whole frame each time) and scaled to the window, with
+//       the few settings that change what is seen -- one hole or a pair,
+//       spin, the pair's masses, separation and inspiral, the disk and its
+//       colour, the camera's angles, exposure, time -- and a button that
+//       saves the current view rendered afresh at 1920x1080.
 //
 //   --frame PATH [--scene one|binary] [--spin a] [--t T] [--width W]
 //       [--height H] [--steps N] [--no-disk]
@@ -29,6 +37,17 @@
 #include <spatium/physics/relativity/metric_glsl.hpp>
 #include <spatium/physics/relativity/spacetime_scene.hpp>
 #include <spatium/viewer/compute.hpp>
+
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+#if SPATIUM_HAS_IMGUI
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_vulkan.h>
+#endif
+#include <chrono>
+#include <ctime>
+#include <memory>
 
 #include <algorithm>
 #include <cmath>
@@ -174,90 +193,329 @@ int check_scene(vc::Context& ctx, const char* label, const rel::SpacetimeScene<d
     return 0;
 }
 
-struct Frame {
-    std::vector<std::uint32_t> pixels;
-    double ms = 0;
+// ── What a person can set ────────────────────────────────────────
+//
+// Few on purpose: what changes the picture, nothing that tunes the solver.
+struct Settings {
+    int scene = 0;                 // 0 one hole, 1 a pair
+    float spin = 0.9f;             // per hole
+    float mass_ratio = 0.8f;       // the pair: m2 / m1
+    float separation = 14.0f;      // the pair, in units of the total mass
+    bool inspiral = false;
+    bool disk = true;
+    float temperature = 1.0f;
+    float disk_outer = 30.0f;
+    float distance = 60.0f, azimuth = 30.0f, elevation = 10.0f, fov = 50.0f;
+    float exposure = 1.6f;
+    int max_steps = 1500;
 };
 
-// One frame of `scene` at coordinate time t, seen by an observer at rest.
-Frame render_frame(vc::Context& ctx, const rel::SpacetimeScene<double>& scene, int W, int H, double t,
-                   int max_steps, bool disk, double exposure) {
-    const auto src = spatium::render::blackhole_shader(scene);
-    if (!src) {
-        std::println(stderr, "shader: {}", src.error().message);
-        std::exit(1);
+rel::SpacetimeScene<double> make_scene(const Settings& st) {
+    rel::SpacetimeScene<double> scene;
+    if (st.scene == 1) {
+        const double m1 = 1.0 / (1.0 + st.mass_ratio), m2 = 1.0 - m1;
+        scene.binary(m1, m2, st.separation, st.inspiral, 6.0, st.spin * m1, st.spin * m2);
+    } else {
+        scene.hole(1.0, st.spin);
     }
-    // The tetrad in the coordinates the shader traces in.
-    const auto metric = *scene.metric(rel::SpacetimeScene<double>::Form::outgoing);
-    const auto cam = scene.camera();
-    const double deg = std::numbers::pi / 180.0;
-    const double ca = std::cos(cam.azimuth_deg * deg), sa = std::sin(cam.azimuth_deg * deg);
-    const double ce = std::cos(cam.elevation_deg * deg), se = std::sin(cam.elevation_deg * deg);
-    const Vec<double, 4> at{t, cam.distance * ce * ca, cam.distance * ce * sa, cam.distance * se};
-    const auto tet = spatium::render::observer_tetrad(metric, at, Vec<double, 3>{0.0, 0.0, 1.0});
-
-    spatium::render::BlackholePush push{};
-    for (int c = 0; c < 4; ++c) {
-        push.e0[c] = static_cast<float>(tet[0][c]);
-        push.e1[c] = static_cast<float>(tet[1][c]);
-        push.e2[c] = static_cast<float>(tet[2][c]);
-        push.e3[c] = static_cast<float>(tet[3][c]);
-        push.cam[c] = static_cast<float>(at[c]);
-    }
-    push.view[0] = static_cast<float>(W);
-    push.view[1] = static_cast<float>(H);
-    push.view[2] = static_cast<float>(std::tan(0.5 * cam.fov_deg * deg));
-    push.view[3] = static_cast<float>(exposure);
-    const auto& d = scene.disk();
-    const double M = scene.total_mass();
-    push.disk[0] = static_cast<float>(d.inner * M);
-    push.disk[1] = static_cast<float>(d.outer * M);
-    push.disk[2] = 0.018f;
-    push.disk[3] = static_cast<float>(d.temperature);
-    push.flags[0] = 0;
-    push.flags[1] = static_cast<std::uint32_t>(max_steps);
-    push.flags[2] = disk && d.on ? 1u : 0u;
-    push.flags[3] = scene.sky().seed;
-
-    const auto table = spatium::render::blackbody_table();
-    vc::Buffer pixels(ctx, static_cast<std::size_t>(W) * H * 4);
-    auto bb = vc::Buffer::from(ctx, std::span<const float>(table));
-    const std::vector<std::uint32_t> none{0};
-    auto perm = vc::Buffer::from(ctx, std::span<const std::uint32_t>(none));
-    auto pts = vc::Buffer::from(ctx, std::span<const std::uint32_t>(none));
-    vc::Kernel kernel(ctx, src->c_str(), "blackhole.comp", 4, sizeof(push));
-    vc::Buffer* bufs[] = {&pixels, &bb, &perm, &pts};
-    kernel.bind(bufs);
-    Frame f;
-    f.ms = ctx.run([&](VkCommandBuffer cmd) {
-        kernel.dispatch(cmd, &push, static_cast<std::uint32_t>((W + 7) / 8), static_cast<std::uint32_t>((H + 7) / 8));
-    });
-    const auto* px = static_cast<const std::uint32_t*>(pixels.data());
-    f.pixels.assign(px, px + static_cast<std::size_t>(W) * H);
-    return f;
+    scene.disk().on = st.disk;
+    scene.disk().temperature = st.temperature;
+    scene.disk().outer = st.disk_outer;
+    scene.camera() = {.distance = st.distance, .azimuth_deg = st.azimuth, .elevation_deg = st.elevation,
+                      .fov_deg = st.fov};
+    return scene;
 }
 
-bool write_frame(const std::string& path, const Frame& f, int W, int H) {
-    std::vector<std::uint8_t> rgb(static_cast<std::size_t>(W) * H * 3);
-    for (std::size_t i = 0; i < f.pixels.size(); ++i)
-        for (int c = 0; c < 3; ++c) rgb[3 * i + c] = static_cast<std::uint8_t>((f.pixels[i] >> (8 * c)) & 0xffu);
-    return spatium::render::write_png_rgb(path, W, H, rgb);
+// The shader for one scene, its buffers, and one frame's push constants.
+struct Renderer {
+    vc::Context& ctx;
+    rel::SpacetimeScene<double> scene;
+    std::unique_ptr<vc::Kernel> kernel;
+    std::unique_ptr<vc::Buffer> pixels, bb, perm, pts;
+    std::uint32_t W = 0, H = 0;
+
+    Renderer(vc::Context& c, rel::SpacetimeScene<double> sc, std::uint32_t w, std::uint32_t h) : ctx(c), scene(std::move(sc)) {
+        const auto src = spatium::render::blackhole_shader(scene);
+        if (!src) {
+            std::println(stderr, "shader: {}", src.error().message);
+            std::exit(1);
+        }
+        const auto table = spatium::render::blackbody_table();
+        bb = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const float>(table)));
+        const std::vector<std::uint32_t> none{0};
+        perm = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
+        pts = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
+        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 4,
+                                              static_cast<std::uint32_t>(sizeof(spatium::render::BlackholePush)));
+        resize(w, h);
+    }
+    void resize(std::uint32_t w, std::uint32_t h) {
+        W = w;
+        H = h;
+        pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get()};
+        kernel->bind(bufs);
+    }
+    spatium::render::BlackholePush push(double t, double exposure, int max_steps, bool bgr) const {
+        const auto metric = *scene.metric(rel::SpacetimeScene<double>::Form::outgoing);
+        const auto& cam = scene.camera();
+        const double deg = std::numbers::pi / 180.0;
+        const double ca = std::cos(cam.azimuth_deg * deg), sa = std::sin(cam.azimuth_deg * deg);
+        const double ce = std::cos(cam.elevation_deg * deg), se = std::sin(cam.elevation_deg * deg);
+        const Vec<double, 4> at{t, cam.distance * ce * ca, cam.distance * ce * sa, cam.distance * se};
+        const auto tet = spatium::render::observer_tetrad(metric, at, Vec<double, 3>{0.0, 0.0, 1.0});
+        spatium::render::BlackholePush p{};
+        for (int c = 0; c < 4; ++c) {
+            p.e0[c] = static_cast<float>(tet[0][c]);
+            p.e1[c] = static_cast<float>(tet[1][c]);
+            p.e2[c] = static_cast<float>(tet[2][c]);
+            p.e3[c] = static_cast<float>(tet[3][c]);
+            p.cam[c] = static_cast<float>(at[c]);
+        }
+        p.view[0] = static_cast<float>(W);
+        p.view[1] = static_cast<float>(H);
+        p.view[2] = static_cast<float>(std::tan(0.5 * cam.fov_deg * deg));
+        p.view[3] = static_cast<float>(exposure);
+        const auto& d = scene.disk();
+        const double M = scene.total_mass();
+        p.disk[0] = static_cast<float>(d.inner * M);
+        p.disk[1] = static_cast<float>(d.outer * M);
+        p.disk[2] = 0.018f;
+        p.disk[3] = static_cast<float>(d.temperature);
+        p.flags[0] = bgr ? 1u : 0u;
+        p.flags[1] = static_cast<std::uint32_t>(max_steps);
+        p.flags[2] = d.on ? 1u : 0u;
+        p.flags[3] = scene.sky().seed;
+        return p;
+    }
+    void record(VkCommandBuffer cmd, const spatium::render::BlackholePush& p) const {
+        kernel->dispatch(cmd, &p, (W + 7) / 8, (H + 7) / 8);
+    }
+    double render(const spatium::render::BlackholePush& p) {
+        return ctx.run([&](VkCommandBuffer cmd) { record(cmd, p); });
+    }
+    std::vector<std::uint32_t> read() const {
+        const auto* px = static_cast<const std::uint32_t*>(pixels->data());
+        return {px, px + std::size_t{W} * H};
+    }
+};
+
+bool write_png(const std::string& path, const std::vector<std::uint32_t>& px, std::uint32_t W, std::uint32_t H,
+               bool bgr) {
+    std::vector<std::uint8_t> rgb(std::size_t{W} * H * 3);
+    for (std::size_t i = 0; i < px.size(); ++i)
+        for (int c = 0; c < 3; ++c) {
+            const int src = bgr ? 2 - c : c;
+            rgb[3 * i + c] = static_cast<std::uint8_t>((px[i] >> (8 * src)) & 0xffu);
+        }
+    return spatium::render::write_png_rgb(path, static_cast<int>(W), static_cast<int>(H), rgb);
+}
+
+// The low-resolution frame scaled up to the window, bilinearly.
+const char* kUpscaleGlsl = R"GLSL(
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(std430, binding = 0) readonly buffer Src { uint src[]; };
+layout(std430, binding = 1) writeonly buffer Dst { uint dst[]; };
+layout(push_constant) uniform P { uvec4 size; } pc;   // source w h, target w h
+
+vec4 at(ivec2 p) {
+    p = clamp(p, ivec2(0), ivec2(pc.size.xy) - 1);
+    return unpackUnorm4x8(src[uint(p.y) * pc.size.x + uint(p.x)]);
+}
+void main() {
+    uvec2 d = gl_GlobalInvocationID.xy;
+    if (d.x >= pc.size.z || d.y >= pc.size.w) return;
+    vec2 uv = (vec2(d) + 0.5) / vec2(pc.size.zw) * vec2(pc.size.xy) - 0.5;
+    ivec2 i = ivec2(floor(uv));
+    vec2 f = uv - vec2(i);
+    vec4 c = mix(mix(at(i), at(i + ivec2(1, 0)), f.x), mix(at(i + ivec2(0, 1)), at(i + ivec2(1, 1)), f.x), f.y);
+    c.a = 1.0;
+    dst[d.y * pc.size.z + d.x] = packUnorm4x8(c);
+}
+)GLSL";
+
+struct Preset { const char* name; std::uint32_t h; };
+constexpr Preset kPresets[] = {{"144p", 144}, {"240p", 240}, {"360p", 360}, {"540p", 540}, {"720p", 720},
+                               {"window", 0}};
+
+std::string timestamp_name() {
+    const std::time_t now = std::time(nullptr);
+    char buf[64];
+    std::strftime(buf, sizeof buf, "blackhole_%Y%m%d_%H%M%S.png", std::localtime(&now));
+    return buf;
+}
+
+int run_live(int max_frames, const std::string& screenshot) {
+    if (!glfwInit()) {
+        std::println(stderr, "blackhole_live: glfwInit failed");
+        return 1;
+    }
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "blackhole_live", nullptr, nullptr);
+    if (!window) {
+        std::println(stderr, "blackhole_live: could not open a window");
+        glfwTerminate();
+        return 1;
+    }
+    {
+        vc::Context ctx("blackhole_live", window);
+        vc::Presenter present(ctx, window);
+        Settings st;
+        int preset = 0;
+        std::uint32_t WW = present.width(), WH = present.height();
+        auto render_size = [&] {
+            const std::uint32_t h = kPresets[preset].h == 0 ? WH : std::min(kPresets[preset].h, WH);
+            const std::uint32_t w = std::max(1u, static_cast<std::uint32_t>(std::lround(double(h) * WW / WH)));
+            return std::pair{w, h};
+        };
+        auto [rw, rh] = render_size();
+        auto renderer = std::make_unique<Renderer>(ctx, make_scene(st), rw, rh);
+        auto window_px = std::make_unique<vc::Buffer>(ctx, std::size_t{WW} * WH * 4);
+        vc::Kernel upscale(ctx, kUpscaleGlsl, "upscale.comp", 2, 16);
+        auto rebind = [&] {
+            vc::Buffer* b[] = {renderer->pixels.get(), window_px.get()};
+            upscale.bind(b);
+        };
+        rebind();
+
+        double t = 0.0, gpu_ms = 0.0, fps = 0.0;
+        float rate = 1.0f;
+        bool playing = true;
+        std::string saved;
+        auto t_prev = std::chrono::steady_clock::now();
+        std::println("device: {}", ctx.device_name());
+
+        for (int frame = 0; !glfwWindowShouldClose(window); ++frame) {
+            if (max_frames > 0 && frame >= max_frames) break;
+            glfwPollEvents();
+            const auto now = std::chrono::steady_clock::now();
+            const double dt = std::chrono::duration<double>(now - t_prev).count();
+            t_prev = now;
+            fps = fps == 0 ? 1.0 / std::max(dt, 1e-6) : 0.9 * fps + 0.1 / std::max(dt, 1e-6);
+            if (playing) t += dt * rate * 20.0;   // 20 M of coordinate time a second at rate 1
+
+            bool rebuild = false, resize = false, save = false;
+#if SPATIUM_HAS_IMGUI
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+            ImGui::Begin("black holes");
+            ImGui::Text("%s", ctx.device_name().c_str());
+            ImGui::Text("%.0f fps, render %ux%u, %.1f ms", fps, renderer->W, renderer->H, gpu_ms);
+            auto changed = [&](bool edited) { if (edited && !ImGui::IsItemActive()) rebuild = true;
+                                              if (ImGui::IsItemDeactivatedAfterEdit()) rebuild = true; };
+            ImGui::SeparatorText("holes");
+            changed(ImGui::RadioButton("one", &st.scene, 0));
+            ImGui::SameLine();
+            changed(ImGui::RadioButton("pair", &st.scene, 1));
+            changed(ImGui::SliderFloat("spin", &st.spin, 0.0f, 0.99f, "%.2f"));
+            if (st.scene == 1) {
+                changed(ImGui::SliderFloat("mass ratio", &st.mass_ratio, 0.1f, 1.0f, "%.2f"));
+                changed(ImGui::SliderFloat("separation", &st.separation, 6.0f, 40.0f, "%.1f M"));
+                changed(ImGui::Checkbox("inspiral", &st.inspiral));
+            }
+            ImGui::SeparatorText("disk");
+            // The disk is push constants: no rebuild.
+            ImGui::Checkbox("disk", &st.disk);
+            ImGui::SliderFloat("temperature", &st.temperature, 0.3f, 3.0f, "%.2f");
+            ImGui::SliderFloat("outer edge", &st.disk_outer, 10.0f, 60.0f, "%.0f M");
+            ImGui::SeparatorText("camera");
+            bool cam = false;
+            cam |= ImGui::SliderFloat("distance", &st.distance, 12.0f, 200.0f, "%.0f M");
+            cam |= ImGui::SliderFloat("azimuth", &st.azimuth, -180.0f, 180.0f, "%.0f deg");
+            cam |= ImGui::SliderFloat("elevation", &st.elevation, -89.0f, 89.0f, "%.0f deg");
+            cam |= ImGui::SliderFloat("field of view", &st.fov, 10.0f, 120.0f, "%.0f deg");
+            ImGui::SliderFloat("exposure", &st.exposure, 0.1f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+            ImGui::SeparatorText("time");
+            ImGui::Checkbox("play", &playing);
+            ImGui::SameLine();
+            ImGui::SliderFloat("rate", &rate, 0.05f, 5.0f, "%.2fx", ImGuiSliderFlags_Logarithmic);
+            ImGui::Text("t = %.0f M", t);
+            if (ImGui::Button("t = 0")) t = 0.0;
+            ImGui::SeparatorText("render");
+            for (int i = 0; i < static_cast<int>(std::size(kPresets)); ++i) {
+                if (i) ImGui::SameLine();
+                if (ImGui::RadioButton(kPresets[i].name, &preset, i)) resize = true;
+            }
+            if (ImGui::Button("save frame (1920x1080)")) save = true;
+            if (!saved.empty()) ImGui::Text("saved %s", saved.c_str());
+            ImGui::End();
+            ImGui::Render();
+            // Camera settings are read from the scene each frame; no rebuild.
+            if (cam) renderer->scene.camera() = make_scene(st).camera();
+#endif
+            renderer->scene.disk().on = st.disk;
+            renderer->scene.disk().temperature = st.temperature;
+            renderer->scene.disk().outer = st.disk_outer;
+            if (rebuild) {
+                vkDeviceWaitIdle(ctx.device());
+                auto [w, h] = render_size();
+                renderer = std::make_unique<Renderer>(ctx, make_scene(st), w, h);
+                rebind();
+            }
+            if (resize) {
+                vkDeviceWaitIdle(ctx.device());
+                auto [w, h] = render_size();
+                renderer->resize(w, h);
+                rebind();
+            }
+            if (save || (!screenshot.empty() && max_frames > 0 && frame == max_frames - 1)) {
+                vkDeviceWaitIdle(ctx.device());
+                Renderer big(ctx, make_scene(st), 1920, 1080);
+                big.render(big.push(t, st.exposure, std::max(st.max_steps, 3000), false));
+                saved = screenshot.empty() ? timestamp_name() : screenshot;
+                write_png(saved, big.read(), 1920, 1080, false);
+                std::println("saved {}", saved);
+            }
+
+            const auto p = renderer->push(t, st.exposure, st.max_steps, present.bgra());
+            const std::uint32_t up[4] = {renderer->W, renderer->H, WW, WH};
+            const bool ok = present.frame(*window_px, [&](VkCommandBuffer cmd) {
+                renderer->record(cmd, p);
+                VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+                mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     0, 1, &mb, 0, nullptr, 0, nullptr);
+                upscale.dispatch(cmd, up, (WW + 7) / 8, (WH + 7) / 8);
+            }, gpu_ms);
+            if (!ok && (present.width() != WW || present.height() != WH)) {
+                vkDeviceWaitIdle(ctx.device());
+                WW = present.width();
+                WH = present.height();
+                window_px = std::make_unique<vc::Buffer>(ctx, std::size_t{WW} * WH * 4);
+                auto [w, h] = render_size();
+                renderer->resize(w, h);
+                rebind();
+            }
+        }
+        vkDeviceWaitIdle(ctx.device());
+        std::println("{:.0f} fps at the end, render {}x{} in {:.1f} ms", fps, renderer->W, renderer->H, gpu_ms);
+    }
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string mode, out;
-    int rays = 4096, steps = 300, W = 640, H = 360, max_steps = 1500;
+    std::string mode, out, screenshot;
+    int rays = 4096, steps = 300, W = 640, H = 360, max_steps = 1500, frames = 0;
     std::string which = "one";
-    double spin = 0.9, t = 0.0, exposure = 1.0;
+    double spin = 0.9, t = 0.0, exposure = 1.6;
     bool disk = true;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&] { return std::string(i + 1 < argc ? argv[++i] : ""); };
         if (a == "--check") mode = "check";
         else if (a == "--shadow-check") mode = "shadow";
+        else if (a == "--live") mode = "live";
         else if (a == "--frame") { mode = "frame"; out = next(); }
+        else if (a == "--frames") frames = std::stoi(next());
+        else if (a == "--screenshot") screenshot = next();
         else if (a == "--rays") rays = std::stoi(next());
         else if (a == "--steps") steps = max_steps = std::stoi(next());
         else if (a == "--width") W = std::stoi(next());
@@ -268,10 +526,11 @@ int main(int argc, char** argv) {
         else if (a == "--exposure") exposure = std::stod(next());
         else if (a == "--no-disk") disk = false;
         else {
-            std::println(stderr, "usage: blackhole_live --check | --shadow-check | --frame PATH [options]");
+            std::println(stderr, "usage: blackhole_live --live | --check | --shadow-check | --frame PATH [options]");
             return 1;
         }
     }
+    if (mode == "live") return run_live(frames, screenshot);
     vc::Context ctx("blackhole_live");
 
     if (mode == "check") {
@@ -288,41 +547,47 @@ int main(int argc, char** argv) {
         // A Schwarzschild hole, no disk, observer at rest at D: the shadow's
         // edge is where rays stop ending at the horizon.
         const double D = 30.0;
-        rel::SpacetimeScene<double> scene;
-        scene.hole(1.0, 0.0);
-        scene.camera() = {.distance = D, .azimuth_deg = 0.0, .elevation_deg = 0.0, .fov_deg = 30.0};
-        const int w = 2000, h = 1125;
-        const auto f = render_frame(ctx, scene, w, h, 0.0, 4000, false, 1.0);
+        Settings st;
+        st.spin = 0.0f;
+        st.disk = false;
+        st.distance = static_cast<float>(D);
+        st.azimuth = st.elevation = 0.0f;
+        st.fov = 30.0f;
+        const std::uint32_t w = 2000, h = 1125;
+        Renderer r(ctx, make_scene(st), w, h);
+        const double ms = r.render(r.push(0.0, 1.0, 4000, false));
+        const auto px = r.read();
         int first = -1, last = -1;
-        for (int x = 0; x < w; ++x)
-            if ((f.pixels[static_cast<std::size_t>(h / 2) * w + x] >> 24) == 0u) {
-                if (first < 0) first = x;
-                last = x;
+        for (std::uint32_t x = 0; x < w; ++x)
+            if ((px[std::size_t{h / 2} * w + x] >> 24) == 0u) {
+                if (first < 0) first = static_cast<int>(x);
+                last = static_cast<int>(x);
             }
         const double tan_half = std::tan(0.5 * 30.0 * std::numbers::pi / 180.0), aspect = double(w) / h;
-        auto angle = [&](double px) { return std::atan(std::abs((px + 0.5) / w * 2.0 - 1.0) * tan_half * aspect); };
+        auto angle = [&](double p) { return std::atan(std::abs((p + 0.5) / w * 2.0 - 1.0) * tan_half * aspect); };
         const double measured = 0.5 * (angle(first - 0.5) + angle(last + 0.5));
         const double expected = std::asin(3.0 * std::sqrt(3.0) / D * std::sqrt(1.0 - 2.0 / D));
-        // The angle one pixel spans at the shadow's edge.
         const double pixel = angle(last + 1.0) - angle(last);
         std::println("shadow of a Schwarzschild hole seen from D = {} M: measured {:.5f} rad, expected {:.5f} rad,"
                      " apart {:.2e} (a pixel is {:.2e}); {:.1f} ms",
-                     D, measured, expected, std::abs(measured - expected), pixel, f.ms);
+                     D, measured, expected, std::abs(measured - expected), pixel, ms);
         return std::abs(measured - expected) < 2.0 * pixel ? 0 : 1;
     }
 
     if (mode == "frame") {
-        rel::SpacetimeScene<double> scene;
-        if (which == "binary") scene.binary(0.5, 0.5, 14.0, /*inspiral=*/false, 10.0, spin * 0.5, spin * 0.5);
-        else scene.hole(1.0, spin);
-        const auto f = render_frame(ctx, scene, W, H, t, max_steps, disk, exposure);
-        if (!write_frame(out, f, W, H)) {
+        Settings st;
+        st.scene = which == "binary" ? 1 : 0;
+        st.spin = static_cast<float>(which == "binary" ? spin * 0.5 : spin);
+        st.disk = disk;
+        Renderer r(ctx, make_scene(st), static_cast<std::uint32_t>(W), static_cast<std::uint32_t>(H));
+        const double ms = r.render(r.push(t, exposure, max_steps, false));
+        if (!write_png(out, r.read(), r.W, r.H, false)) {
             std::println(stderr, "cannot write {}", out);
             return 1;
         }
-        std::println("{}: {}x{}, {} steps at most, {:.1f} ms", out, W, H, max_steps, f.ms);
+        std::println("{}: {}x{}, {} steps at most, {:.1f} ms", out, W, H, max_steps, ms);
         return 0;
     }
-    std::println(stderr, "usage: blackhole_live --check | --shadow-check | --frame PATH [options]");
+    std::println(stderr, "usage: blackhole_live --live | --check | --shadow-check | --frame PATH [options]");
     return 1;
 }
