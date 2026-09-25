@@ -403,7 +403,13 @@ inline std::size_t build_scene(bd::Trace<double>& scene, std::size_t sprinkle_co
         return comp / len * angle;
     };
 
-    auto dust = scene.scatter(scene.flake(Vec<double, 3>{0.010, 0.010, 0.003}),
+    // The speck shrinks as the count grows, so the cloud covers the same
+    // share of the frame at any count: coverage goes as count times area,
+    // and the size was tuned at 35 200. Without it, two million specks of
+    // the old size are a grey wall and the letters vanish behind it --
+    // rendered once to find out. At 35 200 the factor is exactly 1.
+    const double speck = std::sqrt(35200.0 / static_cast<double>(dust_count));
+    auto dust = scene.scatter(scene.flake(Vec<double, 3>{0.010 * speck, 0.010 * speck, 0.003 * speck}),
                               // A *tiny* sphere, and the size is the point.
                               // A Scatter seats each instance on its site,
                               // so the seat is added to wherever the motion
