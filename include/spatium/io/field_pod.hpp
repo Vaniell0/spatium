@@ -272,6 +272,7 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             // a wrong number a bit-exact comparison will catch, not a
             // crash in a lane that has no way to report one.
             case Op::Opaque: s[i] = T{0}; break;
+            case Op::Coord:  s[i] = in.x[n.k]; break;
         }
     }
     return s[count - 1];
