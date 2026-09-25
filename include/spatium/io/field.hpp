@@ -3,6 +3,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
+#  include <spatium/core/error.hpp>
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/groups/so3.hpp>
@@ -314,6 +315,38 @@ public:
     // wrote this spelling down before the overloads existed, which is a
     // decent sign it is the one people reach for.
     static Field t() { return u(); }
+
+    // ── One clock ─────────────────────────────────────────────────
+    //
+    // A motion's time is the first parameter (`t()` above), filled from
+    // MotionEnv::t; a metric's time is coordinate 0 of the spacetime point
+    // (`coord(0)`). Two clocks, and a trajectory written in one could not
+    // be read by the other: a black hole moving along a path is a metric
+    // whose terms depend on where the hole is *at the time of the event*,
+    // which is a motion field evaluated at coordinate 0.
+    //
+    // This is the same field with its time read as coordinate 0, so a
+    // motion written in the scene's ordinary vocabulary enters a metric
+    // unchanged. It refuses a field that reads anything a point of
+    // spacetime does not have -- the second surface parameter, an
+    // instance, an opaque leaf -- and names the op, since substituting
+    // those would change what the field means rather than when it is read.
+    Result<Field> in_spacetime() const {
+        Field f = *this;
+        for (std::size_t i = 0; i < f.ops_.size(); ++i) {
+            auto& n = f.ops_[i];
+            switch (n.op) {
+                case Op::U: n.op = Op::Coord; n.k = 0; break;
+                case Op::V: case Op::Id: case Op::Origin: case Op::Point: case Op::Hash:
+                case Op::Gather: case Op::Opaque:
+                    return std::unexpected(Error(ErrorCode::InvalidArgument,
+                        "in_spacetime: op " + std::to_string(i) + " is " + op_name(n.op) +
+                        ", which a point of spacetime has no value for"));
+                default: break;
+            }
+        }
+        return f;
+    }
 
     // Per-instance inputs; see Op::Id, Op::Origin, Op::Point.
     static Field id() { Field f; f.ops_.clear(); f.push(Op::Id); return f; }
