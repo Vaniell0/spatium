@@ -6,4 +6,5 @@ import spatium.core;
 import spatium.algebra;
 import spatium.geometry;
 #define SPATIUM_BUILDING_MODULE 1
+#include <spatium/spatial/bound.hpp>
 #include <spatium/spatial/bvh.hpp>
