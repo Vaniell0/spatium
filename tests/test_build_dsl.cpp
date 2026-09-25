@@ -1382,3 +1382,87 @@ TEST_CASE("A sphere chart projects exactly, poles included", "[spaces][chart][pr
     const V3 n = chart.normal(q);
     CHECK((n - V3{q * (1.0 / q.norm())}).norm() < 1e-12);
 }
+
+// ── What two nodes must share to be cooked as one shape ─────────
+//
+// The key used to be a hash of samples -- a Space's chart at a 4 x 4 grid,
+// an Offset's thickness at a 5 x 5 grid over [0, 1]^2 whatever the
+// domain, a Literal's vertices without its faces -- and a matching hash
+// was taken as the same shape with nothing rechecked. Each case below is
+// two different shapes that agree on those samples, and each was run
+// against that key and seen to merge.
+
+namespace {
+
+// A chart plus a bump that vanishes on the 4 x 4 grid the old key sampled.
+spatium::ParametricSurface<double> bumped_torus(double amplitude) {
+    const double two_pi = 2.0 * std::numbers::pi;
+    return spatium::ParametricSurface<double>(
+        [amplitude, two_pi](double u, double v) {
+            const double R = 2.0, r = 0.5;
+            // Exactly zero at the grid nodes the old key sampled, which
+            // it computed as u0 + (u1 - u0) * i / 3 -- the same expression
+            // here, so the factors vanish bit for bit rather than to 1e-16.
+            auto at_nodes = [two_pi](double x) {
+                double f = 1.0;
+                for (int i = 0; i <= 3; ++i) f *= x - (0.0 + (two_pi - 0.0) * double(i) / 3.0);
+                return f;
+            };
+            const double bump = amplitude * at_nodes(u) * at_nodes(v);
+            return spatium::Vec<double, 3>{(R + r * std::cos(v)) * std::cos(u),
+                                           (R + r * std::cos(v)) * std::sin(u), r * std::sin(v) + bump};
+        },
+        {0.0, two_pi, 0.0, two_pi}, true, true);
+}
+
+std::size_t distinct_shapes(const bd::Trace<double>& scene, std::size_t root) {
+    return bd::cook(scene, root, 0.0).shape_count();
+}
+
+}  // namespace
+
+TEST_CASE("Two charts that agree on a sample grid are not one shape", "[io][build][cook]") {
+    bd::Trace<double> scene;
+    auto a = scene.space(bumped_torus(0.0), 12, 12);
+    auto b = scene.space(bumped_torus(0.3), 12, 12);
+    auto both = scene.compose({a, b});
+    CHECK(distinct_shapes(scene, both.index) == 2);
+}
+
+TEST_CASE("Two offsets that differ outside [0, 1]^2 are not one shape", "[io][build][cook]") {
+    bd::Trace<double> scene;
+    auto dough = scene.torus(2.0, 0.5, 12, 12);
+    auto thin = scene.offset(dough, bd::ScalarField<double>(0.1));
+    auto ramp = scene.offset(dough, bd::ScalarField<double>(0.1) +
+                                        bd::ScalarField<double>(0.05) *
+                                            max(bd::ScalarField<double>::u() - bd::ScalarField<double>(1.0),
+                                                bd::ScalarField<double>(0.0)));
+    auto both = scene.compose({thin, ramp});
+    CHECK(distinct_shapes(scene, both.index) == 2);
+}
+
+TEST_CASE("Two meshes with the same vertices and different faces are not one shape", "[io][build][cook]") {
+    using V3 = spatium::Vec<double, 3>;
+    spatium::mesh::Mesh<spatium::Euclidean<3, double>> quad_a, quad_b;
+    quad_a.vertices = quad_b.vertices = {V3{0, 0, 0}, V3{1, 0, 0}, V3{1, 1, 0.5}, V3{0, 1, 0}};
+    quad_a.faces = {{0, 1, 2}, {0, 2, 3}};
+    quad_b.faces = {{0, 1, 3}, {1, 2, 3}};
+    bd::Trace<double> scene;
+    auto a = scene.literal(quad_a);
+    auto b = scene.literal(quad_b);
+    auto both = scene.compose({a, b});
+    CHECK(distinct_shapes(scene, both.index) == 2);
+}
+
+TEST_CASE("Shapes built the same way are still cooked as one", "[io][build][cook]") {
+    bd::Trace<double> scene;
+    auto s1 = scene.sphere(1.0);
+    auto s2 = scene.sphere(1.0);
+    auto s3 = scene.sphere(2.0);
+    auto d1 = scene.offset(scene.torus(2.0, 0.5, 12, 12), 0.1);
+    auto d2 = scene.offset(scene.torus(2.0, 0.5, 12, 12), 0.1);
+    auto c1 = scene.cube({0.1, 0.1, 0.1});
+    auto c2 = scene.cube({0.1, 0.1, 0.1});
+    auto all = scene.compose({s1, s2, s3, d1, d2, c1, c2});
+    CHECK(distinct_shapes(scene, all.index) == 4);   // sphere 1, sphere 2, the offset, the cube
+}
