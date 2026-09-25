@@ -26,6 +26,7 @@
 
 #include <spatium/render/camera.hpp>
 #include <spatium/render/cooked_scene.hpp>
+#include <spatium/render/gpu_instances.hpp>
 #include <spatium/render/gpu_scene.hpp>
 #include <spatium/render/gpu_trace_glsl.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
@@ -290,6 +291,90 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, gpu::Sc
     return status;
 }
 
+
+// ── The dust moved on the device ────────────────────────────────────
+
+// Every Scatter whose objects are instanced exact forms, moved by a
+// generated kernel and compared with what cook() put in the same slots.
+// The comparison is within a tolerance and says what it found: the device
+// is fp32 and its compiler may reorder arithmetic the host keeps in order.
+int run_dust_check(const bd::Trace<double>& scene, std::size_t root, double t, int runs) {
+    const auto cooked = bd::cook(scene, root, t);
+    vc::Context ctx("donut_live");
+    std::println("device: {}", ctx.device_name());
+
+    for (std::size_t node = 0; node < scene.size(); ++node) {
+        if (scene.node(node).kind != bd::Kind::Scatter) continue;
+        std::vector<const bd::Object<double>*> objs;
+        for (const auto& o : cooked.objects())
+            if (o.source_node == node) objs.push_back(&o);
+        if (objs.empty() || !objs.front()->instanceable) continue;
+        const auto shape = objs.front()->shape;
+        if (!cooked.shapes()[shape].exact.has_value()) continue;
+
+        auto kernel_src = gpu::make_instance_kernel(
+            scene, node, Vec<double, 3>{cooked.shapes()[shape].geometry.centroid()},
+            static_cast<std::uint32_t>(shape));
+        if (!kernel_src) {
+            std::println("node {}: not movable on the device -- {}", node, kernel_src.error().message);
+            continue;
+        }
+        auto& ks = *kernel_src;
+        const std::size_t count = ks.sites.size();
+        auto b_perm = vc::Buffer::from(ctx, std::span<const std::uint32_t>(ks.module.perm));
+        auto b_points = vc::Buffer::from(ctx, std::span<const float>(ks.module.points));
+        auto b_sites = vc::Buffer::from(ctx, std::span<const gpu::Site>(ks.sites));
+        vc::Buffer b_out(ctx, count * sizeof(gpu::Instance));
+        vc::Kernel kernel(ctx, ks.source.c_str(), "instances.comp", 4, sizeof(gpu::InstancePush));
+        vc::Buffer* bufs[] = {&b_perm, &b_points, &b_sites, &b_out};
+        kernel.bind(bufs);
+        auto push = ks.push;
+        push.rest_centroid_t[3] = static_cast<float>(t);
+        std::vector<double> ms;
+        for (int r = 0; r < runs; ++r)
+            ms.push_back(ctx.run([&](VkCommandBuffer cmd) {
+                kernel.dispatch(cmd, &push, static_cast<std::uint32_t>((count + 63) / 64), 1);
+            }));
+        std::sort(ms.begin(), ms.end());
+
+        const auto* dev = static_cast<const gpu::Instance*>(b_out.data());
+        double worst_t = 0, worst_r = 0, worst_s = 0, worst_c = 0, worst_e = 0;
+        std::size_t over = 0;
+        const std::size_t n_check = std::min(count, objs.size());
+        for (std::size_t i = 0; i < n_check; ++i) {
+            const auto& o = *objs[i];
+            const auto& g = dev[i];
+            const auto R = o.rotation_q.to_matrix();
+            const float* rows[3] = {g.r0, g.r1, g.r2};
+            double et = 0, er = 0;
+            for (std::size_t a = 0; a < 3; ++a) {
+                et = std::max(et, std::abs(rows[a][3] - o.translation[a]));
+                for (std::size_t b = 0; b < 3; ++b)
+                    er = std::max(er, std::abs(rows[a][b] - R(a, b)));
+            }
+            const double es = std::abs(g.scale_quadric[0] - o.scale);
+            double ec = 0, ee = 0;
+            for (std::size_t a = 0; a < 3; ++a) {
+                ec = std::max(ec, std::abs(g.color_rough[a] - o.material.base_color[a]));
+                ee = std::max(ee, std::abs(g.emissive_opacity[a] - o.material.emissive[a]));
+            }
+            worst_t = std::max(worst_t, et);
+            worst_r = std::max(worst_r, er);
+            worst_s = std::max(worst_s, es);
+            worst_c = std::max(worst_c, ec);
+            worst_e = std::max(worst_e, ee);
+            if (et > 1e-3 || er > 1e-3 || es > 1e-4 || ec > 1e-3 || ee > 1e-3) ++over;
+        }
+        std::println("node {}: {} instances moved in {:.2f} ms (median of {}), {} lines of generated GLSL",
+                     node, count, ms[ms.size() / 2], runs,
+                     std::count(ks.source.begin(), ks.source.end(), '\n'));
+        std::println("  against cook() at t={}: worst |translation| {:.2e}, |rotation| {:.2e}, "
+                     "|scale| {:.2e}, |colour| {:.2e}, |glow| {:.2e}; {} of {} past 1e-3",
+                     t, worst_t, worst_r, worst_s, worst_c, worst_e, over, n_check);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -297,6 +382,8 @@ int main(int argc, char** argv) {
     std::string photo;
     int runs = 5;
     bool live = false;
+    bool dust_check = false;
+    std::size_t dust = 35200;
     int frames = 0;
     std::string screenshot;
     render::Camera<double> start = donut::hero_camera();
@@ -306,6 +393,8 @@ int main(int argc, char** argv) {
         if (a == "--photo" && i + 1 < argc) { photo = argv[++i]; continue; }
         if (a == "--runs" && i + 1 < argc) { runs = std::max(1, std::atoi(argv[++i])); continue; }
         if (a == "--live") { live = true; continue; }
+        if (a == "--dust-check") { dust_check = true; continue; }
+        if (a == "--dust" && i + 1 < argc) { dust = static_cast<std::size_t>(std::atol(argv[++i])); continue; }
         if (a == "--camera" && i + 6 < argc) {
             for (std::size_t k = 0; k < 3; ++k) start.position[k] = std::atof(argv[++i]);
             for (std::size_t k = 0; k < 3; ++k) start.target[k] = std::atof(argv[++i]);
@@ -315,7 +404,8 @@ int main(int argc, char** argv) {
         if (a == "--screenshot" && i + 1 < argc) { screenshot = argv[++i]; continue; }
         std::print("donut_live [--t seconds] [--photo PATH] [--runs N]\n"
                    "donut_live --live [--t seconds] [--frames N] [--screenshot PATH]\n"
-                   "  --camera px py pz tx ty tz   start from this position, looking at t\n");
+                   "  --camera px py pz tx ty tz   start from this position, looking at t\n"
+                   "donut_live --dust-check [--t seconds] [--dust N] [--runs N]\n");
         return a == "--help" ? 0 : 1;
     }
 
@@ -327,7 +417,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     bd::Trace<double> scene;
-    const auto root = donut::build_scene(scene, 11000, 35200, boom);
+    const auto root = donut::build_scene(scene, 11000, dust, boom);
+    if (dust_check) return run_dust_check(scene, root, t, runs);
 
     auto t0 = std::chrono::steady_clock::now();
     const auto cooked = bd::cook(scene, root, t);
