@@ -29,6 +29,11 @@
 //       angular radius from the pixels a horizon ended, against the static
 //       observer's sin(alpha) = 3 sqrt(3) M / D sqrt(1 - 2M/D).
 //
+//   --dust-check
+//       2048 dust particles on circular orbits about a Kerr hole (spin
+//       0.9), moved on the device to coordinate time 200 M, against the
+//       host integrating the same geodesics in double with a fine step.
+//
 //   --check [--rays N] [--steps S]
 //       For a single Kerr hole and for a superposed binary, sends N light
 //       rays from a camera S RK4 steps through the scene's metric three
@@ -217,7 +222,10 @@ struct Settings {
     float distance = 60.0f, azimuth = 30.0f, elevation = 10.0f, fov = 50.0f;
     float exposure = 1.6f;
     int max_steps = 1500;
+    int dust = 1;                  // index into kDustCounts
 };
+
+constexpr std::uint32_t kDustCounts[] = {0, 100000, 300000, 1000000};
 
 rel::SpacetimeScene<double> make_scene(const Settings& st) {
     rel::SpacetimeScene<double> scene;
@@ -230,6 +238,8 @@ rel::SpacetimeScene<double> make_scene(const Settings& st) {
     scene.disk().on = st.disk;
     scene.disk().temperature = st.temperature;
     scene.disk().outer = st.disk_outer;
+    scene.dust().count = kDustCounts[st.dust];
+    scene.dust().outer = std::max(40.0, 1.3 * st.disk_outer);
     scene.camera() = {.distance = st.distance, .azimuth_deg = st.azimuth, .elevation_deg = st.elevation,
                       .fov_deg = st.fov};
     return scene;
@@ -242,6 +252,13 @@ struct Renderer {
     std::unique_ptr<vc::Kernel> kernel;
     std::unique_ptr<vc::Buffer> pixels, bb, perm, pts;
     std::uint32_t W = 0, H = 0;
+    // Dust: particles moved on the device each frame, counted into a grid
+    // the rays read.
+    std::unique_ptr<vc::Kernel> move, deposit;
+    std::unique_ptr<vc::Buffer> particles, grid;
+    spatium::render::DustGrid grid_shape;
+    std::uint32_t dust_count = 0;
+    std::uint32_t frame_no = 0;
 
     Renderer(vc::Context& c, rel::SpacetimeScene<double> sc, std::uint32_t w, std::uint32_t h) : ctx(c), scene(std::move(sc)) {
         const auto src = spatium::render::blackhole_shader(scene);
@@ -254,16 +271,42 @@ struct Renderer {
         const std::vector<std::uint32_t> none{0};
         perm = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
         pts = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
-        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 4,
+        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 5,
                                               static_cast<std::uint32_t>(sizeof(spatium::render::BlackholePush)));
+        grid_shape = spatium::render::dust_grid(scene);
+        dust_count = scene.dust().count;
+        grid = std::make_unique<vc::Buffer>(ctx, std::size_t{grid_shape.cells()} * 4);
+        std::memset(grid->data(), 0, grid->size());
+        if (dust_count > 0) {
+            const auto msrc = spatium::render::dust_move_shader(scene);
+            if (!msrc) {
+                std::println(stderr, "dust shader: {}", msrc.error().message);
+                std::exit(1);
+            }
+            move = std::make_unique<vc::Kernel>(ctx, msrc->c_str(), "dust_move.comp", 4, 16);
+            const auto dsrc = spatium::render::dust_deposit_shader(grid_shape);
+            deposit = std::make_unique<vc::Kernel>(ctx, dsrc.c_str(), "dust_deposit.comp", 2, 16);
+            reset_dust();
+            vc::Buffer* mb[] = {particles.get(), bb.get(), perm.get(), pts.get()};
+            move->bind(mb);
+            vc::Buffer* db[] = {particles.get(), grid.get()};
+            deposit->bind(db);
+        }
         resize(w, h);
     }
     void resize(std::uint32_t w, std::uint32_t h) {
         W = w;
         H = h;
         pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
-        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get()};
+        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get(), grid.get()};
         kernel->bind(bufs);
+    }
+    // Back to the first state: circular orbits at t = 0.
+    void reset_dust() {
+        if (dust_count == 0) return;
+        const auto init = spatium::render::dust_initial(scene);
+        if (!particles) particles = std::make_unique<vc::Buffer>(ctx, init.size() * sizeof(float));
+        std::memcpy(particles->data(), init.data(), init.size() * sizeof(float));
     }
     spatium::render::BlackholePush push(double t, double exposure, int max_steps, bool bgr) const {
         const auto metric = *scene.metric(rel::SpacetimeScene<double>::Form::outgoing);
@@ -297,7 +340,25 @@ struct Renderer {
         p.flags[3] = scene.sky().seed;
         return p;
     }
-    void record(VkCommandBuffer cmd, const spatium::render::BlackholePush& p) const {
+    static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags from, VkAccessFlags src) {
+        VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        mb.srcAccessMask = src;
+        mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, from, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr);
+    }
+    // The dust moved to the frame's time and counted, then the frame.
+    void record(VkCommandBuffer cmd, const spatium::render::BlackholePush& p) {
+        if (dust_count > 0) {
+            struct { float target; std::uint32_t count, frame; float outer; } mp{
+                p.cam[0], dust_count, frame_no++, static_cast<float>(scene.dust().outer * scene.total_mass())};
+            move->dispatch(cmd, &mp, (dust_count + 63) / 64, 1);
+            barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+            vkCmdFillBuffer(cmd, grid->handle(), 0, VK_WHOLE_SIZE, 0u);
+            barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+            const std::uint32_t dp[4] = {dust_count, 0, 0, 0};
+            deposit->dispatch(cmd, dp, (dust_count + 63) / 64, 1);
+            barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+        }
         kernel->dispatch(cmd, &p, (W + 7) / 8, (H + 7) / 8);
     }
     double render(const spatium::render::BlackholePush& p) {
@@ -430,6 +491,14 @@ int run_live(int max_frames, const std::string& screenshot) {
             ImGui::Checkbox("disk", &st.disk);
             ImGui::SliderFloat("temperature", &st.temperature, 0.3f, 3.0f, "%.2f");
             ImGui::SliderFloat("outer edge", &st.disk_outer, 10.0f, 60.0f, "%.0f M");
+            ImGui::SeparatorText("dust");
+            {
+                const char* names[] = {"none", "100k", "300k", "1M"};
+                for (int i = 0; i < 4; ++i) {
+                    if (i) ImGui::SameLine();
+                    if (ImGui::RadioButton(names[i], &st.dust, i)) rebuild = true;
+                }
+            }
             ImGui::SeparatorText("camera");
             bool cam = false;
             cam |= ImGui::SliderFloat("distance", &st.distance, 12.0f, 200.0f, "%.0f M");
@@ -442,7 +511,7 @@ int run_live(int max_frames, const std::string& screenshot) {
             ImGui::SameLine();
             ImGui::SliderFloat("rate", &rate, 0.05f, 5.0f, "%.2fx", ImGuiSliderFlags_Logarithmic);
             ImGui::Text("t = %.0f M", t);
-            if (ImGui::Button("t = 0")) t = 0.0;
+            if (ImGui::Button("t = 0")) { t = 0.0; renderer->reset_dust(); }
             ImGui::SeparatorText("render");
             for (int i = 0; i < static_cast<int>(std::size(kPresets)); ++i) {
                 if (i) ImGui::SameLine();
@@ -473,6 +542,9 @@ int run_live(int max_frames, const std::string& screenshot) {
             if (save || (!screenshot.empty() && max_frames > 0 && frame == max_frames - 1)) {
                 vkDeviceWaitIdle(ctx.device());
                 Renderer big(ctx, make_scene(st), 1920, 1080);
+                // The dust as it is now, not as it started.
+                if (big.dust_count > 0 && big.dust_count == renderer->dust_count)
+                    std::memcpy(big.particles->data(), renderer->particles->data(), big.particles->size());
                 big.render(big.push(t, st.exposure, std::max(st.max_steps, 3000), false));
                 saved = screenshot.empty() ? timestamp_name() : screenshot;
                 write_png(saved, big.read(), 1920, 1080, false);
@@ -523,6 +595,7 @@ int main(int argc, char** argv) {
         auto next = [&] { return std::string(i + 1 < argc ? argv[++i] : ""); };
         if (a == "--check") mode = "check";
         else if (a == "--shadow-check") mode = "shadow";
+        else if (a == "--dust-check") mode = "dust";
         else if (a == "--live") mode = "live";
         else if (a == "--frame") { mode = "frame"; out = next(); }
         else if (a == "--video") { mode = "video"; out = next(); }
@@ -556,6 +629,55 @@ int main(int argc, char** argv) {
         int rc = check_scene(ctx, "one Kerr hole, spin 0.9", one, rays, steps);
         rc |= check_scene(ctx, "binary, 12 M apart", pair, rays, steps);
         return rc;
+    }
+
+    if (mode == "dust") {
+        Settings st;
+        st.dust = 0;
+        rel::SpacetimeScene<double> scene = make_scene(st);
+        scene.dust().count = 2048;
+        scene.dust().outer = 40.0;
+        Renderer r(ctx, scene, 16, 16);
+        const auto init = spatium::render::dust_initial(r.scene);
+        const double T = 200.0;
+        // The device moves at most 32 steps a dispatch; dispatch until every
+        // particle has reached T.
+        double ms = 0;
+        for (int k = 0; k < 64; ++k) {
+            struct { float target; std::uint32_t count, frame; float outer; } mp{
+                static_cast<float>(T), r.dust_count, 0u, static_cast<float>(r.scene.dust().outer * r.scene.total_mass())};
+            ms += ctx.run([&](VkCommandBuffer cmd) { r.move->dispatch(cmd, &mp, (r.dust_count + 63) / 64, 1); });
+        }
+        const auto* dev = static_cast<const float*>(r.particles->data());
+        const auto metric = *r.scene.metric(rel::SpacetimeScene<double>::Form::outgoing);
+        std::vector<double> err;
+        double worst = 0;
+        int reborn = 0;
+        for (std::uint32_t i = 0; i < r.dust_count; ++i) {
+            Vec<double, 8> st8{};
+            for (int c = 0; c < 8; ++c) st8[c] = init[8 * i + c];
+            const double R0 = std::hypot(st8[1], st8[2]);
+            Vec<double, 8> prev = st8;
+            while (st8[0] < T) {
+                prev = st8;
+                st8 = rel::geodesic_step(metric, st8, 0.02 * std::max(1.0, R0 / 4.0));
+            }
+            // Linear in coordinate time between the last two steps.
+            const double a = (T - prev[0]) / (st8[0] - prev[0]);
+            Vec<double, 3> host{};
+            for (int c = 0; c < 3; ++c) host[c] = prev[1 + c] + a * (st8[1 + c] - prev[1 + c]);
+            const Vec<double, 3> d{dev[8 * i + 1], dev[8 * i + 2], dev[8 * i + 3]};
+            if (std::abs(dev[8 * i + 0] - T) > 1.0) { ++reborn; continue; }
+            const double e = Vec<double, 3>{d - host}.norm() / R0;
+            err.push_back(e);
+            worst = std::max(worst, e);
+        }
+        std::sort(err.begin(), err.end());
+        std::println("dust: {} particles on circular orbits about a Kerr hole (spin 0.9), moved to t = {} M; "
+                     "{} reborn; device against host double, position apart relative to the orbit's radius: "
+                     "worst {:.2e}, median {:.2e}; device {:.1f} ms",
+                     r.dust_count, T, reborn, worst, err.empty() ? 0.0 : err[err.size() / 2], ms);
+        return worst < 1e-2 ? 0 : 1;
     }
 
     if (mode == "shadow") {
