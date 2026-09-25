@@ -77,115 +77,134 @@ struct BVH {
         std::iota(indices.begin(), indices.end(), 0);
 
         bvh.nodes_.reserve(2 * bvh.shapes_.size());
-        bvh.build_recursive(indices, 0, indices.size(), boxes, centroids);
+        bvh.build_recursive(indices, 0, indices.size(), boxes, centroids, 1);
 
         return bvh;
     }
 
     // ── Queries ───────────────────────────────────────────────
 
-    std::optional<Hit> ray_cast(const geometry::Ray<N, T>& ray) const {
+    // `t_max` ends the ray: a hit beyond it is not a hit. A shadow ray
+    // stops at the light, a swept query at the end of its step.
+    std::optional<Hit> ray_cast(const geometry::Ray<N, T>& ray,
+                                T t_max = std::numeric_limits<T>::max()) const {
         if (nodes_.empty()) return std::nullopt;
 
         std::optional<Hit> best;
-        T best_t = std::numeric_limits<T>::max();
+        T best_t = t_max;
 
-        std::array<std::uint32_t, STACK_DEPTH> stack;
-        std::uint32_t sp = 0;
-        stack[sp++] = 0;
+        return with_stack([&](auto& stack) {
+            std::uint32_t sp = 0;
+            stack[sp++] = 0;
 
-        while (sp) {
-            auto node_idx = stack[--sp];
-            auto& node = nodes_[node_idx];
+            while (sp) {
+                auto node_idx = stack[--sp];
+                auto& node = nodes_[node_idx];
 
-            auto box_hit = geometry::intersect_parameters(ray, node.bounds);
-            if (!box_hit || box_hit->first > best_t) continue;
+                auto box_hit = geometry::intersect_parameters(ray, node.bounds);
+                if (!box_hit || box_hit->first > best_t) continue;
 
-            if (node.count > 0) {
-                for (std::uint32_t i = 0; i < node.count; ++i) {
-                    auto idx = prim_indices_[node.first + i];
-                    if constexpr (has_ray_hit) {
-                        // Unqualified, after pulling the library's own
-                        // overloads into scope: this is the two-step that
-                        // makes the extension point in ray_hit.hpp true.
-                        // A qualified `geometry::ray_hit` finds only what
-                        // lives in that namespace, so a user shape with
-                        // its own overload beside it satisfied
-                        // `RayHittable` -- which looks the name up
-                        // unqualified and finds theirs by ADL -- while
-                        // `BVH<TheirShape>` failed to compile. The concept
-                        // said yes and the use said no.
-                        using geometry::ray_hit;
-                        auto h = ray_hit(ray, shapes_[idx]);
-                        if (h && h->t >= T{0} && h->t < best_t) {
-                            best_t = h->t;
-                            best = Hit{idx, h->t, h->point,
-                                       h->u, h->v, h->normal};
-                        }
-                    } else {
-                        auto result = geometry::intersect(ray, shapes_[idx]);
-                        if (result) {
-                            auto t = (result.value() - ray.origin).dot(ray.direction);
-                            if (t >= T{0} && t < best_t) {
-                                best_t = t;
-                                best = Hit{idx, t, result.value()};
+                if (node.count > 0) {
+                    for (std::uint32_t i = 0; i < node.count; ++i) {
+                        auto idx = prim_indices_[node.first + i];
+                        if constexpr (has_ray_hit) {
+                            // Unqualified, after pulling the library's own
+                            // overloads into scope: this is the two-step that
+                            // makes the extension point in ray_hit.hpp true.
+                            // A qualified `geometry::ray_hit` finds only what
+                            // lives in that namespace, so a user shape with
+                            // its own overload beside it satisfied
+                            // `RayHittable` -- which looks the name up
+                            // unqualified and finds theirs by ADL -- while
+                            // `BVH<TheirShape>` failed to compile. The concept
+                            // said yes and the use said no.
+                            using geometry::ray_hit;
+                            auto h = ray_hit(ray, shapes_[idx]);
+                            if (h && h->t >= T{0} && h->t <= best_t) {
+                                best_t = h->t;
+                                best = Hit{idx, h->t, h->point,
+                                           h->u, h->v, h->normal};
+                            }
+                        } else {
+                            auto result = geometry::intersect(ray, shapes_[idx]);
+                            if (result) {
+                                auto t = (result.value() - ray.origin).dot(ray.direction);
+                                if (t >= T{0} && t <= best_t) {
+                                    best_t = t;
+                                    best = Hit{idx, t, result.value()};
+                                }
                             }
                         }
                     }
-                }
-            } else {
-                auto left = node_idx + 1;
-                auto right = node.first;
-                auto left_t = geometry::intersect_parameters(ray, nodes_[left].bounds);
-                auto right_t = geometry::intersect_parameters(ray, nodes_[right].bounds);
+                } else {
+                    auto left = node_idx + 1;
+                    auto right = node.first;
+                    auto left_t = geometry::intersect_parameters(ray, nodes_[left].bounds);
+                    auto right_t = geometry::intersect_parameters(ray, nodes_[right].bounds);
 
-                bool left_ok = left_t && left_t->first <= best_t;
-                bool right_ok = right_t && right_t->first <= best_t;
+                    bool left_ok = left_t && left_t->first <= best_t;
+                    bool right_ok = right_t && right_t->first <= best_t;
 
-                // Push far first, near second (near popped first)
-                if (left_ok && right_ok) {
-                    if (left_t->first > right_t->first) {
+                    // Push far first, near second (near popped first)
+                    if (left_ok && right_ok) {
+                        if (left_t->first > right_t->first) {
+                            stack[sp++] = left;
+                            stack[sp++] = right;
+                        } else {
+                            stack[sp++] = right;
+                            stack[sp++] = left;
+                        }
+                    } else if (left_ok) {
                         stack[sp++] = left;
+                    } else if (right_ok) {
                         stack[sp++] = right;
-                    } else {
-                        stack[sp++] = right;
-                        stack[sp++] = left;
                     }
-                } else if (left_ok) {
-                    stack[sp++] = left;
-                } else if (right_ok) {
-                    stack[sp++] = right;
                 }
             }
-        }
-        return best;
+            return best;
+        });
     }
 
-    bool ray_test(const geometry::Ray<N, T>& ray) const {
+    // Any hit in [0, t_max]. Through the same `ray_hit` as ray_cast where
+    // the shape has one -- it used to call `intersect()` alone, so a tree of
+    // exact quadrics could say what a ray hits first and not whether it hits
+    // anything.
+    bool ray_test(const geometry::Ray<N, T>& ray, T t_max = std::numeric_limits<T>::max()) const {
         if (nodes_.empty()) return false;
 
-        std::array<std::uint32_t, STACK_DEPTH> stack;
-        std::uint32_t sp = 0;
-        stack[sp++] = 0;
+        return with_stack([&](auto& stack) {
+            std::uint32_t sp = 0;
+            stack[sp++] = 0;
 
-        while (sp) {
-            auto node_idx = stack[--sp];
-            auto& node = nodes_[node_idx];
+            while (sp) {
+                auto node_idx = stack[--sp];
+                auto& node = nodes_[node_idx];
 
-            auto box_hit = geometry::intersect_parameters(ray, node.bounds);
-            if (!box_hit) continue;
+                auto box_hit = geometry::intersect_parameters(ray, node.bounds);
+                if (!box_hit || box_hit->first > t_max) continue;
 
-            if (node.count > 0) {
-                for (std::uint32_t i = 0; i < node.count; ++i) {
-                    auto idx = prim_indices_[node.first + i];
-                    if (geometry::intersect(ray, shapes_[idx])) return true;
+                if (node.count > 0) {
+                    for (std::uint32_t i = 0; i < node.count; ++i) {
+                        auto idx = prim_indices_[node.first + i];
+                        if constexpr (has_ray_hit) {
+                            using geometry::ray_hit;
+                            auto h = ray_hit(ray, shapes_[idx]);
+                            if (h && h->t >= T{0} && h->t <= t_max) return true;
+                        } else {
+                            auto result = geometry::intersect(ray, shapes_[idx]);
+                            if (result) {
+                                auto t = (result.value() - ray.origin).dot(ray.direction);
+                                if (t >= T{0} && t <= t_max) return true;
+                            }
+                        }
+                    }
+                } else {
+                    stack[sp++] = node_idx + 1;   // left
+                    stack[sp++] = node.first;     // right
                 }
-            } else {
-                stack[sp++] = node_idx + 1;   // left
-                stack[sp++] = node.first;     // right
             }
-        }
-        return false;
+            return false;
+        });
     }
 
     std::optional<NearestResult> nearest(const PointType& p) const {
@@ -194,75 +213,78 @@ struct BVH {
         std::optional<NearestResult> best;
         T best_dist = std::numeric_limits<T>::max();
 
-        std::array<std::uint32_t, STACK_DEPTH> stack;
-        std::uint32_t sp = 0;
-        stack[sp++] = 0;
+        return with_stack([&](auto& stack) {
+            std::uint32_t sp = 0;
+            stack[sp++] = 0;
 
-        while (sp) {
-            auto node_idx = stack[--sp];
-            auto& node = nodes_[node_idx];
+            while (sp) {
+                auto node_idx = stack[--sp];
+                auto& node = nodes_[node_idx];
 
-            T box_dist = node.bounds.distance(p);
-            if (box_dist >= best_dist) continue;
+                T box_dist = node.bounds.distance(p);
+                if (box_dist >= best_dist) continue;
 
-            if (node.count > 0) {
-                for (std::uint32_t i = 0; i < node.count; ++i) {
-                    auto idx = prim_indices_[node.first + i];
-                    auto proj = shapes_[idx].project(p);
-                    T d = (p - proj).norm();
-                    if (d < best_dist) {
-                        best_dist = d;
-                        best = NearestResult{idx, d, proj};
+                if (node.count > 0) {
+                    for (std::uint32_t i = 0; i < node.count; ++i) {
+                        auto idx = prim_indices_[node.first + i];
+                        auto proj = shapes_[idx].project(p);
+                        T d = (p - proj).norm();
+                        if (d < best_dist) {
+                            best_dist = d;
+                            best = NearestResult{idx, d, proj};
+                        }
+                    }
+                } else {
+                    auto left = node_idx + 1;
+                    auto right = node.first;
+                    T dl = nodes_[left].bounds.distance(p);
+                    T dr = nodes_[right].bounds.distance(p);
+
+                    if (dl < dr) {
+                        if (dr < best_dist) stack[sp++] = right;
+                        if (dl < best_dist) stack[sp++] = left;
+                    } else {
+                        if (dl < best_dist) stack[sp++] = left;
+                        if (dr < best_dist) stack[sp++] = right;
                     }
                 }
-            } else {
-                auto left = node_idx + 1;
-                auto right = node.first;
-                T dl = nodes_[left].bounds.distance(p);
-                T dr = nodes_[right].bounds.distance(p);
-
-                if (dl < dr) {
-                    if (dr < best_dist) stack[sp++] = right;
-                    if (dl < best_dist) stack[sp++] = left;
-                } else {
-                    if (dl < best_dist) stack[sp++] = left;
-                    if (dr < best_dist) stack[sp++] = right;
-                }
             }
-        }
-        return best;
+            return best;
+        });
     }
 
     std::vector<std::size_t> query_box(const BoxType& query) const {
         std::vector<std::size_t> result;
         if (nodes_.empty()) return result;
 
-        std::array<std::uint32_t, STACK_DEPTH> stack;
-        std::uint32_t sp = 0;
-        stack[sp++] = 0;
+        return with_stack([&](auto& stack) {
+            std::uint32_t sp = 0;
+            stack[sp++] = 0;
 
-        while (sp) {
-            auto node_idx = stack[--sp];
-            auto& node = nodes_[node_idx];
+            while (sp) {
+                auto node_idx = stack[--sp];
+                auto& node = nodes_[node_idx];
 
-            if (!node.bounds.intersects(query)) continue;
+                if (!node.bounds.intersects(query)) continue;
 
-            if (node.count > 0) {
-                for (std::uint32_t i = 0; i < node.count; ++i) {
-                    auto idx = prim_indices_[node.first + i];
-                    if (shapes_[idx].bounding_box().intersects(query))
-                        result.push_back(idx);
+                if (node.count > 0) {
+                    for (std::uint32_t i = 0; i < node.count; ++i) {
+                        auto idx = prim_indices_[node.first + i];
+                        if (shapes_[idx].bounding_box().intersects(query))
+                            result.push_back(idx);
+                    }
+                } else {
+                    stack[sp++] = node_idx + 1;
+                    stack[sp++] = node.first;
                 }
-            } else {
-                stack[sp++] = node_idx + 1;
-                stack[sp++] = node.first;
             }
-        }
-        return result;
+            return std::move(result);
+        });
     }
 
     const std::vector<Shape>& shapes() const { return shapes_; }
     std::size_t node_count() const { return nodes_.size(); }
+    std::size_t depth() const { return depth_; }
 
     // Node layout:
     //   leaf:     first = prim_indices_ offset, count > 0
@@ -284,21 +306,39 @@ struct BVH {
 private:
     static constexpr std::uint32_t LEAF_THRESHOLD = 4;
     static constexpr int NUM_BINS = 12;
-    // Traversal stack size: 64 supports up to 2^64 leaves in a balanced BVH.
-    // Near-first push is at most 2 per level → depth ≤ STACK_DEPTH/2 worst-case
-    // for pathological unbalanced trees; 64 is safe for SAH-built trees up to 10M+ prims.
-    static constexpr std::size_t STACK_DEPTH = 64;
+
+    // The traversal stack, sized by the tree it walks. A pop pushes at most
+    // two, so a walk never holds more than depth + 1 entries. It was a fixed
+    // array of 64 with the comment that SAH trees stay shallow, and they do
+    // not: centroids spread over many orders of magnitude make the binned
+    // split peel a few off per level, and the test that builds such a tree
+    // overran the array. Trees up to 64 deep -- nearly all of them -- still
+    // walk on a fixed array on the call's stack, exactly as before; only a
+    // deeper one allocates. Each query's walk is a generic lambda so both
+    // paths are the same code, and the common one costs what it always did.
+    template<typename Walk>
+    decltype(auto) with_stack(Walk&& walk) const {
+        if (depth_ + 2 <= 64) {
+            std::array<std::uint32_t, 64> stack;
+            return walk(stack);
+        }
+        std::vector<std::uint32_t> stack(depth_ + 2);
+        return walk(stack);
+    }
 
     std::vector<Shape> shapes_;
     std::vector<Node> nodes_;
     std::vector<std::size_t> prim_indices_;
+    std::size_t depth_ = 0;
 
     std::uint32_t build_recursive(std::vector<std::size_t>& indices,
                                    std::size_t begin, std::size_t end,
                                    const std::vector<BoxType>& boxes,
-                                   const std::vector<PointType>& centroids) {
+                                   const std::vector<PointType>& centroids,
+                                   std::size_t depth) {
         auto node_idx = static_cast<std::uint32_t>(nodes_.size());
         nodes_.push_back({});
+        depth_ = std::max(depth_, depth);
 
         BoxType bounds = boxes[indices[begin]];
         for (std::size_t i = begin + 1; i < end; ++i)
@@ -399,8 +439,8 @@ private:
             mid_pos = begin + count / 2;
 
         // Left child built immediately after current → index = node_idx + 1
-        build_recursive(indices, begin, mid_pos, boxes, centroids);
-        auto right = build_recursive(indices, mid_pos, end, boxes, centroids);
+        build_recursive(indices, begin, mid_pos, boxes, centroids, depth + 1);
+        auto right = build_recursive(indices, mid_pos, end, boxes, centroids, depth + 1);
 
         // Internal: first = right child index, count = 0
         nodes_[node_idx] = {bounds, right, 0};

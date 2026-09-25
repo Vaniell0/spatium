@@ -53,7 +53,7 @@ This document tracks what's done and what's open, by content and by date — not
 ## Audit fixes, multi-mesh viewer, atom demo
 
 - Marching cubes: Paul Bourke 256-entry tri_table (replaces centroid-fan)
-- BVH stack: dynamic vector with reserve(64) (replaces fixed array<64>)
+- BVH stack: sized by the tree -- a fixed array of 64 on the call's stack while the tree is at most 62 deep, a vector past that. The line here used to say it had been a vector since long ago; the code had gone back to a bare `array<64>`, and a tree of centroids spread over many orders of magnitude overran it (2026-09-25, `tests/test_bvh.cpp`, caught by AddressSanitizer)
 - MeshTopology: shared_ptr<const Mesh> ownership (replaces dangling reference)
 - Matrix::inverse() → Result<Matrix> (was silent identity on singular)
 - Quaternion::inverse() → Result<Quaternion> (was division by zero)

@@ -295,3 +295,98 @@ TEST_CASE("BVH: a flat shape has a zero-thickness bound and is still found", "[b
                            Vec<double, 3>{1.0, 0.0, -0.005}};
     CHECK(bvh.ray_test(shallow));
 }
+
+// ── A tree deeper than the traversal stack ──────────────────────
+//
+// Triangles across the x axis at x = 1.5^i: the centroids spread over a
+// hundred orders of magnitude, so every binned split peels a few of the
+// largest off and the tree is a long spine. A ray down the axis crosses
+// every box, and near-first traversal leaves the far child of each level
+// on the stack. The stack used to be a fixed array of 64 with no bound
+// check, which such a tree overruns; run under AddressSanitizer this test
+// reported the write past its end.
+namespace {
+
+std::vector<Triangle3> spine(int n) {
+    std::vector<Triangle3> tris;
+    for (int i = 0; i < n; ++i) {
+        const double x = std::pow(1.5, i);
+        tris.push_back(Triangle3({x, -1, -1}, {x, 2, -1}, {x, -1, 2}));
+    }
+    return tris;
+}
+
+template<typename Tree>
+std::size_t depth_of(const Tree& bvh, std::size_t node = 0) {
+    const auto& n = bvh.nodes()[node];
+    if (n.count > 0) return 1;
+    return 1 + std::max(depth_of(bvh, node + 1), depth_of(bvh, n.first));
+}
+
+}  // namespace
+
+TEST_CASE("BVH queries agree with brute force on a tree deeper than 64", "[bvh]") {
+    const auto tris = spine(600);
+    const auto bvh = BVH<Triangle3>::build(tris);
+    INFO("depth " << depth_of(bvh));
+    REQUIRE(depth_of(bvh) > 64);
+    CHECK(bvh.depth() == depth_of(bvh));   // what the walk sizes its stack by
+
+    const Ray<3, double> down_axis{{-1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}};
+    const auto hit = bvh.ray_cast(down_axis);
+    REQUIRE(hit);
+    CHECK(hit->index == 0);
+    CHECK_THAT(hit->t, WithinAbs(2.0, 1e-12));
+    CHECK(bvh.ray_test(down_axis));
+
+    // From beyond the far end looking back: the nearest is the last one.
+    const double far = std::pow(1.5, 600);
+    const Ray<3, double> back{{far * 2.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}};
+    const auto back_hit = bvh.ray_cast(back);
+    REQUIRE(back_hit);
+    CHECK(back_hit->index == 599);
+
+    const auto near = bvh.nearest(Vec<double, 3>{0.0, 0.0, 0.0});
+    REQUIRE(near);
+    CHECK(near->index == 0);
+
+    const auto all = bvh.query_box(Box<3, double>{{0.0, -2.0, -2.0}, {far * 2.0, 3.0, 3.0}});
+    CHECK(all.size() == 600);
+}
+
+// ── A ray that ends ─────────────────────────────────────────────
+//
+// A shadow ray stops at the light and a swept query at the end of its
+// step; an occluder beyond either is not an occluder. Without a t_max
+// the tree could only answer for a ray that never ends.
+TEST_CASE("BVH ray queries stop at t_max", "[bvh]") {
+    std::vector<Triangle3> tris{Triangle3({1, -1, -1}, {1, 2, -1}, {1, -1, 2}),
+                                Triangle3({3, -1, -1}, {3, 2, -1}, {3, -1, 2})};
+    const auto bvh = BVH<Triangle3>::build(tris);
+    const Ray<3, double> ray{{0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}};
+
+    CHECK(bvh.ray_cast(ray, 2.0)->index == 0);
+    CHECK_FALSE(bvh.ray_cast(ray, 0.5));
+    CHECK(bvh.ray_test(ray, 2.0));
+    CHECK_FALSE(bvh.ray_test(ray, 0.5));
+
+    // Between the two, looking at the far one through a light at 2.5.
+    const Ray<3, double> shadow{{2.0, 0.0, 0.0}, {1.0, 0.0, 0.0}};
+    CHECK_FALSE(bvh.ray_test(shadow, 0.5));
+    CHECK(bvh.ray_test(shadow, 1.5));
+}
+
+// ── Any-hit over the shapes ray_cast already handles ────────────
+//
+// ray_cast reaches a shape through ray_hit, ray_test through intersect(),
+// so a tree of exact quadrics could answer "what does this ray hit first"
+// and not "does it hit anything": BVH<BoundedQuadric>::ray_test did not
+// compile. It goes through ray_hit now, the same as ray_cast.
+TEST_CASE("BVH any-hit works for every shape first-hit works for", "[bvh]") {
+    std::vector<BoundedQuadric<double>> balls{BoundedQuadric<double>::sphere(1.0)};
+    const auto bvh = BVH<BoundedQuadric<double>>::build(balls);
+    CHECK(bvh.ray_test(Ray<3, double>{{-5.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}));
+    CHECK_FALSE(bvh.ray_test(Ray<3, double>{{-5.0, 3.0, 0.0}, {1.0, 0.0, 0.0}}));
+    CHECK_FALSE(bvh.ray_test(Ray<3, double>{{-5.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}, 3.0));
+    CHECK(bvh.ray_cast(Ray<3, double>{{-5.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}));
+}
