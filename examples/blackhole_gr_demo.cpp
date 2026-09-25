@@ -146,6 +146,7 @@
 #include <spatium/physics/relativity/accretion_disk.hpp>
 #include <spatium/physics/relativity/geodesic.hpp>
 #include <spatium/physics/relativity/kerr.hpp>
+#include <spatium/physics/relativity/metric_field.hpp>
 #include <spatium/physics/relativity/schwarzschild.hpp>
 #include <spatium/render/camera.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
@@ -216,6 +217,12 @@ int AA_LEVEL = 2;
 double M_BH = 1.0;
 double SPIN = 0.0;      // Kerr a; 0 selects the Schwarzschild fast path exactly
 bool PROGRADE = true;   // disk corotation direction relative to the spin axis
+// Trace through the metric written as fields (physics/relativity/
+// metric_field.hpp) instead of the hand-written KerrMetric: the same
+// Boyer-Lindquist entries, lowered to plain data and differentiated on
+// Dual<T> by the same geodesic.hpp. What lets a change of coordinates be a
+// change of data rather than of code.
+bool METRIC_FIELD = false;
 
 // g_rr diverges at the horizon (Delta=0 for Kerr, 1-2M/r=0 for
 // Schwarzschild), and so does the Christoffel tensor built from it -- a
@@ -952,6 +959,7 @@ void print_usage() {
         "    --spin A              Kerr spin parameter, 0 <= |A| < mass\n"
         "                          (default 0 = Schwarzschild fast path)\n"
         "    --retrograde          disk rotates opposite the spin (default prograde)\n"
+        "    --metric-field        trace through the metric written as IR fields\n"
         "\n"
         "  Camera:\n"
         "    --fov DEG             field of view (default {})\n"
@@ -996,6 +1004,7 @@ int main(int argc, char** argv) {
         if (a == "--help" || a == "-h") { print_usage(); return 0; }
         if (a == "--force") { force = true; continue; }
         if (a == "--retrograde") { PROGRADE = false; continue; }
+        if (a == "--metric-field") { METRIC_FIELD = true; continue; }
         if (a == "--frames" && i + 1 < argc) { N_FRAMES = next_int(); continue; }
         if (a == "--start-frame" && i + 1 < argc) { start_frame = next_int(); continue; }
         if (a == "--width" && i + 1 < argc) { W = next_int(); continue; }
@@ -1032,6 +1041,8 @@ int main(int argc, char** argv) {
 
     SchwarzschildMetric<double> schw_metric{M_BH};
     KerrMetric<double> kerr_metric{M_BH, SPIN};
+    const auto schw_field = spatium::physics::relativity::kerr_boyer_lindquist(M_BH, 0.0);
+    const auto kerr_field = spatium::physics::relativity::kerr_boyer_lindquist(M_BH, SPIN);
     Sky sky = make_starfield(10000, /*seed=*/7, /*tint=*/{8.0, 6.0, 18.0});
 
     // SPATIUM watermark: a plainly-legible copy off to one side (reads
@@ -1159,6 +1170,9 @@ int main(int argc, char** argv) {
                             return Vec<double, 3>{r_hat_exit * nr + t_hat_exit * nphi};
                         };
 
+                        if (METRIC_FIELD)
+                            return trace_ray(schw_field, state, disk_time, sky, D_cam, dir_world,
+                                             height_of, redshift_of, exit_dir_of);
                         return trace_ray(schw_metric, state, disk_time, sky, D_cam, dir_world,
                                           height_of, redshift_of, exit_dir_of);
                     };
@@ -1246,6 +1260,9 @@ int main(int argc, char** argv) {
                                                    tet_e.e_phi * nph_e};
                         };
 
+                        if (METRIC_FIELD)
+                            return trace_ray(kerr_field, state, disk_time, sky, D_cam, dir_world,
+                                             height_of, redshift_of, exit_dir_of);
                         return trace_ray(kerr_metric, state, disk_time, sky, D_cam, dir_world,
                                           height_of, redshift_of, exit_dir_of);
                     };

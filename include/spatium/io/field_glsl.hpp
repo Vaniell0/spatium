@@ -52,7 +52,7 @@ layout(std430, binding = {0}) readonly buffer FieldPerm   {{ uint field_perm[]; 
 layout(std430, binding = {1}) readonly buffer FieldPoints {{ float field_points[]; }};
 
 // FieldInputs: time as the first parameter, then the instance.
-struct FieldIn {{ float u; float v; uint id; vec3 origin; vec3 p; }};
+struct FieldIn {{ float u; float v; uint id; vec3 origin; vec3 p; vec4 x; }};
 
 // instance_hash / instance_unit in io/field.hpp.
 uint field_instance_hash(uint id, uint salt) {{
@@ -267,6 +267,7 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
                 e = std::format("field_gather({}u, {}u, {}, {}u)", b.points + n.table, n.extent, A, n.k);
                 break;
             case Op::Opaque: v[i] = "0.0"; continue;   // unreachable: lower() refuses it
+            case Op::Coord:  e = std::format("{}.x[{}]", in.rec, n.k); break;
         }
         v[i] = sc.value("float", e);
     }

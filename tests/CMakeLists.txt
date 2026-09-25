@@ -80,6 +80,7 @@ add_executable(spatium_tests
     test_lbvh.cpp
     test_ccd_certified.cpp
     test_geodesic_ball.cpp
+    test_metric_field.cpp
     test_chart.cpp
 )
 

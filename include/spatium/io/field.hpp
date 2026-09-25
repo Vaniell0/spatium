@@ -168,6 +168,13 @@ enum class Op : std::uint8_t {
     Gather,
 
     Opaque,  // a callable leaf -- the escape hatch, kept first-class
+
+    // Coordinate `k` of a point of spacetime, 0..3: the input a metric
+    // reads, so a metric is a field like any other -- lowered, compiled,
+    // and differentiated through the same pool. Appended after Opaque
+    // rather than beside the other inputs, because an op's number is its
+    // code in lowered data and inserting would renumber what is saved.
+    Coord,
 };
 
 // The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
@@ -209,6 +216,7 @@ inline const char* op_name(Op o) {
         case Op::Sqrt:   return "Sqrt";
         case Op::Gather: return "Gather";
         case Op::Opaque: return "Opaque";
+        case Op::Coord:  return "Coord";
     }
     return "?";
 }
@@ -285,6 +293,7 @@ struct FieldInputs {
     std::uint32_t id = 0;
     Vec<T, 3> origin{};
     Vec<T, 3> p{};
+    Vec<T, 4> x{};   // a point of spacetime, for a metric; see Op::Coord
 };
 
 template<Scalar T = double>
@@ -318,6 +327,9 @@ public:
     // A fixed number in [0, 1) per instance; `salt` picks an independent
     // one. See Op::Hash.
     static Field hash(std::uint32_t salt) { return input(Op::Hash, salt); }
+
+    // Coordinate k of the spacetime point a metric is evaluated at.
+    static Field coord(std::uint32_t k) { return input(Op::Coord, k); }
 
     // The escape hatch, and deliberately as ordinary to write as the
     // structural builders. An IR whose hatch is second-class becomes a
@@ -528,6 +540,7 @@ private:
                 case Op::Sqrt:   { using std::sqrt; s[i] = sqrt(s[n.a]); break; }
                 case Op::Gather: s[i] = gather_at(*n.table, s[n.a], n.k); break;
                 case Op::Opaque: s[i] = n.fn(in.u, in.v); break;
+                case Op::Coord:  s[i] = in.x[n.k]; break;
             }
         }
         return s[ops_.size() - 1];
