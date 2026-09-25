@@ -28,6 +28,7 @@
 #include <spatium/render/cooked_scene.hpp>
 #include <spatium/render/gpu_instances.hpp>
 #include <spatium/render/gpu_scene.hpp>
+#include <spatium/render/lbvh.hpp>
 #include <spatium/render/gpu_trace_glsl.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/write_image.hpp>
@@ -364,6 +365,24 @@ int run_dust_check(const bd::Trace<double>& scene, std::size_t root, double t, i
             worst_c = std::max(worst_c, ec);
             worst_e = std::max(worst_e, ee);
             if (et > 1e-3 || er > 1e-3 || es > 1e-4 || ec > 1e-3 || ee > 1e-3) ++over;
+        }
+        // The tree over what the device just wrote, built on the host from
+        // the mapped buffer. Timed in two halves, because on shared memory
+        // the read can cost as much as the build if the mapping is uncached.
+        if (count >= 10000) {
+            const auto packed = gpu::pack(render::lay_out(cooked));
+            auto t0 = std::chrono::steady_clock::now();
+            std::vector<gpu::Instance> copy(dev, dev + count);
+            const double ms_read = ms_since(t0);
+            t0 = std::chrono::steady_clock::now();
+            const auto tree = gpu::build_lbvh(copy, packed.quadrics);
+            const double ms_build = ms_since(t0);
+            std::println("  LBVH on the host: read {:.1f} ms ({:.0f} MB), build {:.1f} ms -- {} leaves, "
+                         "{} culled, {} nodes",
+                         ms_read, count * sizeof(gpu::Instance) / 1e6, ms_build, tree.leaves,
+                         tree.culled, tree.nodes.size());
+            std::println("    boxes {:.1f}, keys {:.1f}, sort {:.1f}, hierarchy {:.1f}, bounds {:.1f} ms",
+                         tree.ms[0], tree.ms[1], tree.ms[2], tree.ms[3], tree.ms[4]);
         }
         std::println("node {}: {} instances moved in {:.2f} ms (median of {}), {} lines of generated GLSL",
                      node, count, ms[ms.size() / 2], runs,
