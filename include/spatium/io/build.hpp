@@ -1389,6 +1389,32 @@ inline std::size_t content_hash(const Trace<T>& trace, std::size_t idx) {
     return h;
 }
 
+// Where a Scatter's instances sit before its motion moves them: the seat
+// on the target surface and the tangent frame the item is turned into.
+// One place that says so, because two consumers need the same answer --
+// cook(), and a device kernel that moves the instances itself and must
+// start them exactly where cook() would.
+template<Scalar T>
+struct ScatterSpot {
+    Vec<T, 3> position{};
+    Matrix<T, 3, 3> frame = Matrix<T, 3, 3>::identity();
+};
+
+template<Scalar T>
+std::vector<ScatterSpot<T>> scatter_spots(const Trace<T>& trace, std::size_t idx, T t) {
+    const auto& n = trace.node(idx);
+    auto target = resolve_surface(trace, n.target);
+    auto sites = sample_surface_uniform(target, n.count, n.seed);
+    const T lift =
+        scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false), n.seat_axis) * n.seat;
+    std::vector<ScatterSpot<T>> out;
+    out.reserve(sites.size());
+    for (std::size_t i = 0; i < sites.size(); ++i)
+        out.push_back(ScatterSpot<T>{Vec<T, 3>{sites[i].position + sites[i].normal * lift},
+                                     scatter_frame<T>(sites[i].normal, n.seed, i, n.seat_axis)});
+    return out;
+}
+
 template<Scalar T = double>
 Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
     Cooked<T> out;
@@ -1404,10 +1430,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
     // lambda's own invented parameter list under clang, which reports
     // `Matrix<T, 3, 3>` with T deduced as the lambda type itself. gcc
     // accepts it. The construct buys nothing, so it is simply not used.
-    struct Spot {
-        Vec<T, 3> position{};
-        Matrix<T, 3, 3> frame = Matrix<T, 3, 3>::identity();
-    };
+    using Spot = ScatterSpot<T>;
 
     // A group's transform is folded into its members here, which is why
     // `Compose` never needs one of its own at render time and why the
@@ -1426,16 +1449,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         std::size_t geometry_node = idx;
 
         if (n.kind == Kind::Scatter) {
-            auto target = resolve_surface(trace, n.target);
-            auto sites = sample_surface_uniform(target, n.count, n.seed);
-            const T lift =
-                scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false), n.seat_axis) *
-                n.seat;
-            placements.reserve(sites.size());
-            for (std::size_t i = 0; i < sites.size(); ++i)
-                placements.push_back(
-                    Spot{Vec<T, 3>{sites[i].position + sites[i].normal * lift},
-                         scatter_frame<T>(sites[i].normal, n.seed, i, n.seat_axis)});
+            placements = scatter_spots(trace, idx, t);
             geometry_node = n.item;
         } else {
             placements.push_back(Spot{});
