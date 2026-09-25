@@ -12,6 +12,14 @@
 //       colour, the camera's angles, exposure, time -- and a button that
 //       saves the current view rendered afresh at 1920x1080.
 //
+//   --video DIR [--frames N] [--fps F] [--orbit DEG] [--scene one|binary]
+//       [--spin a] [--width W] [--height H] [--inspiral]
+//       A sequence DIR/frame_%04d.png, time advancing with the frames and
+//       the camera turning DEG degrees of azimuth over the whole sequence.
+//       Vulkan, not CUDA: it runs on any device with a Vulkan driver, a
+//       rented NVIDIA card included. Assemble with
+//         ffmpeg -framerate F -i DIR/frame_%04d.png -pix_fmt yuv420p out.mp4
+//
 //   --frame PATH [--scene one|binary] [--spin a] [--t T] [--width W]
 //       [--height H] [--steps N] [--no-disk]
 //       Renders one frame of the scene to PNG and reports the device time.
@@ -47,6 +55,7 @@
 #endif
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <memory>
 
 #include <algorithm>
@@ -503,6 +512,8 @@ int run_live(int max_frames, const std::string& screenshot) {
 
 int main(int argc, char** argv) {
     std::string mode, out, screenshot;
+    double fps_video = 30.0, orbit = 90.0;
+    bool inspiral = false;
     int rays = 4096, steps = 300, W = 640, H = 360, max_steps = 1500, frames = 0;
     std::string which = "one";
     double spin = 0.9, t = 0.0, exposure = 1.6;
@@ -514,6 +525,10 @@ int main(int argc, char** argv) {
         else if (a == "--shadow-check") mode = "shadow";
         else if (a == "--live") mode = "live";
         else if (a == "--frame") { mode = "frame"; out = next(); }
+        else if (a == "--video") { mode = "video"; out = next(); }
+        else if (a == "--fps") fps_video = std::stod(next());
+        else if (a == "--orbit") orbit = std::stod(next());
+        else if (a == "--inspiral") inspiral = true;
         else if (a == "--frames") frames = std::stoi(next());
         else if (a == "--screenshot") screenshot = next();
         else if (a == "--rays") rays = std::stoi(next());
@@ -572,6 +587,35 @@ int main(int argc, char** argv) {
                      " apart {:.2e} (a pixel is {:.2e}); {:.1f} ms",
                      D, measured, expected, std::abs(measured - expected), pixel, ms);
         return std::abs(measured - expected) < 2.0 * pixel ? 0 : 1;
+    }
+
+    if (mode == "video") {
+        Settings st;
+        st.scene = which == "binary" ? 1 : 0;
+        st.spin = static_cast<float>(which == "binary" ? spin * 0.5 : spin);
+        st.disk = disk;
+        st.inspiral = inspiral;
+        const int n = frames > 0 ? frames : 300;
+        std::filesystem::create_directories(out);
+        const float azimuth0 = st.azimuth;
+        double total_ms = 0;
+        // One shader for the whole sequence: the camera turning and time
+        // advancing are push constants.
+        Renderer r(ctx, make_scene(st), static_cast<std::uint32_t>(W), static_cast<std::uint32_t>(H));
+        for (int f = 0; f < n; ++f) {
+            r.scene.camera().azimuth_deg = azimuth0 + orbit * f / std::max(1, n - 1);
+            // 20 M of coordinate time a second of video, as the window's rate 1.
+            const double at = t + 20.0 * f / fps_video;
+            total_ms += r.render(r.push(at, exposure, std::max(max_steps, 3000), false));
+            char name[64];
+            std::snprintf(name, sizeof name, "frame_%04d.png", f);
+            write_png((std::filesystem::path(out) / name).string(), r.read(), r.W, r.H, false);
+            if (f % 10 == 0) std::println("frame {}/{}", f, n);
+        }
+        std::println("{} frames {}x{} in {}, {:.0f} ms of device time a frame; "
+                     "ffmpeg -framerate {} -i {}/frame_%04d.png -pix_fmt yuv420p out.mp4",
+                     n, W, H, out, total_ms / n, fps_video, out);
+        return 0;
     }
 
     if (mode == "frame") {
