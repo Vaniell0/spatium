@@ -291,49 +291,116 @@ inline std::size_t build_scene(bd::Trace<double>& scene, std::size_t sprinkle_co
     // reading it stays affine in the point and stays shareable.
     const std::size_t dust_count = dust_particles;
 
-    // Seeded from the particle's own starting point, so it is a pure
-    // function of the site and survives being recomputed anywhere. FNV
-    // over the bit patterns, then a final avalanche.
-    auto dust_hash = [](const Vec<double, 3>& o, std::uint32_t salt) {
-        std::uint32_t h = 2166136261u ^ salt;
-        for (int k = 0; k < 3; ++k) {
-            std::uint64_t bits = 0;
-            double v = o[k];
-            std::memcpy(&bits, &v, sizeof(bits));
-            h ^= static_cast<std::uint32_t>(bits ^ (bits >> 32));
-            h *= 16777619u;
-        }
-        h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
-        return h;
-    };
-    auto unit_from = [dust_hash](const Vec<double, 3>& o, std::uint32_t salt) {
-        return static_cast<double>(dust_hash(o, salt) % 1000000u) / 1000000.0;
-    };
-
     auto boom_points = std::make_shared<std::vector<Vec<double, 3>>>();
     boom_points->reserve(boom_uv.size());
     for (auto [u, v] : boom_uv)
         boom_points->push_back(Vec<double, 3>{
             text_center + text_basis.right * (u * text_scale) + text_basis.up * (v * text_scale)});
 
-    // Every per-particle quantity the old loop captured, rebuilt from the
-    // origin instead. Same distributions, same meanings -- see the
-    // comments on dust_core for why pull_strength is continuous rather
-    // than a landed/missed coin flip.
-    auto target_of = [unit_from, boom_points](const Vec<double, 3>& o) {
-        return (*boom_points)[static_cast<std::size_t>(unit_from(o, 7u) *
-                                                       static_cast<double>(boom_points->size())) %
-                              boom_points->size()];
+    // Every per-particle quantity, as an expression over *which* particle
+    // this is. They used to be hashed from the bit patterns of the
+    // particle's starting point, and that is the one thing a device with
+    // no fp64 cannot reproduce: the bits do not exist there. The instance
+    // index is the same integer on both, so `F::hash(salt)` -- FNV and an
+    // avalanche over the index, reduced mod 10^6 exactly as before -- gives
+    // host and device the same particles. The salts are the ones the old
+    // hash used, so each quantity keeps its own independent stream; the
+    // particles themselves are a different draw from the same
+    // distributions.
+    //
+    // No closure is left in the dust, which is what makes it a scene an
+    // outside language can describe and a GPU can move: the burst, the
+    // swirl, the pull toward BOOM, the splat, the tumble and both colours
+    // are all spelled in the field vocabulary below.
+    using F = bd::ScalarField<double>;
+    using V = bd::VecField<double>;
+    const auto& swirl = *swirl_noise;
+    const std::shared_ptr<const std::vector<Vec<double, 3>>> boom_table = boom_points;
+    const double boom_size = static_cast<double>(boom_points->size());
+    auto dir = [](std::uint32_t k) {
+        // The site direction is the burst direction; the carrier sphere's
+        // radius is normalised away.
+        F len = sqrt(F::origin(0) * F::origin(0) + F::origin(1) * F::origin(1) +
+                     F::origin(2) * F::origin(2));
+        return F::origin(k) / len;
     };
+    // `static_cast<size_t>(unit * n) % n` in the closure; the unit is
+    // below 1, so the modulo never did anything and the gather's own
+    // truncation is the same index.
+    auto target = [&](std::uint32_t k) { return gather(boom_table, F::hash(7u) * F{boom_size}, k); };
     // More of them land, and the ones that do not are pulled harder than
-    // before. At 30% landing and no pull on the rest the cloud spread
-    // across the whole frame and the letterforms read as a faint tint
-    // inside it rather than as writing; the burst is supposed to *become*
-    // the word, not drift past it.
-    auto pull_of = [unit_from](const Vec<double, 3>& o) {
-        double roll = unit_from(o, 11u);
-        if (roll < 0.55) return 0.85 + 0.15 * unit_from(o, 13u);   // land and hold
-        return 0.25 * unit_from(o, 13u);                            // bent in close on the way past
+    // before -- see the comments on dust_core for why the pull is
+    // continuous rather than a coin flip. `less` is the branch: 1 where the
+    // roll lands, 0 where it does not.
+    auto pull_strength = [] {
+        F lands = less(F::hash(11u), F{0.55});
+        return lands * (F{0.85} + F{0.15} * F::hash(13u)) +
+               (F{1.0} - lands) * (F{0.25} * F::hash(13u));
+    };
+    // dust_core, component by component, in its own order of operations.
+    auto core = [&](std::uint32_t k) {
+        const F t = F::t();
+        F explode_e = smoothstep(t / F{T_EXPLODE});
+        F burst_dist = F{1.3} + F{0.9} * F::hash(3u);
+        F radius = burst_dist * (F{0.08} + F{0.92} * explode_e);
+        F seed = F::hash(5u);
+        F freq = F{0.6} + F{0.5} * seed;   // fmod(seed, 1) is seed: it is below 1
+        F phase = seed * F{11.0};
+        F a0 = dir(0) * F{3.0} + phase, a1 = dir(1) * F{3.0};
+        F turb = k == 0 ? noise(swirl, a0, a1, t * freq)
+               : k == 1 ? noise(swirl, a0 + F{7.0}, a1, t * freq)
+                        : noise(swirl, a0, a1 + F{7.0}, t * freq);
+        F swirl_pos = dir(k) * radius + turb * (F{0.5} + F{0.6} * radius);
+
+        F pull = smoothstep((t - F{T_EXPLODE}) / F{T_CONVERGE - T_EXPLODE}) * pull_strength();
+        F approach = swirl_pos * (F{1.0} - pull) + target(k) * pull;
+        F arriving = pull * pull;
+        // `t < T_HOLD ? 1 : ...` needs no branch: below T_HOLD the
+        // smoothstep's argument is negative and the clamp makes it zero.
+        F settle = F{1.0} - smoothstep((t - F{T_HOLD}) / F{T_DISSOLVE - T_HOLD + 0.001});
+        F b0 = target(0) * F{5.0} + phase, b1 = target(1) * F{5.0};
+        F splat = k == 0 ? noise(swirl, b0, b1, t * F{4.0})
+                : k == 1 ? noise(swirl, b0 + F{3.0}, b1, t * F{4.0})
+                         : noise(swirl, b0, b1 + F{3.0}, t * F{4.0});
+        F landed = approach + splat * (F{0.22} * arriving * settle * pull_strength());
+
+        // Before the explosion ends a particle is only swirling.
+        F before = less(t, F{T_EXPLODE});
+        return before * swirl_pos + (F{1.0} - before) * landed;
+    };
+    // How far the point being coloured is from its particle's target.
+    auto distance_to_target = [&] {
+        F dx = F::point(0) - target(0), dy = F::point(1) - target(1), dz = F::point(2) - target(2);
+        return sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    // Grey far from any target, shifting toward red-yellow the closer the
+    // point is to the letterform it is headed for -- distance alone decides.
+    auto dust_colour = [&] {
+        F hot = F{1.0} - clamp(distance_to_target() / F{1.4}, F{0.0}, F{1.0});
+        F cool = F{1.0} - hot;
+        return V::make(F{0.45} * cool + F{0.95} * hot,
+                       F{0.44} * cool + (F{0.35} + F{0.35} * hot) * hot,
+                       F{0.42} * cool + F{0.06} * hot);
+    };
+    // The letterforms light up only while a speck is near one. Squared, so
+    // the glow arrives late and sharply rather than as a haze.
+    auto dust_glow = [&] {
+        F near = F{1.0} - clamp(distance_to_target() / F{0.75}, F{0.0}, F{1.0});
+        F hot = near * near;
+        return V::make(F{1.00} * (F{1.35} * hot), F{0.52} * (F{1.35} * hot),
+                       F{0.12} * (F{1.35} * hot));
+    };
+    // The tumble: a fixed axis per particle, turning at its own rate from
+    // its own phase. Per instance, or every flake in the cloud would turn
+    // in lockstep.
+    auto tumble = [&](std::uint32_t k) {
+        F ax = F::hash(17u) * F{2.0} - F{1.0};
+        F ay = F::hash(19u) * F{2.0} - F{1.0};
+        F az = F::hash(23u) * F{2.0} - F{1.0};
+        F len = sqrt(ax * ax + ay * ay + az * az);
+        F angle = F::hash(29u) * F{6.283185307179586} + (F{0.5} + F{1.5} * F::hash(31u)) * F::t();
+        F comp = k == 0 ? ax : k == 1 ? ay : az;
+        return comp / len * angle;
     };
 
     auto dust = scene.scatter(scene.flake(Vec<double, 3>{0.010, 0.010, 0.003}),
@@ -349,65 +416,27 @@ inline std::size_t build_scene(bd::Trace<double>& scene, std::size_t sprinkle_co
                               // its own trajectory, which smeared the
                               // letterforms into a haze: 7 393 particles
                               // near their target and 52 actually on it.
-                              // At 1e-3 the sites stay distinct for the
-                              // hash and the displacement is nothing.
+                              // At 1e-3 the sites stay distinct and the
+                              // displacement is nothing.
                               scene.sphere(0.001, 96, 48), dust_count, 4242,
                               /*seat=*/0.0)
                     // Slightly see-through, because dust is: thousands of
                     // opaque flecks stack into a wall, and at 0.72 the
                     // cloud has depth.
                     .colored(Material<double>{.roughness = 0.85, .opacity = 0.72})
-                    .colored(bd::PointField<double>{[target_of, dust_color](const bd::MotionEnv<double>& e) {
-                        return dust_color(e.p, target_of(e.origin));
-                    }})
-                    // The letterforms light up, and only while a speck is
-                    // near one. Squared, so the glow arrives late and
-                    // sharply rather than as a haze over the whole cloud.
-                    .glowing(bd::PointField<double>{[target_of](const bd::MotionEnv<double>& e) {
-                        double d = std::clamp((e.p - target_of(e.origin)).norm() / 0.75, 0.0, 1.0);
-                        double hot = (1.0 - d) * (1.0 - d);
-                        return Vec<double, 3>{Vec<double, 3>{1.00, 0.52, 0.12} * (1.35 * hot)};
-                    }})
-                    .moving(bd::VecField<double>::opaque_per_instance(
-                                [unit_from, target_of, pull_of, swirl_noise](
-                                    const Vec<double, 3>& origin, double time) {
-                                    // The site direction is the burst
-                                    // direction; its length is an artefact
-                                    // of the carrier sphere and is
-                                    // normalised away.
-                                    Vec<double, 3> dir{Vec<double, 3>{origin}.normalized()};
-                                    return dust_core(time, dir, 1.3 + 0.9 * unit_from(origin, 3u),
-                                                     target_of(origin), pull_of(origin),
-                                                     unit_from(origin, 5u), *swirl_noise);
-                                })
+                    .colored(dust_colour())
+                    .glowing(dust_glow())
+                    .moving(V::make(core(0), core(1), core(2))
                             // The turn wraps the point, not the whole
                             // motion: it orients the flake about its own
                             // centre rather than swinging it round the
-                            // origin. Per-instance, or every flake in the
-                            // cloud would tumble in lockstep.
-                            // The shrink is `dust_shrink` as an expression.
-                            // Its `if (t < T_HOLD) return 1.0` is dropped
-                            // rather than modelled: below T_HOLD the
-                            // argument is negative, the clamp takes it to
-                            // zero and the smoothstep with it, so the
-                            // branch and the expression agree bit for bit
-                            // -- checked over [-1, 5], not assumed.
-                            + rotated(scaled(bd::VecField<double>::point(),
-                                             bd::ScalarField<double>{1.0} -
-                                                 smoothstep((bd::ScalarField<double>::t() -
-                                                             bd::ScalarField<double>{T_HOLD}) /
-                                                            bd::ScalarField<double>{T_DISSOLVE -
-                                                                                    T_HOLD})),
-                                      [unit_from](const Vec<double, 3>& o, double time) {
-                                          Vec<double, 3> axis{
-                                              Vec<double, 3>{unit_from(o, 17u) * 2.0 - 1.0,
-                                                             unit_from(o, 19u) * 2.0 - 1.0,
-                                                             unit_from(o, 23u) * 2.0 - 1.0}
-                                                  .normalized()};
-                                          double phase = unit_from(o, 29u) * 6.283185307179586;
-                                          double rate = 0.5 + 1.5 * unit_from(o, 31u);
-                                          return Vec<double, 3>{axis * (phase + rate * time)};
-                                      }));
+                            // origin. The shrink is `dust_shrink` as an
+                            // expression; its `if (t < T_HOLD)` needs no
+                            // branch, for the reason `settle` does not.
+                            + rotated(scaled(V::point(),
+                                             F{1.0} - smoothstep((F::t() - F{T_HOLD}) /
+                                                                 F{T_DISSOLVE - T_HOLD})),
+                                      tumble(0), tumble(1), tumble(2)));
 
     // Step 1 -- the dough is a torus, offset by a fine noise bump so it
     // actually has bready surface texture (not just a rough *shading*

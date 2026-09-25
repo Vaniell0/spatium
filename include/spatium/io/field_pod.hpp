@@ -32,8 +32,8 @@
 // what an export can get wrong without anything else noticing -- so the
 // interpreter below is written switch-case for switch-case against
 // `Field::eval_into` and `VecField::eval_into`, down to evaluating a
-// factor as its own field at (t, 0) exactly where a Scale or a Rotate
-// reads it. It is a second implementation on purpose: sharing the loop
+// factor as its own field -- time first, then the instance, its origin and
+// the point -- exactly where a Scale, a Rotate or a Make reads it. It is a second implementation on purpose: sharing the loop
 // with the first would make agreement a tautology. What it does share are
 // definitions rather than ways of walking a tree -- `std::sin`, SO3's
 // `exp`, and `PerlinNoise::sample`, which is the noise itself run over a
@@ -58,7 +58,10 @@ template<Scalar T = double>
 struct PodOp {
     std::uint8_t  code  = 0;
     std::uint32_t a = 0, b = 0, c = 0;
-    std::uint32_t table = 0;   // Noise: which 512-byte table in `tables`
+    std::uint32_t table = 0;   // Noise: which 512-byte table in `tables`;
+                               // Gather: the first point of its table in `points`
+    std::uint32_t extent = 0;  // Gather: how many points that table has
+    std::uint32_t k = 0;       // Origin, Point, Gather: component; Hash: salt
     T             value{};     // Const
 };
 
@@ -69,6 +72,9 @@ template<Scalar T = double>
 struct PodField {
     std::vector<PodOp<T>>     ops;
     std::vector<std::uint8_t> tables;
+    // Every Gather's points, x y z per point, tables back to back and
+    // shared by content the way noise tables are.
+    std::vector<T>            points;
 };
 
 // Where one factor's program sits inside a VecField's shared scalar pool.
@@ -77,8 +83,9 @@ struct PodRange {
 };
 
 // One vector op. A Scale reads `factor[0]`; a Rotate reads all three, as
-// the components of the axis-angle vector in order -- the same layout
-// `VecFieldOp::factor_fields` has.
+// the components of the axis-angle vector in order, and a Make as the
+// components of the vector it makes -- the layout `VecFieldOp::factor_fields`
+// has.
 template<Scalar T = double>
 struct PodVecOp {
     std::uint8_t  code = 0;
@@ -123,6 +130,26 @@ inline std::uint32_t intern_table(std::vector<std::uint8_t>& tables,
     return static_cast<std::uint32_t>(count);
 }
 
+template<Scalar T>
+std::uint32_t intern_points(std::vector<T>& points, const std::vector<Vec<T, 3>>& table,
+                            std::uint32_t& start) {
+    // Search for an equal table already present, at any point boundary --
+    // two gathers from one table are the common case, and only that case
+    // is worth the search.
+    const std::size_t n = table.size(), have = points.size() / 3;
+    for (std::size_t s0 = 0; s0 + n <= have; ++s0) {
+        bool same = true;
+        for (std::size_t i = 0; i < n && same; ++i)
+            for (std::size_t k = 0; k < 3 && same; ++k)
+                same = points[(s0 + i) * 3 + k] == table[i][k];
+        if (same) { start = static_cast<std::uint32_t>(s0); return static_cast<std::uint32_t>(n); }
+    }
+    start = static_cast<std::uint32_t>(have);
+    for (const auto& p : table)
+        for (std::size_t k = 0; k < 3; ++k) points.push_back(p[k]);
+    return static_cast<std::uint32_t>(n);
+}
+
 // Append `f`'s ops to `out`, returning where they landed. `where` names
 // the field in the error, so a failure deep inside a VecField's factor
 // still says which one.
@@ -142,7 +169,9 @@ Result<PodRange> lower_into(PodField<T>& out, const Field<T>& f, const std::stri
         p.b     = n.b;
         p.c     = n.c;
         p.value = n.value;
+        p.k     = n.k;
         if (n.op == Op::Noise) p.table = intern_table(out.tables, *n.noise);
+        if (n.op == Op::Gather) p.extent = intern_points(out.points, *n.table, p.table);
         out.ops.push_back(p);
     }
     return r;
@@ -177,7 +206,7 @@ Result<PodVecField<T>> lower(const VecField<T>& f) {
         // A factor given as a callable is a closure exactly as an Opaque
         // leaf is, and the report counts it as one; lowering has to refuse
         // it for the same reason, or the two counts would part company.
-        if (n.op == VecOp::Scale || n.op == VecOp::Rotate) {
+        if (n.op == VecOp::Scale || n.op == VecOp::Rotate || n.op == VecOp::Make) {
             const std::size_t want = n.op == VecOp::Scale ? 1 : 3;
             if (n.factor_fields.size() != want)
                 return std::unexpected(Error(ErrorCode::InvalidArgument,
@@ -204,13 +233,13 @@ Result<PodVecField<T>> lower(const VecField<T>& f) {
 
 template<Scalar T>
 T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables,
-            T* s, T u, T v) {
+            const T* points, T* s, const FieldInputs<T>& in) {
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto& n = ops[i];
         switch (static_cast<Op>(n.code)) {
             case Op::Const: s[i] = n.value; break;
-            case Op::U:     s[i] = u; break;
-            case Op::V:     s[i] = v; break;
+            case Op::U:     s[i] = in.u; break;
+            case Op::V:     s[i] = in.v; break;
             case Op::Add:   s[i] = s[n.a] + s[n.b]; break;
             case Op::Sub:   s[i] = s[n.a] - s[n.b]; break;
             case Op::Mul:   s[i] = s[n.a] * s[n.b]; break;
@@ -224,6 +253,20 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
                 s[i] = algebra::PerlinNoise::sample(tables + std::size_t{n.table} * kNoiseTableBytes,
                                                     s[n.a], s[n.b], s[n.c]);
                 break;
+            case Op::Id:     s[i] = static_cast<T>(in.id); break;
+            case Op::Origin: s[i] = in.origin[n.k]; break;
+            case Op::Point:  s[i] = in.p[n.k]; break;
+            case Op::Hash:   s[i] = instance_unit<T>(in.id, n.k); break;
+            case Op::Sqrt:   { using std::sqrt; s[i] = sqrt(s[n.a]); break; }
+            case Op::Gather: {
+                // Field::gather_at's rounding, over the flat buffer.
+                if (n.extent == 0) { s[i] = T{0}; break; }
+                const T lo = s[n.a] < T{0} ? T{0} : s[n.a];
+                auto at = static_cast<std::size_t>(lo);
+                if (at >= n.extent) at = n.extent - 1;
+                s[i] = points[(std::size_t{n.table} + at) * 3 + n.k];
+                break;
+            }
             // Unreachable from `lower()`, which refuses it. A zero rather
             // than an assert, so a hand-built program with one in it gives
             // a wrong number a bit-exact comparison will catch, not a
@@ -235,10 +278,15 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
 }
 
 template<Scalar T>
-T interpret(const PodField<T>& f, T u, T v) {
+T interpret(const PodField<T>& f, const FieldInputs<T>& in) {
     std::vector<T> scratch(f.ops.size());
     return interpret(f.ops.data(), static_cast<std::uint32_t>(f.ops.size()),
-                     f.tables.data(), scratch.data(), u, v);
+                     f.tables.data(), f.points.data(), scratch.data(), in);
+}
+
+template<Scalar T>
+T interpret(const PodField<T>& f, T u, T v) {
+    return interpret(f, FieldInputs<T>{u, v});
 }
 
 template<Scalar T>
@@ -248,9 +296,10 @@ Vec<T, 3> interpret(const PodVecField<T>& f, const MotionEnv<T>& env) {
 
     // A factor is its own field evaluated at (t, 0) -- the convention
     // `scaled` and `rotated` fix -- run from its own start in the pool.
+    const FieldInputs<T> in = VecField<T>::inputs_of(env);
     auto factor = [&](const PodRange& r) {
         return interpret(f.scalars.ops.data() + r.begin, r.count, f.scalars.tables.data(),
-                         scratch.data(), env.t, T{0});
+                         f.scalars.points.data(), scratch.data(), in);
     };
 
     for (std::size_t i = 0; i < f.ops.size(); ++i) {
@@ -268,6 +317,13 @@ Vec<T, 3> interpret(const PodVecField<T>& f, const MotionEnv<T>& env) {
                 const T ay = factor(n.factor[1]);
                 const T az = factor(n.factor[2]);
                 s[i] = Vec<T, 3>{algebra::SO3<T>{}.exp(Vec<T, 3>{ax, ay, az}) * s[n.a]};
+                break;
+            }
+            case VecOp::Make: {
+                const T x = factor(n.factor[0]);
+                const T y = factor(n.factor[1]);
+                const T z = factor(n.factor[2]);
+                s[i] = Vec<T, 3>{x, y, z};
                 break;
             }
             case VecOp::Opaque: s[i] = Vec<T, 3>{}; break;   // see the scalar case
