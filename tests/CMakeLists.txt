@@ -78,6 +78,7 @@ add_executable(spatium_tests
     test_build_dsl.cpp
     test_field_pod.cpp
     test_lbvh.cpp
+    test_ccd_certified.cpp
     test_chart.cpp
 )
 

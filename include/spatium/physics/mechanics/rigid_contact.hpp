@@ -157,6 +157,11 @@ struct SweptContact {
                              // already touching at the start of the step;
                              // 1, with hit=false, if they never touch)
     ContactQuery<T> contact; // geometry at time `toi` (reuses sphere_sphere_contact)
+    // True when the answer is proved: no contact happens before `toi`, and
+    // a miss is a miss. False only on `sweep_point_surface`'s fallback for
+    // a surface with no `distance_bound`, which steps by an upper bound.
+    bool certified = true;
+    std::size_t evaluations = 0;  // what a searching sweep spent, in shape evaluations
 };
 
 template<Scalar T>
@@ -371,65 +376,114 @@ broad_phase_aabb_pairs(const std::vector<::spatium::geometry::Box<3, T>>& aabbs)
 // ── Point ↔ any Surface, continuous ────────────────────────────
 //
 // Conservative advancement: step forward by a distance that provably
-// cannot reach the surface, ask again, repeat. It needs nothing from the
-// surface but `point_to`, which already has a generic overload over
-// `project` and `normal`, so this is continuous collision detection
-// against a parametric surface, an implicit one, or a user's own type --
-// where `sweep_sphere_sphere` above covers only two spheres.
+// cannot reach the surface, ask again, repeat. The step is `lower /
+// |disp|`: the point cannot travel further than its own displacement, so
+// it cannot reach the surface before that fraction of the step whatever
+// the surface does in between -- provided `lower` is a floor on the
+// distance. That is the whole of the argument, and it is why this asks
+// for `distance_bound` (narrow_phase.hpp) rather than `point_to`: a
+// closest-point search returns the distance to the point it found, an
+// upper bound, and a step sized by an upper bound flies through whatever
+// the search missed. The spike and tube cases in test_ccd_certified.cpp
+// are the two ways that went wrong before.
 //
 // Why it exists, since it is not an end in itself: a search over
 // compositions verifies non-penetration by sampling signed distance, and
 // sampling is unsound over a step. A body moving fast enough is outside
-// at the start, outside at the end, and through the wall in between, so a
-// candidate chain passes a check it should fail. This makes that check
-// true for the whole step rather than for its two ends.
+// at the start, outside at the end, and through the wall in between. This
+// makes that check true for the whole step rather than for its two ends.
 //
-// The safe bound is `distance / |disp|`: the point cannot travel further
-// than its own displacement, so it cannot reach the surface before that
-// fraction of the step whatever the surface does in between. That holds
-// for any shape, which is the point -- IPC's own CCD is robust and is
-// specialised to simplices.
+// Contact is declared when a real surface point lies within
+// `sqrt(eps) * scale`, the scale being the size of the coordinates
+// involved -- a tolerance in the units of the scene, not an absolute one
+// that is never reached at 1e6 or always met at 1e-6. `inside` is trusted
+// only from shapes that know it exactly (a closed sphere, a torus, the
+// sign of an implicit function); a chart's normal orientation says
+// nothing about which side a point is on.
 //
-// `convex` swaps in `distance / (-v_n)`, the time to contact if the point
-// kept closing along the current normal. That is larger, so it converges
-// in fewer iterations, and it is a *bound* only where the surface does not
-// curve away from the ray -- true for a convex target, false in general.
-// Off by default: a faster answer that can be wrong is not an
-// optimisation of a collision test.
+// Out of iterations, or out of floor to advance by, reports a hit: that
+// means "could not prove it misses", and for a collision query the safe
+// answer is that it touches. It is early, never late.
 //
-// Out of iterations reports a hit rather than a miss. Conservative
-// advancement slows down as it approaches a grazing contact, so exhausting
-// the budget means "could not prove it misses", and for a collision query
-// the safe answer to that is that it touches.
+// `radius` sweeps a ball of that radius instead of a point. `budget` caps
+// the shape evaluations of the whole sweep, across its iterations, so a
+// search that cannot tighten its floor ends in a hit rather than a stall.
+template<Scalar T, typename S>
+    requires HasDistanceBound<S, T>
+SweptContact<T> sweep_sphere_surface(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& disp,
+                                     const S& surface, int max_iterations = 64,
+                                     std::size_t budget = std::size_t{1} << 24) {
+    using std::max; using std::sqrt;
+    const T speed = disp.norm();
+    const T scale = max({c0.norm(), Vec<T, 3>{c0 + disp}.norm(), radius});
+    const T tol = sqrt(std::numeric_limits<T>::epsilon()) * scale;
+
+    SweptContact<T> out{true, T{0}, {}, true, 0};
+    T t = T{0};
+    for (int i = 0; i < max_iterations; ++i) {
+        const Vec<T, 3> c{c0 + disp * t};
+        if (out.evaluations >= budget) break;
+        const auto b = distance_bound(c, surface, tol + radius, budget - out.evaluations);
+        out.evaluations += b.evaluations;
+        out.contact = b.nearest;
+        out.toi = t;
+        if (b.nearest.inside || b.nearest.distance - radius <= tol) return out;
+
+        const T lower = b.lower - radius;
+        if (lower <= T{0}) return out;        // no floor left to advance by
+        if (speed * (T{1} - t) <= lower) {     // the rest of the step is proved clear
+            out.hit = false;
+            out.toi = T{1};
+            return out;
+        }
+        t += lower / speed;
+    }
+    out.toi = t;
+    return out;
+}
+
 template<Scalar T, typename S>
 SweptContact<T> sweep_point_surface(const Vec<T, 3>& p0, const Vec<T, 3>& disp,
                                     const S& surface, bool convex = false,
-                                    int max_iterations = 16) {
-    auto q = point_to(p0, surface);
-    if (q.inside || q.distance <= epsilon<T>() * T{100})
-        return SweptContact<T>{true, T{0}, q};
-
-    const T speed = disp.norm();
-    if (speed <= epsilon<T>()) return SweptContact<T>{false, T{1}, q};
-
-    T t = T{0};
-    for (int i = 0; i < max_iterations; ++i) {
-        const Vec<T, 3> p{p0 + disp * t};
-        q = point_to(p, surface);
+                                    int max_iterations = 64) {
+    if constexpr (HasDistanceBound<S, T>) {
+        return sweep_sphere_surface<T>(p0, T{0}, disp, surface, max_iterations);
+    } else {
+        // Fallback for a surface with no floor on its distance: the step
+        // is sized by `point_to`, an upper bound, so the answer is marked
+        // uncertified. Kept because a closest-point search that happens to
+        // be exact -- a chart given closed forms -- is right here, and
+        // because nothing better is available without a Lipschitz bound.
+        //
+        // `convex` swaps in `distance / (-v_n)`, the time to contact if
+        // the point kept closing along the current normal: a bound only
+        // where the surface does not curve away from the path.
+        auto q = point_to(p0, surface);
         if (q.inside || q.distance <= epsilon<T>() * T{100})
-            return SweptContact<T>{true, t, q};
+            return SweptContact<T>{true, T{0}, q, false};
 
-        T advance = q.distance / speed;           // safe for any surface
-        if (convex) {
-            const T closing = -disp.dot(q.normal);
-            if (closing <= T{0}) return SweptContact<T>{false, T{1}, q};
-            advance = q.distance / closing;
+        const T speed = disp.norm();
+        if (speed <= epsilon<T>()) return SweptContact<T>{false, T{1}, q, false};
+
+        T t = T{0};
+        for (int i = 0; i < max_iterations; ++i) {
+            const Vec<T, 3> p{p0 + disp * t};
+            q = point_to(p, surface);
+            if (q.inside || q.distance <= epsilon<T>() * T{100})
+                return SweptContact<T>{true, t, q, false};
+
+            T advance = q.distance / speed;
+            if (convex) {
+                const T closing = -disp.dot(q.normal);
+                if (closing <= T{0}) return SweptContact<T>{false, T{1}, q, false};
+                advance = q.distance / closing;
+            }
+
+            t += advance;
+            if (t >= T{1}) return SweptContact<T>{false, T{1}, q, false};
         }
-
-        t += advance;
-        if (t >= T{1}) return SweptContact<T>{false, T{1}, q};
+        return SweptContact<T>{true, t, q, false};
     }
-    return SweptContact<T>{true, t, q};
 }
 
 
