@@ -27,6 +27,8 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/render/cooked_scene.hpp>
+#  include <spatium/render/gpu_types.hpp>
+#  include <spatium/render/lbvh.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <algorithm>
 #  include <array>
@@ -40,83 +42,23 @@
 
 namespace spatium::render::gpu {
 
-// std430 layouts, and each one is written so that the GLSL struct of the
-// same name has the same offsets with no explicit padding: a `vec3`
-// followed by a 4-byte scalar packs into one 16-byte slot, and a `vec4`
-// is used everywhere else. Sizes are asserted rather than trusted.
-
-// GLSL: struct Node { vec3 lo; uint first; vec3 hi; uint count; };
-// Same meaning as `BVH::Node`: a leaf has count > 0 and `first` indexes the
-// primitive array; an internal node has count == 0, its left child is the
-// next node and `first` is the right child.
-struct Node {
-    float lo[3];
-    std::uint32_t first;
-    float hi[3];
-    std::uint32_t count;
-};
-static_assert(sizeof(Node) == 32);
-
-// GLSL: struct Triangle { vec4 v0, v1, v2, n0, n1, n2, color_rough, emissive; };
-// Vertices and normals in world space; `.w` unused except where named.
-struct Triangle {
-    float v0[4], v1[4], v2[4];
-    float n0[4], n1[4], n2[4];
-    float color_rough[4];   // rgb, roughness
-    float emissive[4];      // rgb, unused
-};
-static_assert(sizeof(Triangle) == 128);
-
-// GLSL: struct Quadric { mat4 q; vec4 lo; vec4 hi; };  (q column-major)
-// One per shape, shared by every instance of it -- the whole point of an
-// instance.
-struct Quadric {
-    float q[16];      // column-major, so a GLSL mat4 reads it unchanged
-    float lo[4];      // clip box; lo.w = 1 when the box closes it into a solid
-    float hi[4];
-};
-static_assert(sizeof(Quadric) == 96);
-
-// GLSL: struct Instance { vec4 r0, r1, r2; vec4 scale_quadric; vec4 color_rough; vec4 emissive_opacity; };
-// Rotation rows with the translation in `.w`, so a row is one dot product
-// away from a world coordinate. The quadric index travels as the bits of a
-// float (`floatBitsToUint` on the device) to keep the struct one layout.
-struct Instance {
-    float r0[4], r1[4], r2[4];   // rows of R; .w = translation
-    float scale_quadric[4];      // scale, quadric index (as bits), unused, unused
-    float color_rough[4];
-    float emissive_opacity[4];
-};
-static_assert(sizeof(Instance) == 96);
-
 struct Scene {
     std::vector<Node> tri_nodes;
     std::vector<Triangle> triangles;          // in leaf order
     std::vector<std::uint32_t> triangle_source;  // leaf order -> index into CookedScene::prims
-    std::vector<Node> inst_nodes;
+    std::vector<LNode> inst_nodes;                // a linear BVH, see render/lbvh.hpp
     std::vector<Quadric> quadrics;
     std::vector<Instance> instances;          // in leaf order
-    std::vector<std::uint32_t> instance_source;  // leaf order -> index into CookedScene::looks
+    std::vector<std::uint32_t> instance_source;  // -> index into CookedScene::looks
 
     std::size_t bytes() const {
         return tri_nodes.size() * sizeof(Node) + triangles.size() * sizeof(Triangle) +
-               inst_nodes.size() * sizeof(Node) + quadrics.size() * sizeof(Quadric) +
+               inst_nodes.size() * sizeof(LNode) + quadrics.size() * sizeof(Quadric) +
                instances.size() * sizeof(Instance);
     }
 };
 
 namespace detail {
-
-inline std::uint32_t bits_of(float f) {
-    std::uint32_t u;
-    std::memcpy(&u, &f, sizeof u);
-    return u;
-}
-inline float float_of(std::uint32_t u) {
-    float f;
-    std::memcpy(&f, &u, sizeof f);
-    return f;
-}
 
 template<typename BvhNode>
 std::vector<Node> convert_nodes(const std::vector<BvhNode>& in) {
@@ -178,14 +120,15 @@ inline Scene pack(const CookedScene<double>& laid) {
         detail::put3(out.quadrics[i].hi, Vec<double, 3>{bq.clip.max_corner});
     }
 
-    out.inst_nodes = detail::convert_nodes(laid.instances.nodes());
-    const auto& inst_order = laid.instances.prim_indices();
+    // Instances in the order lay_out() made them, and a linear BVH over
+    // them: the same tree a device builds over instances it moved itself,
+    // so the trace kernel has one instance traversal, not one per source.
     const auto& shapes = laid.instances.shapes();
-    out.instances.resize(inst_order.size());
-    out.instance_source.resize(inst_order.size());
-    for (std::size_t k = 0; k < inst_order.size(); ++k) {
-        const auto& in = shapes[inst_order[k]];
-        const auto& look = laid.looks[inst_order[k]];
+    out.instances.resize(shapes.size());
+    out.instance_source.resize(shapes.size());
+    for (std::size_t k = 0; k < shapes.size(); ++k) {
+        const auto& in = shapes[k];
+        const auto& look = laid.looks[k];
         auto& g = out.instances[k];
         float* rows[3] = {g.r0, g.r1, g.r2};
         for (std::size_t r = 0; r < 3; ++r) {
@@ -198,8 +141,9 @@ inline Scene pack(const CookedScene<double>& laid) {
         g.scale_quadric[2] = g.scale_quadric[3] = 0.0f;
         detail::put3(g.color_rough, look.color, static_cast<float>(look.roughness));
         detail::put3(g.emissive_opacity, look.emissive, static_cast<float>(look.opacity));
-        out.instance_source[k] = static_cast<std::uint32_t>(inst_order[k]);
+        out.instance_source[k] = static_cast<std::uint32_t>(k);
     }
+    out.inst_nodes = build_lbvh(out.instances, out.quadrics).nodes;
     return out;
 }
 
@@ -455,6 +399,62 @@ inline bool walk(const std::vector<Node>& nodes, const Ray32& r, Hit& h, Leaf&& 
     return any;
 }
 
+// The slab test against an LNode, which has the same box layout as a Node.
+inline bool slab_l(const Ray32& r, const LNode& n, float t_max, float& t_enter) {
+    Node box{};
+    for (int k = 0; k < 3; ++k) { box.lo[k] = n.lo[k]; box.hi[k] = n.hi[k]; }
+    return slab(r, box, t_max, t_enter);
+}
+
+// Nearest instance hit through the tree, as the shader will walk it: near
+// child first, entry distance kept on the stack.
+inline bool trace_lbvh(const std::vector<LNode>& nodes, const std::vector<Instance>& instances,
+                       const std::vector<Quadric>& quadrics, const Ray32& r, Hit& h) {
+    if (nodes.empty()) return false;
+    std::uint32_t stack[64];
+    float enter[64];
+    int sp = 0;
+    float te0;
+    if (!slab_l(r, nodes[0], h.t, te0)) return false;
+    stack[sp] = 0;
+    enter[sp++] = te0;
+    bool any = false;
+    while (sp > 0) {
+        --sp;
+        const std::uint32_t self = stack[sp];
+        if (enter[sp] > h.t) continue;
+        const LNode& n = nodes[self];
+        if (n.left & kLeafBit) {
+            const std::uint32_t i = n.left & ~kLeafBit;
+            const auto& g = instances[i];
+            if (hit_instance(r, g, quadrics[detail::bits_of(g.scale_quadric[1])], h)) {
+                h.kind = HitKind::Instance;
+                h.index = i;
+                any = true;
+            }
+            continue;
+        }
+        float tl = 0, tr = 0;
+        const bool l_ok = slab_l(r, nodes[n.left], h.t, tl);
+        const bool r_ok = slab_l(r, nodes[n.right], h.t, tr);
+        auto push = [&](std::uint32_t node, float e) { enter[sp] = e; stack[sp++] = node; };
+        if (l_ok && r_ok) {
+            if (tl > tr) { push(n.left, tl); push(n.right, tr); }
+            else         { push(n.right, tr); push(n.left, tl); }
+        } else if (l_ok) {
+            push(n.left, tl);
+        } else if (r_ok) {
+            push(n.right, tr);
+        }
+    }
+    return any;
+}
+
+inline bool trace_lbvh(const Lbvh& t, const std::vector<Instance>& instances,
+                       const std::vector<Quadric>& quadrics, const Ray32& r, Hit& h) {
+    return trace_lbvh(t.nodes, instances, quadrics, r, h);
+}
+
 // The nearer of the two trees' hits, as the renderer takes it.
 inline Hit trace(const Scene& sc, const Ray32& r) {
     Hit h;
@@ -464,14 +464,7 @@ inline Hit trace(const Scene& sc, const Ray32& r) {
         h.index = i;
         return true;
     });
-    walk(sc.inst_nodes, r, h, [&](std::uint32_t i) {
-        const auto& g = sc.instances[i];
-        const auto qi = detail::bits_of(g.scale_quadric[1]);
-        if (!hit_instance(r, g, sc.quadrics[qi], h)) return false;
-        h.kind = HitKind::Instance;
-        h.index = i;
-        return true;
-    });
+    trace_lbvh(sc.inst_nodes, sc.instances, sc.quadrics, r, h);
     return h;
 }
 

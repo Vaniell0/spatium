@@ -26,7 +26,7 @@
 // `render/cooked_scene.hpp` is not.
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
-#  include <spatium/render/gpu_scene.hpp>
+#  include <spatium/render/gpu_types.hpp>
 #  include <algorithm>
 #  include <array>
 #  include <atomic>
@@ -40,19 +40,6 @@
 #endif
 
 namespace spatium::render::gpu {
-
-// GLSL: struct LNode { vec3 lo; uint left; vec3 hi; uint right; };
-// Internal: `left` and `right` are node indices. Leaf: `left` is the
-// instance index with the top bit set, `right` is unused.
-struct LNode {
-    float lo[3];
-    std::uint32_t left;
-    float hi[3];
-    std::uint32_t right;
-};
-static_assert(sizeof(LNode) == 32);
-
-inline constexpr std::uint32_t kLeafBit = 0x80000000u;
 
 struct Lbvh {
     std::vector<LNode> nodes;           // root first; empty when nothing is visible
@@ -299,57 +286,6 @@ inline Lbvh build_lbvh(const std::vector<Instance>& instances, const std::vector
     });
     lap(4);
     return out;
-}
-
-// The slab test against an LNode, which has the same box layout as a Node.
-inline bool slab_l(const Ray32& r, const LNode& n, float t_max, float& t_enter) {
-    Node box{};
-    for (int k = 0; k < 3; ++k) { box.lo[k] = n.lo[k]; box.hi[k] = n.hi[k]; }
-    return slab(r, box, t_max, t_enter);
-}
-
-// Nearest instance hit through the tree, as the shader will walk it: near
-// child first, entry distance kept on the stack.
-inline bool trace_lbvh(const Lbvh& t, const std::vector<Instance>& instances,
-                       const std::vector<Quadric>& quadrics, const Ray32& r, Hit& h) {
-    if (t.nodes.empty()) return false;
-    std::uint32_t stack[64];
-    float enter[64];
-    int sp = 0;
-    float te0;
-    if (!slab_l(r, t.nodes[0], h.t, te0)) return false;
-    stack[sp] = 0;
-    enter[sp++] = te0;
-    bool any = false;
-    while (sp > 0) {
-        --sp;
-        const std::uint32_t self = stack[sp];
-        if (enter[sp] > h.t) continue;
-        const LNode& n = t.nodes[self];
-        if (n.left & kLeafBit) {
-            const std::uint32_t i = n.left & ~kLeafBit;
-            const auto& g = instances[i];
-            if (hit_instance(r, g, quadrics[detail::bits_of(g.scale_quadric[1])], h)) {
-                h.kind = HitKind::Instance;
-                h.index = i;
-                any = true;
-            }
-            continue;
-        }
-        float tl = 0, tr = 0;
-        const bool l_ok = slab_l(r, t.nodes[n.left], h.t, tl);
-        const bool r_ok = slab_l(r, t.nodes[n.right], h.t, tr);
-        auto push = [&](std::uint32_t node, float e) { enter[sp] = e; stack[sp++] = node; };
-        if (l_ok && r_ok) {
-            if (tl > tr) { push(n.left, tl); push(n.right, tr); }
-            else         { push(n.right, tr); push(n.left, tl); }
-        } else if (l_ok) {
-            push(n.left, tl);
-        } else if (r_ok) {
-            push(n.right, tr);
-        }
-    }
-    return any;
 }
 
 }  // namespace spatium::render::gpu

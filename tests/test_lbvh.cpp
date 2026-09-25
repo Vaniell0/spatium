@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <spatium/algebra/groups/so3.hpp>
 #include <spatium/geometry/ray_surface.hpp>
-#include <spatium/render/lbvh.hpp>
+#include <spatium/render/gpu_scene.hpp>
 
 #include <cstring>
 #include <random>

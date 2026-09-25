@@ -17,13 +17,14 @@ inline constexpr const char* kTraceGlsl = R"GLSL(
 layout(local_size_x = 8, local_size_y = 8) in;
 
 struct Node     { vec3 lo; uint first; vec3 hi; uint count; };
+struct LNode    { vec3 lo; uint left; vec3 hi; uint right; };   // render/lbvh.hpp
 struct Triangle { vec4 v0, v1, v2, n0, n1, n2, color_rough, emissive; };
 struct Quadric  { mat4 q; vec4 lo; vec4 hi; };
 struct Instance { vec4 r0, r1, r2, scale_quadric, color_rough, emissive_opacity; };
 
 layout(std430, binding = 0) readonly buffer TriNodes  { Node tri_nodes[]; };
 layout(std430, binding = 1) readonly buffer Tris      { Triangle tris[]; };
-layout(std430, binding = 2) readonly buffer InstNodes { Node inst_nodes[]; };
+layout(std430, binding = 2) readonly buffer InstNodes { LNode inst_nodes[]; };
 layout(std430, binding = 3) readonly buffer Quads     { Quadric quads[]; };
 layout(std430, binding = 4) readonly buffer Insts     { Instance insts[]; };
 layout(std430, binding = 5) writeonly buffer Image    { uint pixels[]; };
@@ -200,36 +201,42 @@ void walk_triangles(vec3 o, vec3 d, inout Hit h) {
     }
 }
 
+// trace_lbvh in render/gpu_scene.hpp: both children named, one instance
+// per leaf, marked by the top bit of `left`.
+bool slab_l(vec3 o, vec3 d, LNode n, float t_max, out float t_enter) {
+    Node box;
+    box.lo = n.lo; box.hi = n.hi; box.first = 0u; box.count = 0u;
+    return slab(o, d, box, t_max, t_enter);
+}
+
 void walk_instances(vec3 o, vec3 d, inout Hit h) {
     if (pc.size.w == 0u) return;
     uint stack[64];
     float enter[64];
     int sp = 0;
-    stack[sp++] = 0u; enter[0] = 0.0;
+    float te0;
+    if (!slab_l(o, d, inst_nodes[0], h.t, te0)) return;
+    stack[sp] = 0u; enter[sp] = te0; ++sp;
     while (sp > 0) {
         --sp;
         uint self = stack[sp];
-        // Tested when it was pushed; only a hit found since can rule it out.
         if (enter[sp] > h.t) continue;
-        Node n = inst_nodes[self];
-        if (self == 0u) { float te; if (!slab(o, d, n, h.t, te)) continue; }
-        if (n.count > 0u) {
-            for (uint i = 0u; i < n.count; ++i) {
-                Instance g = insts[n.first + i];
-                uint qi = floatBitsToUint(g.scale_quadric.y);
-                if (hit_instance(o, d, g, quads[qi], h)) { h.kind = 2u; h.index = n.first + i; }
-            }
+        LNode n = inst_nodes[self];
+        if ((n.left & 0x80000000u) != 0u) {
+            uint i = n.left & 0x7fffffffu;
+            Instance g = insts[i];
+            uint qi = floatBitsToUint(g.scale_quadric.y);
+            if (hit_instance(o, d, g, quads[qi], h)) { h.kind = 2u; h.index = i; }
             continue;
         }
-        uint left = self + 1u, right = n.first;
         float tl, trr;
-        bool l_ok = slab(o, d, inst_nodes[left], h.t, tl);
-        bool r_ok = slab(o, d, inst_nodes[right], h.t, trr);
+        bool l_ok = slab_l(o, d, inst_nodes[n.left], h.t, tl);
+        bool r_ok = slab_l(o, d, inst_nodes[n.right], h.t, trr);
         if (l_ok && r_ok) {
-            if (tl > trr) { enter[sp] = tl; stack[sp++] = left; enter[sp] = trr; stack[sp++] = right; }
-            else          { enter[sp] = trr; stack[sp++] = right; enter[sp] = tl; stack[sp++] = left; }
-        } else if (l_ok) { enter[sp] = tl; stack[sp++] = left; }
-        else if (r_ok)   { enter[sp] = trr; stack[sp++] = right; }
+            if (tl > trr) { enter[sp] = tl; stack[sp++] = n.left; enter[sp] = trr; stack[sp++] = n.right; }
+            else          { enter[sp] = trr; stack[sp++] = n.right; enter[sp] = tl; stack[sp++] = n.left; }
+        } else if (l_ok) { enter[sp] = tl; stack[sp++] = n.left; }
+        else if (r_ok)   { enter[sp] = trr; stack[sp++] = n.right; }
     }
 }
 

@@ -103,7 +103,7 @@ struct SceneBuffers {
     SceneBuffers(vc::Context& ctx, const gpu::Scene& p)
         : tri_nodes(vc::Buffer::from(ctx, std::span<const gpu::Node>(p.tri_nodes))),
           tris(vc::Buffer::from(ctx, std::span<const gpu::Triangle>(p.triangles))),
-          inst_nodes(vc::Buffer::from(ctx, std::span<const gpu::Node>(p.inst_nodes))),
+          inst_nodes(vc::Buffer::from(ctx, std::span<const gpu::LNode>(p.inst_nodes))),
           quads(vc::Buffer::from(ctx, std::span<const gpu::Quadric>(p.quadrics))),
           insts(vc::Buffer::from(ctx, std::span<const gpu::Instance>(p.instances))) {}
 };
@@ -514,7 +514,7 @@ int main(int argc, char** argv) {
     vc::Context ctx("donut_live");
     auto b_tri_nodes = vc::Buffer::from(ctx, std::span<const gpu::Node>(packed.tri_nodes));
     auto b_tris = vc::Buffer::from(ctx, std::span<const gpu::Triangle>(packed.triangles));
-    auto b_inst_nodes = vc::Buffer::from(ctx, std::span<const gpu::Node>(packed.inst_nodes));
+    auto b_inst_nodes = vc::Buffer::from(ctx, std::span<const gpu::LNode>(packed.inst_nodes));
     auto b_quads = vc::Buffer::from(ctx, std::span<const gpu::Quadric>(packed.quadrics));
     auto b_insts = vc::Buffer::from(ctx, std::span<const gpu::Instance>(packed.instances));
     vc::Buffer b_pixels(ctx, npix * sizeof(std::uint32_t));
