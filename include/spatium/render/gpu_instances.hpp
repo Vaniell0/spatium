@@ -73,16 +73,43 @@ inline Result<InstanceKernel> make_instance_kernel(const io::build::Trace<double
     InstanceKernel k;
     k.node = idx;
     k.module.code = bd::glsl_prelude(0, 1);
-    if (auto r = bd::emit_placement(k.module, n.transform, "motion"); !r)
-        return std::unexpected(Error(r.error().code, std::format("node {}: {}", idx, r.error().message)));
     const bool has_colour = static_cast<bool>(n.color_fn);
     const bool has_glow = static_cast<bool>(n.emissive_fn);
-    if (has_colour)
-        if (auto r = bd::emit_vector(k.module, n.color_fn, "colour"); !r)
-            return std::unexpected(Error(r.error().code, std::format("node {} colour: {}", idx, r.error().message)));
-    if (has_glow)
-        if (auto r = bd::emit_vector(k.module, n.emissive_fn, "glow"); !r)
-            return std::unexpected(Error(r.error().code, std::format("node {} glow: {}", idx, r.error().message)));
+
+    // The whole of main() in one value-numbered scope: the placement, the
+    // composition with the site, then colour and glow at the point the
+    // shape's centroid lands on. A hash, a gathered target or a pull the
+    // motion already computed is not computed again for the colour.
+    bd::GlslScope sc;
+    const bd::GlslInputs at_rest{"fin", "fin.p"};
+    auto pl = bd::emit_placement_into(sc, k.module, n.transform, at_rest);
+    if (!pl)
+        return std::unexpected(Error(pl.error().code, std::format("node {}: {}", idx, pl.error().message)));
+    sc.line(std::format("vec3 T = {} + {} * (st.pos.xyz * {});", pl->translation, pl->rotation, pl->scale));
+    sc.line(std::format("mat3 W = {} * mat3(st.c0.xyz, st.c1.xyz, st.c2.xyz);", pl->rotation));
+    sc.line(std::format("float S = {};", pl->scale));
+    sc.line("vec3 at = W * (pc.rest_centroid_t.xyz * S) + T;");
+    const bd::GlslInputs at_point{"fin", "at"};
+    std::string colour = "pc.color_rough.xyz", glow = "pc.emissive_opacity.xyz";
+    auto vector_at = [&](const bd::VecField<double>& f, const char* what) -> Result<std::string> {
+        auto pod = bd::lower(f);
+        if (!pod)
+            return std::unexpected(Error(pod.error().code, std::format("node {} {}: {}", idx, what, pod.error().message)));
+        const auto b = bd::detail::append_data(k.module, pod->scalars.tables, pod->scalars.points);
+        return bd::emit_vector_into(sc, *pod, b, at_point, "at");
+    };
+    if (has_colour) {
+        auto r = vector_at(n.color_fn, "colour");
+        if (!r) return std::unexpected(std::move(r.error()));
+        colour = *r;
+    }
+    if (has_glow) {
+        auto r = vector_at(n.emissive_fn, "glow");
+        if (!r) return std::unexpected(std::move(r.error()));
+        glow = *r;
+    }
+    sc.line(std::format("vec3 col = {};", colour));
+    sc.line(std::format("vec3 emit = {};", glow));
 
     for (const auto& s : bd::scatter_spots(trace, idx, 0.0)) {
         Site site{};
@@ -106,9 +133,7 @@ inline Result<InstanceKernel> make_instance_kernel(const io::build::Trace<double
     // applied to a site seated at `pos` and turned by `F` gives the
     // instance translation `tr + R (s pos)` and rotation `R F`, and the
     // material is resolved where the shape's centroid lands.
-    k.source = std::string("#version 450\nlayout(local_size_x = 64) in;\n") + k.module.code +
-               (has_colour ? "" : "vec3 colour(FieldIn in_) { return vec3(0.0); }\n") +
-               (has_glow ? "" : "vec3 glow(FieldIn in_) { return vec3(0.0); }\n") + R"GLSL(
+    k.source = std::string("#version 450\nlayout(local_size_x = 64) in;\n") + k.module.code + R"GLSL(
 struct Site { vec4 pos; vec4 c0; vec4 c1; vec4 c2; };
 struct Instance { vec4 r0, r1, r2, scale_quadric, color_rough, emissive_opacity; };
 layout(std430, binding = 2) readonly buffer Sites { Site sites[]; };
@@ -131,24 +156,14 @@ void main() {
     fin.id = i;
     fin.origin = st.pos.xyz;
     fin.p = vec3(0.0);
-
-    vec3 tr; mat3 R; float s;
-    motion_place(fin, tr, R, s);
-    vec3 T = tr + R * (st.pos.xyz * s);
-    mat3 W = R * mat3(st.c0.xyz, st.c1.xyz, st.c2.xyz);
-
-    FieldIn cin = fin;
-    cin.p = W * (pc.rest_centroid_t.xyz * s) + T;
-    vec3 col = pc.info.z != 0u ? colour(cin) : pc.color_rough.xyz;
-    vec3 emit = pc.info.w != 0u ? glow(cin) : pc.emissive_opacity.xyz;
-
+)GLSL" + sc.body + R"GLSL(
     Instance o;
     // Rows of W, translation in .w -- gpu::Instance's layout. GLSL
     // indexes a matrix by column first.
     o.r0 = vec4(W[0][0], W[1][0], W[2][0], T.x);
     o.r1 = vec4(W[0][1], W[1][1], W[2][1], T.y);
     o.r2 = vec4(W[0][2], W[1][2], W[2][2], T.z);
-    o.scale_quadric = vec4(s, uintBitsToFloat(pc.info.y), 0.0, 0.0);
+    o.scale_quadric = vec4(S, uintBitsToFloat(pc.info.y), 0.0, 0.0);
     o.color_rough = vec4(col, pc.color_rough.w);
     o.emissive_opacity = vec4(emit, pc.emissive_opacity.w);
     insts[pc.base.x + i] = o;
