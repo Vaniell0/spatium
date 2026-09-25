@@ -68,9 +68,12 @@ struct Sphere {
             canonical = canonical - p * (p.dot(canonical) / p.dot(p));
             auto cn = canonical.norm();
             if (cn < epsilon<T>()) return TangentVector{};
-            return canonical * (theta / cn);
+            return canonical * (radius * theta / cn);
         }
-        return proj * (theta / proj_norm);
+        // The length is the distance along the sphere, radius * theta,
+        // because that is what exp_map reads -- it divides by the radius.
+        // It was theta alone, the two inverse only on the unit sphere.
+        return proj * (radius * theta / proj_norm);
     }
 
     constexpr ScalarType metric_at(const PointType&,

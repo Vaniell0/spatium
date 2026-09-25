@@ -79,6 +79,7 @@ add_executable(spatium_tests
     test_field_pod.cpp
     test_lbvh.cpp
     test_ccd_certified.cpp
+    test_geodesic_ball.cpp
     test_chart.cpp
 )
 
