@@ -1,6 +1,7 @@
 #include <spatium/viewer/gpu_lbvh.hpp>
 
 #include <spatium/render/gpu_lbvh_glsl.hpp>
+#include <spatium/render/gpu_splat_glsl.hpp>
 #include <spatium/render/gpu_types.hpp>
 #include <spatium/render/lbvh.hpp>
 
@@ -26,6 +27,7 @@ void barrier(VkCommandBuffer cmd, VkPipelineStageFlags from, VkAccessFlags src) 
 std::uint32_t groups(std::uint32_t n) { return (n + 255) / 256; }
 
 struct Push { std::uint32_t info[4]; };
+struct KeysPush { std::uint32_t info[4]; float cam[4]; float fwd[4]; };
 
 }  // namespace
 
@@ -33,8 +35,8 @@ DeviceLbvh::DeviceLbvh(Context& ctx) : ctx_(ctx) {
     const std::string common = gpu::kLbvhCommonGlsl;
     boxes_ = std::make_unique<Kernel>(ctx_, (common + gpu::kBoxesGlsl).c_str(), "lbvh_boxes.comp", 4,
                                       sizeof(Push));
-    keys_ = std::make_unique<Kernel>(ctx_, (common + gpu::kKeysGlsl).c_str(), "lbvh_keys.comp", 3,
-                                     sizeof(Push));
+    keys_ = std::make_unique<Kernel>(ctx_, (common + gpu::kSplatClassifyGlsl + gpu::kKeysGlsl).c_str(),
+                                     "lbvh_keys.comp", 3, sizeof(KeysPush));
     tree_ = std::make_unique<Kernel>(ctx_, (common + gpu::kTreeGlsl).c_str(), "lbvh_tree.comp", 4,
                                      sizeof(Push));
     bounds_ = std::make_unique<Kernel>(ctx_, (common + gpu::kBoundsGlsl).c_str(), "lbvh_bounds.comp",
@@ -58,6 +60,12 @@ void DeviceLbvh::reserve_(std::uint32_t count) {
 }
 
 DeviceLbvh::Timing DeviceLbvh::build(Buffer& instances, Buffer& quadrics, std::uint32_t count) {
+    const float none[4] = {0, 0, 0, 0};
+    return build(instances, quadrics, count, none, none);
+}
+
+DeviceLbvh::Timing DeviceLbvh::build(Buffer& instances, Buffer& quadrics, std::uint32_t count,
+                                     const float cam[4], const float fwd[4]) {
     Timing t;
     reserve_(count);
     if (bound_instances_ != &instances || bound_quadrics_ != &quadrics) {
@@ -76,23 +84,22 @@ DeviceLbvh::Timing DeviceLbvh::build(Buffer& instances, Buffer& quadrics, std::u
     // Boxes and keys. The centre bounds start at (max, min) in the ordered
     // encoding: all ones for the minima, zero for the maxima.
     Push p{{count, 0, 0, 0}};
+    KeysPush kp{{count, 0, 0, 0}, {cam[0], cam[1], cam[2], cam[3]}, {fwd[0], fwd[1], fwd[2], fwd[3]}};
     t.boxes_keys_ms = ctx_.run([&](VkCommandBuffer cmd) {
         vkCmdFillBuffer(cmd, bounds_buf_->handle(), 0, 12, 0xffffffffu);
-        vkCmdFillBuffer(cmd, bounds_buf_->handle(), 12, 12, 0u);
+        vkCmdFillBuffer(cmd, bounds_buf_->handle(), 12, 20, 0u);   // maxima and the live count
         barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
         boxes_->dispatch(cmd, &p, groups(count), 1);
         barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-        keys_->dispatch(cmd, &p, groups(count), 1);
+        keys_->dispatch(cmd, &kp, groups(count), 1);
     });
 
-    // The sort, in place in the shared buffer. Dead instances carry an
-    // all-ones code and land at the end, so the live count is where they
-    // start.
+    // The sort, in place in the shared buffer, over the live keys the
+    // kernel packed at the front.
     const auto t0 = std::chrono::steady_clock::now();
+    const std::uint32_t n = static_cast<const std::uint32_t*>(bounds_buf_->data())[6];
     auto* keys = static_cast<std::uint64_t*>(key_buf_->data());
-    render::gpu::detail::radix_sort(keys, count, 8);
-    std::uint32_t n = count;
-    while (n > 0 && (keys[n - 1] >> 32) == 0xffffffffu) --n;
+    render::gpu::detail::radix_sort(keys, n, 8);
     leaves_ = n;
     t.read_sort_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();

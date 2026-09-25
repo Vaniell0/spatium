@@ -5,7 +5,9 @@
 // Four kernels, each one of build_lbvh()'s phases:
 //
 //   kBoxesGlsl   an instance's world box, and the bounds of the centres
-//   kKeysGlsl    the Morton code of each centre, with the index beside it
+//   kKeysGlsl    the Morton code of each centre, with the index beside it --
+//                after render/gpu_splat_glsl.hpp's kSplatClassifyGlsl, since
+//                an instance drawn by projection is left out
 //   (host)       the sort, over 8 bytes a key read from shared memory
 //   kTreeGlsl    a leaf and an internal node per invocation, Karras 2012
 //   kBoundsGlsl  boxes climbing from the leaves on per-node counters
@@ -82,13 +84,16 @@ void main() {
 
 // build_lbvh()'s keys: the 30-bit Morton code of the centre above the
 // instance index -- as a uvec2 (index, code), which is the little-endian
-// layout of the host's `(code << 32) | index`. A dead instance's code is
-// all ones, above every live code, so it sorts to the end.
+// layout of the host's `(code << 32) | index`. Dead and splatted instances
+// get no key at all; the live ones are packed at the front.
 inline constexpr const char* kKeysGlsl = R"GLSL(
 layout(std430, binding = 0) readonly buffer Boxes { vec4 boxes[]; };
-layout(std430, binding = 1) readonly buffer Bounds { uint bounds[]; };
+layout(std430, binding = 1) coherent buffer Bounds { uint bounds[]; };   // [6]: live key count
 layout(std430, binding = 2) writeonly buffer Keys { uvec2 keys[]; };
-layout(push_constant) uniform Push { uvec4 info; } pc;
+// cam and fwd are render/gpu_splat_glsl.hpp's: an instance splat_small()
+// accepts is drawn by projection and left out of the tree. A zero
+// threshold (fwd.w) keeps every instance.
+layout(push_constant) uniform Push { uvec4 info; vec4 cam; vec4 fwd; } pc;
 
 uint spread10(uint v) {
     v &= 0x3ffu;
@@ -103,7 +108,11 @@ void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= pc.info.x) return;
     vec4 lo = boxes[2u * i], hi = boxes[2u * i + 1u];
-    if (lo.w == 0.0) { keys[i] = uvec2(i, NONE); return; }
+    // Only live keys are written, packed at the front by a counter: the
+    // host sorts what the tree holds, not every instance. Their order here
+    // is whatever the atomics give -- the sort is what orders them.
+    float r_px;
+    if (lo.w == 0.0 || splat_small(lo.xyz, hi.xyz, pc.cam, pc.fwd, r_px)) return;
     uint code = 0u;
     for (int k = 0; k < 3; ++k) {
         float a = unordered(bounds[k]), z = unordered(bounds[3 + k]);
@@ -112,7 +121,7 @@ void main() {
         float u = clamp((c - a) / ext, 0.0, 1.0);
         code |= spread10(uint(u * 1023.0)) << (2 - k);
     }
-    keys[i] = uvec2(i, code);
+    keys[atomicAdd(bounds[6], 1u)] = uvec2(i, code);
 }
 )GLSL";
 

@@ -408,8 +408,15 @@ inline bool slab_l(const Ray32& r, const LNode& n, float t_max, float& t_enter) 
 
 // Nearest instance hit through the tree, as the shader will walk it: near
 // child first, entry distance kept on the stack.
+// What a traversal did, for finding where a frame's time goes: interior
+// nodes opened, leaves whose instance was tested, and tests that hit.
+struct TraceStats {
+    std::uint64_t interior = 0, leaves = 0, hits = 0;
+};
+
 inline bool trace_lbvh(const std::vector<LNode>& nodes, const std::vector<Instance>& instances,
-                       const std::vector<Quadric>& quadrics, const Ray32& r, Hit& h) {
+                       const std::vector<Quadric>& quadrics, const Ray32& r, Hit& h,
+                       TraceStats* stats = nullptr) {
     if (nodes.empty()) return false;
     std::uint32_t stack[64];
     float enter[64];
@@ -427,13 +434,16 @@ inline bool trace_lbvh(const std::vector<LNode>& nodes, const std::vector<Instan
         if (n.left & kLeafBit) {
             const std::uint32_t i = n.left & ~kLeafBit;
             const auto& g = instances[i];
+            if (stats) ++stats->leaves;
             if (hit_instance(r, g, quadrics[detail::bits_of(g.scale_quadric[1])], h)) {
                 h.kind = HitKind::Instance;
                 h.index = i;
                 any = true;
+                if (stats) ++stats->hits;
             }
             continue;
         }
+        if (stats) ++stats->interior;
         float tl = 0, tr = 0;
         const bool l_ok = slab_l(r, nodes[n.left], h.t, tl);
         const bool r_ok = slab_l(r, nodes[n.right], h.t, tr);

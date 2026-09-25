@@ -29,6 +29,9 @@ layout(std430, binding = 3) readonly buffer Quads     { Quadric quads[]; };
 layout(std430, binding = 4) readonly buffer Insts     { Instance insts[]; };
 layout(std430, binding = 5) writeonly buffer Image    { uint pixels[]; };
 layout(std430, binding = 6) writeonly buffer HitIds   { uint hit_ids[]; };
+// The nearest hit's distance per pixel, infinite on a miss: what a later
+// pass drawing particles by projection is hidden behind.
+layout(std430, binding = 7) writeonly buffer Depth    { float depth[]; };
 
 layout(push_constant) uniform Push {
     vec4 cam_pos;      // .w = tan(fov/2)
@@ -287,6 +290,7 @@ void main() {
     if (pc.background.w > 0.5) b = b.bgr;
     pixels[i] = b.r | (b.g << 8) | (b.b << 16) | (255u << 24);
     hit_ids[i] = (h.kind << 30) | h.index;
+    depth[i] = h.t;
 }
 )GLSL";
 

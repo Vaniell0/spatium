@@ -34,6 +34,16 @@ public:
     // out, as build_lbvh() leaves them out.
     Timing build(Buffer& instances, Buffer& quadrics, std::uint32_t count);
 
+    // The same, leaving out instances a projection pass draws instead:
+    // `cam` and `fwd` as render/gpu_splat_glsl.hpp's splat_small() reads
+    // them -- position and pixels-per-unit, forward and the threshold.
+    Timing build(Buffer& instances, Buffer& quadrics, std::uint32_t count, const float cam[4],
+                 const float fwd[4]);
+
+    // Each instance's box, lo (w = live) and hi, as the build left them:
+    // what a projection pass reads.
+    Buffer& boxes() { return *box_buf_; }
+
     // The tree: `2 * leaves() - 1` nodes, root first; none when no instance
     // is visible.
     Buffer& nodes();

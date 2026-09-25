@@ -28,6 +28,7 @@
 #include <spatium/render/cooked_scene.hpp>
 #include <spatium/render/gpu_instances.hpp>
 #include <spatium/render/gpu_scene.hpp>
+#include <spatium/render/gpu_splat_glsl.hpp>
 #include <spatium/render/lbvh.hpp>
 #include <spatium/render/gpu_trace_glsl.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
@@ -67,6 +68,13 @@ struct Push {
     std::uint32_t size[4];
 };
 static_assert(sizeof(Push) == 128);
+
+// The splat kernel's push constants, as render/gpu_splat_glsl.hpp lays them out.
+struct SplatPush {
+    float cam[4], fwd[4], right[4], up[4], key[4], fill[4];
+    std::uint32_t size[4];
+};
+static_assert(sizeof(SplatPush) == 112);
 
 // The shader's primary ray, in the shader's arithmetic. The host's own
 // `camera_pixel_dir` works in fp64, and a comparison against it would
@@ -243,11 +251,21 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
         std::uint32_t W = present.width(), H = present.height();
         auto pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
         auto ids = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
-        vc::Kernel trace(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 7, sizeof(Push));
+        auto depth = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+        auto accum = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 16);
+        vc::Kernel trace(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 8, sizeof(Push));
+        const std::string splat_src = std::string(gpu::kSplatHeadGlsl) + gpu::kSplatClassifyGlsl +
+                                      gpu::kSplatBodyGlsl;
+        vc::Kernel splat(ctx, splat_src.c_str(), "splat.comp", 4, sizeof(SplatPush));
+        vc::Kernel composite(ctx, gpu::kCompositeGlsl, "composite.comp", 2, 16);
         auto rebind = [&] {
             vc::Buffer* bufs[] = {part.tri_nodes.get(), part.tris.get(), &tree.nodes(), &quads,
-                                  insts.get(), pixels.get(), ids.get()};
+                                  insts.get(), pixels.get(), ids.get(), depth.get()};
             trace.bind(bufs);
+            vc::Buffer* sb[] = {insts.get(), &tree.boxes(), depth.get(), accum.get()};
+            splat.bind(sb);
+            vc::Buffer* cb[] = {pixels.get(), accum.get()};
+            composite.bind(cb);
         };
 
         // Move every moved node to time `at`, then rebuild the tree.
@@ -261,10 +279,15 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
                     m.kernel->dispatch(cmd, &p, (m.count + 63) / 64, 1);
                 }
             });
-            tree_ms = tree.build(*insts, quads, total);
+        };
+        // The tree over what is traced, leaving out what is splatted -- which
+        // depends on the camera, so it is rebuilt when the camera moves too.
+        float splat_px = 1.0f;
+        SplatPush sp{};
+        auto build_tree = [&] {
+            tree_ms = tree.build(*insts, quads, total, sp.cam, sp.fwd);
         };
         move_to(t);
-        rebind();
 
         FlyCamera cam = FlyCamera::from(start);
         const FlyCamera home = cam;
@@ -304,7 +327,9 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
             ImGui::Begin("donut_live");
             ImGui::Text("%s", ctx.device_name().c_str());
             ImGui::Text("%.0f fps, %ux%u", fps, W, H);
-            ImGui::Text("trace %.2f ms", gpu_ms);
+            ImGui::Text("trace + splat %.2f ms", gpu_ms);
+            ImGui::SliderFloat("splat below", &splat_px, 0.0f, 4.0f, "%.2f px");
+            ImGui::Text("traced instances %u of %u", tree.leaves(), total);
             ImGui::Text("move %.2f ms  (%u instances)", move_ms, moved_total);
             ImGui::Text("tree %.2f + sort %.1f (host) + %.2f ms", tree_ms.boxes_keys_ms,
                         tree_ms.read_sort_ms, tree_ms.tree_ms);
@@ -339,7 +364,7 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
                     std::println(stderr, "donut_live: static instance count changed with t");
                 }
                 write_static();
-                tree_ms = tree.build(*insts, quads, total);
+                build_tree();
                 rebind();
             }
             was_playing = playing;
@@ -374,17 +399,57 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
                 if (down(GLFW_KEY_ESCAPE)) glfwSetWindowShouldClose(window, 1);
             }
 
+            // Which specks are splatted depends on where the camera is, so a
+            // new camera or a new time is a new tree.
+            const auto camera = cam.camera();
+            const auto basis = render::make_camera_basis(camera);
+            SplatPush next{};
+            gpu::detail::put3(next.cam, camera.position,
+                              static_cast<float>(0.5 * H / basis.tan_half));
+            gpu::detail::put3(next.fwd, basis.fwd, splat_px);
+            gpu::detail::put3(next.right, basis.right, static_cast<float>(basis.tan_half));
+            gpu::detail::put3(next.up, basis.up, static_cast<float>(W) / static_cast<float>(H));
+            const Vec<double, 3> key = Vec<double, 3>{Vec<double, 3>{0.85, 0.45, 0.55}.normalized()};
+            const Vec<double, 3> fill = Vec<double, 3>{Vec<double, 3>{0.62, -0.70, 0.35}.normalized()};
+            gpu::detail::put3(next.key, key, 0.38f);
+            gpu::detail::put3(next.fill, fill);
+            next.size[0] = W; next.size[1] = H; next.size[2] = total; next.size[3] = 0;
+            const bool first_frame = frame == 0;
+            if (first_frame || t_changed || std::memcmp(&next, &sp, sizeof sp) != 0) {
+                sp = next;
+                build_tree();
+                if (first_frame) rebind();
+            }
+
             Push pc{};
             const std::size_t inst_nodes = tree.leaves() == 0 ? 0 : 2 * std::size_t{tree.leaves()} - 1;
-            fill_push(pc, cam.camera(), W, H, present.bgra(), part.packed.tri_nodes.size(), inst_nodes);
+            fill_push(pc, camera, W, H, present.bgra(), part.packed.tri_nodes.size(), inst_nodes);
+            const std::uint32_t cpush[4] = {W, H, present.bgra() ? 1u : 0u, 0u};
+            auto barrier = [](VkCommandBuffer cmd, VkPipelineStageFlags from, VkAccessFlags src) {
+                VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+                mb.srcAccessMask = src;
+                mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                vkCmdPipelineBarrier(cmd, from, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0,
+                                     nullptr, 0, nullptr);
+            };
             const bool ok = present.frame(*pixels, [&](VkCommandBuffer cmd) {
+                vkCmdFillBuffer(cmd, accum->handle(), 0, VK_WHOLE_SIZE, 0u);
+                barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
                 trace.dispatch(cmd, &pc, (W + 7) / 8, (H + 7) / 8);
+                barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+                if (splat_px > 0.0f) {
+                    splat.dispatch(cmd, &sp, (total + 255) / 256, 1);
+                    barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+                    composite.dispatch(cmd, cpush, (W + 7) / 8, (H + 7) / 8);
+                }
             }, gpu_ms);
             if (!ok && (present.width() != W || present.height() != H)) {
                 W = present.width();
                 H = present.height();
                 pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
                 ids = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+                depth = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
+                accum = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 16);
                 rebind();
             }
         }
@@ -399,9 +464,10 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
                     rgb[i * 3 + c] = static_cast<std::uint8_t>((px[i] >> (8 * src)) & 0xffu);
                 }
             render::write_png_rgb(screenshot, static_cast<int>(W), static_cast<int>(H), rgb);
-            std::println("  -> {} (trace {:.2f} ms, move {:.2f} ms, tree {:.2f}+{:.1f}+{:.2f} ms at {}x{})",
+            std::println("  -> {} (trace+splat {:.2f} ms, move {:.2f} ms, tree {:.2f}+{:.1f}+{:.2f} ms, "
+                         "{} of {} instances traced, at {}x{})",
                          screenshot, gpu_ms, move_ms, tree_ms.boxes_keys_ms, tree_ms.read_sort_ms,
-                         tree_ms.tree_ms, W, H);
+                         tree_ms.tree_ms, tree.leaves(), total, W, H);
         }
     }
     glfwDestroyWindow(window);
@@ -537,6 +603,25 @@ int run_dust_check(const bd::Trace<double>& scene, std::size_t root, double t, i
                 }
             std::println("  device tree against brute force: {} of {} rays agree ({} hit something)",
                          agree, rays, hits);
+
+            // Where a primary ray's time goes, through the device tree, over
+            // every eighth pixel of the hero view.
+            gpu::TraceStats st;
+            std::size_t sampled = 0, hit_px = 0;
+            for (int y = 0; y < 720; y += 8)
+                for (int x = 0; x < 960; x += 8) {
+                    const auto d = render::camera_pixel_dir(cam, basis, x, y, 960, 720);
+                    const gpu::Ray32 ray{{float(cam.position[0]), float(cam.position[1]), float(cam.position[2])},
+                                         {float(d[0]), float(d[1]), float(d[2])}};
+                    gpu::Hit h;
+                    gpu::trace_lbvh(nodes, copy, packed.quadrics, ray, h, &st);
+                    ++sampled;
+                    if (h.kind != gpu::HitKind::None) ++hit_px;
+                }
+            std::println("  per primary ray: {:.1f} interior nodes, {:.1f} instance tests, {:.2f} of them hits; "
+                         "{:.0f}% of rays hit a particle",
+                         double(st.interior) / sampled, double(st.leaves) / sampled,
+                         double(st.hits) / sampled, 100.0 * hit_px / sampled);
         }
         std::println("node {}: {} instances moved in {:.2f} ms (median of {}), {} lines of generated GLSL",
                      node, count, ms[ms.size() / 2], runs,
@@ -672,8 +757,9 @@ int main(int argc, char** argv) {
     auto b_insts = vc::Buffer::from(ctx, std::span<const gpu::Instance>(packed.instances));
     vc::Buffer b_pixels(ctx, npix * sizeof(std::uint32_t));
     vc::Buffer b_ids(ctx, npix * sizeof(std::uint32_t));
-    vc::Kernel kernel(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 7, sizeof(Push));
-    vc::Buffer* bufs[] = {&b_tri_nodes, &b_tris, &b_inst_nodes, &b_quads, &b_insts, &b_pixels, &b_ids};
+    vc::Buffer b_depth(ctx, npix * sizeof(float));
+    vc::Kernel kernel(ctx, gpu::kTraceGlsl, "gpu_trace.comp", 8, sizeof(Push));
+    vc::Buffer* bufs[] = {&b_tri_nodes, &b_tris, &b_inst_nodes, &b_quads, &b_insts, &b_pixels, &b_ids, &b_depth};
     kernel.bind(bufs);
 
     std::vector<double> gpu_ms;
