@@ -197,4 +197,14 @@ concept RiemannianManifold =
 template<typename S>
 concept Surface = Manifold<S> && HasProject<S> && HasNormal<S>;
 
+// ── Chooser ────────────────────────────────────────────────────
+// Picks one of a method's settings from features the caller computes.
+// The seam where a learned choice -- RSC's, distilled to a table or a
+// tree -- enters an algorithm without the algorithm knowing it: a setting
+// changes what a result costs, never whether it is right, so any chooser
+// is a valid one and the default is simply a constant.
+
+template<typename C, typename F>
+concept Chooser = requires(const C& c, const F& f) { c.choose(f); };
+
 } // namespace spatium
