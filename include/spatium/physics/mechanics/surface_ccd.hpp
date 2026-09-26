@@ -100,7 +100,32 @@ struct SurfaceContact {
     T u_a = T{0}, v_a = T{0}, u_b = T{0}, v_b = T{0};   // centres of the answering cells
     std::size_t evaluations = 0;   // of p and w, corners and centres
     std::size_t pairs = 0;         // pairs of cells bounded
+    std::size_t slabs = 0;         // slab directions tried across them
 };
+
+// What a chooser of policy sees of a query, computed from the charts
+// alone: how many parameters each surface has -- a vertex none, an edge
+// one, a patch two -- and how bent and how fast each is for its size.
+template<Scalar T>
+struct SurfaceCcdFeatures {
+    int dim_a = 2, dim_b = 2;
+    T bend_a = T{0}, bend_b = T{0};    // second derivatives over first
+    T speed = T{0};                     // relative motion over the query's size
+};
+
+template<Scalar T>
+SurfaceCcdFeatures<T> surface_ccd_features(const MovingChart<T>& a, const MovingChart<T>& b) {
+    const auto dim = [](const MovingChart<T>& c) { return int(c.u1 > c.u0) + int(c.v1 > c.v0); };
+    const auto bend = [](const MovingChart<T>& c) {
+        const T first = c.bp.u + c.bp.v + c.bw.u + c.bw.v;
+        return first > T{0} ? (c.bp.uu + c.bp.vv + c.bw.uu + c.bw.vv) / first : T{0};
+    };
+    const auto mid = [](const MovingChart<T>& c, const auto& f) {
+        return f((c.u0 + c.u1) / T{2}, (c.v0 + c.v1) / T{2});
+    };
+    const T size = mid(a, a.p).norm() + mid(b, b.p).norm() + a.bp.u + a.bp.v + b.bp.u + b.bp.v + T{1e-300};
+    return {dim(a), dim(b), bend(a), bend(b), Vec<T, 3>{mid(a, a.w) - mid(b, b.w)}.norm() / size};
+}
 
 namespace detail {
 
@@ -299,6 +324,7 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
             const auto& raw = dirs[di];
             const T len = raw.norm();
             if (!(len > T{0}) || !std::isfinite(len)) continue;
+            ++out.slabs;
             const Vec<T, 3> n{raw * (T{1} / len)};
             // A's least minus B's greatest, for every corner pair: 16 lines.
             std::array<T, 16> alpha{}, beta{}, alpha2{}, beta2{};
@@ -362,6 +388,17 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
         }
     }
     return finish(false, T{1}, nullptr);
+}
+
+// The same search with its policy picked per query by a chooser over
+// SurfaceCcdFeatures -- a constant, a table, or a tree RSC distilled from
+// measurements (rsc/include/ccd_chooser.hpp).
+template<Scalar T, typename C>
+    requires Chooser<C, SurfaceCcdFeatures<T>>
+SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b, T width, std::size_t budget,
+                                const C& chooser) {
+    const SurfaceCcdPolicy policy = chooser.choose(surface_ccd_features(a, b));
+    return first_contact(a, b, width, budget, policy);
 }
 
 }  // namespace spatium::physics::mechanics

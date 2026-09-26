@@ -109,3 +109,11 @@ target_include_directories(ccd_synthesize PRIVATE
 )
 target_link_libraries(ccd_synthesize PRIVATE spatium_core)
 target_compile_options(ccd_synthesize PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(ccd_policy ccd_policy.cpp)
+target_include_directories(ccd_policy PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(ccd_policy PRIVATE spatium_core)
+target_compile_options(ccd_policy PRIVATE -Wall -Wextra -Wpedantic)

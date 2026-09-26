@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <comparison_task.hpp>
+#include <ccd_queries.hpp>
+#include <generated/ccd_chooser_tree.hpp>
 
 #include <cmath>
 #include <random>
@@ -131,4 +133,27 @@ TEST_CASE("CF is exact, and an undecided chain answers where it stopped", "[rsc]
     const auto nothing = run(Query{V3{0, 0, 3}, V3{0, 0, -6}, 0.0, &ob}, {});
     CHECK(nothing.hit);
     CHECK(nothing.toi == 0.0);
+}
+
+// What rsc/tools/ccd_policy found is kept as a header and held to what it
+// was found for. A policy changes what a query costs, never its answer; and
+// on queries of the kinds it was fitted on but from a seed it never saw,
+// the tree costs no more than the default. When this fails after the
+// primitives change, the finding is stale: rerun the tool.
+TEST_CASE("The learned CCD policy answers as the default and costs no more", "[rsc][ccd]") {
+    namespace mech = spatium::physics::mechanics;
+    static_assert(spatium::Chooser<rsc::ccd::LearnedSurfaceChooser, mech::SurfaceCcdFeatures<double>>);
+    const rsc::ccd::LearnedSurfaceChooser chooser;
+    const auto queries = rsc::ccd::generate(3, 4);
+    double cost_default = 0, cost_tree = 0;
+    for (const auto& q : queries) {
+        const auto d = mech::first_contact(q.a, q.b, 1e-5, std::size_t{1} << 22, mech::SurfaceCcdPolicy{});
+        const auto t = mech::first_contact(q.a, q.b, 1e-5, std::size_t{1} << 22, chooser);
+        CHECK(d.hit == t.hit);
+        if (d.hit && t.hit) CHECK(std::abs(d.toi - t.toi) < 1e-4);
+        cost_default += double(d.pairs + d.slabs);
+        cost_tree += double(t.pairs + t.slabs);
+    }
+    INFO("default " << cost_default << ", tree " << cost_tree);
+    CHECK(cost_tree <= cost_default * 1.02);
 }
