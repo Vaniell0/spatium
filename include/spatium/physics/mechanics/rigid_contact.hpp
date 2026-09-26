@@ -165,6 +165,9 @@ struct SweptContact {
     // a surface with no `distance_bound`, which steps by an upper bound.
     bool certified = true;
     std::size_t evaluations = 0;  // what a searching sweep spent, in shape evaluations
+    // Cells of a kept tree it looked at: a query against a tree that is
+    // already split evaluates nothing and still walks it.
+    std::size_t visited = 0;
 };
 
 template<Scalar T>
@@ -563,7 +566,7 @@ namespace detail {
 // distance_bound() does, or when it has made `budget` new cells.
 template<Scalar T>
 std::pair<T, T> tree_distance_bound(const Vec<T, 3>& p, ChartCellTree<T>& tree, T floor,
-                                    std::size_t budget) {
+                                    std::size_t budget, std::size_t* visited = nullptr) {
     struct Item { std::uint32_t cell; T lower; };
     const auto worse = [](const Item& a, const Item& b) { return a.lower > b.lower; };
     std::priority_queue<Item, std::vector<Item>, decltype(worse)> open(worse);
@@ -574,6 +577,7 @@ std::pair<T, T> tree_distance_bound(const Vec<T, 3>& p, ChartCellTree<T>& tree, 
         const auto& b = tree.cell(i).ball;
         const T d = Vec<T, 3>{p - b.c}.norm();
         best = std::min(best, d);
+        if (visited) ++*visited;
         open.push(Item{i, d - b.r - ulp * (p.norm() + b.c.norm())});
     };
     push(0);
@@ -611,12 +615,14 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
     const std::size_t before = tree.size();
     const auto spent = [&] { return tree.size() - before; };
 
-    SweptContact<T> out{false, T{1}, {}, true, 0};
+    SweptContact<T> out{false, T{1}, {}, true, 0, 0};
+    std::size_t visited = 0;
     const auto finish = [&](bool hit, T toi, ContactQuery<T> contact) {
         out.hit = hit;
         out.toi = toi;
         out.contact = contact;
         out.evaluations = spent();
+        out.visited = visited;
         return out;
     };
 
@@ -624,7 +630,7 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
     for (int k = 0; k < advance_moves && speed > T{0}; ++k) {
         if (spent() >= budget) break;
         const Vec<T, 3> p{c0 + disp * start};
-        const auto [lower, best] = detail::tree_distance_bound(p, tree, tol + radius, budget - spent());
+        const auto [lower, best] = detail::tree_distance_bound(p, tree, tol + radius, budget - spent(), &visited);
         if (best - radius <= tol) return finish(true, start, ContactQuery<T>{T{0}, p, {}, false});
         const T step = (lower - radius) / speed;
         if (step <= T{0}) break;
@@ -644,6 +650,7 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
     };
     const auto push = [&](std::uint32_t cell, T t0, T t1) {
         const auto [dc, pad] = gap_at(cell, (t0 + t1) / T{2});
+        ++visited;
         const T lower = dc - tree.cell(cell).ball.r - speed * (t1 - t0) / T{2} - pad;
         if (lower > tol) return;   // proved empty
         open.push(Item{cell, t0, t1, lower});
