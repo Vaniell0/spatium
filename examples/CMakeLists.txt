@@ -124,6 +124,11 @@ if(SPATIUM_HAS_VIEWER)
     # double, and reports how far their end points are apart.
     spatium_add_example(NAME blackhole_live LIBS spatium_viewer OPTIONS -O3 -march=native)
 
+    # An XPBD sheet on an analytic obstacle -- cloth_visual_demo's scene,
+    # removed in April for tunnelling and stretch, back with the scene in
+    # cloth_scene.hpp and `--measure` putting numbers on the failure.
+    spatium_add_example(NAME cloth_live LIBS spatium_viewer OPTIONS -O3 -march=native)
+
     # Burning Ship fractal — Vulkan window with a fragment-shader
     # iterator and Jacobian-based distance estimation.  Deliberately
     # standalone (no spatium_viewer dep) so it can later double as a
