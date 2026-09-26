@@ -50,6 +50,17 @@ LipschitzChart<double> sphere_chart_bound(const ParametricSurface<double>& chart
             }};
 }
 
+// |f_uu| = r sin v and |f_vv| = r over a cell of the same chart: the
+// domain's bound, r, would make the slab of every cell near a pole thick,
+// where the cells are wide in u and |f_uu| is nearly zero.
+auto sphere_cell_second(double r) {
+    return [r](double, double, double v0, double v1) {
+        const double pi2 = std::numbers::pi / 2;
+        const double s = (v0 <= pi2 && pi2 <= v1) ? 1.0 : std::max(std::sin(v0), std::sin(v1));
+        return std::pair{r * s, r};
+    };
+}
+
 ParametricSurface<double> sphere_chart(double r) {
     return ParametricSurface<double>(
         [r](double u, double v) {
@@ -285,6 +296,129 @@ TEST_CASE("A chart sweep never answers later than the closed form",
     }
 }
 
+// The same fuzz with the chart's second derivatives bounded, so a cell is
+// also held between two planes (ChartCellTree). One-sided as before; what
+// is compared is how early the grazes come back and what they cost, first
+// order against second at one budget.
+TEST_CASE("A second-order floor keeps the rule and tightens the grazes",
+          "[physics][ccd][certified][fuzz]") {
+    std::mt19937_64 rng(20260926);
+    std::uniform_real_distribution<double> ang(0.0, 2.0 * std::numbers::pi);
+    constexpr int kQueries = 600;
+    constexpr std::size_t kBudget = std::size_t{1} << 14;
+    const geometry::Torus<double> torus{V3{}, V3{0.0, 0.0, 1.0}, 1.0, 0.3};
+    const double R = torus.major_radius, r = torus.minor_radius;
+    const ParametricSurface<double> chart(
+        [R, r](double u, double v) {
+            return V3{(R + r * std::cos(v)) * std::cos(u), (R + r * std::cos(v)) * std::sin(u), r * std::sin(v)};
+        },
+        {0.0, 2.0 * std::numbers::pi, 0.0, 2.0 * std::numbers::pi}, true, true);
+    const auto reach = [R, r](double u0, double u1, double v0, double v1) {
+        return (R + r) * (u1 - u0) / 2 + r * (v1 - v0) / 2;
+    };
+    const LipschitzChart<double> first{chart, R + r, reach};
+    // |f_uu| = R + r cos v, |f_vv| = r.
+    const LipschitzChart<double> second{chart, R + r, reach, R + r, r};
+
+    int grazes = 0, early_first = 0, early_second = 0;
+    double cost_first = 0, cost_second = 0, worst_first = 0, worst_second = 0;
+    for (int i = 0; i < kQueries; ++i) {
+        const double u = ang(rng), v = ang(rng);
+        const V3 n{std::cos(v) * std::cos(u), std::cos(v) * std::sin(u), std::sin(v)};
+        const V3 foot{V3{std::cos(u), std::sin(u), 0.0} * R + n * r};
+        const auto path = random_path(rng, 2.0, foot, n);
+        if (point_to(path.start, torus).inside || point_to(path.start, torus).distance < 1e-6) continue;
+        const auto exact = sweep_sphere_surface<double>(path.start, 0.0, path.disp, torus, 1 << 18);
+        const auto a = sweep_sphere_surface<double>(path.start, 0.0, path.disp, first, 8, kBudget);
+        const auto b = sweep_sphere_surface<double>(path.start, 0.0, path.disp, second, 8, kBudget);
+        const double slack = 2.0 * std::sqrt(std::numeric_limits<double>::epsilon()) *
+                             std::max(path.start.norm(), V3{path.start + path.disp}.norm()) / path.disp.norm();
+        INFO(std::format("query {} exact hit={} toi={:.12f}; second hit={} toi={:.12f}", i, exact.hit, exact.toi,
+                         b.hit, b.toi));
+        if (exact.hit) {
+            REQUIRE(b.hit);
+            REQUIRE(b.toi <= exact.toi + slack);
+        }
+        if (!exact.hit || !path.graze) continue;
+        ++grazes;
+        early_first += a.toi < exact.toi - 1e-3;
+        early_second += b.toi < exact.toi - 1e-3;
+        worst_first = std::max(worst_first, exact.toi - a.toi);
+        worst_second = std::max(worst_second, exact.toi - b.toi);
+        cost_first += static_cast<double>(a.evaluations + a.visited);
+        cost_second += static_cast<double>(b.evaluations + b.visited);
+    }
+    const std::string table = std::format(
+        "{} grazes; more than 1e-3 early: first {} second {}; worst {:.3g} / {:.3g}; evaluations + cells walked a graze {:.0f} / {:.0f}",
+        grazes, early_first, early_second, worst_first, worst_second, cost_first / grazes, cost_second / grazes);
+    INFO(table);
+    WARN(table);
+    CHECK(grazes > kQueries / 4);
+    // Measured, counting chart evaluations (corners included) and cells
+    // walked: first order 32 of 244 grazes more than 1e-3 early, the worst
+    // 0.45 of the step, at 53k a graze -- most of them ending on the
+    // budget; second order none, the worst 1.3e-8, at 32k. A rule that
+    // split time whenever the slab asked walked 134k: the slab's thickness
+    // falls as the square of a cell, so it asks for time almost always.
+    CHECK(early_second == 0);
+    CHECK(worst_second < 1e-6);
+    CHECK(cost_second < cost_first);
+}
+
+// The sphere's grazes, poles included, first order against second with the
+// second derivatives bounded per cell. Near a pole a bound over the whole
+// domain made the search worse than none: 2 of 20 grazes that had ended
+// within 2.3e-4 of the contact ended 0.074 early instead.
+TEST_CASE("A second-order floor holds at a chart's poles", "[physics][ccd][certified][fuzz]") {
+    std::mt19937_64 rng(20260927);
+    std::uniform_real_distribution<double> ang(0.0, 2.0 * std::numbers::pi);
+    constexpr int kQueries = 600;
+    constexpr std::size_t kBudget = std::size_t{1} << 14;
+    const auto chart = sphere_chart(1.0);
+    const auto first = sphere_chart_bound(chart, 1.0);
+    auto second = first;
+    second.cell_second = sphere_cell_second(1.0);
+    const auto q = geometry::Quadric<double>::sphere(1.0);
+    int grazes = 0, early_first = 0, early_second = 0, polar = 0;
+    double cost_first = 0, cost_second = 0;
+    for (int i = 0; i < kQueries; ++i) {
+        // Half of the feet within 0.3 rad of a pole.
+        const double u = ang(rng);
+        const double v = i % 2 ? std::acos(std::uniform_real_distribution<double>(-1, 1)(rng))
+                               : (i % 4 ? 0.0 : std::numbers::pi) + (i % 4 ? 1 : -1) *
+                                     std::uniform_real_distribution<double>(0.0, 0.3)(rng);
+        const V3 n{std::sin(v) * std::cos(u), std::sin(v) * std::sin(u), std::cos(v)};
+        const auto path = random_path(rng, 3.0, n, n);
+        if (path.start.norm() <= 1.0 + 1e-6) continue;
+        const auto exact = sweep_point_quadric<double>(path.start, path.disp, q);
+        const auto a = sweep_sphere_surface<double>(path.start, 0.0, path.disp, first, 8, kBudget);
+        const auto b = sweep_sphere_surface<double>(path.start, 0.0, path.disp, second, 8, kBudget);
+        INFO(std::format("query {} exact hit={} toi={:.12f}; second hit={} toi={:.12f}", i, exact.hit, exact.toi,
+                         b.hit, b.toi));
+        if (exact.hit) {
+            REQUIRE(b.hit);
+            REQUIRE(b.toi <= exact.toi + 1e-12);
+        }
+        if (!exact.hit || !path.graze) continue;
+        ++grazes;
+        polar += i % 2 == 0;
+        early_first += a.toi < exact.toi - 1e-3;
+        early_second += b.toi < exact.toi - 1e-3;
+        cost_first += static_cast<double>(a.evaluations + a.visited);
+        cost_second += static_cast<double>(b.evaluations + b.visited);
+    }
+    const std::string table = std::format(
+        "{} grazes ({} near a pole); more than 1e-3 early: first {} second {}; evaluations + cells walked {:.0f} / {:.0f}",
+        grazes, polar, early_first, early_second, cost_first / grazes, cost_second / grazes);
+    INFO(table);
+    WARN(table);
+    // Measured: 139 grazes, 68 near a pole, none more than 1e-3 early on
+    // either; 68k a graze first order, 37k second.
+    CHECK(polar * 3 > grazes);
+    CHECK(early_second <= early_first);
+    CHECK(cost_second < cost_first);
+}
+
 // A ball rather than a point: first contact when the centre is a radius
 // away, the same answer from the closed-form sphere and from its chart.
 TEST_CASE("A swept ball touches when its centre is a radius away", "[physics][ccd][certified]") {
@@ -313,6 +447,19 @@ TEST_CASE("A swept ball touches when its centre is a radius away", "[physics][cc
     REQUIRE(swept.hit);
     CHECK(swept.toi <= toi_true + 1e-12);
     CHECK(swept.toi > toi_true - 1e-4);
+
+    // With the second derivatives bounded (|f_uu| = sin v <= 1, |f_vv| = 1)
+    // the ball's flat minimum is held between planes instead of balls.
+    // This path meets the chart's pole. With the domain's bound on |f_uu|
+    // it came back 4.0e-5 early at 2^14; bounded per cell, 9.7e-6 -- against
+    // 1.0e-4 at 2^16 for first order.
+    auto bound2 = sphere_chart_bound(chart, 1.0);
+    bound2.cell_second = sphere_cell_second(1.0);
+    const auto swept2 = sweep_sphere_surface<double>(start, radius, disp, bound2, 64, std::size_t{1} << 14);
+    WARN(std::format("ball, second order: toi {} early by {:.3g}, evaluations {}", swept2.toi,
+                     toi_true - swept2.toi, swept2.evaluations));
+    REQUIRE(swept2.hit);
+    CHECK(swept2.toi <= toi_true + 1e-12);
 
     // Passing a radius and a half beside it is a miss, and a proved one.
     const auto beside = sweep_sphere_surface<double>(V3{1.0 + 1.5 * radius, 0.0, 3.0}, radius, disp,

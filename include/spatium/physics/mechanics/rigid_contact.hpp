@@ -64,11 +64,14 @@
 #  include <spatium/physics/mechanics/xpbd.hpp>
 #  include <spatium/spatial/bound.hpp>
 #  include <algorithm>
+#  include <array>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
+#  include <functional>
 #  include <limits>
 #  include <queue>
+#  include <tuple>
 #  include <utility>
 #  include <vector>
 #endif
@@ -494,6 +497,19 @@ SweptContact<T> sweep_sphere_surface(const Vec<T, 3>& c0, T radius, const Vec<T,
 // lazily, a cell's halves the first time something asks for them, and
 // kept, so the next query against the same surface, or the same query
 // next step, walks what is already there.
+//
+// When the chart bounds its second derivatives, a cell is also held
+// between two planes. Along any unit direction n the height g = n.f of
+// the cell's image differs from the bilinear interpolant of its corners
+// by at most (du^2 |f_uu| + dv^2 |f_vv|) / 8, and the interpolant stays
+// between the corners' heights, so the cell lies in the slab [lo, hi]
+// around the plane through its centre. That holds for every n; n only
+// decides how thin the slab is, and taken across the cell's diagonals it
+// is close to the normal, so the slab is as thin as the cell is flat --
+// second order in the cell's size, where the ball is first. The floor it
+// gives drifts with the motion along n alone: a path sliding past the
+// surface, a graze, barely erodes it. Corners are shared with the parent,
+// so a split evaluates the chart four times instead of two.
 template<Scalar T>
 class ChartCellTree {
 public:
@@ -501,15 +517,25 @@ public:
         T u0, u1, v0, v1;
         spatial::Ball<3, T> ball;
         std::int32_t first_child = -1;   // two children at first_child and first_child + 1
+        Vec<T, 3> n{};                   // the slab's direction, zero when there is none
+        T lo = T{0}, hi = T{0};          // heights of the slab along n, from the centre
+        std::array<Vec<T, 3>, 4> corner{};   // f at (u0,v0), (u1,v0), (u0,v1), (u1,v1)
     };
 
     explicit ChartCellTree(LipschitzChart<T> chart) : chart_(std::move(chart)) {
         const auto& d = chart_.chart.domain();
-        cells_.push_back(make(d.u_min, d.u_max, d.v_min, d.v_max));
+        std::array<Vec<T, 3>, 4> c{};
+        if (slabs()) c = {f(d.u_min, d.v_min), f(d.u_max, d.v_min), f(d.u_min, d.v_max), f(d.u_max, d.v_max)};
+        cells_.push_back(make(d.u_min, d.u_max, d.v_min, d.v_max, c));
     }
 
     const Cell& cell(std::size_t i) const { return cells_[i]; }
     std::size_t size() const { return cells_.size(); }
+    // Evaluations of the chart so far, corners included.
+    std::size_t evaluations() const { return evaluations_; }
+    bool slabs() const {
+        return chart_.second_uu > T{0} || chart_.second_vv > T{0} || static_cast<bool>(chart_.cell_second);
+    }
 
     // The two halves of cell i, made if they are not yet: the side whose
     // halving shrinks the reach more.
@@ -518,12 +544,16 @@ public:
         const Cell c = cells_[i];
         const T um = (c.u0 + c.u1) / T{2}, vm = (c.v0 + c.v1) / T{2};
         const auto first = static_cast<std::int32_t>(cells_.size());
+        const auto& k = c.corner;
+        const bool slab = slabs();
         if (reach(c.u0, um, c.v0, c.v1) <= reach(c.u0, c.u1, c.v0, vm)) {
-            cells_.push_back(make(c.u0, um, c.v0, c.v1));
-            cells_.push_back(make(um, c.u1, c.v0, c.v1));
+            const Vec<T, 3> b = slab ? f(um, c.v0) : Vec<T, 3>{}, t = slab ? f(um, c.v1) : Vec<T, 3>{};
+            cells_.push_back(make(c.u0, um, c.v0, c.v1, {k[0], b, k[2], t}));
+            cells_.push_back(make(um, c.u1, c.v0, c.v1, {b, k[1], t, k[3]}));
         } else {
-            cells_.push_back(make(c.u0, c.u1, c.v0, vm));
-            cells_.push_back(make(c.u0, c.u1, vm, c.v1));
+            const Vec<T, 3> l = slab ? f(c.u0, vm) : Vec<T, 3>{}, r = slab ? f(c.u1, vm) : Vec<T, 3>{};
+            cells_.push_back(make(c.u0, c.u1, c.v0, vm, {k[0], k[1], l, r}));
+            cells_.push_back(make(c.u0, c.u1, vm, c.v1, {l, r, k[2], k[3]}));
         }
         cells_[i].first_child = first;
         return static_cast<std::uint32_t>(first);
@@ -543,22 +573,55 @@ public:
     }
 
 private:
+    Vec<T, 3> f(T u, T v) {
+        ++evaluations_;
+        return chart_.chart(u, v);
+    }
     T reach(T u0, T u1, T v0, T v1) const {
         using std::sqrt;
         if (chart_.cell_radius) return chart_.cell_radius(u0, u1, v0, v1);
         const T du = u1 - u0, dv = v1 - v0;
         return chart_.lipschitz * sqrt(du * du + dv * dv) / T{2};
     }
-    Cell make(T u0, T u1, T v0, T v1) const {
-        const Vec<T, 3> x = chart_.chart((u0 + u1) / T{2}, (v0 + v1) / T{2});
-        return Cell{u0, u1, v0, v1, spatial::Ball<3, T>{x, reach(u0, u1, v0, v1)}, -1};
+    Cell make(T u0, T u1, T v0, T v1, const std::array<Vec<T, 3>, 4>& corner) {
+        const Vec<T, 3> x = f((u0 + u1) / T{2}, (v0 + v1) / T{2});
+        Cell c{u0, u1, v0, v1, spatial::Ball<3, T>{x, reach(u0, u1, v0, v1)}, -1, {}, T{0}, T{0}, corner};
+        if (!slabs()) return c;
+        const Vec<T, 3> n = Vec<T, 3>{corner[3] - corner[0]}.cross(Vec<T, 3>{corner[2] - corner[1]});
+        const T len = n.norm();
+        // A cell collapsed to a line or a point -- a pole -- has no plane.
+        if (!(len > std::numeric_limits<T>::epsilon() * c.ball.r * c.ball.r) || !std::isfinite(len)) return c;
+        c.n = Vec<T, 3>{n * (T{1} / len)};
+        const T du = u1 - u0, dv = v1 - v0;
+        T suu = chart_.second_uu, svv = chart_.second_vv;
+        if (chart_.cell_second) std::tie(suu, svv) = chart_.cell_second(u0, u1, v0, v1);
+        const T bend = (du * du * suu + dv * dv * svv) / T{8};
+        T lo = std::numeric_limits<T>::infinity(), hi = -lo;
+        for (const auto& k : corner) {
+            const T h = c.n.dot(Vec<T, 3>{k - x});
+            lo = std::min(lo, h);
+            hi = std::max(hi, h);
+        }
+        c.lo = lo - bend;
+        c.hi = hi + bend;
+        return c;
     }
 
     LipschitzChart<T> chart_;
     std::vector<Cell> cells_;
+    std::size_t evaluations_ = 0;
 };
 
 namespace detail {
+
+// How far p is outside a cell's slab, or minus infinity with no slab.
+template<typename Cell, Scalar T>
+T slab_gap(const Cell& c, const Vec<T, 3>& p) {
+    if (c.hi < c.lo || (c.n[0] == T{0} && c.n[1] == T{0} && c.n[2] == T{0}))
+        return -std::numeric_limits<T>::infinity();
+    const T h = c.n.dot(Vec<T, 3>{p - c.ball.c});
+    return std::max(h - c.hi, c.lo - h);
+}
 
 // A floor on the distance from `p` to the chart and the best real distance
 // found, by branch and bound over the tree, keeping what it splits. Stops
@@ -574,11 +637,13 @@ std::pair<T, T> tree_distance_bound(const Vec<T, 3>& p, ChartCellTree<T>& tree, 
     const std::size_t before = tree.size();
     T best = std::numeric_limits<T>::infinity();
     auto push = [&](std::uint32_t i) {
-        const auto& b = tree.cell(i).ball;
+        const auto& cell = tree.cell(i);
+        const auto& b = cell.ball;
         const T d = Vec<T, 3>{p - b.c}.norm();
         best = std::min(best, d);
         if (visited) ++*visited;
-        open.push(Item{i, d - b.r - ulp * (p.norm() + b.c.norm())});
+        const T pad = ulp * (p.norm() + b.c.norm());
+        open.push(Item{i, std::max(d - b.r, slab_gap(cell, p)) - pad});
     };
     push(0);
     std::size_t pops = 0;
@@ -612,7 +677,7 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
     const T scale = max({c0.norm(), Vec<T, 3>{c0 + disp}.norm(), radius});
     const T tol = sqrt(std::numeric_limits<T>::epsilon()) * scale;
     const T ulp = std::numeric_limits<T>::epsilon() * T{8};
-    const std::size_t before = tree.size();
+    const std::size_t before = tree.size(), evaluated = tree.evaluations();
     const auto spent = [&] { return tree.size() - before; };
 
     SweptContact<T> out{false, T{1}, {}, true, 0, 0};
@@ -621,7 +686,7 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
         out.hit = hit;
         out.toi = toi;
         out.contact = contact;
-        out.evaluations = spent();
+        out.evaluations = tree.evaluations() - evaluated;
         out.visited = visited;
         return out;
     };
@@ -649,9 +714,15 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
         return std::pair{Vec<T, 3>{p - b.c}.norm() - radius, ulp * (p.norm() + b.c.norm())};
     };
     const auto push = [&](std::uint32_t cell, T t0, T t1) {
-        const auto [dc, pad] = gap_at(cell, (t0 + t1) / T{2});
+        const T tc = (t0 + t1) / T{2};
+        const auto [dc, pad] = gap_at(cell, tc);
         ++visited;
-        const T lower = dc - tree.cell(cell).ball.r - speed * (t1 - t0) / T{2} - pad;
+        const auto& c = tree.cell(cell);
+        const T ball = dc - c.ball.r - speed * (t1 - t0) / T{2};
+        // The slab drifts only with the motion along its direction.
+        const T slab = detail::slab_gap(c, Vec<T, 3>{c0 + disp * tc}) - radius -
+                       std::abs(c.n.dot(disp)) * (t1 - t0) / T{2};
+        const T lower = std::max(ball, slab) - pad;
         if (lower > tol) return;   // proved empty
         open.push(Item{cell, t0, t1, lower});
     };
@@ -670,7 +741,17 @@ SweptContact<T> first_contact(const Vec<T, 3>& c0, T radius, const Vec<T, 3>& di
         if (dc <= tol && drift <= tol)
             return finish(true, it.t0, ContactQuery<T>{max(dc, T{0}), cell.ball.c, tree.normal(it.cell), false});
         // Split what contributes more to the gap between floor and truth.
-        if (drift / T{2} >= cell.ball.r) {
+        // Time only when both floors ask for it: the slab alone would
+        // split time forever head-on, since its thickness falls as the
+        // square of the cell while the motion across it does not, and a
+        // contact is certified only on a cell small in space as well. The
+        // slab's own call counts where it is the tighter floor -- at a
+        // graze, where it asks for space and the ball would ask for time.
+        const T along = std::abs(cell.n.dot(disp)) * (it.t1 - it.t0);
+        const T slab = detail::slab_gap(cell, Vec<T, 3>{c0 + disp * tc}) - radius - along / T{2};
+        const bool by_slab = slab > dc - cell.ball.r - drift / T{2};
+        const bool split_time = drift / T{2} >= cell.ball.r && (!by_slab || along >= cell.hi - cell.lo);
+        if (split_time) {
             push(it.cell, it.t0, tc);
             push(it.cell, tc, it.t1);
         } else {

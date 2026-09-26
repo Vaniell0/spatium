@@ -60,17 +60,22 @@ struct Obstacle {
                         const double h = std::numbers::pi / 2;
                         const double s = (v0 <= h && h <= v1) ? 1.0 : std::max(std::sin(v0), std::sin(v1));
                         return r * s * (u1 - u0) / 2 + r * (v1 - v0) / 2;
+                    }, r, r, [r](double, double, double v0, double v1) {
+                        const double h = std::numbers::pi / 2;
+                        const double s = (v0 <= h && h <= v1) ? 1.0 : std::max(std::sin(v0), std::sin(v1));
+                        return std::pair{r * s, r};
                     }};
         }
         if (shape == Shape::Torus) {
             const double R = torus.major_radius, r = torus.minor_radius;
             return {*chart, R + r, [R, r](double u0, double u1, double v0, double v1) {
                         return (R + r) * (u1 - u0) / 2 + r * (v1 - v0) / 2;
-                    }};
+                    }, R + r, r};
         }
-        return {*chart, lipschitz, {}};
+        return {*chart, lipschitz, {}, second_uu, second_vv};
     }
     double lipschitz = 1.0;                     // Chart
+    double second_uu = 0, second_vv = 0;        // Chart: bounds on |f_uu|, |f_vv|, zero if unknown
 };
 
 struct Query {
@@ -153,10 +158,10 @@ inline std::pair<double, double> floor_at(const Query& q, State& s, const V3& p)
         return {d, d};
     }
     auto& tree = cells(q, s);
-    const auto before = tree.size();
+    const auto before = tree.evaluations();
     std::size_t visited = 0;
     const auto r = mech::detail::tree_distance_bound(p, tree, detail::tolerance(q) + q.radius, 1u << 20, &visited);
-    s.answer.cost += tree.size() - before + visited;
+    s.answer.cost += tree.evaluations() - before + visited;
     return r;
 }
 

@@ -301,6 +301,15 @@ struct LipschitzChart {
     const ::spatium::ParametricSurface<T>& chart;
     T lipschitz;
     std::function<T(T u0, T u1, T v0, T v1)> cell_radius = {};
+    // Bounds on |f_uu| and |f_vv| over the domain, when known: they let a
+    // cell be held between two planes as well as in a ball, a floor of
+    // second order (see ChartCellTree). Zero means not known.
+    T second_uu = T{0}, second_vv = T{0};
+    // The same bounds over one cell, when a chart can say more there than
+    // over the whole domain -- as cell_radius does for the first
+    // derivatives. A sphere's |f_uu| is r sin v and vanishes at the poles,
+    // where the domain's bound would make every cell's slab thick.
+    std::function<std::pair<T, T>(T u0, T u1, T v0, T v1)> cell_second = {};
 };
 
 // Branch and bound over the parameter rectangle. A cell with centre c and
