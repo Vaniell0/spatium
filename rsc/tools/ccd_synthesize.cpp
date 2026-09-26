@@ -155,8 +155,11 @@ int main(int argc, char** argv) {
     Obstacle torus{Shape::Torus, 0.0, spatium::geometry::Torus<double>{V3{}, V3{0, 0, 1}, 1.0, 0.3}, torus_chart(1.0, 0.3)};
     Obstacle sphere_as_chart{Shape::Chart, 1.0, {}, sphere_chart(1.0)};
     sphere_as_chart.lipschitz = 1.0;
+    sphere_as_chart.second_uu = sphere_as_chart.second_vv = 1.0;
     Obstacle torus_as_chart{Shape::Chart, -1.0, spatium::geometry::Torus<double>{V3{}, V3{0, 0, 1}, 1.0, 0.3}, torus_chart(1.0, 0.3)};
     torus_as_chart.lipschitz = 1.3;
+    torus_as_chart.second_uu = 1.3;
+    torus_as_chart.second_vv = 0.3;
     const std::vector<std::pair<const char*, const Obstacle*>> obstacles{
         {"sphere", &sphere}, {"torus", &torus}, {"sphere as chart", &sphere_as_chart}, {"torus as chart", &torus_as_chart}};
     const auto all = chains();
@@ -187,6 +190,10 @@ int main(int argc, char** argv) {
         ok = 0;
         for (const auto& q : k.cases) {
             const auto a = run(Query{q.p0, q.disp, 0.0, k.ob, &tree}, c);
+            // A kept tree is bounded, as a solver's would be: a chain that
+            // splits 2^20 cells a query would otherwise hold twenty times
+            // that across the class -- measured 12 GB in 29 s on 8 workers.
+            tree.trim(std::size_t{1} << 20);
             cost += static_cast<double>(a.cost);
             ok += admissible(a, q.truth);
             if (print) {
@@ -243,7 +250,10 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
     };
     std::vector<std::thread> pool;
-    const unsigned workers = std::max(1u, std::thread::hardware_concurrency());
+    // Each worker holds a class's cell tree for one chain at a time: the
+    // second argument caps how many, and so the memory.
+    const unsigned workers = argc > 2 ? static_cast<unsigned>(std::atoi(argv[2]))
+                                      : std::max(1u, std::thread::hardware_concurrency());
     for (unsigned w = 0; w < workers; ++w)
         pool.emplace_back([&] {
             for (std::size_t i; (i = next++) < classes.size() * all.size();) {
