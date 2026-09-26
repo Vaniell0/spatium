@@ -365,6 +365,18 @@ The local device decides the shape. Checked 2026-09-24 with `vulkaninfo`: Intel 
 
 **One black hole program, described rather than coded (2026-09-26).** `blackhole_demo.cpp` and `blackhole_gr_demo.cpp` each hard-coded a metric, a disk and a camera path in ~1500 lines between them; both are removed. `examples/blackhole_live.cpp` renders a `SpacetimeScene` -- one hole or a pair on a quadrupole inspiral, the metric Minkowski plus a Kerr-Schild term per hole, written as IR fields and lowered to GLSL with exact derivatives -- on the Iris Xe in a window (144p at 60 fps by default), to a frame, or to a frame sequence on any Vulkan device. What holds it to physics is measured, not asserted: the device against the host in float and double for rays and for dust, a Schwarzschild shadow within a third of a pixel of 3 sqrt(3) M / D sqrt(1 - 2M/D), and each metric's vacuum residual. `gpu/`'s CUDA kernels stay, as the transcription of the removed demo they were checked against.
 
+**The disk is its matter, drawn through a tree (2026-09-26).** The disk was a procedural density with dust laid over it in a 256x256x32 grid -- two substances, and the grid blurred the dust to fog over the photon rings. Now the disk is one substance: test particles on the scene's geodesics, seeded as clumps already sheared by Keplerian rotation, so they draw thin spiral streams; each is packed as a sphere instance and `DeviceLbvh` builds a tree over them on the device every frame, which each RK4 chord of a ray walks. The Doppler shift is each particle's own, from its 4-velocity. What a frame costs on the Iris Xe (`blackhole_live --bench`, median of five):
+
+| scene | particles | 144p: matter (move+pack / boxes / sort / nodes) | 144p trace | 540p trace |
+|---|---|---|---|---|
+| one Kerr hole | 0 | -- | 22 ms | 352 ms |
+| one Kerr hole | 300k | 5.3 / 2.0 / 5.4 / 3.6 ms | 22 ms | 386 ms |
+| one Kerr hole | 1M | 18 / 6.7 / 12 / 13 ms | 25 ms | 400 ms |
+| a pair | 300k | 7.3 / 2.0 / 3.9 / 3.6 ms | 39 ms | 601 ms |
+| a pair | 1M | 24 / 6.5 / 11 / 13 ms | 50 ms | 642 ms |
+
+The trace dominates and hardly notices the matter, since a ray's chord that misses the root box asks nothing; the matter's own cost is linear in the particles, the host's sort a third of it. The quality pass before this (a finer step near the photon orbit, a lower transmittance floor, for the rings) made the trace about a third dearer: 960x540 went from 0.26 s to 0.35 s.
+
 Newton's cradle belongs in the middle rather than beside it. It is the canonical case where a naive integrator *visibly* fails, so it is the first demo in the tree that shows an invariant rather than a motion.
 
 ## Mesh processing

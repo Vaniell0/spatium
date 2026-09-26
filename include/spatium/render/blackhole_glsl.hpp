@@ -96,21 +96,6 @@ std::array<Vec<double, 4>, 4> observer_tetrad(const Metric& metric, const Vec<do
     return {e0, right, up, fwd};
 }
 
-// Where the dust is counted: a box about the centre of mass, `n` cells a
-// side in the plane and `nz` across it, wide enough for the dust's outer
-// edge.
-struct DustGrid {
-    std::uint32_t nx = 256, ny = 256, nz = 32;
-    double half_width = 0, half_height = 0;
-    std::uint32_t cells() const { return nx * ny * nz; }
-};
-inline DustGrid dust_grid(const physics::relativity::SpacetimeScene<double>& scene) {
-    DustGrid g;
-    g.half_width = 1.1 * scene.dust().outer * scene.total_mass();
-    g.half_height = 0.12 * g.half_width;
-    return g;
-}
-
 // What every shader of a scene shares: the hole paths, the metric and its
 // geodesic step, the horizon test, integer hashes. `form` is the Kerr-
 // Schild form traced in; rays and dust both use the outgoing one, so their
@@ -170,57 +155,31 @@ float hash_f(uvec3 v) {{ return float(hash_u(v) & 0xffffffu) / 16777216.0; }}
 
 // The whole shader for `scene`. Bindings: 0 pixels (uint, RGBA8), 1 the
 // blackbody table, 2 and 3 the field tables the hole paths may read, 4 the
-// dust counts (dust_grid()).
+// unused, 5 the accumulation, 6 and 7 the matter's tree and instances.
 inline Result<std::string> blackhole_shader(const physics::relativity::SpacetimeScene<double>& scene) {
     auto common = scene_common_glsl(scene);
     if (!common) return std::unexpected(common.error());
-    const auto grid = dust_grid(scene);
     const auto& dust = scene.dust();
-    // Counts to density: a cell holding the mean occupancy of the dust's
-    // own volume reads as 1.
-    const double volume_cells = 0.6 * grid.nx * grid.ny * 0.35 * grid.nz;
-    const double per_cell = dust.count > 0 ? double(dust.count) / volume_cells : 1.0;
 
     std::string src = "#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\n";
     src += R"GLSL(
 layout(std430, binding = 0) writeonly buffer Image { uint pixels[]; };
 layout(std430, binding = 1) readonly buffer Blackbody { vec4 bb[256]; };
-layout(std430, binding = 4) readonly buffer Dust { uint dust[]; };
 layout(std430, binding = 5) buffer Accum { vec4 accum[]; };   // rgb sum, samples
+struct LNode    { vec3 lo; uint left; vec3 hi; uint right; };
+struct Instance { vec4 r0, r1, r2, scale_quadric, color_rough, emissive_opacity; };
+layout(std430, binding = 6) readonly buffer Nodes { LNode nodes[]; };   // the matter's tree
+layout(std430, binding = 7) readonly buffer Insts { Instance insts[]; };
 layout(push_constant) uniform Push {
     vec4 e0, e1, e2, e3, cam, view, disk; uvec4 flags;
 } pc;
 )GLSL";
     src += *common;
     src += std::format(R"GLSL(
-const bool DUST_ON = {0};
-const uvec3 DUST_N = uvec3({1}u, {2}u, {3}u);
-const vec2 DUST_HALF = vec2({4}, {5});
-const float DUST_PER_CELL = {6};
-
-float dust_cell(ivec3 c) {{
-    if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, ivec3(DUST_N)))) return 0.0;
-    return float(dust[(uint(c.z) * DUST_N.y + uint(c.y)) * DUST_N.x + uint(c.x)]);
-}}
-// Dust density at p, 1 at the mean occupancy, interpolated between cell
-// centres: read from the nearest cell, a cell near the camera projects to
-// a block.
-float dust_at(vec3 p) {{
-    if (!DUST_ON) return 0.0;
-    vec3 u = (p / vec3(DUST_HALF.x, DUST_HALF.x, DUST_HALF.y)) * 0.5 + 0.5;
-    if (any(lessThan(u, vec3(-0.01))) || any(greaterThan(u, vec3(1.01)))) return 0.0;
-    vec3 g = u * vec3(DUST_N) - 0.5;
-    ivec3 i = ivec3(floor(g));
-    vec3 f = g - vec3(i);
-    float c00 = mix(dust_cell(i), dust_cell(i + ivec3(1, 0, 0)), f.x);
-    float c10 = mix(dust_cell(i + ivec3(0, 1, 0)), dust_cell(i + ivec3(1, 1, 0)), f.x);
-    float c01 = mix(dust_cell(i + ivec3(0, 0, 1)), dust_cell(i + ivec3(1, 0, 1)), f.x);
-    float c11 = mix(dust_cell(i + ivec3(0, 1, 1)), dust_cell(i + ivec3(1, 1, 1)), f.x);
-    return mix(mix(c00, c10, f.y), mix(c01, c11, f.y), f.z) / DUST_PER_CELL;
-}}
-)GLSL", dust.count > 0 ? "true" : "false", grid.nx, grid.ny, grid.nz,
-        io::build::detail::glsl_float(grid.half_width), io::build::detail::glsl_float(grid.half_height),
-        io::build::detail::glsl_float(per_cell));
+const bool MATTER_ON = {0};
+const uint SKY_SEED = {2}u;
+const float MATTER_GAIN = {1};
+)GLSL", dust.count > 0 ? "true" : "false", io::build::detail::glsl_float(120000.0 / std::max<double>(1.0, dust.count)), scene.sky().seed);
     src += R"GLSL(
 // ── Noise and stars, from integer hashes only ────────────────────
 float value_noise(vec3 p) {
@@ -334,6 +293,60 @@ vec4 disk_at(vec4 x, vec4 k, float g[10]) {
     return vec4(bb_color(T) * I, rho * 0.8);
 }
 
+// ── The matter, drawn through its tree ───────────────────────────
+// The light the particles near the chord a -> b give off: each a Gaussian
+// blob of radius sigma about its centre, its temperature from where it is
+// (T ~ r^(-3/4)) and its shift from its own 4-velocity, so the Doppler is
+// the particle's, not a formula's. The chord is one RK4 step, short near
+// the matter, so a straight segment stands for the curved path there.
+bool seg_box(vec3 a, vec3 inv, float len, vec3 lo, vec3 hi) {
+    vec3 t0 = (lo - a) * inv, t1 = (hi - a) * inv;
+    vec3 tn = min(t0, t1), tf = max(t0, t1);
+    float n = max(max(tn.x, tn.y), max(tn.z, 0.0));
+    float f = min(min(tf.x, tf.y), min(tf.z, len));
+    return n <= f;
+}
+vec3 matter_along(vec3 a, vec3 b, vec4 k, float g[10], uint node_count) {
+    vec3 light = vec3(0.0);
+    if (!MATTER_ON || node_count == 0u) return light;
+    vec3 d = b - a;
+    float len = length(d);
+    if (len <= 0.0) return light;
+    vec3 dir = d / len;
+    vec3 inv = 1.0 / (dir + vec3(1e-12));
+    if (!seg_box(a, inv, len, nodes[0].lo, nodes[0].hi)) return light;
+    mat4 gm;
+    for (int i = 0; i < 4; ++i) for (int j = 0; j < 4; ++j) gm[i][j] = g[metric_entry(i, j)];
+    vec4 pl = gm * k;
+    float inner = pc.disk.x;
+    uint stack[48];
+    int sp = 0;
+    stack[sp++] = 0u;
+    while (sp > 0) {
+        LNode n = nodes[stack[--sp]];
+        if ((n.left & 0x80000000u) != 0u) {
+            Instance q = insts[n.left & 0x7fffffffu];
+            vec3 c = vec3(q.r0.w, q.r1.w, q.r2.w);
+            float sigma = q.scale_quadric.x;
+            float t = clamp(dot(c - a, dir), 0.0, len);
+            vec3 off = a + dir * t - c;
+            float w = exp(-0.5 * dot(off, off) / (sigma * sigma));
+            if (w < 1e-3) continue;
+            float R = max(length(c.xy), inner * 0.5);
+            float shift = dot(pl, pc.e0) / dot(pl, q.color_rough);
+            shift = 1.0 + pc.disk.z * (shift - 1.0);
+            float T = pc.disk.w * 7000.0 * pow(inner / R, 0.75) * shift;
+            float I = pow(inner / R, 3.0) * pow(shift, 4.0);
+            light += bb_color(T) * I * w * min(len, 2.5 * sigma) / sigma * MATTER_GAIN;
+            continue;
+        }
+        LNode l = nodes[n.left], r = nodes[n.right];
+        if (sp < 46 && seg_box(a, inv, len, l.lo, l.hi)) stack[sp++] = n.left;
+        if (sp < 46 && seg_box(a, inv, len, r.lo, r.hi)) stack[sp++] = n.right;
+    }
+    return light;
+}
+
 void main() {
     uvec2 id = gl_GlobalInvocationID.xy;
     uint W = uint(pc.view.x), H = uint(pc.view.y);
@@ -366,24 +379,25 @@ void main() {
         // of higher order are exponentially thin.
         if (hd < 2.5) dl *= 0.35;
         float ds = dl * length(k.yzw);
+        vec4 x0 = x, k0 = k;
+        geodesic_step(x, k, dl);
         if ((pc.flags.x & 2u) != 0u) {
             float g[10]; vec4 dg[10];
-            metric(x, g, dg);
-            vec4 e = disk_at(x, k, g);
-            light += trans * e.rgb * ds * 0.6;
-            trans *= exp(-e.a * ds);
+            metric(x0, g, dg);
+            if (MATTER_ON) {
+                // The disk is its particles: one substance, not a field
+                // with dust laid over it.
+                light += trans * matter_along(x0.yzw, x.yzw, k0, g, pc.flags.w);
+            } else {
+                vec4 e = disk_at(x0, k0, g);
+                light += trans * e.rgb * ds * 0.6;
+                trans *= exp(-e.a * ds);
+            }
         }
-        // Dust: warm grey, lit by nothing but itself, and absorbing a little.
-        float rho_d = dust_at(x.yzw);
-        if (rho_d > 0.0) {
-            light += trans * vec3(0.9, 0.75, 0.6) * rho_d * ds * 0.006;
-            trans *= exp(-rho_d * ds * 0.004);
-        }
-        geodesic_step(x, k, dl);
     }
     // A ray that neither escaped nor fell in within the step budget is
     // circling close to the photon orbit; it is drawn as captured.
-    if (escaped) light += trans * sky(normalize(k.yzw), sigma, pc.flags.w);
+    if (escaped) light += trans * sky(normalize(k.yzw), sigma, SKY_SEED);
 
     // Accumulate in HDR, before the curve, so the average is of light.
     uint pix = id.y * W + id.x;
@@ -472,30 +486,38 @@ void main() {
     return src;
 }
 
-// Counts every particle into its grid cell. Binding 0 the particles, 1 the
-// counts (cleared before). Push: count.
-inline std::string dust_deposit_shader(const DustGrid& grid) {
-    return std::format(R"GLSL(
+// Each particle as an instance of the unit sphere scaled to sigma, for
+// viewer/gpu_lbvh.hpp's tree: translation its position, color_rough its
+// 4-velocity (what the shader reads the Doppler from). Binding 0 the
+// particles, 1 the instances. Push: count, sigma.
+inline const char* kMatterPackGlsl = R"GLSL(
 #version 450
 layout(local_size_x = 64) in;
-layout(std430, binding = 0) readonly buffer Particles {{ vec4 s[]; }};
-layout(std430, binding = 1) buffer Dust {{ uint dust[]; }};
-layout(push_constant) uniform Push {{ uint count; }} pc;
-void main() {{
+struct Instance { vec4 r0, r1, r2, scale_quadric, color_rough, emissive_opacity; };
+layout(std430, binding = 0) readonly buffer Particles { vec4 s[]; };
+layout(std430, binding = 1) writeonly buffer Insts { Instance insts[]; };
+layout(push_constant) uniform Push { uint count; float sigma; uint pad0; uint pad1; } pc;
+void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= pc.count) return;
-    vec3 p = s[2u * i].yzw;
-    vec3 u = (p / vec3({3}, {3}, {4})) * 0.5 + 0.5;
-    if (any(lessThan(u, vec3(0.0))) || any(greaterThanEqual(u, vec3(1.0)))) return;
-    uvec3 c = uvec3(u * vec3({0}.0, {1}.0, {2}.0));
-    atomicAdd(dust[(c.z * {1}u + c.y) * {0}u + c.x], 1u);
-}}
-)GLSL", grid.nx, grid.ny, grid.nz, io::build::detail::glsl_float(grid.half_width),
-                       io::build::detail::glsl_float(grid.half_height));
+    vec4 x = s[2u * i], u = s[2u * i + 1u];
+    Instance q;
+    q.r0 = vec4(1.0, 0.0, 0.0, x.y);
+    q.r1 = vec4(0.0, 1.0, 0.0, x.z);
+    q.r2 = vec4(0.0, 0.0, 1.0, x.w);
+    q.scale_quadric = vec4(pc.sigma, uintBitsToFloat(0u), 0.0, 0.0);
+    q.color_rough = u;
+    q.emissive_opacity = vec4(x.x, 0.0, 0.0, 1.0);
+    insts[i] = q;
 }
+)GLSL";
 
-// The particles' first state: circular orbits about the total mass between
-// half the dust's outer area and its edge, normalised in the metric.
+// The particles' first state: clumps on circular orbits about the total
+// mass, each already sheared as Keplerian rotation would have sheared it
+// over its age -- a particle at radius R has turned by Omega(R) * age from
+// where the clump began -- so the disk starts as the streams differential
+// rotation makes, and the geodesics carry on from there. Normalised in the
+// metric; no gas and no magnetic field, only the shear.
 inline std::vector<float> dust_initial(const physics::relativity::SpacetimeScene<double>& scene) {
     const auto& d = scene.dust();
     const auto metric = *scene.metric(physics::relativity::SpacetimeScene<double>::Form::outgoing);
@@ -506,16 +528,32 @@ inline std::vector<float> dust_initial(const physics::relativity::SpacetimeScene
         state = state * 6364136223846793005ull + 1442695040888963407ull;
         return static_cast<double>(state >> 11) / static_cast<double>(1ull << 53);
     };
+    auto gauss = [&] {
+        const double a = std::max(1e-12, uni()), b = uni();
+        return std::sqrt(-2.0 * std::log(a)) * std::cos(2 * std::numbers::pi * b);
+    };
+    const std::uint32_t clumps = std::max(1u, d.count / 400u);
     for (std::uint32_t i = 0; i < d.count; ++i) {
-        const double R = std::sqrt(inner * inner + (outer * outer - inner * inner) * uni());
-        const double phi = 2 * std::numbers::pi * uni(), z = (uni() - 0.5) * 0.04 * R;
+        // Which clump: its centre radius (area-weighted), phase and age.
+        std::uint64_t cs = (i % clumps) * 0x9E3779B97F4A7C15ull + d.seed;
+        auto cuni = [&cs] {
+            cs = cs * 6364136223846793005ull + 1442695040888963407ull;
+            return static_cast<double>(cs >> 11) / static_cast<double>(1ull << 53);
+        };
+        const double Rc = std::sqrt(inner * inner + (outer * outer - inner * inner) * cuni());
+        const double phic = 2 * std::numbers::pi * cuni();
+        const double age = 300.0 * M * cuni();
+        const double width = 0.06 * Rc;
+        const double R = std::max(inner * 0.9, Rc + width * gauss());
+        const double omega = std::sqrt(M / (R * R * R)), omegac = std::sqrt(M / (Rc * Rc * Rc));
+        const double phi = phic + (omega - omegac) * age + 0.02 * gauss();
+        const double z = 0.01 * R * gauss();
         const Vec<double, 4> x{0.0, R * std::cos(phi), R * std::sin(phi), z};
-        const double omega = std::sqrt(M / (R * R * R));
         const Vec<double, 4> v{1.0, -omega * x[2], omega * x[1], 0.0};
         const auto g = metric(x);
         double vv = 0;
         for (std::size_t a = 0; a < 4; ++a)
-            for (std::size_t b = 0; b < 4; ++b) vv += g(a, b) * v[a] * v[b];
+            for (std::size_t b2 = 0; b2 < 4; ++b2) vv += g(a, b2) * v[a] * v[b2];
         const double n = 1.0 / std::sqrt(std::max(1e-12, -vv));
         for (int c = 0; c < 4; ++c) {
             s[8 * i + c] = static_cast<float>(x[static_cast<std::size_t>(c)]);

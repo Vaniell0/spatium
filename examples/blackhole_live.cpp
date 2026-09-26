@@ -29,6 +29,11 @@
 //       angular radius from the pixels a horizon ended, against the static
 //       observer's sin(alpha) = 3 sqrt(3) M / D sqrt(1 - 2M/D).
 //
+//   --bench
+//       What a frame costs, by part -- moving and packing the matter, the
+//       tree (device boxes and keys, host sort, device nodes), the trace --
+//       for one hole and a pair, 0 to 1M particles, at 144p and 540p.
+//
 //   --dust-check
 //       2048 dust particles on circular orbits about a Kerr hole (spin
 //       0.9), moved on the device to coordinate time 200 M, against the
@@ -50,6 +55,8 @@
 #include <spatium/physics/relativity/metric_glsl.hpp>
 #include <spatium/physics/relativity/spacetime_scene.hpp>
 #include <spatium/viewer/compute.hpp>
+#include <spatium/viewer/gpu_lbvh.hpp>
+#include <spatium/render/gpu_types.hpp>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -223,7 +230,7 @@ struct Settings {
     float doppler = 0.6f;          // how much of the physical asymmetry is kept
     float exposure = 1.6f;
     int max_steps = 1500;
-    int dust = 0;                  // index into kDustCounts
+    int dust = 2;                  // index into kDustCounts: the disk's matter
 };
 
 constexpr std::uint32_t kDustCounts[] = {0, 100000, 300000, 1000000};
@@ -254,13 +261,19 @@ struct Renderer {
     std::unique_ptr<vc::Buffer> pixels, accum, bb, perm, pts;
     float doppler = 0.6f;
     std::uint32_t W = 0, H = 0;
-    // Dust: particles moved on the device each frame, counted into a grid
-    // the rays read.
-    std::unique_ptr<vc::Kernel> move, deposit;
-    std::unique_ptr<vc::Buffer> particles, grid;
-    spatium::render::DustGrid grid_shape;
-    std::uint32_t dust_count = 0;
-    std::uint32_t frame_no = 0;
+    // The matter: particles moved on the device each frame, packed as
+    // instances of a sphere of radius sigma, and a tree built over them on
+    // the device, which the rays walk.
+    std::unique_ptr<vc::Kernel> move, pack;
+    std::unique_ptr<vc::Buffer> particles, insts, quad, dummy;
+    std::unique_ptr<vc::DeviceLbvh> tree;
+    VkBuffer bound_nodes = VK_NULL_HANDLE;
+    std::uint32_t dust_count = 0, frame_no = 0;
+    float sigma = 0.08f;
+    // What the last prepare() cost: moving and packing on the device, then
+    // the tree (device boxes and keys, the host's sort, device nodes).
+    double move_pack_ms = 0;
+    vc::DeviceLbvh::Timing tree_ms{};
 
     Renderer(vc::Context& c, rel::SpacetimeScene<double> sc, std::uint32_t w, std::uint32_t h) : ctx(c), scene(std::move(sc)) {
         const auto src = spatium::render::blackhole_shader(scene);
@@ -273,12 +286,12 @@ struct Renderer {
         const std::vector<std::uint32_t> none{0};
         perm = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
         pts = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
-        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 6,
+        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 8,
                                               static_cast<std::uint32_t>(sizeof(spatium::render::BlackholePush)));
-        grid_shape = spatium::render::dust_grid(scene);
         dust_count = scene.dust().count;
-        grid = std::make_unique<vc::Buffer>(ctx, std::size_t{grid_shape.cells()} * 4);
-        std::memset(grid->data(), 0, grid->size());
+        sigma = static_cast<float>(0.08 * scene.total_mass());
+        dummy = std::make_unique<vc::Buffer>(ctx, 256);
+        std::memset(dummy->data(), 0, dummy->size());
         if (dust_count > 0) {
             const auto msrc = spatium::render::dust_move_shader(scene);
             if (!msrc) {
@@ -286,13 +299,18 @@ struct Renderer {
                 std::exit(1);
             }
             move = std::make_unique<vc::Kernel>(ctx, msrc->c_str(), "dust_move.comp", 4, 16);
-            const auto dsrc = spatium::render::dust_deposit_shader(grid_shape);
-            deposit = std::make_unique<vc::Kernel>(ctx, dsrc.c_str(), "dust_deposit.comp", 2, 16);
+            pack = std::make_unique<vc::Kernel>(ctx, spatium::render::kMatterPackGlsl, "matter_pack.comp", 2, 16);
             reset_dust();
+            insts = std::make_unique<vc::Buffer>(ctx, std::size_t{dust_count} * sizeof(spatium::render::gpu::Instance));
+            spatium::render::gpu::Quadric unit{};
+            for (int c = 0; c < 3; ++c) { unit.lo[c] = -1.0f; unit.hi[c] = 1.0f; }
+            unit.lo[3] = 1.0f;
+            quad = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const spatium::render::gpu::Quadric>(&unit, 1)));
+            tree = std::make_unique<vc::DeviceLbvh>(ctx);
             vc::Buffer* mb[] = {particles.get(), bb.get(), perm.get(), pts.get()};
             move->bind(mb);
-            vc::Buffer* db[] = {particles.get(), grid.get()};
-            deposit->bind(db);
+            vc::Buffer* pb[] = {particles.get(), insts.get()};
+            pack->bind(pb);
         }
         resize(w, h);
     }
@@ -301,9 +319,33 @@ struct Renderer {
         H = h;
         pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
         accum = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 16);
-        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get(), grid.get(), accum.get()};
-        kernel->bind(bufs);
+        bind();
     }
+    void bind() {
+        vc::Buffer* nodes = tree && tree->leaves() > 0 ? &tree->nodes() : dummy.get();
+        vc::Buffer* in = insts ? insts.get() : dummy.get();
+        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get(), dummy.get(), accum.get(), nodes, in};
+        kernel->bind(bufs);
+        bound_nodes = nodes->handle();
+    }
+    // Before a frame at time t: the matter moved there, packed, and its
+    // tree built. Outside the frame's command buffer, since the build
+    // sorts its keys on the host.
+    void prepare(double t) {
+        if (dust_count == 0) return;
+        struct { float target; std::uint32_t count, frame; float outer; } mp{
+            static_cast<float>(t), dust_count, frame_no++, static_cast<float>(scene.dust().outer * scene.total_mass())};
+        struct { std::uint32_t count; float sigma; std::uint32_t a, b; } pp{dust_count, sigma, 0, 0};
+        move_pack_ms = ctx.run([&](VkCommandBuffer cmd) {
+            move->dispatch(cmd, &mp, (dust_count + 63) / 64, 1);
+            barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+            pack->dispatch(cmd, &pp, (dust_count + 63) / 64, 1);
+        });
+        tree_ms = tree->build(*insts, *quad, dust_count);
+        const VkBuffer now = tree->leaves() > 0 ? tree->nodes().handle() : dummy->handle();
+        if (now != bound_nodes) bind();
+    }
+    std::uint32_t leaves() const { return tree ? tree->leaves() : 0u; }
     // Back to the first state: circular orbits at t = 0.
     void reset_dust() {
         if (dust_count == 0) return;
@@ -342,7 +384,7 @@ struct Renderer {
         p.flags[0] = (bgr ? kFlagBgr : 0u) | (d.on ? kFlagDisk : 0u) | (accumulate ? kFlagAccumulate : 0u);
         p.flags[1] = static_cast<std::uint32_t>(max_steps);
         p.flags[2] = sample;
-        p.flags[3] = scene.sky().seed;
+        p.flags[3] = leaves();
         return p;
     }
     static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags from, VkAccessFlags src) {
@@ -351,30 +393,24 @@ struct Renderer {
         mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
         vkCmdPipelineBarrier(cmd, from, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr);
     }
-    // The dust moved to the frame's time and counted, then the frame.
     void record(VkCommandBuffer cmd, const spatium::render::BlackholePush& p) {
-        if (dust_count > 0) {
-            struct { float target; std::uint32_t count, frame; float outer; } mp{
-                p.cam[0], dust_count, frame_no++, static_cast<float>(scene.dust().outer * scene.total_mass())};
-            move->dispatch(cmd, &mp, (dust_count + 63) / 64, 1);
-            barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-            vkCmdFillBuffer(cmd, grid->handle(), 0, VK_WHOLE_SIZE, 0u);
-            barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-            const std::uint32_t dp[4] = {dust_count, 0, 0, 0};
-            deposit->dispatch(cmd, dp, (dust_count + 63) / 64, 1);
-            barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-        }
         kernel->dispatch(cmd, &p, (W + 7) / 8, (H + 7) / 8);
     }
     double render(const spatium::render::BlackholePush& p) {
-        return ctx.run([&](VkCommandBuffer cmd) { record(cmd, p); });
+        prepare(p.cam[0]);
+        auto q = p;
+        q.flags[3] = leaves();
+        return ctx.run([&](VkCommandBuffer cmd) { record(cmd, q); });
     }
     // `samples` jittered samples averaged in HDR: the anti-aliased frame a
     // still or a video wants, one dispatch per sample.
     double render_samples(double t, double exposure, int max_steps, int samples) {
         double ms = 0;
-        for (int k = 0; k < std::max(1, samples); ++k)
-            ms += render(push(t, exposure, max_steps, false, static_cast<std::uint32_t>(k), samples > 1));
+        prepare(t);
+        for (int k = 0; k < std::max(1, samples); ++k) {
+            const auto p = push(t, exposure, max_steps, false, static_cast<std::uint32_t>(k), samples > 1);
+            ms += ctx.run([&](VkCommandBuffer cmd) { record(cmd, p); });
+        }
         return ms;
     }
     std::vector<std::uint32_t> read() const {
@@ -530,7 +566,7 @@ int run_live(int max_frames, const std::string& screenshot) {
             ImGui::SliderFloat("temperature", &st.temperature, 0.3f, 3.0f, "%.2f");
             ImGui::SliderFloat("outer edge", &st.disk_outer, 10.0f, 60.0f, "%.0f M");
             ImGui::SliderFloat("doppler", &st.doppler, 0.0f, 1.0f, "%.2f of the physics");
-            ImGui::SeparatorText("dust");
+            ImGui::SeparatorText("matter (the disk)");
             {
                 const char* names[] = {"none", "100k", "300k", "1M"};
                 for (int i = 0; i < 4; ++i) {
@@ -625,6 +661,7 @@ int run_live(int max_frames, const std::string& screenshot) {
             }
 
             renderer->doppler = st.doppler;
+            renderer->prepare(t);
             // Progressive: while nothing changes, each frame adds a sample
             // to the average; any change starts it again.
             auto p = renderer->push(t, st.exposure, st.max_steps, present.bgra(), 0, progressive);
@@ -680,6 +717,7 @@ int main(int argc, char** argv) {
         if (a == "--check") mode = "check";
         else if (a == "--shadow-check") mode = "shadow";
         else if (a == "--dust-check") mode = "dust";
+        else if (a == "--bench") mode = "bench";
         else if (a == "--live") mode = "live";
         else if (a == "--frame") { mode = "frame"; out = next(); }
         else if (a == "--video") { mode = "video"; out = next(); }
@@ -715,6 +753,41 @@ int main(int argc, char** argv) {
         int rc = check_scene(ctx, "one Kerr hole, spin 0.9", one, rays, steps);
         rc |= check_scene(ctx, "binary, 12 M apart", pair, rays, steps);
         return rc;
+    }
+
+    if (mode == "bench") {
+        std::println("{:<6} {:>9} {:>6} | {:>10} {:>9} {:>9} {:>9} | {:>9} | {:>8}", "scene", "particles", "height",
+                     "move+pack", "boxes", "sort", "nodes", "trace", "frame");
+        for (int which_scene : {0, 1})
+            for (int dust_i : {0, 1, 2, 3})
+                for (std::uint32_t h : {144u, 540u}) {
+                    Settings st;
+                    st.scene = which_scene;
+                    st.spin = which_scene == 1 ? 0.45f : 0.9f;
+                    st.dust = dust_i;
+                    const std::uint32_t w = h * 16 / 9;
+                    Renderer r(ctx, make_scene(st), w, h);
+                    // Warm up, then the median of five.
+                    std::vector<double> trace, mp, bx, so, no;
+                    for (int k = 0; k < 6; ++k) {
+                        const double t_frame = 5.0 * k;
+                        r.prepare(t_frame);
+                        auto p = r.push(t_frame, 1.6, st.max_steps, false);
+                        const double ms = ctx.run([&](VkCommandBuffer cmd) { r.record(cmd, p); });
+                        if (k == 0) continue;
+                        trace.push_back(ms);
+                        mp.push_back(r.move_pack_ms);
+                        bx.push_back(r.tree_ms.boxes_keys_ms);
+                        so.push_back(r.tree_ms.read_sort_ms);
+                        no.push_back(r.tree_ms.tree_ms);
+                    }
+                    auto med = [](std::vector<double> v) { std::sort(v.begin(), v.end()); return v[v.size() / 2]; };
+                    const double total = med(trace) + med(mp) + med(bx) + med(so) + med(no);
+                    std::println("{:<6} {:>9} {:>5}p | {:>8.2f}ms {:>7.2f}ms {:>7.2f}ms {:>7.2f}ms | {:>7.2f}ms | {:>6.1f}ms",
+                                 which_scene ? "pair" : "one", kDustCounts[dust_i], h, med(mp), med(bx), med(so),
+                                 med(no), med(trace), total);
+                }
+        return 0;
     }
 
     if (mode == "dust") {
