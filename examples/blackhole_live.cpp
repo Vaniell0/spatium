@@ -406,8 +406,11 @@ void main() {
 )GLSL";
 
 struct Preset { const char* name; std::uint32_t h; };
-constexpr Preset kPresets[] = {{"144p", 144}, {"240p", 240}, {"360p", 360}, {"540p", 540}, {"720p", 720},
-                               {"window", 0}};
+// "auto" holds a frame rate by moving the render height; "window" is the
+// window's own resolution.
+constexpr std::uint32_t kAuto = 1;
+constexpr Preset kPresets[] = {{"auto", kAuto}, {"144p", 144}, {"240p", 240}, {"360p", 360}, {"540p", 540},
+                               {"720p", 720}, {"window", 0}};
 
 std::string timestamp_name() {
     const std::time_t now = std::time(nullptr);
@@ -433,9 +436,28 @@ int run_live(int max_frames, const std::string& screenshot) {
         vc::Presenter present(ctx, window);
         Settings st;
         int preset = 0;
+        float auto_h = 144.0f, target_fps = 30.0f;
+        bool fullscreen = false;
+        int windowed[4] = {0, 0, 1280, 720};   // x, y, w, h before going full screen
+        auto set_fullscreen = [&](bool on) {
+            if (on == fullscreen) return;
+            if (on) {
+                glfwGetWindowPos(window, &windowed[0], &windowed[1]);
+                glfwGetWindowSize(window, &windowed[2], &windowed[3]);
+                GLFWmonitor* mon = glfwGetPrimaryMonitor();
+                const GLFWvidmode* mode = glfwGetVideoMode(mon);
+                glfwSetWindowMonitor(window, mon, 0, 0, mode->width, mode->height, mode->refreshRate);
+            } else {
+                glfwSetWindowMonitor(window, nullptr, windowed[0], windowed[1], windowed[2], windowed[3], 0);
+            }
+            fullscreen = on;
+        };
+        bool f11_was = false;
         std::uint32_t WW = present.width(), WH = present.height();
         auto render_size = [&] {
-            const std::uint32_t h = kPresets[preset].h == 0 ? WH : std::min(kPresets[preset].h, WH);
+            const std::uint32_t want = kPresets[preset].h == kAuto ? static_cast<std::uint32_t>(auto_h)
+                                                                     : kPresets[preset].h;
+            const std::uint32_t h = want == 0 ? WH : std::min(want, WH);
             const std::uint32_t w = std::max(1u, static_cast<std::uint32_t>(std::lround(double(h) * WW / WH)));
             return std::pair{w, h};
         };
@@ -517,6 +539,18 @@ int run_live(int max_frames, const std::string& screenshot) {
                 if (i) ImGui::SameLine();
                 if (ImGui::RadioButton(kPresets[i].name, &preset, i)) resize = true;
             }
+            if (kPresets[preset].h == kAuto)
+                ImGui::SliderFloat("target fps", &target_fps, 10.0f, 60.0f, "%.0f");
+            ImGui::SeparatorText("window");
+            ImGui::Text("%ux%u", WW, WH);
+            if (!fullscreen) {
+                if (ImGui::Button("1280x720")) glfwSetWindowSize(window, 1280, 720);
+                ImGui::SameLine();
+                if (ImGui::Button("1600x900")) glfwSetWindowSize(window, 1600, 900);
+                ImGui::SameLine();
+                if (ImGui::Button("1920x1080")) glfwSetWindowSize(window, 1920, 1080);
+            }
+            if (ImGui::Button(fullscreen ? "leave full screen (F11)" : "full screen (F11)")) set_fullscreen(!fullscreen);
             if (ImGui::Button("save frame (1920x1080)")) save = true;
             if (!saved.empty()) ImGui::Text("saved %s", saved.c_str());
             ImGui::End();
@@ -527,6 +561,25 @@ int run_live(int max_frames, const std::string& screenshot) {
             renderer->scene.disk().on = st.disk;
             renderer->scene.disk().temperature = st.temperature;
             renderer->scene.disk().outer = st.disk_outer;
+            {
+                const bool f11 = glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS;
+                if (f11 && !f11_was) set_fullscreen(!fullscreen);
+                f11_was = f11;
+            }
+            // Auto: every half second, move the render height toward what the
+            // frame budget allows -- down quickly when over it, up slowly
+            // when well under -- and resize only on a change worth it.
+            if (kPresets[preset].h == kAuto && frame % 30 == 29 && gpu_ms > 0.0) {
+                const double budget = 1000.0 / target_fps;
+                float h = auto_h;
+                if (gpu_ms > 0.9 * budget) h *= 0.8f;
+                else if (gpu_ms < 0.5 * budget) h *= 1.15f;
+                h = std::clamp(h, 72.0f, static_cast<float>(WH));
+                if (std::abs(h - auto_h) > 0.08f * auto_h) {
+                    auto_h = h;
+                    resize = true;
+                }
+            }
             if (rebuild) {
                 vkDeviceWaitIdle(ctx.device());
                 auto [w, h] = render_size();
