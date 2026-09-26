@@ -21,9 +21,11 @@
 //   interpolation bound (du^2 |f_uu| + dv^2 |f_vv|) / 8 of the chart at
 //   that time, itself linear in t. Two cells are apart along n where one's
 //   least line clears the other's greatest: the minimum of a few lines, so
-//   the times it holds form one interval, found line by line. Directions
-//   tried: both cells' normals across their diagonals and the line between
-//   their centres. Any direction is valid; these make the slabs thin.
+//   the times it holds form one interval, found line by line. Any
+//   direction is valid; which are tried is the policy's (SurfaceCcdPolicy):
+//   the cells' normals across their diagonals, the line between their
+//   centres, the cross products of their sides -- what two edges, which
+//   have no normal, are apart along -- and the world axes.
 //
 // What is left of the interval after both is where the pair may touch.
 // The earliest pair is refined: the cell of larger reach is halved, or,
@@ -70,6 +72,25 @@ struct MovingChart {
     std::function<Vec<T, 3>(T, T)> p, w;
     DerivativeBounds<T> bp, bw;
     T u0 = T{0}, u1 = T{1}, v0 = T{0}, v1 = T{1};
+};
+
+// The decisions of the search that no correctness depends on -- which
+// directions a slab is tried along, which cell is halved, when time is
+// split -- as data, so they can be chosen per kind of query rather than
+// once for all of them. Every choice keeps the rule; only the cost moves.
+struct SurfaceCcdPolicy {
+    enum Axis : std::uint32_t {
+        kNormals = 1,        // each cell's normal across its diagonals
+        kCentres = 2,        // the line between the cells' centres
+        kTangentCross = 4,   // cross products of one cell's sides with the other's --
+                             // the axis two edges are apart along, where neither has a normal
+        kWorld = 8,          // x, y, z
+    };
+    std::uint32_t axes = kNormals | kCentres | kTangentCross;
+    bool ball = true;
+    // Halve by reach (position plus velocity over the interval) or by the
+    // widest parameter side.
+    bool split_by_reach = true;
 };
 
 template<Scalar T>
@@ -189,14 +210,17 @@ bool cut(T& t0, T& t1, std::pair<T, T> apart) {
 // interval still open -- early, never late.
 template<Scalar T>
 SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b, T width = T{1e-5},
-                                std::size_t budget = std::size_t{1} << 24) {
+                                std::size_t budget = std::size_t{1} << 24, const SurfaceCcdPolicy& policy = {}) {
     using std::abs; using std::sqrt;
     detail::MovingCellTree<T> ta(a), tb(b);
     SurfaceContact<T> out;
     const T ulp = std::numeric_limits<T>::epsilon() * T{64};
 
-    struct Item { std::uint32_t ia, ib; T t0, t1; };
-    const auto later = [](const Item& x, const Item& y) { return x.t0 > y.t0; };
+    // Earliest first; among equal starts -- a contact along a whole line
+    // or patch at one moment, resting or sliding -- the smallest pair
+    // first, so the search goes down one of them instead of across all.
+    struct Item { std::uint32_t ia, ib; T t0, t1, size; };
+    const auto later = [](const Item& x, const Item& y) { return x.t0 != y.t0 ? x.t0 > y.t0 : x.size > y.size; };
     std::priority_queue<Item, std::vector<Item>, decltype(later)> open(later);
 
     // Narrow [t0, t1] to where cells ia, ib may touch; false if nowhere.
@@ -211,7 +235,7 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
         // Ball: |d0 + t d1| <= r0 + t r1.
         const Vec<T, 3> d0{A.pc - B.pc}, d1{A.wc - B.wc};
         const T r0 = ta.reach_p(ia) + tb.reach_p(ib) + pad, r1 = ta.reach_w(ia) + tb.reach_w(ib);
-        {
+        if (policy.ball) {
             // q(t) = |d0 + t d1|^2 - (r0 + t r1)^2 > 0 is apart.
             const T qa = d1.dot(d1) - r1 * r1, qb = T{2} * (d0.dot(d1) - r0 * r1), qc = d0.dot(d0) - r0 * r0;
             const auto q = [&](T t) { return (qa * t + qb) * t + qc; };
@@ -246,7 +270,7 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
             t1 = std::min(t1, hi);
         }
 
-        // Slabs along three directions.
+        // Slabs along the policy's directions.
         const T tc = (t0 + t1) / T{2};
         const auto at = [tc](const Vec<T, 3>& p, const Vec<T, 3>& w) { return Vec<T, 3>{p + w * tc}; };
         const auto normal = [&](const auto& C) {
@@ -254,9 +278,25 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
             const Vec<T, 3> d12{at(C.pk[2], C.wk[2]) - at(C.pk[1], C.wk[1])};
             return Vec<T, 3>{d03.cross(d12)};
         };
-        const std::array<Vec<T, 3>, 3> dirs{normal(A), normal(B), Vec<T, 3>{d0 + d1 * tc}};
+        std::array<Vec<T, 3>, 12> dirs{};
+        int nd = 0;
+        if (policy.axes & SurfaceCcdPolicy::kNormals) { dirs[nd++] = normal(A); dirs[nd++] = normal(B); }
+        if (policy.axes & SurfaceCcdPolicy::kCentres) dirs[nd++] = Vec<T, 3>{d0 + d1 * tc};
+        if (policy.axes & SurfaceCcdPolicy::kTangentCross) {
+            const auto side_u = [&](const auto& C) { return Vec<T, 3>{at(C.pk[1], C.wk[1]) - at(C.pk[0], C.wk[0])}; };
+            const auto side_v = [&](const auto& C) { return Vec<T, 3>{at(C.pk[2], C.wk[2]) - at(C.pk[0], C.wk[0])}; };
+            const std::array<Vec<T, 3>, 2> sa{side_u(A), side_v(A)}, sb{side_u(B), side_v(B)};
+            for (const auto& x : sa)
+                for (const auto& y : sb) dirs[nd++] = Vec<T, 3>{x.cross(y)};
+        }
+        if (policy.axes & SurfaceCcdPolicy::kWorld) {
+            dirs[nd++] = Vec<T, 3>{T{1}, T{0}, T{0}};
+            dirs[nd++] = Vec<T, 3>{T{0}, T{1}, T{0}};
+            dirs[nd++] = Vec<T, 3>{T{0}, T{0}, T{1}};
+        }
         const T bpa = ta.bend_p(ia), bwa = ta.bend_w(ia), bpb = tb.bend_p(ib), bwb = tb.bend_w(ib);
-        for (const auto& raw : dirs) {
+        for (int di = 0; di < nd; ++di) {
+            const auto& raw = dirs[di];
             const T len = raw.norm();
             if (!(len > T{0}) || !std::isfinite(len)) continue;
             const Vec<T, 3> n{raw * (T{1} / len)};
@@ -279,7 +319,7 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
 
     {
         T t0 = T{0}, t1 = T{1};
-        if (narrow(0, 0, t0, t1)) open.push(Item{0, 0, t0, t1});
+        if (narrow(0, 0, t0, t1)) open.push(Item{0, 0, t0, t1, ta.width(0) + tb.width(0)});
     }
     const auto finish = [&](bool hit, T toi, const Item* it) {
         out.hit = hit;
@@ -300,7 +340,7 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
         const T wa = ta.width(it.ia), wb = tb.width(it.ib);
         if (wa < width && wb < width && it.t1 - it.t0 < width) return finish(true, it.t0, &it);
         const auto push = [&](std::uint32_t ia, std::uint32_t ib, T t0, T t1) {
-            if (narrow(ia, ib, t0, t1)) open.push(Item{ia, ib, t0, t1});
+            if (narrow(ia, ib, t0, t1)) open.push(Item{ia, ib, t0, t1, ta.width(ia) + tb.width(ib) + (t1 - t0)});
         };
         if (wa < width && wb < width) {
             const T tm = (it.t0 + it.t1) / T{2};
@@ -309,8 +349,8 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
             continue;
         }
         // Halve the cell that reaches farther over the interval.
-        const T ra = ta.reach_p(it.ia) + it.t1 * ta.reach_w(it.ia);
-        const T rb = tb.reach_p(it.ib) + it.t1 * tb.reach_w(it.ib);
+        const T ra = policy.split_by_reach ? ta.reach_p(it.ia) + it.t1 * ta.reach_w(it.ia) : wa;
+        const T rb = policy.split_by_reach ? tb.reach_p(it.ib) + it.t1 * tb.reach_w(it.ib) : wb;
         if ((ra >= rb && wa >= width) || wb < width) {
             const auto f = ta.children(it.ia);
             push(f, it.ib, it.t0, it.t1);

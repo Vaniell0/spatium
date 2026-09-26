@@ -182,3 +182,49 @@ TEST_CASE("Random moving patches: never later than a witness", "[physics][ccd][s
     WARN(line);
     CHECK(witnessed * 10 >= hits * 8);
 }
+
+// Two edges crossing at right angles, one falling onto the other: they
+// have no normal to be apart along, only the cross product of their
+// directions (SurfaceCcdPolicy::kTangentCross). Edge a lies along x at
+// z = 0; edge b along y at z = 1 falls at 2 and meets it at t = 0.5.
+TEST_CASE("Two edges meet where they cross, and pass when they do not", "[physics][ccd][surface]") {
+    const auto edge = [](V3 e0, V3 e1, V3 w) {
+        MovingChart<double> c;
+        c.p = [=](double u, double) { return V3{e0 + (e1 - e0) * u}; };
+        c.w = [=](double, double) { return w; };
+        c.bp = {V3{e1 - e0}.norm(), 0, 0, 0};
+        c.v1 = 0;
+        return c;
+    };
+    const auto a = edge(V3{-1, 0, 0}, V3{1, 0, 0}, V3{});
+    const auto b = edge(V3{0, -1, 1}, V3{0, 1, 1}, V3{0, 0, -2});
+    const auto r = first_contact(a, b, 1e-7);
+    INFO(std::format("hit={} toi={} pairs={}", r.hit, r.toi, r.pairs));
+    REQUIRE(r.hit);
+    CHECK(r.toi <= 0.5);
+    CHECK(r.toi > 0.5 - 1e-6);
+    // Shifted past a's end, b falls beside it.
+    const auto beside = edge(V3{1.5, -1, 1}, V3{1.5, 1, 1}, V3{0, 0, -2});
+    CHECK_FALSE(first_contact(a, beside, 1e-7).hit);
+}
+
+// A vertex falling through a triangle, and one falling past its edge.
+TEST_CASE("A vertex meets a triangle it falls through", "[physics][ccd][surface]") {
+    MovingChart<double> tri;
+    const V3 A{0, 0, 0}, B{1, 0, 0}, C{0, 1, 0};
+    tri.p = [=](double u, double v) { return V3{A + (V3{B - A} * (1 - v) + V3{C - A} * v) * u}; };
+    tri.w = [](double, double) { return V3{}; };
+    tri.bp = {1.0, std::sqrt(2.0), 0, 0};
+    const auto point = [](V3 x, V3 w) {
+        MovingChart<double> c;
+        c.p = [=](double, double) { return x; };
+        c.w = [=](double, double) { return w; };
+        c.u1 = c.v1 = 0;
+        return c;
+    };
+    const auto r = first_contact(point(V3{0.25, 0.25, 1}, V3{0, 0, -4}), tri, 1e-7);
+    REQUIRE(r.hit);
+    CHECK(r.toi <= 0.25);
+    CHECK(r.toi > 0.25 - 1e-6);
+    CHECK_FALSE(first_contact(point(V3{0.75, 0.75, 1}, V3{0, 0, -4}), tri, 1e-7).hit);
+}

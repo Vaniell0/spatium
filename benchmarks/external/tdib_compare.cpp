@@ -12,7 +12,7 @@
 //   g++ -std=c++23 -O3 -march=native -DNDEBUG -Icore -Iscene \
 //       -I<eigen3> -I<fmt>/include -I<spatium>/include \
 //       <spatium>/benchmarks/external/tdib_compare.cpp core/argsParser.cpp -lfmt -o compare
-//   ./compare CASES WIDTH REFERENCE_WIDTH ORDER CHECK    e.g. 1000 1e-5 0 3 1
+//   ./compare CASES WIDTH REFERENCE_WIDTH ORDER CHECK [AXES [SPLIT_BY_REACH]]    e.g. 1000 1e-5 0 3 1
 //
 #include "scene_random.h"
 #include <spatium/physics/mechanics/surface_ccd.hpp>
@@ -109,7 +109,10 @@ int run(int argc, char** argv) {
             pos1, vel1, pos2, vel2, uv1, uv2, BoundingBoxType::OBB, delta);
         auto t1 = clk::now();
         const auto a = chart(pos1, vel1), b = chart(pos2, vel2);
-        const auto r = mech::first_contact(a, b, delta);
+        mech::SurfaceCcdPolicy policy;
+        if (argc > 6) policy.axes = std::uint32_t(std::atoi(argv[6]));
+        if (argc > 7) policy.split_by_reach = std::atoi(argv[7]) != 0;
+        const auto r = mech::first_contact(a, b, delta, std::size_t{1} << 24, policy);
         auto t2 = clk::now();
         ms_td += std::chrono::duration<double, std::milli>(t1 - t0).count();
         ms_ours += std::chrono::duration<double, std::milli>(t2 - t1).count();
