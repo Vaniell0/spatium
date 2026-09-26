@@ -135,7 +135,9 @@ TEST_CASE("A falling torus touches a plane when its lowest circle does", "[physi
     const auto plane = moving(flat(0.0, 4.0 / 3.0), constant(V3{}));
     auto shifted = plane;
     shifted.p = [&plane](double u, double v) { return V3{plane.p(u, v) - V3{2.0, 2.0, 0.0}}; };
-    const auto c = first_contact(torus, shifted, 1e-6);
+    // A whole circle touches at once: a flat minimum, refined across the
+    // circle, so this asks the width the patch test asks, not finer.
+    const auto c = first_contact(torus, shifted, 1e-5);
     const double truth = (2.0 - r) / 2.0;
     INFO(std::format("hit={} toi={} truth={} pairs={}", c.hit, c.toi, truth, c.pairs));
     REQUIRE(c.hit);
@@ -227,4 +229,76 @@ TEST_CASE("A vertex meets a triangle it falls through", "[physics][ccd][surface]
     CHECK(r.toi <= 0.25);
     CHECK(r.toi > 0.25 - 1e-6);
     CHECK_FALSE(first_contact(point(V3{0.75, 0.75, 1}, V3{0, 0, -4}), tri, 1e-7).hit);
+}
+
+// A ball as a point with a thickness: it touches a plane when its centre
+// is a radius away -- a falling ball of radius 0.25 from height 1 at speed
+// 2 meets z = 0 at t = (1 - 0.25) / 2.
+TEST_CASE("A thickness is a distance of contact", "[physics][ccd][surface]") {
+    MovingChart<double> ball;
+    ball.p = [](double, double) { return V3{1.5, 1.5, 1.0}; };
+    ball.w = [](double, double) { return V3{0.0, 0.0, -2.0}; };
+    ball.u1 = ball.v1 = 0;
+    ball.thickness = 0.25;
+    const auto plane = moving(flat(0.0, 1.0), constant(V3{}));
+    const auto r = first_contact(ball, plane, 1e-7);
+    INFO(std::format("hit={} toi={} pairs={}", r.hit, r.toi, r.pairs));
+    REQUIRE(r.hit);
+    CHECK(r.toi <= 0.375);
+    CHECK(r.toi > 0.375 - 1e-6);
+}
+
+// A point grazing a torus given by its formula, against the quartic's first
+// root: never later, and to the width asked. Grazes are where a first-order
+// bound spends its cells; the torus's second derivatives make them cheap.
+TEST_CASE("A point grazing a torus chart: never later than the quartic", "[physics][ccd][surface][fuzz]") {
+    const double R = 1.0, r = 0.3, tp = 2 * std::numbers::pi;
+    MovingChart<double> torus;
+    torus.p = [=](double u, double v) {
+        return V3{(R + r * std::cos(v)) * std::cos(u), (R + r * std::cos(v)) * std::sin(u), r * std::sin(v)};
+    };
+    torus.w = [](double, double) { return V3{}; };
+    torus.bp = {R + r, r, R + r, r};
+    torus.u1 = torus.v1 = tp;
+    std::mt19937_64 rng(20260927);
+    std::uniform_real_distribution<double> ang(0, tp), uni(-1, 1);
+    int n = 0;
+    double worst_early = 0;
+    for (int i = 0; i < 150; ++i) {
+        const double u = ang(rng), v = ang(rng);
+        const V3 nrm{std::cos(v) * std::cos(u), std::cos(v) * std::sin(u), std::sin(v)};
+        const V3 foot{V3{std::cos(u), std::sin(u), 0.0} * R + nrm * r};
+        V3 tan{uni(rng), uni(rng), uni(rng)};
+        tan = V3{tan - nrm * tan.dot(nrm)};
+        tan = V3{tan * (1 / tan.norm())};
+        const double depth = std::pow(10.0, -2 - 6 * (uni(rng) + 1) / 2);
+        const V3 p0{foot - nrm * depth - tan * 2.0}, disp{tan * 4.0};
+        // First root of the quartic |p0 + s tan| on the torus, s in [0, 4].
+        const auto F = [&](double s) {
+            const V3 x{p0 + tan * s};
+            const double q = std::hypot(x[0], x[1]) - R;
+            return q * q + x[2] * x[2] - r * r;
+        };
+        double truth = 2;
+        for (int k = 0; k < 4000 && truth > 1; ++k)
+            if (F(4.0 * k / 4000) > 0 && F(4.0 * (k + 1) / 4000) <= 0) {
+                double lo = 4.0 * k / 4000, hi = 4.0 * (k + 1) / 4000;
+                for (int it = 0; it < 80; ++it) (F((lo + hi) / 2) > 0 ? lo : hi) = (lo + hi) / 2;
+                truth = hi / 4;
+            }
+        if (F(0) <= 0 || truth > 1) continue;
+        MovingChart<double> pt;
+        pt.p = [p0](double, double) { return p0; };
+        pt.w = [disp](double, double) { return disp; };
+        pt.u1 = pt.v1 = 0;
+        const auto c = first_contact(pt, torus, 1e-6);
+        INFO(std::format("query {}: truth {:.12f} hit={} toi={:.12f}", i, truth, c.hit, c.toi));
+        REQUIRE(c.hit);
+        REQUIRE(c.toi <= truth + 1e-12);
+        worst_early = std::max(worst_early, truth - c.toi);
+        ++n;
+    }
+    INFO(std::format("{} grazes, worst early {:.3g}", n, worst_early));
+    CHECK(n > 100);
+    CHECK(worst_early < 1e-3);
 }

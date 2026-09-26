@@ -72,6 +72,13 @@ struct MovingChart {
     std::function<Vec<T, 3>(T, T)> p, w;
     DerivativeBounds<T> bp, bw;
     T u0 = T{0}, u1 = T{1}, v0 = T{0}, v1 = T{1};
+    // The position's bounds over one cell, when a chart can say more there
+    // than over its domain -- a sphere's |f_u| and |f_uu| fall as sin v
+    // towards its poles. Empty: bp everywhere.
+    std::function<DerivativeBounds<T>(T u0, T u1, T v0, T v1)> cell_bp = {};
+    // Contact is a distance of the two thicknesses' sum: a ball's radius,
+    // a sheet's half-thickness, zero for a surface itself.
+    T thickness = T{0};
 };
 
 // The decisions of the search that no correctness depends on -- which
@@ -91,6 +98,15 @@ struct SurfaceCcdPolicy {
     // Halve by reach (position plus velocity over the interval) or by the
     // widest parameter side.
     bool split_by_reach = true;
+    // Also bracket the answer: any pair whose centres come within the
+    // thicknesses, to sqrt(eps) of the query's size, at a moment of its
+    // interval is real contact then -- an upper bound on the time of impact
+    // -- while the earliest open pair's start is a lower one. Once the two
+    // are within `width`, the lower is the answer, however coarse the cells
+    // still are. Without it a flat minimum -- a ball against a surface, a
+    // sheet resting on one -- is refined to `width` in parameters across
+    // the whole region where it is nearly touching.
+    bool witness_stop = true;
 };
 
 template<Scalar T>
@@ -134,6 +150,7 @@ namespace detail {
 template<Scalar T>
 struct MovingCell {
     T u0, u1, v0, v1;
+    DerivativeBounds<T> bp;            // the position's bounds over this cell
     Vec<T, 3> pc, wc;
     std::array<Vec<T, 3>, 4> pk, wk;   // (u0,v0), (u1,v0), (u0,v1), (u1,v1)
     std::int32_t first_child = -1;
@@ -154,10 +171,10 @@ public:
     T dv(std::size_t i) const { return cells_[i].v1 - cells_[i].v0; }
     T width(std::size_t i) const { return std::max(du(i), dv(i)); }
     // Reach of position and of velocity from the centre over the cell.
-    T reach_p(std::size_t i) const { return (c_.bp.u * du(i) + c_.bp.v * dv(i)) / T{2}; }
+    T reach_p(std::size_t i) const { return (cells_[i].bp.u * du(i) + cells_[i].bp.v * dv(i)) / T{2}; }
     T reach_w(std::size_t i) const { return (c_.bw.u * du(i) + c_.bw.v * dv(i)) / T{2}; }
     // The interpolation widening of position and velocity.
-    T bend_p(std::size_t i) const { return (du(i) * du(i) * c_.bp.uu + dv(i) * dv(i) * c_.bp.vv) / T{8}; }
+    T bend_p(std::size_t i) const { return (du(i) * du(i) * cells_[i].bp.uu + dv(i) * dv(i) * cells_[i].bp.vv) / T{8}; }
     T bend_w(std::size_t i) const { return (du(i) * du(i) * c_.bw.uu + dv(i) * dv(i) * c_.bw.vv) / T{8}; }
 
     std::uint32_t children(std::size_t i) {
@@ -166,8 +183,8 @@ public:
         const auto first = static_cast<std::int32_t>(cells_.size());
         const T um = (c.u0 + c.u1) / T{2}, vm = (c.v0 + c.v1) / T{2};
         // Halve across the side along which the chart reaches farther.
-        const bool across_u = c_.bp.u * (c.u1 - c.u0) + c_.bw.u * (c.u1 - c.u0) >=
-                              c_.bp.v * (c.v1 - c.v0) + c_.bw.v * (c.v1 - c.v0);
+        const bool across_u = c.bp.u * (c.u1 - c.u0) + c_.bw.u * (c.u1 - c.u0) >=
+                              c.bp.v * (c.v1 - c.v0) + c_.bw.v * (c.v1 - c.v0);
         const auto& P = c.pk;
         const auto& W = c.wk;
         if (across_u) {
@@ -189,7 +206,8 @@ private:
     MovingCell<T> make(T u0, T u1, T v0, T v1, const std::array<Vec<T, 3>, 4>& pk,
                        const std::array<Vec<T, 3>, 4>& wk) {
         const T uc = (u0 + u1) / T{2}, vc = (v0 + v1) / T{2};
-        return MovingCell<T>{u0, u1, v0, v1, p(uc, vc), w(uc, vc), pk, wk, -1};
+        return MovingCell<T>{u0, u1, v0, v1, c_.cell_bp ? c_.cell_bp(u0, u1, v0, v1) : c_.bp, p(uc, vc), w(uc, vc), pk,
+                             wk, -1};
     }
 
     const MovingChart<T>& c_;
@@ -259,7 +277,8 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
 
         // Ball: |d0 + t d1| <= r0 + t r1.
         const Vec<T, 3> d0{A.pc - B.pc}, d1{A.wc - B.wc};
-        const T r0 = ta.reach_p(ia) + tb.reach_p(ib) + pad, r1 = ta.reach_w(ia) + tb.reach_w(ib);
+        const T thick = a.thickness + b.thickness;
+        const T r0 = ta.reach_p(ia) + tb.reach_p(ib) + thick + pad, r1 = ta.reach_w(ia) + tb.reach_w(ib);
         if (policy.ball) {
             // q(t) = |d0 + t d1|^2 - (r0 + t r1)^2 > 0 is apart.
             const T qa = d1.dot(d1) - r1 * r1, qb = T{2} * (d0.dot(d1) - r0 * r1), qc = d0.dot(d0) - r0 * r0;
@@ -332,9 +351,9 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
                 for (int j = 0; j < 4; ++j) {
                     const T ha = n.dot(A.pk[i]), va = n.dot(A.wk[i]);
                     const T hb = n.dot(B.pk[j]), vb = n.dot(B.wk[j]);
-                    alpha[4 * i + j] = ha - hb - bpa - bpb - pad;
+                    alpha[4 * i + j] = ha - hb - bpa - bpb - thick - pad;
                     beta[4 * i + j] = va - vb - bwa - bwb;
-                    alpha2[4 * i + j] = hb - ha - bpa - bpb - pad;
+                    alpha2[4 * i + j] = hb - ha - bpa - bpb - thick - pad;
                     beta2[4 * i + j] = vb - va - bwa - bwb;
                 }
             if (!detail::cut(t0, t1, detail::all_positive(alpha, beta, t0, t1))) return false;
@@ -359,14 +378,27 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
         out.evaluations = ta.evaluations() + tb.evaluations();
         return out;
     };
+    const T size = ta.cell(0).pc.norm() + tb.cell(0).pc.norm() + ta.reach_p(0) + tb.reach_p(0) +
+                   ta.cell(0).wc.norm() + tb.cell(0).wc.norm();
+    const T touch = std::sqrt(std::numeric_limits<T>::epsilon()) * size;
+    T upper = std::numeric_limits<T>::infinity();   // the earliest witnessed contact
     while (!open.empty()) {
         const Item it = open.top();
         if (out.pairs >= budget) return finish(true, it.t0, &it);
         open.pop();
         const T wa = ta.width(it.ia), wb = tb.width(it.ib);
         if (wa < width && wb < width && it.t1 - it.t0 < width) return finish(true, it.t0, &it);
+        if (policy.witness_stop && upper - it.t0 <= width) return finish(true, it.t0, &it);
         const auto push = [&](std::uint32_t ia, std::uint32_t ib, T t0, T t1) {
-            if (narrow(ia, ib, t0, t1)) open.push(Item{ia, ib, t0, t1, ta.width(ia) + tb.width(ib) + (t1 - t0)});
+            if (!narrow(ia, ib, t0, t1)) return;
+            if (policy.witness_stop) {
+                const auto& A = ta.cell(ia);
+                const auto& B = tb.cell(ib);
+                const T thick = a.thickness + b.thickness;
+                for (const T t : {t0, (t0 + t1) / T{2}})
+                    if (t < upper && Vec<T, 3>{A.pc + A.wc * t - B.pc - B.wc * t}.norm() - thick <= touch) upper = t;
+            }
+            open.push(Item{ia, ib, t0, t1, ta.width(ia) + tb.width(ib) + (t1 - t0)});
         };
         if (wa < width && wb < width) {
             const T tm = (it.t0 + it.t1) / T{2};
