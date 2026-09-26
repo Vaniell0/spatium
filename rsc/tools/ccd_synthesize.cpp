@@ -18,6 +18,8 @@
 #include <ccd_ops.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <format>
@@ -25,12 +27,14 @@
 #include <mutex>
 #include <print>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
 using namespace rsc::ccd;
 namespace geo = spatium::geometry;
+namespace mech = spatium::physics::mechanics;
 
 namespace {
 
@@ -158,57 +162,99 @@ int main(int argc, char** argv) {
     const auto all = chains();
     const Chain hybrid{{Op::A, 8}, {Op::S, 1 << 16}}, search{{Op::S, 1 << 16}};
 
-    struct Row { std::string obstacle, motion, best; double best_cost, hybrid_cost, search_cost; int hybrid_ok, search_ok, admissible_chains; };
-    std::vector<Row> rows;
-    std::mutex mu;
-    std::vector<std::thread> pool;
+    // A class's queries run as one step of a solver would: every query of
+    // the class against one cell tree, fresh for each chain, so a chain
+    // pays for the cells it makes and for walking the ones already made,
+    // and no chain inherits another's.
+    struct Class { std::string obstacle, motion; const Obstacle* ob; std::vector<Case> cases; };
+    std::vector<Class> classes;
     for (std::size_t oi = 0; oi < obstacles.size(); ++oi)
         for (Motion m : {Motion::HeadOn, Motion::Graze, Motion::Miss, Motion::Through})
-            pool.emplace_back([&, oi, m] {
-                const auto& [oname, ob] = obstacles[oi];
-                const auto cases = sample(*ob, m, per_class, 1000 * oi + static_cast<int>(m));
-                auto eval = [&](const Chain& c, int& ok) {
-                    double cost = 0;
-                    ok = 0;
-                    for (const auto& k : cases) {
-                        const auto a = run(Query{k.p0, k.disp, 0.0, ob}, c);
-                        cost += static_cast<double>(a.cost);
-                        ok += admissible(a, k.truth);
-                    }
-                    return cost / cases.size();
-                };
-                Row row{oname, name(m), "(none)", 0, 0, 0, 0, 0, 0};
-                double best = std::numeric_limits<double>::infinity();
-                std::size_t best_len = 99;
-                for (const auto& c : all) {
-                    int ok;
-                    const double cost = eval(c, ok);
-                    if (ok != static_cast<int>(cases.size())) continue;
-                    ++row.admissible_chains;
-                    // Ties to the shorter chain: a CF on a chart does nothing
-                    // and costs nothing, and should not be kept for it.
-                    if (cost < best || (cost == best && c.size() < best_len)) {
-                        best = cost;
-                        best_len = c.size();
-                        row.best = rsc::ccd::name(c);
-                        row.best_cost = cost;
-                    }
-                }
-                row.hybrid_cost = eval(hybrid, row.hybrid_ok);
-                row.search_cost = eval(search, row.search_ok);
-                std::lock_guard lk(mu);
-                rows.push_back(row);
-            });
-    for (auto& t : pool) t.join();
-    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
-        return std::tie(a.obstacle, a.motion) < std::tie(b.obstacle, b.motion);
-    });
+            classes.push_back({obstacles[oi].first, name(m), obstacles[oi].second,
+                               sample(*obstacles[oi].second, m, per_class, 1000 * oi + static_cast<int>(m))});
+    // What a chain did on a class, as three fingerprints: its answers bit
+    // for bit, its answers and what each cost, and its answers with the
+    // time rounded to 1e-9 of the step. Two chains with one fingerprint
+    // are one algorithm as far as the class can tell -- the measure of how
+    // much of the chain space is really there, as mesh_collisions.cpp
+    // measures it for meshes. Bits flatter the space, rounding flatters
+    // its collapse; the gap between them is part of the answer.
+    struct Print { std::uint64_t exact = 1469598103934665603u, costed = 1469598103934665603u, rounded = 1469598103934665603u; };
+    auto mix = [](std::uint64_t& h, std::uint64_t v) { h = (h ^ v) * 1099511628211u; };
+    auto eval = [&](const Class& k, const Chain& c, int& ok, Print* print = nullptr) {
+        mech::ChartCellTree<double> tree(k.ob->bound());
+        double cost = 0;
+        ok = 0;
+        for (const auto& q : k.cases) {
+            const auto a = run(Query{q.p0, q.disp, 0.0, k.ob, &tree}, c);
+            cost += static_cast<double>(a.cost);
+            ok += admissible(a, q.truth);
+            if (print) {
+                const std::uint64_t bits = std::bit_cast<std::uint64_t>(a.toi) ^ (a.hit ? 1u : 0u);
+                mix(print->exact, bits);
+                mix(print->costed, bits);
+                mix(print->costed, a.cost);
+                mix(print->rounded, static_cast<std::uint64_t>(std::llround(a.toi * 1e9)) * 2 + (a.hit ? 1u : 0u));
+            }
+        }
+        return cost / static_cast<double>(k.cases.size());
+    };
+
+    struct Result { double cost; int ok; Print print; };
+    std::vector<std::vector<Result>> results(classes.size(), std::vector<Result>(all.size()));
+    std::vector<std::atomic<std::size_t>> left(classes.size());
+    for (auto& l : left) l = all.size();
+    std::atomic<std::size_t> next{0};
+    std::mutex mu;
     std::println("{} queries a class, {} chains; admissible = right on every query of the class", per_class, all.size());
     std::println("{:<16} {:<8} | {:<14} {:>10} | {:>18} | {:>18} | {:>6}", "obstacle", "motion", "best chain", "cost",
                  "hybrid A8 S16", "search S16", "admis.");
-    for (const auto& r : rows)
-        std::println("{:<16} {:<8} | {:<14} {:>10.1f} | {:>9.1f} ({:>2}/{:<2}) | {:>9.1f} ({:>2}/{:<2}) | {:>6}", r.obstacle,
-                     r.motion, r.best, r.best_cost, r.hybrid_cost, r.hybrid_ok, per_class, r.search_cost, r.search_ok,
-                     per_class, r.admissible_chains);
+    std::println("{:>104} distinct: exact +cost 1e-9", "");
+    std::fflush(stdout);
+    auto report = [&](std::size_t ci) {
+        const auto& k = classes[ci];
+        std::string best = "(none)";
+        double best_cost = 0, lowest = std::numeric_limits<double>::infinity();
+        std::size_t best_len = 99;
+        int admissible_chains = 0;
+        std::set<std::uint64_t> exact, costed, rounded;
+        for (std::size_t j = 0; j < all.size(); ++j) {
+            const auto& r = results[ci][j];
+            exact.insert(r.print.exact);
+            costed.insert(r.print.costed);
+            rounded.insert(r.print.rounded);
+            if (r.ok != static_cast<int>(k.cases.size())) continue;
+            ++admissible_chains;
+            // Ties to the shorter chain: a CF on a chart does nothing and
+            // costs nothing, and should not be kept for it.
+            if (r.cost < lowest || (r.cost == lowest && all[j].size() < best_len)) {
+                lowest = r.cost;
+                best_len = all[j].size();
+                best = rsc::ccd::name(all[j]);
+                best_cost = r.cost;
+            }
+        }
+        int hok, sok;
+        const double hc = eval(k, hybrid, hok), sc = eval(k, search, sok);
+        std::lock_guard lk(mu);
+        std::println("{:<16} {:<8} | {:<14} {:>10.1f} | {:>9.1f} ({:>2}/{:<2}) | {:>9.1f} ({:>2}/{:<2}) | {:>6} | {:>5} {:>5} {:>5}",
+                     k.obstacle, k.motion, best, best_cost, hc, hok, per_class, sc, sok, per_class, admissible_chains,
+                     exact.size(), costed.size(), rounded.size());
+        std::fflush(stdout);
+    };
+    std::vector<std::thread> pool;
+    const unsigned workers = std::max(1u, std::thread::hardware_concurrency());
+    for (unsigned w = 0; w < workers; ++w)
+        pool.emplace_back([&] {
+            for (std::size_t i; (i = next++) < classes.size() * all.size();) {
+                const std::size_t ci = i / all.size(), j = i % all.size();
+                int ok;
+                Print print;
+                const double cost = eval(classes[ci], all[j], ok, &print);
+                results[ci][j] = {cost, ok, print};
+                if (--left[ci] == 0) report(ci);
+            }
+        });
+    for (auto& t : pool) t.join();
     return 0;
 }

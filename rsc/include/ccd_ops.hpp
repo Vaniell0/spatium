@@ -14,7 +14,9 @@
 // chain runs its primitives in order over one State -- how far the step is
 // proved clear, whether it is decided, what it has spent -- so a primitive
 // starts where the one before it stopped, and the obstacle's cell tree is
-// shared, so nothing is split twice:
+// shared, so nothing is split twice -- within a query, and across queries
+// when the caller hands one tree to all of them (`Query::cells`), as a
+// solver does for every vertex against one obstacle in a step:
 //
 //   CF       the closed form: a quadric's roots, a torus's quartic.
 //            Decides the query; not available for a chart.
@@ -75,19 +77,25 @@ struct Query {
     V3 p0, disp;
     double radius = 0;
     const Obstacle* obstacle = nullptr;
+    // The obstacle's cell tree, kept by the caller across queries; null
+    // makes the query build its own and throw it away.
+    mech::ChartCellTree<double>* cells = nullptr;
 };
 
 struct Answer {
     bool hit = false;
     double toi = 1.0;
-    std::size_t cost = 0;   // evaluations: chart cells, distances, closed forms
+    // Work: chart evaluations, cells of a kept tree walked, distances and
+    // closed forms, each counted as one.
+    std::size_t cost = 0;
 };
 
 struct State {
     double t = 0;           // [0, t) is proved clear
     bool done = false;
     Answer answer;
-    std::unique_ptr<mech::ChartCellTree<double>> tree;
+    std::unique_ptr<mech::ChartCellTree<double>> own;
+    mech::ChartCellTree<double>* tree = nullptr;
 };
 
 enum class Op : std::uint8_t { CF, A, S, P };
@@ -119,6 +127,17 @@ inline double tolerance(const Query& q) {
     return std::sqrt(std::numeric_limits<double>::epsilon()) * scale;
 }
 
+inline mech::ChartCellTree<double>& cells(const Query& q, State& s) {
+    if (!s.tree) {
+        if (q.cells) s.tree = q.cells;
+        else {
+            s.own = std::make_unique<mech::ChartCellTree<double>>(q.obstacle->bound());
+            s.tree = s.own.get();
+        }
+    }
+    return *s.tree;
+}
+
 // A floor on the distance from p to the obstacle's surface, and the best
 // real distance, from the closed form where there is one.
 inline std::pair<double, double> floor_at(const Query& q, State& s, const V3& p) {
@@ -133,10 +152,11 @@ inline std::pair<double, double> floor_at(const Query& q, State& s, const V3& p)
         const double d = mech::point_to(p, ob.torus).distance;
         return {d, d};
     }
-    if (!s.tree) s.tree = std::make_unique<mech::ChartCellTree<double>>(ob.bound());
-    const auto before = s.tree->size();
-    const auto r = mech::detail::tree_distance_bound(p, *s.tree, detail::tolerance(q) + q.radius, 1u << 20);
-    s.answer.cost += s.tree->size() - before + 1;
+    auto& tree = cells(q, s);
+    const auto before = tree.size();
+    std::size_t visited = 0;
+    const auto r = mech::detail::tree_distance_bound(p, tree, detail::tolerance(q) + q.radius, 1u << 20, &visited);
+    s.answer.cost += tree.size() - before + visited;
     return r;
 }
 
@@ -193,11 +213,11 @@ inline void apply(const Query& q, State& s, const Step& st) {
             return;
         }
         case Op::S: {
-            if (!s.tree) s.tree = std::make_unique<mech::ChartCellTree<double>>(ob.bound());
+            auto& tree = detail::cells(q, s);
             const V3 a{q.p0 + q.disp * s.t};
             const V3 rest{q.disp * (1.0 - s.t)};
-            const auto r = mech::first_contact(a, q.radius, rest, *s.tree, static_cast<std::size_t>(st.arg), 0);
-            s.answer.cost += r.evaluations;
+            const auto r = mech::first_contact(a, q.radius, rest, tree, static_cast<std::size_t>(st.arg), 0);
+            s.answer.cost += r.evaluations + r.visited;
             detail::decide(s, r.hit, s.t + r.toi * (1.0 - s.t));
             return;
         }

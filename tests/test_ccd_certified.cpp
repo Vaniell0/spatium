@@ -337,4 +337,7 @@ TEST_CASE("A chart's cell tree is reused across queries", "[physics][ccd][certif
     CHECK(again.toi == first.toi);
     CHECK(first.evaluations > 0);
     CHECK(again.evaluations == 0);
+    // Walking the kept cells is not free, and the count says what it was.
+    CHECK(again.visited > 0);
+    CHECK(first.visited >= again.visited);
 }
