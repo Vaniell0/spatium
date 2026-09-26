@@ -43,10 +43,13 @@ struct BlackholePush {
     float e0[4], e1[4], e2[4], e3[4];   // the observer's tetrad: time, right, up, forward
     float cam[4];                        // the observer's event
     float view[4];                       // width, height, tan(fov/2), exposure
-    float disk[4];                       // inner, outer, aspect h/r, temperature scale
-    std::uint32_t flags[4];              // bgr, max steps, disk on, sky seed
+    float disk[4];                       // inner, outer, Doppler damping, temperature scale
+    std::uint32_t flags[4];              // bits (see kFlag*), max steps, sample index, sky seed
 };
 static_assert(sizeof(BlackholePush) == 128);
+// flags[0]: the target stores B,G,R; the disk is on; accumulate samples
+// (flags[2] is then which sample this is, 0 starting afresh).
+inline constexpr std::uint32_t kFlagBgr = 1u, kFlagDisk = 2u, kFlagAccumulate = 4u;
 
 // 256 entries of blackbody_to_rgb255 over 1000..40000 K, log-spaced, in 0..1.
 inline std::vector<float> blackbody_table() {
@@ -183,6 +186,7 @@ inline Result<std::string> blackhole_shader(const physics::relativity::Spacetime
 layout(std430, binding = 0) writeonly buffer Image { uint pixels[]; };
 layout(std430, binding = 1) readonly buffer Blackbody { vec4 bb[256]; };
 layout(std430, binding = 4) readonly buffer Dust { uint dust[]; };
+layout(std430, binding = 5) buffer Accum { vec4 accum[]; };   // rgb sum, samples
 layout(push_constant) uniform Push {
     vec4 e0, e1, e2, e3, cam, view, disk; uvec4 flags;
 } pc;
@@ -296,7 +300,7 @@ vec4 disk_at(vec4 x, vec4 k, float g[10]) {
     float R = length(p.xy);
     float inner = pc.disk.x, outer = pc.disk.y;
     if (R < inner * 0.8 || R > outer * 1.3) return vec4(0.0);
-    float h = pc.disk.z * R;
+    float h = 0.018 * R;
     float vert = exp(-0.5 * p.z * p.z / (h * h));
     if (vert < 1e-3) return vec4(0.0);
     float edge = smoothstep(inner * 0.8, inner, R) * (1.0 - smoothstep(outer, outer * 1.3, R));
@@ -316,11 +320,18 @@ vec4 disk_at(vec4 x, vec4 k, float g[10]) {
     vec4 u = v / sqrt(-vv);
     vec4 pl = gm * k;                           // lowered
     float shift = dot(pl, pc.e0) / dot(pl, u);  // nu_obs / nu_emit
+    // Damped towards 1 before it reaches the picture, as Double Negative
+    // did for Gargantua: the exact asymmetry, tens to one, reads as a
+    // one-sided disk. pc.disk.z is how much of it is kept, 1 the physics.
+    shift = 1.0 + pc.disk.z * (shift - 1.0);
     // T ~ r^(-3/4), so what a blackbody puts out, ~ T^4, falls as r^(-3):
     // the inner edge outshines the rim by orders of magnitude.
     float T = pc.disk.w * 7000.0 * pow(inner / R, 0.75) * shift;
     float I = rho * pow(inner / R, 3.0) * pow(shift, 4.0) * 3.0;
-    return vec4(bb_color(T) * I, rho * 3.0);
+    // Absorption kept low: the thin ring at the shadow's edge is the disk
+    // seen after one, two, three windings about the photon orbit, and a
+    // ray that has lost its transmittance by then never shows it.
+    return vec4(bb_color(T) * I, rho * 0.8);
 }
 
 void main() {
@@ -328,7 +339,11 @@ void main() {
     uint W = uint(pc.view.x), H = uint(pc.view.y);
     if (id.x >= W || id.y >= H) return;
     float aspect = pc.view.x / pc.view.y;
-    vec2 ndc = (vec2(id) + 0.5) / pc.view.xy * 2.0 - 1.0;
+    // Accumulating, each sample lands somewhere else in the pixel.
+    vec2 jitter = vec2(0.5);
+    if ((pc.flags.x & 4u) != 0u && pc.flags.z > 0u)
+        jitter = vec2(hash_f(uvec3(id, pc.flags.z)), hash_f(uvec3(id, pc.flags.z + 7919u)));
+    vec2 ndc = (vec2(id) + jitter) / pc.view.xy * 2.0 - 1.0;
     ndc.y = -ndc.y;
     vec3 n = normalize(vec3(ndc.x * pc.view.z * aspect, ndc.y * pc.view.z, 1.0));
     vec4 x = pc.cam;
@@ -340,15 +355,18 @@ void main() {
     uint max_steps = pc.flags.y;
     float escape = 3.0 * length(pc.cam.yzw);
     bool captured = false, escaped = false;
-    for (uint s = 0u; s < max_steps && trans > 0.01; ++s) {
+    for (uint s = 0u; s < max_steps && trans > 0.001; ++s) {
         float hd = horizon_distance(x.yzw, x.x);
         if (hd < 1.02) { captured = true; break; }
         if (length(x.yzw) > escape) { escaped = true; break; }
         // The step grows with the distance to the nearest horizon, in its
         // radii: fine near a hole, where the path bends, coarse far out.
         float dl = clamp(0.05 * hd, 0.01, 1.5);
+        // Finer near the photon orbit, where a ray winds and the rings
+        // of higher order are exponentially thin.
+        if (hd < 2.5) dl *= 0.35;
         float ds = dl * length(k.yzw);
-        if (pc.flags.z != 0u) {
+        if ((pc.flags.x & 2u) != 0u) {
             float g[10]; vec4 dg[10];
             metric(x, g, dg);
             vec4 e = disk_at(x, k, g);
@@ -367,17 +385,30 @@ void main() {
     // circling close to the photon orbit; it is drawn as captured.
     if (escaped) light += trans * sky(normalize(k.yzw), sigma, pc.flags.w);
 
-    // ACES-style filmic curve, then sRGB.
+    // Accumulate in HDR, before the curve, so the average is of light.
+    uint pix = id.y * W + id.x;
+    if ((pc.flags.x & 4u) != 0u) {
+        vec4 sum = pc.flags.z == 0u ? vec4(0.0) : accum[pix];
+        sum += vec4(light, 1.0);
+        accum[pix] = sum;
+        light = sum.rgb / sum.a;
+    }
+    // A curve on luminance that keeps the colour: the filmic curve on each
+    // channel pressed every bright pixel to the same white, and the
+    // brighter, bluer side of the disk with it.
     vec3 c = light * pc.view.w;
-    c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+    float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float Lm = L * (1.0 + L / 64.0) / (1.0 + L);
+    c *= Lm / max(L, 1e-6);
+    c = clamp(c, 0.0, 1.0);
     c = pow(c, vec3(1.0 / 2.2));
     uvec3 b = uvec3(c * 255.0 + 0.5);
-    if (pc.flags.x != 0u) b = b.bgr;
+    if ((pc.flags.x & 1u) != 0u) b = b.bgr;
     // Alpha marks a ray that ended at a horizon (0) from one that did not
     // (255), so a check can measure the shadow rather than guess it from
     // colour; a window's copy ignores alpha.
     uint alpha = escaped ? 255u : 0u;
-    pixels[id.y * W + id.x] = b.r | (b.g << 8) | (b.b << 16) | (alpha << 24);
+    pixels[pix] = b.r | (b.g << 8) | (b.b << 16) | (alpha << 24);
 }
 )GLSL";
     return src;

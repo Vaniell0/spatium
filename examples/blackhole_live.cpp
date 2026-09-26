@@ -219,10 +219,11 @@ struct Settings {
     bool disk = true;
     float temperature = 1.0f;
     float disk_outer = 30.0f;
-    float distance = 60.0f, azimuth = 30.0f, elevation = 10.0f, fov = 50.0f;
+    float distance = 60.0f, azimuth = 30.0f, elevation = 20.0f, fov = 50.0f;
+    float doppler = 0.6f;          // how much of the physical asymmetry is kept
     float exposure = 1.6f;
     int max_steps = 1500;
-    int dust = 1;                  // index into kDustCounts
+    int dust = 0;                  // index into kDustCounts
 };
 
 constexpr std::uint32_t kDustCounts[] = {0, 100000, 300000, 1000000};
@@ -250,7 +251,8 @@ struct Renderer {
     vc::Context& ctx;
     rel::SpacetimeScene<double> scene;
     std::unique_ptr<vc::Kernel> kernel;
-    std::unique_ptr<vc::Buffer> pixels, bb, perm, pts;
+    std::unique_ptr<vc::Buffer> pixels, accum, bb, perm, pts;
+    float doppler = 0.6f;
     std::uint32_t W = 0, H = 0;
     // Dust: particles moved on the device each frame, counted into a grid
     // the rays read.
@@ -271,7 +273,7 @@ struct Renderer {
         const std::vector<std::uint32_t> none{0};
         perm = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
         pts = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const std::uint32_t>(none)));
-        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 5,
+        kernel = std::make_unique<vc::Kernel>(ctx, src->c_str(), "blackhole.comp", 6,
                                               static_cast<std::uint32_t>(sizeof(spatium::render::BlackholePush)));
         grid_shape = spatium::render::dust_grid(scene);
         dust_count = scene.dust().count;
@@ -298,7 +300,8 @@ struct Renderer {
         W = w;
         H = h;
         pixels = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 4);
-        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get(), grid.get()};
+        accum = std::make_unique<vc::Buffer>(ctx, std::size_t{W} * H * 16);
+        vc::Buffer* bufs[] = {pixels.get(), bb.get(), perm.get(), pts.get(), grid.get(), accum.get()};
         kernel->bind(bufs);
     }
     // Back to the first state: circular orbits at t = 0.
@@ -308,7 +311,8 @@ struct Renderer {
         if (!particles) particles = std::make_unique<vc::Buffer>(ctx, init.size() * sizeof(float));
         std::memcpy(particles->data(), init.data(), init.size() * sizeof(float));
     }
-    spatium::render::BlackholePush push(double t, double exposure, int max_steps, bool bgr) const {
+    spatium::render::BlackholePush push(double t, double exposure, int max_steps, bool bgr,
+                                        std::uint32_t sample = 0, bool accumulate = false) const {
         const auto metric = *scene.metric(rel::SpacetimeScene<double>::Form::outgoing);
         const auto& cam = scene.camera();
         const double deg = std::numbers::pi / 180.0;
@@ -332,11 +336,12 @@ struct Renderer {
         const double M = scene.total_mass();
         p.disk[0] = static_cast<float>(d.inner * M);
         p.disk[1] = static_cast<float>(d.outer * M);
-        p.disk[2] = 0.018f;
+        p.disk[2] = doppler;
         p.disk[3] = static_cast<float>(d.temperature);
-        p.flags[0] = bgr ? 1u : 0u;
+        using namespace spatium::render;
+        p.flags[0] = (bgr ? kFlagBgr : 0u) | (d.on ? kFlagDisk : 0u) | (accumulate ? kFlagAccumulate : 0u);
         p.flags[1] = static_cast<std::uint32_t>(max_steps);
-        p.flags[2] = d.on ? 1u : 0u;
+        p.flags[2] = sample;
         p.flags[3] = scene.sky().seed;
         return p;
     }
@@ -363,6 +368,14 @@ struct Renderer {
     }
     double render(const spatium::render::BlackholePush& p) {
         return ctx.run([&](VkCommandBuffer cmd) { record(cmd, p); });
+    }
+    // `samples` jittered samples averaged in HDR: the anti-aliased frame a
+    // still or a video wants, one dispatch per sample.
+    double render_samples(double t, double exposure, int max_steps, int samples) {
+        double ms = 0;
+        for (int k = 0; k < std::max(1, samples); ++k)
+            ms += render(push(t, exposure, max_steps, false, static_cast<std::uint32_t>(k), samples > 1));
+        return ms;
     }
     std::vector<std::uint32_t> read() const {
         const auto* px = static_cast<const std::uint32_t*>(pixels->data());
@@ -472,6 +485,9 @@ int run_live(int max_frames, const std::string& screenshot) {
         rebind();
 
         double t = 0.0, gpu_ms = 0.0, fps = 0.0;
+        bool progressive = false;
+        std::uint32_t sample = 0;
+        spatium::render::BlackholePush last_push{};
         float rate = 1.0f;
         bool playing = true;
         std::string saved;
@@ -513,6 +529,7 @@ int run_live(int max_frames, const std::string& screenshot) {
             ImGui::Checkbox("disk", &st.disk);
             ImGui::SliderFloat("temperature", &st.temperature, 0.3f, 3.0f, "%.2f");
             ImGui::SliderFloat("outer edge", &st.disk_outer, 10.0f, 60.0f, "%.0f M");
+            ImGui::SliderFloat("doppler", &st.doppler, 0.0f, 1.0f, "%.2f of the physics");
             ImGui::SeparatorText("dust");
             {
                 const char* names[] = {"none", "100k", "300k", "1M"};
@@ -551,7 +568,9 @@ int run_live(int max_frames, const std::string& screenshot) {
                 if (ImGui::Button("1920x1080")) glfwSetWindowSize(window, 1920, 1080);
             }
             if (ImGui::Button(fullscreen ? "leave full screen (F11)" : "full screen (F11)")) set_fullscreen(!fullscreen);
-            if (ImGui::Button("save frame (1920x1080)")) save = true;
+            ImGui::Checkbox("progressive (while still)", &progressive);
+            if (progressive) { ImGui::SameLine(); ImGui::Text("%u samples", sample + 1); }
+            if (ImGui::Button("save frame (1920x1080, 4 samples)")) save = true;
             if (!saved.empty()) ImGui::Text("saved %s", saved.c_str());
             ImGui::End();
             ImGui::Render();
@@ -598,13 +617,23 @@ int run_live(int max_frames, const std::string& screenshot) {
                 // The dust as it is now, not as it started.
                 if (big.dust_count > 0 && big.dust_count == renderer->dust_count)
                     std::memcpy(big.particles->data(), renderer->particles->data(), big.particles->size());
-                big.render(big.push(t, st.exposure, std::max(st.max_steps, 3000), false));
+                big.doppler = st.doppler;
+                big.render_samples(t, st.exposure, std::max(st.max_steps, 3000), 4);
                 saved = screenshot.empty() ? timestamp_name() : screenshot;
                 write_png(saved, big.read(), 1920, 1080, false);
                 std::println("saved {}", saved);
             }
 
-            const auto p = renderer->push(t, st.exposure, st.max_steps, present.bgra());
+            renderer->doppler = st.doppler;
+            // Progressive: while nothing changes, each frame adds a sample
+            // to the average; any change starts it again.
+            auto p = renderer->push(t, st.exposure, st.max_steps, present.bgra(), 0, progressive);
+            if (progressive) {
+                const bool same = std::memcmp(&p, &last_push, sizeof p) == 0;
+                sample = same ? sample + 1 : 0;
+                last_push = p;
+                p.flags[2] = sample;
+            }
             const std::uint32_t up[4] = {renderer->W, renderer->H, WW, WH};
             const bool ok = present.frame(*window_px, [&](VkCommandBuffer cmd) {
                 renderer->record(cmd, p);
@@ -638,6 +667,8 @@ int run_live(int max_frames, const std::string& screenshot) {
 int main(int argc, char** argv) {
     std::string mode, out, screenshot;
     double fps_video = 30.0, orbit = 90.0;
+    int samples = 1;
+    double doppler = 0.6;
     bool inspiral = false;
     int rays = 4096, steps = 300, W = 640, H = 360, max_steps = 1500, frames = 0;
     std::string which = "one";
@@ -655,6 +686,8 @@ int main(int argc, char** argv) {
         else if (a == "--fps") fps_video = std::stod(next());
         else if (a == "--orbit") orbit = std::stod(next());
         else if (a == "--inspiral") inspiral = true;
+        else if (a == "--samples") samples = std::stoi(next());
+        else if (a == "--doppler") doppler = std::stod(next());
         else if (a == "--frames") frames = std::stoi(next());
         else if (a == "--screenshot") screenshot = next();
         else if (a == "--rays") rays = std::stoi(next());
@@ -781,7 +814,8 @@ int main(int argc, char** argv) {
             r.scene.camera().azimuth_deg = azimuth0 + orbit * f / std::max(1, n - 1);
             // 20 M of coordinate time a second of video, as the window's rate 1.
             const double at = t + 20.0 * f / fps_video;
-            total_ms += r.render(r.push(at, exposure, std::max(max_steps, 3000), false));
+            r.doppler = static_cast<float>(doppler);
+            total_ms += r.render_samples(at, exposure, std::max(max_steps, 3000), samples);
             char name[64];
             std::snprintf(name, sizeof name, "frame_%04d.png", f);
             write_png((std::filesystem::path(out) / name).string(), r.read(), r.W, r.H, false);
@@ -799,7 +833,8 @@ int main(int argc, char** argv) {
         st.spin = static_cast<float>(which == "binary" ? spin * 0.5 : spin);
         st.disk = disk;
         Renderer r(ctx, make_scene(st), static_cast<std::uint32_t>(W), static_cast<std::uint32_t>(H));
-        const double ms = r.render(r.push(t, exposure, max_steps, false));
+        r.doppler = static_cast<float>(doppler);
+        const double ms = r.render_samples(t, exposure, max_steps, samples);
         if (!write_png(out, r.read(), r.W, r.H, false)) {
             std::println(stderr, "cannot write {}", out);
             return 1;
