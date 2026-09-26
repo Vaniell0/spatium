@@ -127,6 +127,7 @@ if(SPATIUM_BOOST)
         test_precision.cpp
         test_rsc_registry.cpp
         test_rsc_task.cpp
+        test_rsc_ccd.cpp
         test_rsc_dispatcher.cpp
         test_rsc_describe.cpp
         test_rsc_train.cpp
