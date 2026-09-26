@@ -60,6 +60,8 @@ import spatium.io;
 // it lives in physics because it bridges the IPC barrier with the
 // existing analytical surface stack.
 #include <spatium/physics/mechanics/narrow_phase.hpp>
+// First contact between two moving surfaces, over pairs of cells x time.
+#include <spatium/physics/mechanics/surface_ccd.hpp>
 // --- spatium::physics::relativity (metric-agnostic geodesic integration) ---
 // Independent headers (no cross-includes among the four); schwarzschild.hpp
 // and kerr.hpp supply concrete metrics, geodesic.hpp integrates any
