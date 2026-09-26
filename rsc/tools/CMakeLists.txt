@@ -101,3 +101,11 @@ target_include_directories(supervised_vs_reinforce PRIVATE
 )
 target_link_libraries(supervised_vs_reinforce PRIVATE spatium_core)
 target_compile_options(supervised_vs_reinforce PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(ccd_synthesize ccd_synthesize.cpp)
+target_include_directories(ccd_synthesize PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(ccd_synthesize PRIVATE spatium_core)
+target_compile_options(ccd_synthesize PRIVATE -Wall -Wextra -Wpedantic)
