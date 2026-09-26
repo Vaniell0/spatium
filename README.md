@@ -26,8 +26,8 @@ C++23, in large part header-only — three deliberate exceptions exist where rea
 
 ## Gallery
 
-- [Kerr black hole, spin 0.9](gallery/blackhole_kerr_4k.png) — described with `SpacetimeScene`, the metric written as fields and lowered to GLSL with exact derivatives, rendered at 3840x2160 on an Intel Iris Xe in 4.4 s by `blackhole_live`; disk, lensed dust on geodesics, and the shadow a spinning hole casts
-- [Two black holes](gallery/blackhole_pair_4k.png) — the same program, a pair on a Kepler orbit as a superposed Kerr-Schild metric, each hole lensing the other and the matter between them; 7.5 s at 3840x2160
+- [Kerr black hole, spin 0.9](gallery/blackhole_kerr_4k.png) — described with `SpacetimeScene`, the metric written as fields and lowered to GLSL with exact derivatives; the disk is 300k test particles on its geodesics, sheared by their own orbits into streams and drawn through an LBVH built on the device, each particle Doppler-shifted by its own velocity. 3840x2160 on an Intel Iris Xe, 10 s
+- [Two black holes](gallery/blackhole_pair_4k.png) — the same program, a pair on a Kepler orbit as a superposed Kerr-Schild metric; the streams wind round both, and each hole lenses the other. 3840x2160, 8.6 s
 - [Kerr black hole, the earlier renderer](gallery/blackhole_gr.png) — full 4-coordinate geodesic integration, GPU-rendered (CUDA) at 1920x1080 ([video](gallery/blackhole_gr.mp4))
 - [A donut, declaratively](gallery/donut_dsl.png) — built entirely from `torus()`/`offset()`/`scatter()`, see the [getting-started guide](docs/getting-started-dsl.md) ([build-up video](gallery/donut_dsl.mp4))
 
