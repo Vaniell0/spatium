@@ -52,9 +52,26 @@ public:
           extract_features_(std::move(extract_features)), reference_(std::move(reference)),
           distance_(std::move(distance)), tolerance_(tolerance), rng_(seed) {}
 
+    // A gate replaces the symmetric test for domains where closeness is
+    // not the question. Continuous collision is one: an answer a hair late
+    // is within any tolerance of the reference and is the one answer that
+    // must never be given, while one a little early is safe. With a gate a
+    // candidate is admissible when gate(candidate, reference) says so, and
+    // the distance is not consulted.
+    using GateFn = std::function<bool(const Output& candidate, const Output& reference)>;
+    // A cost replaces "cheapest is the lowest index": the admissible
+    // candidate with the smallest cost(output) wins, ties to the lower
+    // index -- for domains whose candidates report what they spent, which
+    // is the premise the registry order stood in for and did not measure
+    // (see ROADMAP, "The labels check the outcome, not the preference").
+    using CostFn = std::function<double(const Output&)>;
+    ComparisonTaskGenerator& with_gate(GateFn g) { gate_ = std::move(g); return *this; }
+    ComparisonTaskGenerator& with_cost(CostFn c) { cost_ = std::move(c); return *this; }
+
     Task sample() {
         Problem problem = sample_problem_(rng_);
         Output ref = reference_(problem);
+        if (gate_) return Task{choose_gated(problem, ref), extract_features_(problem), {}};
 
         // Each candidate is judged against the *last* (presumably most
         // capable) candidate's own error, not a fixed absolute constant --
@@ -88,6 +105,22 @@ public:
     const std::vector<Candidate<Problem, Output>>& candidates() const { return candidates_; }
 
 private:
+    std::size_t choose_gated(const Problem& problem, const Output& ref) const {
+        std::size_t chosen = candidates_.size() - 1;   // fallback: the last one
+        double best = 0;
+        bool found = false;
+        for (std::size_t i = 0; i < candidates_.size(); ++i) {
+            const Output out = candidates_[i].compute(problem);
+            if (!gate_(out, ref)) continue;
+            if (!cost_) return i;                      // cheapest-first by index
+            const double c = cost_(out);
+            if (!found || c < best) { best = c; chosen = i; found = true; }
+        }
+        return chosen;
+    }
+
+    GateFn gate_;
+    CostFn cost_;
     std::vector<Candidate<Problem, Output>> candidates_;
     ProblemSampler sample_problem_;
     FeatureExtractor extract_features_;
