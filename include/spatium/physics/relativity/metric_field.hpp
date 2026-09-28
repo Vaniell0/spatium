@@ -36,6 +36,7 @@
 #  include <cmath>
 #  include <cstring>
 #  include <format>
+#  include <limits>
 #  include <map>
 #  include <tuple>
 #  include <vector>
@@ -230,6 +231,22 @@ MetricField<T> kerr_schild(T mass, T spin) {
     return *MetricField<T>::make(g);
 }
 
+// ── Is the metric a spacetime here ───────────────────────────────
+//
+// det g < 0 with g invertible: the one-negative-eigenvalue signature a
+// 4x4 symmetric metric needs to be Lorentzian (with det < 0 there is an
+// odd number of negative eigenvalues; three negative would need g_00 > 0
+// on every timelike direction, which no metric here has). A superposition
+// of Kerr-Schild terms loses it between two holes: measured for equal
+// masses, det g >= 0 at d <= 4 M, det within [-0.39, -0.04] at 5 M. Checked
+// before anything inverts g, since christoffel() does not refuse.
+template<Scalar T, typename Metric>
+bool lorentzian_at(const Metric& metric, const Vec<T, 4>& x) {
+    const Matrix<T, 4, 4> g = metric(x);
+    const auto inv = invert(g);
+    return inv.has_value() && g.determinant() < T{0};
+}
+
 // ── How far a metric is from solving the vacuum equations ────────
 //
 // The largest |R_{mu nu}| at an event, the Ricci tensor built from the
@@ -241,7 +258,7 @@ MetricField<T> kerr_schild(T mass, T spin) {
 // tests/test_metric_field.cpp's points, against 6.1e-2 for a metric with a
 // source. The measure of a superposition's error, which is not zero.
 template<Scalar T, typename Metric>
-T vacuum_residual(const Metric& metric, const Vec<T, 4>& x, T h = T{1e-4}) {
+T vacuum_residual_fd(const Metric& metric, const Vec<T, 4>& x, T h = T{1e-4}) {
     using std::abs;
     const auto G = christoffel(metric, x);
     std::array<std::array<Matrix<T, 4, 4>, 4>, 4> dG{};   // dG[k][l](mu,nu) = d_k G^l_{mu nu}
@@ -254,6 +271,53 @@ T vacuum_residual(const Metric& metric, const Vec<T, 4>& x, T h = T{1e-4}) {
             for (std::size_t mu = 0; mu < 4; ++mu)
                 for (std::size_t nu = 0; nu < 4; ++nu)
                     dG[k][l](mu, nu) = (Gp[l](mu, nu) - Gm[l](mu, nu)) / (T{2} * h);
+    }
+    T worst{0};
+    for (std::size_t mu = 0; mu < 4; ++mu)
+        for (std::size_t nu = 0; nu < 4; ++nu) {
+            T v{0};
+            for (std::size_t l = 0; l < 4; ++l) {
+                v += dG[l][l](mu, nu) - dG[nu][l](mu, l);
+                for (std::size_t s = 0; s < 4; ++s)
+                    v += G[l](l, s) * G[s](mu, nu) - G[l](nu, s) * G[s](mu, l);
+            }
+            worst = std::max(worst, abs(v));
+        }
+    return worst;
+}
+
+// The same residual with the derivatives of the Christoffel symbols taken
+// exactly: christoffel() run on Dual<T>, which metric_derivatives() wraps
+// once more, so the metric is evaluated on Dual<Dual<T>> and the second
+// derivatives of g come out of the arithmetic rather than a step size.
+// Nothing in the metric or in geodesic.hpp changes for it. Measured when it
+// was written: Kerr (Kerr-Schild and Boyer-Lindquist) 1e-16 to 1e-18 against
+// vacuum_residual_fd's 1e-9 to 1e-12, at the same cost per event (~29 us on
+// the binary's 155-op pool), and the Schwarzschild Kretschmann scalar to 12
+// digits. This is the oracle a regime choice is graded against.
+//
+// At a point where the metric does not invert -- a degenerate signature,
+// which a superposition of two holes reaches between them at d <= ~4.5 M --
+// christoffel() substitutes a zero inverse and the curvature would read as
+// 0. So the inverse is checked first and a NaN is returned instead: an
+// answer nobody can mistake for "vacuum".
+template<Scalar T, typename Metric>
+T vacuum_residual(const Metric& metric, const Vec<T, 4>& x) {
+    using std::abs;
+    if (!lorentzian_at(metric, x)) return std::numeric_limits<T>::quiet_NaN();
+    std::array<Matrix<T, 4, 4>, 4> G{};
+    std::array<std::array<Matrix<T, 4, 4>, 4>, 4> dG{};   // dG[k][l](mu,nu) = d_k G^l_{mu nu}
+    for (std::size_t k = 0; k < 4; ++k) {
+        Vec<Dual<T>, 4> xd;
+        for (std::size_t j = 0; j < 4; ++j)
+            xd[j] = (j == k) ? Dual<T>::variable(x[j]) : Dual<T>::constant(x[j]);
+        const auto Gd = christoffel(metric, xd);
+        for (std::size_t l = 0; l < 4; ++l)
+            for (std::size_t mu = 0; mu < 4; ++mu)
+                for (std::size_t nu = 0; nu < 4; ++nu) {
+                    if (k == 0) G[l](mu, nu) = Gd[l](mu, nu).value;
+                    dG[k][l](mu, nu) = Gd[l](mu, nu).deriv;
+                }
     }
     T worst{0};
     for (std::size_t mu = 0; mu < 4; ++mu)

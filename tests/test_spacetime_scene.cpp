@@ -81,7 +81,7 @@ TEST_CASE("A superposed binary reports the residual it has", "[relativity][scene
     const V4 beside{0.0, 20.0, 0.0, 0.0};
     const auto r1 = one.residual_at(beside);
     REQUIRE(r1);
-    CHECK(*r1 < 1e-9);
+    CHECK(*r1 < 1e-13);   // exact derivatives: Kerr is vacuum to rounding
 
     SpacetimeScene<double> pair;
     pair.binary(1.0, 1.0, 40.0, /*inspiral=*/false);
@@ -108,4 +108,40 @@ TEST_CASE("The outgoing Kerr-Schild form is the same spacetime", "[relativity][s
         const V4 eq{0.0, std::sqrt(r * r + 0.64), 0.0, 0.0};
         CHECK_THAT((*out)(eq)(0, 0), WithinAbs((*in)(eq)(0, 0), 1e-13));
     }
+}
+
+// The residual is exact now, so a single hole reads as vacuum to rounding
+// and the kept finite-difference form is the looser one.
+TEST_CASE("The exact residual is tighter than the finite-difference one", "[relativity][scene]") {
+    SpacetimeScene<double> scene;
+    scene.hole(1.0, 0.9);
+    const auto g = scene.metric();
+    REQUIRE(g);
+    for (const V4 x : {V4{0.0, 5.0, 1.0, 2.0}, V4{0.0, -3.0, 4.0, -1.5}, V4{0.0, 8.0, -2.0, 0.3}}) {
+        const double exact = vacuum_residual(*g, x);
+        const double fd = vacuum_residual_fd(*g, x);
+        INFO(std::format("exact {:.2e}, finite difference {:.2e}", exact, fd));
+        CHECK(exact < 1e-13);
+        CHECK(exact <= fd);
+    }
+}
+
+// Two holes too close: between them the superposition is not a spacetime.
+// residual_at says so instead of returning a number, and the exact residual
+// is NaN there rather than the 0 a silently zeroed inverse would give.
+TEST_CASE("A superposition that is not Lorentzian is refused", "[relativity][scene]") {
+    SpacetimeScene<double> close;
+    close.binary(1.0, 1.0, 3.0, /*inspiral=*/false);
+    const V4 mid{0.0, 0.0, 0.0, 0.0};
+    const auto g = close.metric();
+    REQUIRE(g);
+    CHECK_FALSE(lorentzian_at(*g, mid));
+    CHECK(std::isnan(vacuum_residual(*g, mid)));
+    CHECK_FALSE(close.residual_at(mid));
+
+    SpacetimeScene<double> wide;
+    wide.binary(1.0, 1.0, 20.0, /*inspiral=*/false);
+    const auto gw = wide.metric();
+    REQUIRE(gw);
+    CHECK(lorentzian_at(*gw, mid));
 }

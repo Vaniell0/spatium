@@ -278,7 +278,11 @@ vec4 disk_at(vec4 x, vec4 k, float g[10]) {
     if (vv >= 0.0) return vec4(0.0);          // no timelike circular orbit here
     vec4 u = v / sqrt(-vv);
     vec4 pl = gm * k;                           // lowered
-    float shift = dot(pl, pc.e0) / dot(pl, u);  // nu_obs / nu_emit
+    // nu_obs / nu_emit. The numerator is p.u_obs AT THE CAMERA, which is 1
+    // by construction (k = -e0 + n there). p.e0 evaluated here, at the
+    // emitter, equals it only while p_t is conserved -- true for one hole,
+    // not for a pair, whose p_t drifts 40-60% along a ray (measured).
+    float shift = 1.0 / dot(pl, u);
     // Damped towards 1 before it reaches the picture, as Double Negative
     // did for Gargantua: the exact asymmetry, tens to one, reads as a
     // one-sided disk. pc.disk.z is how much of it is kept, 1 the physics.
@@ -333,7 +337,7 @@ vec3 matter_along(vec3 a, vec3 b, vec4 k, float g[10], uint node_count) {
             float w = exp(-0.5 * dot(off, off) / (sigma * sigma));
             if (w < 1e-3) continue;
             float R = max(length(c.xy), inner * 0.5);
-            float shift = dot(pl, pc.e0) / dot(pl, q.color_rough);
+            float shift = 1.0 / dot(pl, q.color_rough);   // camera value is 1, see the disk above
             shift = 1.0 + pc.disk.z * (shift - 1.0);
             float T = pc.disk.w * 7000.0 * pow(inner / R, 0.75) * shift;
             float I = pow(inner / R, 3.0) * pow(shift, 4.0);

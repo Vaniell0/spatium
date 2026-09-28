@@ -184,10 +184,17 @@ public:
 
     // How far the scene's metric is from a vacuum solution at an event;
     // see vacuum_residual().
-    Result<T> residual_at(const Vec<T, 4>& event, T h = T{1e-4}) const {
+    //
+    // Exact (nested Dual, no step size). An event where the superposition
+    // is not a spacetime at all -- det g >= 0, between two close holes --
+    // is an error rather than a number, since no residual describes it.
+    Result<T> residual_at(const Vec<T, 4>& event) const {
         auto g = metric();
         if (!g) return std::unexpected(g.error());
-        return vacuum_residual(*g, event, h);
+        if (!lorentzian_at(*g, event))
+            return std::unexpected(Error{ErrorCode::DegenerateInput,
+                                         "metric is not Lorentzian at this event"});
+        return vacuum_residual(*g, event);
     }
 
 private:
