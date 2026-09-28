@@ -169,8 +169,12 @@ geodesics.
 - Disk and dust redshift numerator was p·e0 evaluated at the emitter; for a
   pair p_t drifts 40-60% along a ray, so g was off 12% at 14 M and 25% at
   8 M, brightness (∝ g⁴) by 1.6-2.4x. Now the camera value, 1 by
-  construction. Identical to 6e-6 for one hole. *Not run on a GPU here --
-  check with `blackhole_live --check` and a before/after frame.*
+  construction. Identical to 6e-6 for one hole. Run on the Iris Xe: `--check`
+  unchanged (device against double, worst 2.2e-6); the default binary frame
+  at 960x540 barely moves -- mean luminance 33.36 to 33.34, 0.5% of pixels
+  change by more than 2 levels, median ratio over lit pixels 1.000 -- since
+  the Doppler damping (0.6) and the tone curve compress g⁴. The error is in
+  the physics the picture reports, not in the picture as it is shipped.
 - `vacuum_residual` is exact (nested Dual; the old one kept as
   `vacuum_residual_fd`): Kerr 1e-17..1e-20 against 1e-11..1e-14.
 - `lorentzian_at()`; `vacuum_residual` returns NaN and `residual_at` an
