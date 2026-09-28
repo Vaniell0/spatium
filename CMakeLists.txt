@@ -130,6 +130,7 @@ if(SPATIUM_USE_MODULES)
         PARTITIONS
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/concepts.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/access.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/error.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/epsilon.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/up_to.cppm

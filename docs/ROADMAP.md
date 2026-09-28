@@ -8,6 +8,10 @@ This document tracks what's done and what's open, by content and by date — not
 
 ---
 
+**Open findings from the September 2026 audit live in [`findings-2026-09.md`](findings-2026-09.md)** -- bugs with their probes, RSC's breakages, the binary's measured errors, the root-level direction. Pick an item there, fix it with a failing test, delete it there.
+
+---
+
 # Completed
 
 ## Concept hierarchy, core geometry, mesh, viewer foundations

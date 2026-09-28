@@ -7,6 +7,7 @@
 #  include <spatium/algebra/linear_solve.hpp>
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/vector.hpp>
+#  include <spatium/core/access.hpp>
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <cstddef>
@@ -230,17 +231,23 @@ typename S::PointType riemannian_minimize(const S& space, F&& f, typename S::Poi
 // spaces/spd.hpp's frechet_mean_affine_invariant(), generalized here to
 // any RiemannianManifold (Sphere, Hyperbolic, ShapeSurface-wrapped
 // shapes, ...) instead of being reimplemented per space.
+//
+// Asks only for the Riemannian basis (exp, log, metric) through the
+// customization points in core/access.hpp, not for the member-based
+// RiemannianManifold -- which would also demand distance() and contains(),
+// neither of which this uses. So a space modelled by ADL functions alone
+// gets a mean too.
 template<typename S>
-    requires RiemannianManifold<S>
-typename S::PointType frechet_mean(
+    requires spaces::Riemannian<S>
+spaces::point_t<S> frechet_mean(
         const S& space,
-        const std::vector<typename S::PointType>& points,
-        typename S::PointType initial_guess,
-        typename S::ScalarType tol
-            = epsilon<typename S::ScalarType>() * typename S::ScalarType{1000},
+        const std::vector<spaces::point_t<S>>& points,
+        spaces::point_t<S> initial_guess,
+        spaces::scalar_t<S> tol
+            = epsilon<spaces::scalar_t<S>>() * spaces::scalar_t<S>{1000},
         int max_iters = 100) {
-    using T = typename S::ScalarType;
-    using Tangent = typename S::TangentVector;
+    using T = spaces::scalar_t<S>;
+    using Tangent = spaces::tangent_t<S>;
     using std::sqrt; using std::abs;
 
     auto mean = initial_guess;
@@ -248,13 +255,13 @@ typename S::PointType frechet_mean(
     for (int iter = 0; iter < max_iters; ++iter) {
         Tangent avg{};
         for (const auto& p : points)
-            avg = Tangent{avg + space.log_map(mean, p)};
+            avg = Tangent{avg + spaces::log_map(space, mean, p)};
         avg = Tangent{avg * inv_n};
 
-        T avg_norm2 = abs(space.metric_at(mean, avg, avg));
+        T avg_norm2 = abs(spaces::metric(space, mean, avg, avg));
         if (sqrt(avg_norm2) < tol) break;
 
-        mean = space.exp_map(mean, avg, T{1});
+        mean = spaces::exp_map(space, mean, avg, T{1});
     }
     return mean;
 }
@@ -262,12 +269,12 @@ typename S::PointType frechet_mean(
 // Convenience overload: starts the iteration from the first sample instead
 // of requiring an explicit initial guess.
 template<typename S>
-    requires RiemannianManifold<S>
-typename S::PointType frechet_mean(
+    requires spaces::Riemannian<S>
+spaces::point_t<S> frechet_mean(
         const S& space,
-        const std::vector<typename S::PointType>& points,
-        typename S::ScalarType tol
-            = epsilon<typename S::ScalarType>() * typename S::ScalarType{1000},
+        const std::vector<spaces::point_t<S>>& points,
+        spaces::scalar_t<S> tol
+            = epsilon<spaces::scalar_t<S>>() * spaces::scalar_t<S>{1000},
         int max_iters = 100) {
     return frechet_mean(space, points, points.front(), tol, max_iters);
 }

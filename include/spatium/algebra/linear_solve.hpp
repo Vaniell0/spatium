@@ -94,7 +94,11 @@ Result<Matrix<T, N, N>> invert(Matrix<T, N, N> A) {
         for (std::size_t k = 0; k < N; ++k) {
             if (k == i) continue;
             T factor = A(k, i);
-            if (factor == T{0}) continue;
+            // No `factor == 0` shortcut: for Dual<T> it compares the value
+            // alone, so an entry that is zero but has a derivative was
+            // skipped and the inverse's derivative lost -- found as a
+            // spurious Ricci residual of exact Kerr on every coordinate
+            // plane, once curvature was taken through nested Dual.
             for (std::size_t c = 0; c < N; ++c) {
                 A(k, c) -= factor * A(i, c);
                 inv(k, c) -= factor * inv(i, c);
