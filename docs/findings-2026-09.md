@@ -34,6 +34,19 @@ only**, so an entry that is zero with a non-zero derivative is treated as
 absent -- found in `invert()` by this session, suspected elsewhere
 (section 2).
 
+And the pattern that finds them, stated as the project's rule: **consistency
+comes only from automatic checks, and the cheapest check is a symmetry** --
+two paths to one answer that must agree. None of this month's deepest bugs
+was found by a test someone wrote for it; each was two paths disagreeing
+(closed-form distance against |log|_g, `Dual²` curvature exposing
+`invert()`), and a symmetry that held is equally a result (erased and typed
+CCD charts: the same stops, reverts and piercings, section 11). It follows
+that the more of the library is reused through its interfaces, the more
+paths meet, and the more such checks exist for free: connectivity is not
+only economy, it is coverage. The architecture in `architecture.md` is much
+larger than the parts worked on; the drift away from it happened where it
+was not re-read before new work.
+
 ---
 
 ## 1. Correctness (library audit at c064ad5)
@@ -358,3 +371,151 @@ objects from 34 nodes, frame 10^6 without stepping, a scene in a QR code
 reproduced bit for bit in a browser, one metric function spinning a black
 hole, a chain found on a sphere replayed on a torus, a picture that shows
 where it is right (certificate overlay).
+
+## 11. Carried from the conversation, not in the first write-up
+
+Decisions and measurements that were in the pasted reports or this month's
+CCD work but not in the sections above. Same rules: re-verify, fix with a
+failing test, delete here.
+
+**RSC, cheap experiments on the existing machinery** (from the RSC report):
+1. Cross-entropy everywhere and trees fitted on labels -- mesh 0.78 → ~0.98.
+2. `a` as a rootfind feature (+2.4%).
+3. Per-vertex features for geodesic.
+4. An absolute gate and a "refuse" class in ODE and integrator (B1).
+5. `with_cost` in linear -- it will likely collapse to "always direct", an
+   honest answer.
+6. A `Chooser` on `sweep_sphere_surface` from `ccd_synthesize`'s winners.
+7. `explicit_contact_window`'s explicit-or-Newton window as a dispatcher.
+8. The render level by the measured ~100-object boundary.
+
+**RSC contract, as sketched.** Three layers: *certificates* in the library
+(`Certified<T>{value, bound, certified}` or a `Bracketed<T>`, next to
+`Result<T>`; CCD's `certified` flag and #90's bracket are the first),
+*decisions* by RSC under a budget, *prediction* by learned models only for
+the order of refinement and the first choice.
+
+```cpp
+concept BudgetedChooser = requires(const C& c, const F& f, double eps) {
+    { c.choose(f, eps) };   // a choice under a tolerance
+};
+// a Certifier checks bound <= eps; if not, Refine
+```
+
+One loop for every domain -- the one `first_contact` already runs: refine
+the earliest or the most uncertain, discard what a certificate settles, stop
+when the bound is within budget. Labels from oracles, one-sided, with
+measured cost and a refuse class; deployed as generated headers held by a
+test. B8 is why the contract has to change: under a finite budget a setting
+does change the answer.
+
+**Certificates per quantity, for the binary** (all cheap next to a frame):
+
+| Quantity | Certificate | Cost |
+|---|---|---|
+| metric at an event | signature, det g < 0 (hard); exact residual through `Dual²`, over local curvature (soft) | 1 evaluation / ~29 us |
+| orbit | energy balance dE/dt = -F; size of the last PN term | cheap |
+| ray | null condition g(k,k) (free from the first RK stage); step doubling; helical invariant p_t + Omega L_z for a circular pair (to 2e-5) | <= 2x |
+| pixel | Ricci focusing kappa_R along the ray (magnification error ~ 2 kappa); redshift at the emitter against the camera | 2-5x on a preview |
+| capture | sensitivity to the threshold; growth of the null condition; later a horizon finder | cheap / M |
+| escape | the analytic weak-field tail M b / s^2 | free |
+
+Residual without the boost, near a hole: 12% at 10 M, 10% at 14 M, 4.4% at
+80 M; at the midpoint, 5% at 80 M (the rest in section 5).
+
+**The binary uses all six kinds of RSC:** method choice (the metric's
+regime per event: superposition, boosted, matched asymptotics, remnant Kerr;
+ingoing or outgoing KS); calibration (the ray step constants, blend widths,
+capture thresholds, against the host double oracle); surrogates (remnant
+mass, spin and kick fits; QNM frequencies and damping; PN coefficients --
+the first real use of the kind); synthesis (the chain of regimes in time,
+PN → morph → ringdown, graded by the residual); IR rewriting (a smaller
+metric pool for GLSL, bit-exact, the oracle exists); structure building (the
+pixel/ray refinement tree, LBVH and balls for dust, splits by measured
+time).
+
+**Why this scene is the peak.** It is the one scene where space itself
+moves, not objects in it; it has no closed form, so it forces search and
+certificates; it touches every subsystem at once, the longest path through
+the library's graph; infinity is physically in it (asymptotic flatness, the
+horizon's infinite redshift, the sky at infinity); and it has an outside
+truth to be checked against (NR catalogues, LIGO waveforms, remnant fits).
+
+**Merger as synthesis, its limits.** Zero residual means *some* vacuum, not
+ours -- anchors are required (mass and angular momentum at infinity, the PN
+limit far away, the remnant Kerr late), or the search finds empty space. A
+family of formulas has a residual floor at merger: the search finds the
+best in the family and shows where the floor is; the exact solution lives
+in another search space, discretisations (numerical relativity). The
+single-KS form g = eta + H k⊗k with eta-null k is Lorentzian by
+construction and turns the search into one for a function H, represented
+finitely as an IR expression. For a picture less is needed than for a
+solution: a metric and a certificate on every ray -- an image with a proven
+map of its own error.
+
+**Infinities, which the library already has without naming them.** The
+infinitesimal is `Dual` (e^2 = 0), `Dual<Dual>` second order, a jet --
+which is why `Dual²` simply worked. The infinitely large by
+compactification: infinity moved to a finite boundary (conformal
+compactification in GR; the render's exit at 3 D_cam is a missing infinity,
+to be replaced by the analytic tail; the hyperbolic ideal boundary is where
+tiling rays go; projective coordinates). The infinite-dimensional as
+function spaces: a `Field` expression is an element of one represented
+finitely, a `MetricField` a section of a bundle, the merger search a search
+over metrics. "Infinities on a PC" means a lazy or symbolic representation
+plus a certified bound.
+
+**CCD's configuration space as a space.** The two-surface search runs in
+(u_a, v_a, u_b, v_b, t) -- chart × chart × time, a product of spaces --
+implemented as boxes and indices. As a `ProductSpace` with its own metric,
+cells would be geodesic balls (the ball tree exists) and the Lipschitz
+constant a local norm. The first probe of "CCD on the library's spaces".
+
+**What survived of the original style**, to be made the core's law rather
+than chosen per subsystem: `point_to` as ADL overloads; `chart_of` as the
+DSL's ADL entry; the `Bound` concept and `BVH<Shape, Bound>`, geodesic
+balls; `Chooser`, a policy as a parameter; the Field IR with `lower` and
+GLSL, a lazy description with several backends; `Placed<T>`, a mesh only on
+request; the templated metrics in relativity.
+
+**Derivations the customization points should supply** (`core/access.hpp`
+has the first four):
+
+| Operation | Derived from |
+|---|---|
+| `distance` | the norm of `log` in the metric |
+| `midpoint`, geodesic interpolation | `exp(log / 2)` |
+| parallel transport | Schild's ladder through `exp`/`log` |
+| `exp_map` for any metric function | Christoffel symbols through `Dual`, then an ODE (works in relativity; to become the default for all) |
+| curvature | `Dual<Dual>` on the metric |
+| `normal` | a chart's `d_u × d_v` |
+| `bounds` | a support function `support(dir)` |
+| `project_tangent` | the normal |
+
+Numbers behind the diagnosis: `Vec<T,3>` appears 612 times in include/
+(`rigid_contact.hpp` 68, `spherical_polygon.hpp` 51, `narrow_phase.hpp` 45,
+`ray_surface.hpp` 39, `field.hpp` 37). A fifth CI metric beside section 6's:
+a count of early materialisation -- a `Mesh` built inside a function that is
+not a materialiser.
+
+**CCD, open from this month's work** (numbers in ROADMAP):
+- *To drop IPC from the dependencies* the CCD is not the missing part;
+  missing are friction in cloth-cloth contact, a response other than
+  stopping short (it kills the velocity), a resting stack that is still (the
+  napkins' kinetic energy dithers at 1-30 without settling), and the
+  head-to-head on the same scene -- `cloth_sphere_probe` already runs
+  ipc-toolkit behind `SPATIUM_IPC_TOOLKIT`.
+- *Napkins, the limit to reach*: no piercing and no revert over 10 s
+  including settling; <= 4 ms a substep for 16 napkins of 25x25 on the
+  laptop (60 fps, 4 substeps); the ipc-toolkit comparison; energy decay and
+  stack height; a count of napkin pairs left entangled. Today: 8 of 19x19
+  thrown at 8 m/s, 12 ms a substep on 8 threads, 0 piercings.
+- *A ball against a curved surface* is a flat minimum that both CCD paths
+  pay for (155 ms exact, or 6.7 ms and 74 answers early); the fix is the
+  surface offset by the radius, where the minimum is sharp -- a torus stays a
+  torus, a chart needs curvature bounds.
+- *The bracket's witness* (two cells' centres within tolerance) is weak on a
+  contact along a curve (a torus flat on a plane: 4.5M pairs at 1e-6); a
+  centre within tolerance of the other cell's slab would witness at once.
+- The search still allocates a cell vector and a queue per query: what is
+  left after typed charts (7-15%).
