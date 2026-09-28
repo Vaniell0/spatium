@@ -66,6 +66,22 @@ jobs:
       - name: Run tests
         run: nix develop --command bash -c 'ctest --preset modules --output-on-failure -j'
 
+  connectivity:
+    name: connectivity matrix is up to date
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Every (scalar, space, probe) cell built alone and graded; fails if
+      # docs/connectivity.md or tests/connectivity/expected.hpp would change.
+      - name: Regenerate and compare
+        run: nix develop --command bash -c 'python3 scripts/gen_connectivity.py --check -j 4'
+
   dependency-graph:
     name: dependency graph is up to date
     runs-on: ubuntu-24.04

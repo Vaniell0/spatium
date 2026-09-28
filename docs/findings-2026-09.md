@@ -60,7 +60,7 @@ was not re-read before new work.
 | 5 | `verify_symplecticity_drift` checks only the (q_i, p_i) planes: `p += S q` with S antisymmetric (not symplectic) reads 1e-12, like Verlet. Needs ‖MᵀJM − J‖ | `physics/mechanics/symplectic.hpp:144-163` | open |
 | 6 | Segment-segment distance for N != 3 compares endpoints only: crossing segments give 1, overlapping plus-shaped polygons 4, star-of-David triangles 1.28 | `geometry/distance.hpp:81-111` | open |
 | 7 | `Triangle<3>::contains` ignores the distance from the plane (a triangle 5 above another is at distance 0); degenerate triangle "contains" everything | `geometry/triangle.hpp:105-114` | open |
-| 8 | `ParametricSurface::log_map`, `ImplicitSurface::log_map` do not compile (`auto diff = q - p` captures an expression template); concepts pass because they check declarations | `spaces/parametric.hpp:99`, `implicit.hpp:79` | open |
+| 8 | `ParametricSurface::log_map`, `ImplicitSurface::log_map` do not compile (`auto diff = q - p` captures an expression template); concepts pass because they check declarations -- confirmed by the connectivity matrix: every log-based cell of both, on every scalar, is L0-red (60 cells) | `spaces/parametric.hpp:99`, `implicit.hpp:79` | open |
 | 9 | Sphere chart normal points inward: `offset(sphere, +0.5)` has radius 0.5 | `spaces/chart.hpp:105` | open |
 | 10 | Generic CCD tunnelled (distance from a local projection is an upper bound) | `narrow_phase.hpp`, `rigid_contact.hpp` | **fixed upstream** (#60, certified floor) |
 | 11 | Second `.moving()` wraps both motions in an opaque lambda; exact form kept when it should be cleared; `MotionEnv::origin` lost | `io/build.hpp:900-911` | open |
@@ -99,6 +99,19 @@ was not re-read before new work.
 | ImplicitSurface FD step h = 2.8e-11 absolute: at |x| = 1e6 the normal is (0,0,0) | `spaces/implicit.hpp:99` | open |
 
 ## 3. Connectivity: where "any space gets everything" stops
+
+Measured by `docs/connectivity.md` (225 of 336 cells at L2 or above, first
+run 2026-09-29), beyond items listed below:
+- **`Sphere::exp_map` loses the derivative at t = 0**: `theta = |t v| / r`
+  and `if (theta < eps) return p` -- for `Dual` the branch reads the value
+  alone (the `== 0` pattern of section 2), and |t v| is not differentiable
+  at t = 0 anyway. d/dt exp_p(t v) at 0 should be v; S2 and S2xE1
+  derivative cells are L1 on Dual and Dual2. Fix: theta = t |v| / r, signed,
+  direction v / |v|. Open.
+- `Dual` lacks `abs`, `log`, `cosh`, `acosh`, `fmod` and division by `int`:
+  Hyperbolic and SPD affine-invariant do not compile over Dual at all.
+- `Real50` fails in `solve_quadratic` (SPD affine-invariant's eigenvalues)
+  and `fmod` on a Boost expression (`ParametricSurface`'s periodic wrap).
 
 - Mesh calculus is Euclidean-ambient: cotangents by `cross`, `face_area_3d`, `heat_geodesic` ignores the space. On `Hyperbolic<2>` heat errs 342%, `Mesh::area` 22.0 vs 2.23; Dijkstra on the same mesh is right, so the two methods answer different questions. Fix: intrinsic edge lengths (law of cosines, Heron). Doc `concept-driven-physics.md:147` promises a `metric_at` Laplacian that does not exist.
 - SO3/SE3 are LieGroups but not Riemannian spaces: add `LieGroupManifold<G>` (exp_map = p·exp(tv), log_map = log(p⁻¹q)); then `frechet_mean` averages rotations. With `core/access.hpp` this can be ADL functions instead of an adapter type.
