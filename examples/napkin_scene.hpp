@@ -326,50 +326,40 @@ inline Candidates broad_phase(const Cloth& s, const std::vector<V3>& from, doubl
 
 // ── Narrow phase through surface_ccd ────────────────────────────
 
-// A query's eight points on the caller's stack, and charts that point at
-// them: a lambda holding a pointer fits std::function's own storage, where
-// one holding three or six vectors is sent to the heap -- an allocation a
-// chart, four a query.
+// A query's eight points, and charts that keep them: moving_chart() holds
+// the lambdas themselves, so nothing is erased and nothing goes to the heap
+// once a query.
 struct Moves {
     std::array<V3, 4> from, to;
 };
-inline MovingChart<double> point_chart(const Moves& m, int i) {
-    MovingChart<double> c;
-    const Moves* q = &m;
-    c.p = [q, i](double, double) { return q->from[i]; };
-    c.w = [q, i](double, double) { return V3{q->to[i] - q->from[i]}; };
+inline auto point_chart(const Moves& m, int i) {
+    const V3 a = m.from[i], d{m.to[i] - m.from[i]};
+    auto c = moving_chart<double>([a](double, double) { return a; }, [d](double, double) { return d; },
+                                  DerivativeBounds<double>{}, DerivativeBounds<double>{});
     c.u1 = c.v1 = 0;
     return c;
 }
-inline MovingChart<double> edge_chart(const Moves& m, int i) {
-    MovingChart<double> c;
-    const Moves* q = &m;
-    c.p = [q, i](double u, double) { return V3{q->from[i] + (q->from[i + 1] - q->from[i]) * u}; };
-    c.w = [q, i](double u, double) {
-        const V3 d0{q->to[i] - q->from[i]}, d1{q->to[i + 1] - q->from[i + 1]};
-        return V3{d0 + (d1 - d0) * u};
-    };
-    c.bp = {V3{m.from[i + 1] - m.from[i]}.norm(), 0, 0, 0};
-    c.bw = {V3{V3{m.to[i + 1] - m.from[i + 1]} - V3{m.to[i] - m.from[i]}}.norm(), 0, 0, 0};
+inline auto edge_chart(const Moves& m, int i) {
+    const V3 e0 = m.from[i], e1 = m.from[i + 1];
+    const V3 d0{m.to[i] - e0}, d1{m.to[i + 1] - e1};
+    auto c = moving_chart<double>([e0, e1](double u, double) { return V3{e0 + (e1 - e0) * u}; },
+                                  [d0, d1](double u, double) { return V3{d0 + (d1 - d0) * u}; },
+                                  DerivativeBounds<double>{V3{e1 - e0}.norm(), 0, 0, 0},
+                                  DerivativeBounds<double>{V3{d1 - d0}.norm(), 0, 0, 0});
     c.v1 = 0;
     return c;
 }
 // Points i, i+1, i+2 as x(u, v) = a + u ((1 - v)(b - a) + v (c - a)).
-inline MovingChart<double> triangle_chart(const Moves& m, int i) {
-    MovingChart<double> c;
-    const Moves* q = &m;
+inline auto triangle_chart(const Moves& m, int i) {
+    const V3 a = m.from[i], b = m.from[i + 1], c = m.from[i + 2];
+    const V3 da{m.to[i] - a}, db{m.to[i + 1] - b}, dc{m.to[i + 2] - c};
     const auto tri = [](const V3& a, const V3& b, const V3& c, double u, double v) {
         return V3{a + (V3{b - a} * (1 - v) + V3{c - a} * v) * u};
     };
-    c.p = [q, i, tri](double u, double v) { return tri(q->from[i], q->from[i + 1], q->from[i + 2], u, v); };
-    c.w = [q, i, tri](double u, double v) {
-        return tri(V3{q->to[i] - q->from[i]}, V3{q->to[i + 1] - q->from[i + 1]}, V3{q->to[i + 2] - q->from[i + 2]}, u, v);
-    };
-    const V3 da{m.to[i] - m.from[i]}, db{m.to[i + 1] - m.from[i + 1]}, dc{m.to[i + 2] - m.from[i + 2]};
-    c.bp = {std::max(V3{m.from[i + 1] - m.from[i]}.norm(), V3{m.from[i + 2] - m.from[i]}.norm()),
-            V3{m.from[i + 2] - m.from[i + 1]}.norm(), 0, 0};
-    c.bw = {std::max(V3{db - da}.norm(), V3{dc - da}.norm()), V3{dc - db}.norm(), 0, 0};
-    return c;
+    return moving_chart<double>(
+        [=](double u, double v) { return tri(a, b, c, u, v); }, [=](double u, double v) { return tri(da, db, dc, u, v); },
+        DerivativeBounds<double>{std::max(V3{b - a}.norm(), V3{c - a}.norm()), V3{c - b}.norm(), 0, 0},
+        DerivativeBounds<double>{std::max(V3{db - da}.norm(), V3{dc - da}.norm()), V3{dc - db}.norm(), 0, 0});
 }
 
 // The closest point of a triangle to p, as barycentric weights (Ericson).
