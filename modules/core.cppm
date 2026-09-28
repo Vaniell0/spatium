@@ -2,6 +2,7 @@
 // can `import spatium.core;` and receive the full surface.
 export module spatium.core;
 export import :concepts;
+export import :access;
 export import :error;
 export import :epsilon;
 export import :up_to;

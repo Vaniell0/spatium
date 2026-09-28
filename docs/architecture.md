@@ -148,6 +148,29 @@ C++ concepts use **structural typing**: if a type has the required methods, it s
 - Error messages say "concept X not satisfied" instead of template error walls.
 - Users define a struct, implement methods, everything works.
 
+### Customization Points, and What a Space Gets for Free
+
+The concepts above ask for members (`space.distance(p, q)`), which means a
+type its author cannot edit can never be a space, and a space has to write
+every operation itself even where one follows from the others.
+`core/access.hpp` adds the `std::ranges::begin` pattern on top: each
+operation is an object in `spatium::spaces` that finds a member first, then
+a free function by ADL, then a derivation from what the space does provide:
+
+```cpp
+spaces::distance(s, p, q);   // s.distance(p, q), or distance(s, p, q), or |log_p q|_g
+spaces::midpoint(s, p, q);   // exp_p(log_p q / 2) -- written once, for every space
+```
+
+The basis of a Riemannian manifold is `exp`, `log` and a metric
+(`spaces::Riemannian<S>`); `distance`, `norm_at`, `geodesic` and `midpoint`
+follow from it. A derivation never overrides a closed form a space provides,
+and `tests/test_space_access.cpp` holds every closed form against the
+derivation from its own space's basis. The member-based concepts are
+unchanged; everything that satisfied them satisfies these. Algorithms move to
+the customization points one at a time -- `frechet_mean` first, which asked
+for `distance` and `contains` and used neither.
+
 ### Space = Type + Value
 
 ```cpp
