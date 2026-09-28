@@ -13,7 +13,7 @@ scalar, in its own translation unit, and graded:
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**229 of 336 cells at L2 or above.**
+**255 of 336 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -31,13 +31,13 @@ holds every cell to the level recorded here.
 | S2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
-| H2 | MetricAxioms | L3 | L3 | L3 | L3 | ✗ L0 [1] | ✗ L0 [2] |
-| H2 | DerivedDistance | L3 | L3 | L3 | L3 | ✗ L0 [3] | ✗ L0 [4] |
-| H2 | ExpLog | L3 | L3 | L3 | L3 | ✗ L0 [5] | ✗ L0 [6] |
-| H2 | Midpoint | L3 | L3 | L3 | L3 | ✗ L0 [7] | ✗ L0 [8] |
-| H2 | FrechetMean | L3 | L3 | L3 | L3 | ✗ L0 [9] | ✗ L0 [10] |
-| H2 | VerifyExpLog | L3 | L3 | L3 | L3 | ✗ L0 [11] | ✗ L0 [12] |
-| H2 | Derivative | L3 | L3 | L3 | L3 | ✗ L0 [13] | ✗ L0 [14] |
+| H2 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2xE1 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2xE1 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2xE1 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
@@ -52,134 +52,106 @@ holds every cell to the level recorded here.
 | SPDLogE | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDLogE | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDLogE | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
-| SPDAff | MetricAxioms | L2 | L3 | L3 | ✗ L0 [15] | ✗ L0 [16] | ✗ L0 [17] |
-| SPDAff | DerivedDistance | L2 | L3 | L3 | ✗ L0 [18] | ✗ L0 [19] | ✗ L0 [20] |
-| SPDAff | ExpLog | L2 | L3 | L3 | ✗ L0 [21] | ✗ L0 [22] | ✗ L0 [23] |
-| SPDAff | Midpoint | L2 | L3 | L3 | ✗ L0 [24] | ✗ L0 [25] | ✗ L0 [26] |
-| SPDAff | FrechetMean | L2 | L3 | L3 | ✗ L0 [27] | ✗ L0 [28] | ✗ L0 [29] |
-| SPDAff | VerifyExpLog | L2 | L3 | L3 | ✗ L0 [30] | ✗ L0 [31] | ✗ L0 [32] |
-| SPDAff | Derivative | L2 | L3 | L3 | ✗ L0 [33] | ✗ L0 [34] | ✗ L0 [35] |
-| TorusChart | MetricAxioms | L2 | L3 | L3 | ✗ L0 [36] | ✗ L0 [37] | ✗ L0 [38] |
-| TorusChart | DerivedDistance | ✗ L0 [39] | ✗ L0 [40] | ✗ L0 [41] | ✗ L0 [42] | ✗ L0 [43] | ✗ L0 [44] |
-| TorusChart | ExpLog | ✗ L0 [45] | ✗ L0 [46] | ✗ L0 [47] | ✗ L0 [48] | ✗ L0 [49] | ✗ L0 [50] |
-| TorusChart | Midpoint | ✗ L0 [51] | ✗ L0 [52] | ✗ L0 [53] | ✗ L0 [54] | ✗ L0 [55] | ✗ L0 [56] |
-| TorusChart | FrechetMean | ✗ L0 [57] | ✗ L0 [58] | ✗ L0 [59] | ✗ L0 [60] | ✗ L0 [61] | ✗ L0 [62] |
-| TorusChart | VerifyExpLog | ✗ L0 [63] | ✗ L0 [64] | ✗ L0 [65] | ✗ L0 [66] | ✗ L0 [67] | ✗ L0 [68] |
-| TorusChart | Derivative | L2 | L3 | L3 | ✗ L0 [69] | ✗ L0 [70] | ✗ L0 [71] |
-| SphereLevelSet | MetricAxioms | L2 | L3 | L3 | ✗ L0 [72] | ✗ L0 [73] | ✗ L0 [74] |
-| SphereLevelSet | DerivedDistance | ✗ L0 [75] | ✗ L0 [76] | ✗ L0 [77] | ✗ L0 [78] | ✗ L0 [79] | ✗ L0 [80] |
-| SphereLevelSet | ExpLog | ✗ L0 [81] | ✗ L0 [82] | ✗ L0 [83] | ✗ L0 [84] | ✗ L0 [85] | ✗ L0 [86] |
-| SphereLevelSet | Midpoint | ✗ L0 [87] | ✗ L0 [88] | ✗ L0 [89] | ✗ L0 [90] | ✗ L0 [91] | ✗ L0 [92] |
-| SphereLevelSet | FrechetMean | ✗ L0 [93] | ✗ L0 [94] | ✗ L0 [95] | ✗ L0 [96] | ✗ L0 [97] | ✗ L0 [98] |
-| SphereLevelSet | VerifyExpLog | ✗ L0 [99] | ✗ L0 [100] | ✗ L0 [101] | ✗ L0 [102] | ✗ L0 [103] | ✗ L0 [104] |
-| SphereLevelSet | Derivative | L2 | L3 | L3 | ✗ L0 [105] | ✗ L0 [106] | ✗ L0 [107] |
+| SPDAff | MetricAxioms | L2 | L3 | L3 | ✗ L0 [1] | L3 | L3 |
+| SPDAff | DerivedDistance | L2 | L3 | L3 | ✗ L0 [2] | L3 | L3 |
+| SPDAff | ExpLog | L2 | L3 | L3 | ✗ L0 [3] | L3 | L3 |
+| SPDAff | Midpoint | L2 | L3 | L3 | ✗ L0 [4] | L3 | L3 |
+| SPDAff | FrechetMean | L2 | L3 | L3 | ✗ L0 [5] | L3 | L3 |
+| SPDAff | VerifyExpLog | L2 | L3 | L3 | ✗ L0 [6] | L3 | L3 |
+| SPDAff | Derivative | L2 | L3 | L3 | ✗ L0 [7] | L0 | L0 |
+| TorusChart | MetricAxioms | L2 | L3 | L3 | ✗ L0 [8] | ✗ L0 [9] | ✗ L0 [10] |
+| TorusChart | DerivedDistance | ✗ L0 [11] | ✗ L0 [12] | ✗ L0 [13] | ✗ L0 [14] | ✗ L0 [15] | ✗ L0 [16] |
+| TorusChart | ExpLog | ✗ L0 [17] | ✗ L0 [18] | ✗ L0 [19] | ✗ L0 [20] | ✗ L0 [21] | ✗ L0 [22] |
+| TorusChart | Midpoint | ✗ L0 [23] | ✗ L0 [24] | ✗ L0 [25] | ✗ L0 [26] | ✗ L0 [27] | ✗ L0 [28] |
+| TorusChart | FrechetMean | ✗ L0 [29] | ✗ L0 [30] | ✗ L0 [31] | ✗ L0 [32] | ✗ L0 [33] | ✗ L0 [34] |
+| TorusChart | VerifyExpLog | ✗ L0 [35] | ✗ L0 [36] | ✗ L0 [37] | ✗ L0 [38] | ✗ L0 [39] | ✗ L0 [40] |
+| TorusChart | Derivative | L2 | L3 | L3 | ✗ L0 [41] | ✗ L0 [42] | ✗ L0 [43] |
+| SphereLevelSet | MetricAxioms | L2 | L3 | L3 | ✗ L0 [44] | ✗ L0 [45] | ✗ L0 [46] |
+| SphereLevelSet | DerivedDistance | ✗ L0 [47] | ✗ L0 [48] | ✗ L0 [49] | ✗ L0 [50] | ✗ L0 [51] | ✗ L0 [52] |
+| SphereLevelSet | ExpLog | ✗ L0 [53] | ✗ L0 [54] | ✗ L0 [55] | ✗ L0 [56] | ✗ L0 [57] | ✗ L0 [58] |
+| SphereLevelSet | Midpoint | ✗ L0 [59] | ✗ L0 [60] | ✗ L0 [61] | ✗ L0 [62] | ✗ L0 [63] | ✗ L0 [64] |
+| SphereLevelSet | FrechetMean | ✗ L0 [65] | ✗ L0 [66] | ✗ L0 [67] | ✗ L0 [68] | ✗ L0 [69] | ✗ L0 [70] |
+| SphereLevelSet | VerifyExpLog | ✗ L0 [71] | ✗ L0 [72] | ✗ L0 [73] | ✗ L0 [74] | ✗ L0 [75] | ✗ L0 [76] |
+| SphereLevelSet | Derivative | L2 | L3 | L3 | ✗ L0 [77] | ✗ L0 [78] | ✗ L0 [79] |
 
 ## Notes
 
-1. H2 / MetricAxioms / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
-2. H2 / MetricAxioms / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-3. H2 / DerivedDistance / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
-4. H2 / DerivedDistance / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-5. H2 / ExpLog / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
-6. H2 / ExpLog / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-7. H2 / Midpoint / Dual: no matching function for call to ‘cosh(const spatium::algebra::Dual<double>&)’
-8. H2 / Midpoint / Dual2: no matching function for call to ‘cosh(const spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-9. H2 / FrechetMean / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
-10. H2 / FrechetMean / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-11. H2 / VerifyExpLog / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
-12. H2 / VerifyExpLog / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-13. H2 / Derivative / Dual: no matching function for call to ‘cosh(const spatium::algebra::Dual<double>&)’
-14. H2 / Derivative / Dual2: no matching function for call to ‘cosh(const spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-15. SPDAff / MetricAxioms / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-16. SPDAff / MetricAxioms / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-17. SPDAff / MetricAxioms / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-18. SPDAff / DerivedDistance / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-19. SPDAff / DerivedDistance / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-20. SPDAff / DerivedDistance / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-21. SPDAff / ExpLog / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-22. SPDAff / ExpLog / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-23. SPDAff / ExpLog / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-24. SPDAff / Midpoint / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-25. SPDAff / Midpoint / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-26. SPDAff / Midpoint / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-27. SPDAff / FrechetMean / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-28. SPDAff / FrechetMean / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-29. SPDAff / FrechetMean / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-30. SPDAff / VerifyExpLog / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-31. SPDAff / VerifyExpLog / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-32. SPDAff / VerifyExpLog / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-33. SPDAff / Derivative / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
-34. SPDAff / Derivative / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
-35. SPDAff / Derivative / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-36. TorusChart / MetricAxioms / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-37. TorusChart / MetricAxioms / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-38. TorusChart / MetricAxioms / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-39. TorusChart / DerivedDistance / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-40. TorusChart / DerivedDistance / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-41. TorusChart / DerivedDistance / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-42. TorusChart / DerivedDistance / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-43. TorusChart / DerivedDistance / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-44. TorusChart / DerivedDistance / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-45. TorusChart / ExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-46. TorusChart / ExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-47. TorusChart / ExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-48. TorusChart / ExpLog / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-49. TorusChart / ExpLog / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-50. TorusChart / ExpLog / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-51. TorusChart / Midpoint / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-52. TorusChart / Midpoint / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-53. TorusChart / Midpoint / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-54. TorusChart / Midpoint / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-55. TorusChart / Midpoint / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-56. TorusChart / Midpoint / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-57. TorusChart / FrechetMean / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-58. TorusChart / FrechetMean / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-59. TorusChart / FrechetMean / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-60. TorusChart / FrechetMean / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-61. TorusChart / FrechetMean / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-62. TorusChart / FrechetMean / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-63. TorusChart / VerifyExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-64. TorusChart / VerifyExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-65. TorusChart / VerifyExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-66. TorusChart / VerifyExpLog / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-67. TorusChart / VerifyExpLog / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-68. TorusChart / VerifyExpLog / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-69. TorusChart / Derivative / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
-70. TorusChart / Derivative / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
-71. TorusChart / Derivative / Dual2: no match for ‘operator/’ (operand types are ‘spatium::algebra::Dual<spatium::algebra::Dual<double> >’ and ‘const int’)
-72. SphereLevelSet / MetricAxioms / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-73. SphereLevelSet / MetricAxioms / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-74. SphereLevelSet / MetricAxioms / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-75. SphereLevelSet / DerivedDistance / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-76. SphereLevelSet / DerivedDistance / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-77. SphereLevelSet / DerivedDistance / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-78. SphereLevelSet / DerivedDistance / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-79. SphereLevelSet / DerivedDistance / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-80. SphereLevelSet / DerivedDistance / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-81. SphereLevelSet / ExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-82. SphereLevelSet / ExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-83. SphereLevelSet / ExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-84. SphereLevelSet / ExpLog / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-85. SphereLevelSet / ExpLog / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-86. SphereLevelSet / ExpLog / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-87. SphereLevelSet / Midpoint / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-88. SphereLevelSet / Midpoint / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-89. SphereLevelSet / Midpoint / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-90. SphereLevelSet / Midpoint / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-91. SphereLevelSet / Midpoint / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-92. SphereLevelSet / Midpoint / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-93. SphereLevelSet / FrechetMean / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-94. SphereLevelSet / FrechetMean / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-95. SphereLevelSet / FrechetMean / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-96. SphereLevelSet / FrechetMean / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-97. SphereLevelSet / FrechetMean / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-98. SphereLevelSet / FrechetMean / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-99. SphereLevelSet / VerifyExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
-100. SphereLevelSet / VerifyExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
-101. SphereLevelSet / VerifyExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
-102. SphereLevelSet / VerifyExpLog / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-103. SphereLevelSet / VerifyExpLog / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-104. SphereLevelSet / VerifyExpLog / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-105. SphereLevelSet / Derivative / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
-106. SphereLevelSet / Derivative / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
-107. SphereLevelSet / Derivative / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+1. SPDAff / MetricAxioms / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+2. SPDAff / DerivedDistance / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+3. SPDAff / ExpLog / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+4. SPDAff / Midpoint / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+5. SPDAff / FrechetMean / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+6. SPDAff / VerifyExpLog / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+7. SPDAff / Derivative / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
+8. TorusChart / MetricAxioms / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+9. TorusChart / MetricAxioms / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+10. TorusChart / MetricAxioms / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+11. TorusChart / DerivedDistance / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+12. TorusChart / DerivedDistance / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+13. TorusChart / DerivedDistance / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+14. TorusChart / DerivedDistance / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+15. TorusChart / DerivedDistance / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+16. TorusChart / DerivedDistance / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+17. TorusChart / ExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+18. TorusChart / ExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+19. TorusChart / ExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+20. TorusChart / ExpLog / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+21. TorusChart / ExpLog / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+22. TorusChart / ExpLog / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+23. TorusChart / Midpoint / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+24. TorusChart / Midpoint / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+25. TorusChart / Midpoint / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+26. TorusChart / Midpoint / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+27. TorusChart / Midpoint / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+28. TorusChart / Midpoint / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+29. TorusChart / FrechetMean / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+30. TorusChart / FrechetMean / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+31. TorusChart / FrechetMean / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+32. TorusChart / FrechetMean / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+33. TorusChart / FrechetMean / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+34. TorusChart / FrechetMean / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+35. TorusChart / VerifyExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+36. TorusChart / VerifyExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+37. TorusChart / VerifyExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+38. TorusChart / VerifyExpLog / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+39. TorusChart / VerifyExpLog / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+40. TorusChart / VerifyExpLog / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+41. TorusChart / Derivative / Real50: no matching function for call to ‘fmod(boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::
+42. TorusChart / Derivative / Dual: no matching function for call to ‘fmod(spatium::algebra::Dual<double>, const spatium::algebra::Dual<double>&)’
+43. TorusChart / Derivative / Dual2: no matching function for call to ‘fmod(spatium::algebra::Dual<spatium::algebra::Dual<double> >, const spatium::algebra::Dual<spatium::algebr
+44. SphereLevelSet / MetricAxioms / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+45. SphereLevelSet / MetricAxioms / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+46. SphereLevelSet / MetricAxioms / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+47. SphereLevelSet / DerivedDistance / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+48. SphereLevelSet / DerivedDistance / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+49. SphereLevelSet / DerivedDistance / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+50. SphereLevelSet / DerivedDistance / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+51. SphereLevelSet / DerivedDistance / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+52. SphereLevelSet / DerivedDistance / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+53. SphereLevelSet / ExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+54. SphereLevelSet / ExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+55. SphereLevelSet / ExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+56. SphereLevelSet / ExpLog / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+57. SphereLevelSet / ExpLog / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+58. SphereLevelSet / ExpLog / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+59. SphereLevelSet / Midpoint / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+60. SphereLevelSet / Midpoint / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+61. SphereLevelSet / Midpoint / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+62. SphereLevelSet / Midpoint / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+63. SphereLevelSet / Midpoint / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+64. SphereLevelSet / Midpoint / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+65. SphereLevelSet / FrechetMean / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+66. SphereLevelSet / FrechetMean / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+67. SphereLevelSet / FrechetMean / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+68. SphereLevelSet / FrechetMean / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+69. SphereLevelSet / FrechetMean / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+70. SphereLevelSet / FrechetMean / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+71. SphereLevelSet / VerifyExpLog / double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<double, 3>, spatium
+72. SphereLevelSet / VerifyExpLog / float: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<float, 3>, spatium:
+73. SphereLevelSet / VerifyExpLog / long double: no match for ‘operator=’ (operand types are ‘spatium::algebra::VecBinExpr<spatium::algebra::OpSub, spatium::algebra::Vec<long double, 3>, sp
+74. SphereLevelSet / VerifyExpLog / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+75. SphereLevelSet / VerifyExpLog / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+76. SphereLevelSet / VerifyExpLog / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+77. SphereLevelSet / Derivative / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
+78. SphereLevelSet / Derivative / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
+79. SphereLevelSet / Derivative / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’

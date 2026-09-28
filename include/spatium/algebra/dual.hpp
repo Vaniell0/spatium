@@ -4,6 +4,7 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <cmath>
+#  include <type_traits>
 #  include <format>
 #endif
 
@@ -51,6 +52,27 @@ struct Dual {
     friend constexpr Dual operator+(T s, const Dual& d) { return Dual(s) + d; }
     friend constexpr Dual operator-(T s, const Dual& d) { return Dual(s) - d; }
     friend constexpr Dual operator*(T s, const Dual& d) { return {s * d.value, s * d.deriv}; }
+    friend constexpr Dual operator/(T s, const Dual& d) { return Dual(s) / d; }
+
+    // A built-in number on either side, whatever T is: for Dual<Dual<double>>
+    // an int reaches Dual only through two conversions, which C++ does not
+    // chain, so `x / 2` did not compile at the second level of nesting.
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator+(const Dual& d, U s) { return d + Dual(T(s)); }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator+(U s, const Dual& d) { return Dual(T(s)) + d; }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator-(const Dual& d, U s) { return d - Dual(T(s)); }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator-(U s, const Dual& d) { return Dual(T(s)) - d; }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator*(const Dual& d, U s) { return {d.value * T(s), d.deriv * T(s)}; }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator*(U s, const Dual& d) { return {T(s) * d.value, T(s) * d.deriv}; }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator/(const Dual& d, U s) { return {d.value / T(s), d.deriv / T(s)}; }
+    template<class U> requires std::is_arithmetic_v<U>
+    friend constexpr Dual operator/(U s, const Dual& d) { return Dual(T(s)) / d; }
 
     constexpr Dual& operator+=(const Dual& o) { *this = *this + o; return *this; }
     constexpr Dual& operator-=(const Dual& o) { *this = *this - o; return *this; }
@@ -110,6 +132,70 @@ Dual<T> tan(const Dual<T>& x) {
     using std::tan, std::cos;
     auto c = cos(x.value);
     return {tan(x.value), x.deriv / (c * c)};
+}
+
+template<Scalar T>
+Dual<T> log(const Dual<T>& x) {
+    using std::log;
+    return {log(x.value), x.deriv / x.value};
+}
+
+template<Scalar T>
+Dual<T> sinh(const Dual<T>& x) {
+    using std::sinh, std::cosh;
+    return {sinh(x.value), x.deriv * cosh(x.value)};
+}
+
+template<Scalar T>
+Dual<T> cosh(const Dual<T>& x) {
+    using std::sinh, std::cosh;
+    return {cosh(x.value), x.deriv * sinh(x.value)};
+}
+
+template<Scalar T>
+Dual<T> asinh(const Dual<T>& x) {
+    using std::asinh, std::sqrt;
+    return {asinh(x.value), x.deriv / sqrt(x.value * x.value + T{1})};
+}
+
+template<Scalar T>
+Dual<T> acosh(const Dual<T>& x) {
+    using std::acosh, std::sqrt;
+    return {acosh(x.value), x.deriv / sqrt(x.value * x.value - T{1})};
+}
+
+template<Scalar T>
+Dual<T> asin(const Dual<T>& x) {
+    using std::asin, std::sqrt;
+    return {asin(x.value), x.deriv / sqrt(T{1} - x.value * x.value)};
+}
+
+template<Scalar T>
+Dual<T> atan(const Dual<T>& x) {
+    using std::atan;
+    return {atan(x.value), x.deriv / (T{1} + x.value * x.value)};
+}
+
+template<Scalar T>
+Dual<T> atan2(const Dual<T>& y, const Dual<T>& x) {
+    using std::atan2;
+    const T r2 = x.value * x.value + y.value * y.value;
+    return {atan2(y.value, x.value), (x.value * y.deriv - y.value * x.deriv) / r2};
+}
+
+// Piecewise constant: derivative zero wherever it is defined.
+template<Scalar T>
+Dual<T> floor(const Dual<T>& x) {
+    using std::floor;
+    return {floor(x.value), T{0}};
+}
+
+// x - y * trunc(x / y): the quotient is piecewise constant.
+template<Scalar T>
+Dual<T> fmod(const Dual<T>& x, const Dual<T>& y) {
+    using std::fmod, std::trunc;
+    const T q = trunc(x.value / y.value);
+    return {fmod(x.value, y.value), x.deriv - y.deriv * q};
 }
 
 // Real-exponent power; n is a plain constant, not itself a Dual (matches the

@@ -102,14 +102,12 @@ was not re-read before new work.
 
 Measured by `docs/connectivity.md` (first run 2026-09-29), beyond items
 listed below:
-- `Dual` lacks `abs`, `log`, `cosh`, `acosh`, `fmod` and division by `int`:
-  Hyperbolic and SPD affine-invariant do not compile over Dual at all.
 - `Real50` fails in `solve_quadratic` (SPD affine-invariant's eigenvalues)
   and `fmod` on a Boost expression (`ParametricSurface`'s periodic wrap).
 
 - Mesh calculus is Euclidean-ambient: cotangents by `cross`, `face_area_3d`, `heat_geodesic` ignores the space. On `Hyperbolic<2>` heat errs 342%, `Mesh::area` 22.0 vs 2.23; Dijkstra on the same mesh is right, so the two methods answer different questions. Fix: intrinsic edge lengths (law of cosines, Heron). Doc `concept-driven-physics.md:147` promises a `metric_at` Laplacian that does not exist.
 - SO3/SE3 are LieGroups but not Riemannian spaces: add `LieGroupManifold<G>` (exp_map = p·exp(tv), log_map = log(p⁻¹q)); then `frechet_mean` averages rotations. With `core/access.hpp` this can be ADL functions instead of an adapter type.
-- `Dual` does not flow through geometry: 58 unqualified-free `std::abs/std::sqrt` calls; `ray_triangle`, `Triangle::distance`, seg-seg, `ray_torus`, `BVH<Triangle<3,Dual>>` fail to compile with Dual. Dual lacks `T/Dual`, `pow(Dual,int)`, `log`, `floor`, `atan2`, `sinh`, `cosh`; without `floor`, `Field<Dual>` fails on noise.
+- `Dual` does not flow through geometry: 58 unqualified-free `std::abs/std::sqrt` calls; `ray_triangle`, `Triangle::distance`, seg-seg, `ray_torus`, `BVH<Triangle<3,Dual>>` fail to compile with Dual. Dual lacked `T/Dual`, `log`, `floor`, `atan2`, `sinh`, `cosh` (added 2026-09-29; `pow(Dual, int)` still goes through the real-exponent overload).
 - SPD limited to N ≤ 3 by a stale reason (general `eigen_decomp.hpp` exists); `distance` costs ~4 eigendecompositions where 2 suffice.
 - `riemannian_minimize` requires `HasNormal`, excluding SPD and products.
 - `Scalar` requires `totally_ordered`: no `Complex`, no `Interval`.
