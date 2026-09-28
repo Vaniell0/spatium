@@ -46,6 +46,11 @@ spatium_add_example(NAME scene_demo OPTIONS -O3 -march=native)
 # per-pixel-cost reasoning as the raytracers above).
 spatium_add_example(NAME donut_demo OPTIONS -O3 -march=native)
 
+# Napkins falling onto a sphere and onto each other: cloth against cloth
+# through surface_ccd.hpp's vertex-face and edge-edge queries, measured
+# with the continuous pass on and off by an independent piercing count.
+spatium_add_example(NAME napkins OPTIONS -O3 -march=native)
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel
