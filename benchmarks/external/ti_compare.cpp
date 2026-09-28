@@ -97,6 +97,35 @@ static mech::MovingChart<double> triangle(const SV& a, const SV& b, const SV& c,
     return m;
 }
 
+// The same three charts keeping their callables' types (moving_chart):
+// nothing erased, nothing on the heap, the search inlines them.
+static auto typed_vertex(const SV& a, const SV& b) {
+    const SV d{b - a};
+    auto c = mech::moving_chart<double>([a](double, double) { return a; }, [d](double, double) { return d; },
+                                        mech::DerivativeBounds<double>{}, mech::DerivativeBounds<double>{});
+    c.u1 = c.v1 = 0;
+    return c;
+}
+static auto typed_edge(const SV& e0, const SV& e1, const SV& f0, const SV& f1) {
+    const SV d0{f0 - e0}, d1{f1 - e1};
+    auto c = mech::moving_chart<double>([e0, e1](double u, double) { return SV{e0 + (e1 - e0) * u}; },
+                                        [d0, d1](double u, double) { return SV{d0 + (d1 - d0) * u}; },
+                                        mech::DerivativeBounds<double>{SV{e1 - e0}.norm(), 0, 0, 0},
+                                        mech::DerivativeBounds<double>{SV{d1 - d0}.norm(), 0, 0, 0});
+    c.v1 = 0;
+    return c;
+}
+static auto typed_triangle(const SV& a, const SV& b, const SV& c, const SV& a1, const SV& b1, const SV& c1) {
+    const SV da{a1 - a}, db{b1 - b}, dc{c1 - c};
+    const auto tri = [](const SV& a, const SV& b, const SV& c, double u, double v) {
+        return SV{a + (SV{b - a} * (1 - v) + SV{c - a} * v) * u};
+    };
+    return mech::moving_chart<double>(
+        [=](double u, double v) { return tri(a, b, c, u, v); }, [=](double u, double v) { return tri(da, db, dc, u, v); },
+        mech::DerivativeBounds<double>{std::max(SV{b - a}.norm(), SV{c - a}.norm()), SV{c - b}.norm(), 0, 0},
+        mech::DerivativeBounds<double>{std::max(SV{db - da}.norm(), SV{dc - da}.norm()), SV{dc - db}.norm(), 0, 0});
+}
+
 int main(int argc, char** argv) {
     const fs::path root = argc > 1 ? argv[1] : "Sample-Queries";
     const double width = argc > 2 ? std::atof(argv[2]) : 1e-6;
@@ -105,8 +134,8 @@ int main(int argc, char** argv) {
     using clk = std::chrono::steady_clock;
     for (const char* kind : {"vertex-face", "edge-edge"}) {
         const bool vf = std::string(kind) == "vertex-face";
-        std::size_t n = 0, positives = 0, fn_ti = 0, fp_ti = 0, fn_us = 0, fp_us = 0;
-        double s_ti = 0, s_us = 0;
+        std::size_t n = 0, positives = 0, fn_ti = 0, fp_ti = 0, fn_us = 0, fp_us = 0, fn_ty = 0, fp_ty = 0;
+        double s_ti = 0, s_us = 0, s_ty = 0;
         std::vector<fs::path> files;
         for (const auto& e : fs::recursive_directory_iterator(root))
             if (e.is_regular_file() && e.path().extension() == ".csv" && e.path().parent_path().filename() == kind)
@@ -130,6 +159,14 @@ int main(int argc, char** argv) {
                 const auto b = vf ? triangle(x[1], x[2], x[3], x[5], x[6], x[7]) : edge(x[2], x[3], x[6], x[7]);
                 const auto r = mech::first_contact(a, b, width, budget);
                 auto t2 = clk::now();
+                const bool ty = vf ? mech::first_contact(typed_vertex(x[0], x[4]),
+                                                          typed_triangle(x[1], x[2], x[3], x[5], x[6], x[7]), width, budget).hit
+                                   : mech::first_contact(typed_edge(x[0], x[1], x[4], x[5]),
+                                                         typed_edge(x[2], x[3], x[6], x[7]), width, budget).hit;
+                auto t3 = clk::now();
+                s_ty += std::chrono::duration<double>(t3 - t2).count();
+                fn_ty += q.truth && !ty;
+                fp_ty += !q.truth && ty;
                 s_ti += std::chrono::duration<double>(t1 - t0).count();
                 s_us += std::chrono::duration<double>(t2 - t1).count();
                 ++n;
@@ -151,5 +188,7 @@ int main(int argc, char** argv) {
                      fp_ti);
         std::println("  ours:            {:.3f} us a query, {} false negatives, {} false positives", 1e6 * s_us / n, fn_us,
                      fp_us);
+        std::println("  ours, typed:     {:.3f} us a query, {} false negatives, {} false positives", 1e6 * s_ty / n, fn_ty,
+                     fp_ty);
     }
 }

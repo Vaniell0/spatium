@@ -67,9 +67,16 @@ struct DerivativeBounds {
 
 // A surface moving linearly over the step: position p and velocity w as
 // charts on one parameter rectangle, each with its bounds.
-template<Scalar T>
+//
+// P and W are the callables themselves, so the search sees and inlines
+// them -- and a lambda holding its data is not sent to the heap once a
+// query, as it is behind std::function, which holds 16 bytes. The default,
+// std::function, is the erased form for a boundary where charts of
+// different kinds must share one type; moving_chart() makes the other.
+template<Scalar T, class P = std::function<Vec<T, 3>(T, T)>, class W = P>
 struct MovingChart {
-    std::function<Vec<T, 3>(T, T)> p, w;
+    P p;
+    W w;
     DerivativeBounds<T> bp, bw;
     T u0 = T{0}, u1 = T{1}, v0 = T{0}, v1 = T{1};
     // The position's bounds over one cell, when a chart can say more there
@@ -80,6 +87,12 @@ struct MovingChart {
     // a sheet's half-thickness, zero for a surface itself.
     T thickness = T{0};
 };
+
+// A chart that keeps its callables' types.
+template<Scalar T, class P, class W>
+MovingChart<T, P, W> moving_chart(P p, W w, DerivativeBounds<T> bp, DerivativeBounds<T> bw = {}) {
+    return {std::move(p), std::move(w), bp, bw};
+}
 
 // The decisions of the search that no correctness depends on -- which
 // directions a slab is tried along, which cell is halved, when time is
@@ -129,14 +142,14 @@ struct SurfaceCcdFeatures {
     T speed = T{0};                     // relative motion over the query's size
 };
 
-template<Scalar T>
-SurfaceCcdFeatures<T> surface_ccd_features(const MovingChart<T>& a, const MovingChart<T>& b) {
-    const auto dim = [](const MovingChart<T>& c) { return int(c.u1 > c.u0) + int(c.v1 > c.v0); };
-    const auto bend = [](const MovingChart<T>& c) {
+template<Scalar T, class PA, class WA, class PB, class WB>
+SurfaceCcdFeatures<T> surface_ccd_features(const MovingChart<T, PA, WA>& a, const MovingChart<T, PB, WB>& b) {
+    const auto dim = [](const auto& c) { return int(c.u1 > c.u0) + int(c.v1 > c.v0); };
+    const auto bend = [](const auto& c) {
         const T first = c.bp.u + c.bp.v + c.bw.u + c.bw.v;
         return first > T{0} ? (c.bp.uu + c.bp.vv + c.bw.uu + c.bw.vv) / first : T{0};
     };
-    const auto mid = [](const MovingChart<T>& c, const auto& f) {
+    const auto mid = [](const auto& c, const auto& f) {
         return f((c.u0 + c.u1) / T{2}, (c.v0 + c.v1) / T{2});
     };
     const T size = mid(a, a.p).norm() + mid(b, b.p).norm() + a.bp.u + a.bp.v + b.bp.u + b.bp.v + T{1e-300};
@@ -156,10 +169,10 @@ struct MovingCell {
     std::int32_t first_child = -1;
 };
 
-template<Scalar T>
+template<Scalar T, class Chart>
 class MovingCellTree {
 public:
-    explicit MovingCellTree(const MovingChart<T>& c) : c_(c) {
+    explicit MovingCellTree(const Chart& c) : c_(c) {
         std::array<Vec<T, 3>, 4> pk{p(c.u0, c.v0), p(c.u1, c.v0), p(c.u0, c.v1), p(c.u1, c.v1)};
         std::array<Vec<T, 3>, 4> wk{w(c.u0, c.v0), w(c.u1, c.v0), w(c.u0, c.v1), w(c.u1, c.v1)};
         cells_.push_back(make(c.u0, c.u1, c.v0, c.v1, pk, wk));
@@ -210,7 +223,7 @@ private:
                              wk, -1};
     }
 
-    const MovingChart<T>& c_;
+    const Chart& c_;
     std::vector<MovingCell<T>> cells_;
     std::size_t evaluations_ = 0;
 };
@@ -251,11 +264,12 @@ bool cut(T& t0, T& t1, std::pair<T, T> apart) {
 // The first time two moving surfaces touch, to `width` in parameters and
 // time. `budget` caps the pairs bounded; running out answers the earliest
 // interval still open -- early, never late.
-template<Scalar T>
-SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b, T width = T{1e-5},
+template<Scalar T, class PA, class WA, class PB, class WB>
+SurfaceContact<T> first_contact(const MovingChart<T, PA, WA>& a, const MovingChart<T, PB, WB>& b, T width = T{1e-5},
                                 std::size_t budget = std::size_t{1} << 24, const SurfaceCcdPolicy& policy = {}) {
     using std::abs; using std::sqrt;
-    detail::MovingCellTree<T> ta(a), tb(b);
+    detail::MovingCellTree<T, MovingChart<T, PA, WA>> ta(a);
+    detail::MovingCellTree<T, MovingChart<T, PB, WB>> tb(b);
     SurfaceContact<T> out;
     const T ulp = std::numeric_limits<T>::epsilon() * T{64};
 
@@ -425,10 +439,10 @@ SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b
 // The same search with its policy picked per query by a chooser over
 // SurfaceCcdFeatures -- a constant, a table, or a tree RSC distilled from
 // measurements (rsc/include/generated/ccd_chooser_tree.hpp).
-template<Scalar T, typename C>
+template<Scalar T, class PA, class WA, class PB, class WB, typename C>
     requires Chooser<C, SurfaceCcdFeatures<T>>
-SurfaceContact<T> first_contact(const MovingChart<T>& a, const MovingChart<T>& b, T width, std::size_t budget,
-                                const C& chooser) {
+SurfaceContact<T> first_contact(const MovingChart<T, PA, WA>& a, const MovingChart<T, PB, WB>& b, T width,
+                                std::size_t budget, const C& chooser) {
     const SurfaceCcdPolicy policy = chooser.choose(surface_ccd_features(a, b));
     return first_contact(a, b, width, budget, policy);
 }
