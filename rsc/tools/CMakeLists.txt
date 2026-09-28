@@ -117,3 +117,11 @@ target_include_directories(ccd_policy PRIVATE
 )
 target_link_libraries(ccd_policy PRIVATE spatium_core)
 target_compile_options(ccd_policy PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(metric_calibrate metric_calibrate.cpp)
+target_include_directories(metric_calibrate PRIVATE
+    ${CMAKE_SOURCE_DIR}/rsc/include
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(metric_calibrate PRIVATE spatium_core)
+target_compile_options(metric_calibrate PRIVATE -Wall -Wextra -Wpedantic)

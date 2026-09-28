@@ -145,3 +145,28 @@ TEST_CASE("A superposition that is not Lorentzian is refused", "[relativity][sce
     REQUIRE(gw);
     CHECK(lorentzian_at(*gw, mid));
 }
+
+// A hole in uniform motion, boosted into the frame it moves in, is boosted
+// Kerr -- an exact vacuum solution -- so its residual is rounding; at rest
+// wherever it is (boost 0) it is not. The boost's correctness, checked by
+// the exact residual alone.
+TEST_CASE("A moving hole boosted into its own frame is vacuum", "[relativity][scene]") {
+    const auto moving = [](double boost) {
+        SpacetimeScene<double> sc;
+        auto& h = sc.hole(1.0, 0.6);
+        const auto t = SpacetimeScene<double>::F::t();
+        h.x = SpacetimeScene<double>::F(0.3) * t;
+        h.vx = SpacetimeScene<double>::F(0.3);
+        sc.boost(boost);
+        return sc;
+    };
+    for (const V4 x : {V4{0.0, 5.0, 1.0, 2.0}, V4{2.0, -3.0, 4.0, -1.5}, V4{-1.0, 8.0, -2.0, 0.3}}) {
+        const auto exact = moving(1.0).residual_at(x);
+        const auto rest = moving(0.0).residual_at(x);
+        REQUIRE(exact);
+        REQUIRE(rest);
+        INFO(std::format("boosted {:.2e}, unboosted {:.2e}", *exact, *rest));
+        CHECK(*exact < 1e-12);
+        CHECK(*rest > 1e-4);
+    }
+}
