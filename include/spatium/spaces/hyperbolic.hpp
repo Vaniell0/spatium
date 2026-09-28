@@ -41,13 +41,14 @@ struct Hyperbolic {
         return acosh(inner);
     }
 
+    // As Sphere::exp_map: the arc length t |v|_L is signed and linear in t,
+    // so exp is smooth through t = 0 and a Dual t carries its derivative v.
     PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const {
         using std::cosh; using std::sinh; using std::sqrt; using std::abs;
-        auto tv = v * t;
-        auto norm_sq = minkowski(tv, tv);
-        if (abs(norm_sq) < epsilon<T>() * epsilon<T>()) return p;
-        auto norm = sqrt(abs(norm_sq));
-        return p * cosh(norm) + tv * (sinh(norm) / norm);
+        const T speed = sqrt(abs(minkowski(v, v)));
+        if (speed == T{0}) return p;
+        const T s = t * speed;
+        return PointType{p * cosh(s) + v * (sinh(s) / speed)};
     }
 
     TangentVector log_map(const PointType& p, const PointType& q) const {

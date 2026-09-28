@@ -1,6 +1,7 @@
 add_executable(spatium_tests
     test_concepts.cpp
     test_space_access.cpp
+    test_connectivity.cpp
     test_vector.cpp
     test_euclidean.cpp
     test_box.cpp
