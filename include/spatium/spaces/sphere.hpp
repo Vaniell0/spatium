@@ -38,13 +38,18 @@ struct Sphere {
         return radius * acos(cos_angle);
     }
 
+    // The angle is t |v| / r, signed and linear in t, and the direction
+    // v / |v| does not depend on t: exp is smooth in t through t = 0, so a
+    // Dual t carries d/dt exp_p(t v) = v there. Measuring |t v| instead (as
+    // this did) is not differentiable at t = 0, and its small-angle branch,
+    // which compares only a Dual's value, returned p with a zero derivative
+    // -- found by the connectivity matrix's derivative cells.
     PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const {
         using std::cos; using std::sin;
-        auto tv = v * t;
-        auto theta = tv.norm() / radius;
-        if (theta < epsilon<T>()) return p;
-        auto dir = tv / (theta * radius);
-        return p * cos(theta) + dir * (radius * sin(theta));
+        const T speed = v.norm();
+        if (speed == T{0}) return p;
+        const T theta = t * speed / radius;
+        return PointType{p * cos(theta) + v * (radius * sin(theta) / speed)};
     }
 
     TangentVector log_map(const PointType& p, const PointType& q) const {

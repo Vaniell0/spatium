@@ -13,7 +13,7 @@ scalar, in its own translation unit, and graded:
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**225 of 336 cells at L2 or above.**
+**229 of 336 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -30,7 +30,7 @@ holds every cell to the level recorded here.
 | S2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
-| S2 | Derivative | L3 | L3 | L3 | L3 | L1 | L1 |
+| S2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | H2 | MetricAxioms | L3 | L3 | L3 | L3 | ✗ L0 [1] | ✗ L0 [2] |
 | H2 | DerivedDistance | L3 | L3 | L3 | L3 | ✗ L0 [3] | ✗ L0 [4] |
 | H2 | ExpLog | L3 | L3 | L3 | L3 | ✗ L0 [5] | ✗ L0 [6] |
@@ -44,7 +44,7 @@ holds every cell to the level recorded here.
 | S2xE1 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2xE1 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
 | S2xE1 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
-| S2xE1 | Derivative | L3 | L3 | L3 | L3 | L1 | L1 |
+| S2xE1 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDLogE | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDLogE | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDLogE | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
@@ -82,14 +82,14 @@ holds every cell to the level recorded here.
 4. H2 / DerivedDistance / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
 5. H2 / ExpLog / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
 6. H2 / ExpLog / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-7. H2 / Midpoint / Dual: no matching function for call to ‘cosh(spatium::algebra::Dual<double>&)’
-8. H2 / Midpoint / Dual2: no matching function for call to ‘cosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+7. H2 / Midpoint / Dual: no matching function for call to ‘cosh(const spatium::algebra::Dual<double>&)’
+8. H2 / Midpoint / Dual2: no matching function for call to ‘cosh(const spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
 9. H2 / FrechetMean / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
 10. H2 / FrechetMean / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
 11. H2 / VerifyExpLog / Dual: no matching function for call to ‘acosh(spatium::algebra::Dual<double>&)’
 12. H2 / VerifyExpLog / Dual2: no matching function for call to ‘acosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
-13. H2 / Derivative / Dual: no matching function for call to ‘cosh(spatium::algebra::Dual<double>&)’
-14. H2 / Derivative / Dual2: no matching function for call to ‘cosh(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+13. H2 / Derivative / Dual: no matching function for call to ‘cosh(const spatium::algebra::Dual<double>&)’
+14. H2 / Derivative / Dual2: no matching function for call to ‘cosh(const spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
 15. SPDAff / MetricAxioms / Real50: no matching function for call to ‘solve_quadratic(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >, boost:
 16. SPDAff / MetricAxioms / Dual: no matching function for call to ‘log(spatium::algebra::Dual<double>&)’
 17. SPDAff / MetricAxioms / Dual2: no matching function for call to ‘log(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’

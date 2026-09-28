@@ -100,14 +100,8 @@ was not re-read before new work.
 
 ## 3. Connectivity: where "any space gets everything" stops
 
-Measured by `docs/connectivity.md` (225 of 336 cells at L2 or above, first
-run 2026-09-29), beyond items listed below:
-- **`Sphere::exp_map` loses the derivative at t = 0**: `theta = |t v| / r`
-  and `if (theta < eps) return p` -- for `Dual` the branch reads the value
-  alone (the `== 0` pattern of section 2), and |t v| is not differentiable
-  at t = 0 anyway. d/dt exp_p(t v) at 0 should be v; S2 and S2xE1
-  derivative cells are L1 on Dual and Dual2. Fix: theta = t |v| / r, signed,
-  direction v / |v|. Open.
+Measured by `docs/connectivity.md` (first run 2026-09-29), beyond items
+listed below:
 - `Dual` lacks `abs`, `log`, `cosh`, `acosh`, `fmod` and division by `int`:
   Hyperbolic and SPD affine-invariant do not compile over Dual at all.
 - `Real50` fails in `solve_quadratic` (SPD affine-invariant's eigenvalues)
