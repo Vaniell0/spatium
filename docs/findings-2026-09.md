@@ -519,3 +519,15 @@ not a materialiser.
   centre within tolerance of the other cell's slab would witness at once.
 - The search still allocates a cell vector and a queue per query: what is
   left after typed charts (7-15%).
+- *The napkins repeat IPC's limitation*: the cloth is a triangle mesh with
+  vertex-face and edge-edge queries, as in IPC, whose barrier and CCD are
+  defined on a distance but computed only between triangles. Ours are
+  defined and computed on charts. Next: the napkin as a smooth patch
+  (bicubic, control points as degrees of freedom -- cf. "Simulating
+  Parametric Thin Shells by Bicubic Hermite Elements", arXiv 2312.14839),
+  contact through `surface_ccd` between patches, where it measured 7-20x
+  TDIB-CCD; the triangle scene stays as the comparison.
+- *Energy.* IPC's implicit Euler dissipates energy; it is robust, not
+  energy-conserving. The library's variational and symplectic integrators
+  (`variational.hpp`, `lgvi.hpp`) with a barrier on the true distance are
+  the route to both: no intersection and energy held.
