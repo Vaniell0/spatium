@@ -3,7 +3,7 @@
 // many pairs the continuous pass asks and stops, and the independent
 // count of edges piercing triangles, with the continuous pass on and off.
 //
-//   napkins [--seconds S] [--napkins K] [--grid N] [--throw SPEED] [--rate SUBSTEPS_A_SECOND] [--trace]
+//   napkins [--seconds S] [--napkins K] [--grid N] [--throw SPEED] [--rate SUBSTEPS_A_SECOND] [--threads T] [--trace]
 
 #include "napkin_scene.hpp"
 
@@ -25,6 +25,7 @@ int main(int argc, char** argv) {
         else if (a == "--trace") trace = true;
         else if (a == "--throw") c.throw_speed = next();
         else if (a == "--rate") c.substep_dt = 1.0 / next();
+        else if (a == "--threads") c.threads = unsigned(next());
     }
     std::println("{} napkins of {}x{}, {} s at {} substeps a second", c.napkins, c.grid, c.grid, seconds,
                  1.0 / c.substep_dt);

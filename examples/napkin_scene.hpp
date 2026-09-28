@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -59,6 +60,7 @@ struct Config {
     int iterations = 8;
     double gravity = -9.81;
     int ccd_rounds = 4;
+    unsigned threads = 1;          // broad phase and continuous queries
     // Thrown: each napkin starts moving at this speed towards the stack's
     // axis, alternately from either side, so they meet in the air at a
     // speed a substep's discrete test does not see. Zero: dropped.
@@ -138,6 +140,22 @@ inline Cloth make_cloth(const Config& c) {
             if (seen.emplace((std::uint64_t(a) << 32) | b, 1).second) s.edges.push_back({a, b});
         }
     return s;
+}
+
+// ── Threads ─────────────────────────────────────────────────────
+
+// f(begin, end, worker) over [0, n) in contiguous chunks, one per worker.
+template<typename F>
+void parallel_chunks(std::size_t n, unsigned workers, F&& f) {
+    if (workers <= 1 || n < 512) { f(std::size_t{0}, n, 0u); return; }
+    std::vector<std::thread> pool;
+    const std::size_t chunk = (n + workers - 1) / workers;
+    for (unsigned w = 0; w < workers; ++w) {
+        const std::size_t b = w * chunk, e = std::min(n, b + chunk);
+        if (b >= e) break;
+        pool.emplace_back([&f, b, e, w] { f(b, e, w); });
+    }
+    for (auto& t : pool) t.join();
 }
 
 // ── Broad phase: a hash grid over boxes ─────────────────────────
@@ -224,44 +242,84 @@ struct SpatialHash {
     }
 };
 
-inline Candidates broad_phase(const Cloth& s, const std::vector<V3>& from, double pad, double cell) {
+// Pairs within one napkin are found in the napkin's own frame, moving
+// with its mean displacement: a translation common to both elements of a
+// pair, x(t) - t d, leaves every distance between them as it was, so the
+// pairs are the same, and a napkin flying at speed has boxes the size of
+// its folds rather than of its flight. Pairs across napkins are found in
+// the world's frame.
+inline Candidates broad_phase(const Cloth& s, const std::vector<V3>& from, double pad, double cell,
+                              unsigned threads = 1) {
     Candidates out;
     const auto& to = s.parts;
     const std::size_t nv = s.parts.size(), nf = s.faces.size(), ne = s.edges.size();
-    std::vector<Box> vb(nv), tb(nf), eb(ne);
-    for (std::size_t v = 0; v < nv; ++v) vb[v] = box_of({from[v], to[v].x}, pad);
-    for (std::size_t f = 0; f < nf; ++f) {
-        const auto& F = s.faces[f];
-        tb[f] = box_of({from[F[0]], from[F[1]], from[F[2]], to[F[0]].x, to[F[1]].x, to[F[2]].x}, pad);
+    int parts = 0;
+    for (int k : s.part_of) parts = std::max(parts, k + 1);
+    std::vector<V3> mean(std::size_t(parts), V3{});
+    std::vector<double> count(std::size_t(parts), 0);
+    for (std::size_t v = 0; v < nv; ++v) {
+        mean[std::size_t(s.part_of[v])] = V3{mean[std::size_t(s.part_of[v])] + (to[v].x - from[v])};
+        count[std::size_t(s.part_of[v])] += 1;
     }
-    for (std::size_t e = 0; e < ne; ++e) {
-        const auto& E = s.edges[e];
-        eb[e] = box_of({from[E[0]], from[E[1]], to[E[0]].x, to[E[1]].x}, pad);
-    }
+    for (int k = 0; k < parts; ++k) mean[std::size_t(k)] = V3{mean[std::size_t(k)] * (1 / std::max(1.0, count[std::size_t(k)]))};
+    const unsigned T = std::max(1u, threads);
     const std::uint32_t bits = std::max(10u, std::uint32_t(std::ceil(std::log2(double(nf + ne) * 2))));
-    {
-        const SpatialHash h(tb, cell, bits);
-        std::vector<std::uint32_t> mark(nf, ~0u);
-        for (std::uint32_t v = 0; v < nv; ++v)
-            h.near(vb[v], [&](std::uint32_t f) {
-                if (mark[f] == v) return;
-                mark[f] = v;
-                const auto& F = s.faces[f];
-                if (F[0] != v && F[1] != v && F[2] != v && overlap(vb[v], tb[f])) out.vf.push_back({v, f});
+
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool own = pass == 0;   // own frame, same napkin; world frame, different napkins
+        const auto end_of = [&](std::uint32_t i) {
+            return own ? V3{to[i].x - mean[std::size_t(s.part_of[i])]} : to[i].x;
+        };
+        std::vector<Box> vb(nv), tb(nf), eb(ne);
+        for (std::uint32_t v = 0; v < nv; ++v) vb[v] = box_of({from[v], end_of(v)}, pad);
+        for (std::uint32_t f = 0; f < nf; ++f) {
+            const auto& F = s.faces[f];
+            tb[f] = box_of({from[F[0]], from[F[1]], from[F[2]], end_of(F[0]), end_of(F[1]), end_of(F[2])}, pad);
+        }
+        for (std::uint32_t e = 0; e < ne; ++e) {
+            const auto& E = s.edges[e];
+            eb[e] = box_of({from[E[0]], from[E[1]], end_of(E[0]), end_of(E[1])}, pad);
+        }
+        // Cells about the size of the boxes, so a box covers a few.
+        double mean_box = 0;
+        for (const auto& b : eb) mean_box += std::max({b.hi[0] - b.lo[0], b.hi[1] - b.lo[1], b.hi[2] - b.lo[2]});
+        const double h = std::max(cell, ne ? mean_box / double(ne) : cell);
+        const auto keep = [&](std::uint32_t a, std::uint32_t b) { return (s.part_of[a] == s.part_of[b]) == own; };
+        std::vector<Candidates> part(T);
+        {
+            const SpatialHash hash(tb, h, bits);
+            parallel_chunks(nv, T, [&](std::size_t b, std::size_t e, unsigned w) {
+                std::vector<std::uint32_t> mark(nf, ~0u);
+                for (auto v = std::uint32_t(b); v < e; ++v)
+                    hash.near(vb[v], [&](std::uint32_t f) {
+                        if (mark[f] == v) return;
+                        mark[f] = v;
+                        const auto& F = s.faces[f];
+                        if (!keep(v, F[0]) || F[0] == v || F[1] == v || F[2] == v) return;
+                        if (overlap(vb[v], tb[f])) part[w].vf.push_back({v, f});
+                    });
             });
-    }
-    {
-        const SpatialHash h(eb, cell, bits);
-        std::vector<std::uint32_t> mark(ne, ~0u);
-        for (std::uint32_t e = 0; e < ne; ++e)
-            h.near(eb[e], [&](std::uint32_t o) {
-                if (o <= e || mark[o] == e) return;
-                mark[o] = e;
-                const auto& A = s.edges[e];
-                const auto& B = s.edges[o];
-                if (A[0] == B[0] || A[0] == B[1] || A[1] == B[0] || A[1] == B[1]) return;
-                if (overlap(eb[e], eb[o])) out.ee.push_back({e, o});
+        }
+        {
+            const SpatialHash hash(eb, h, bits);
+            parallel_chunks(ne, T, [&](std::size_t b, std::size_t en, unsigned w) {
+                std::vector<std::uint32_t> mark(ne, ~0u);
+                for (auto e = std::uint32_t(b); e < en; ++e)
+                    hash.near(eb[e], [&](std::uint32_t o) {
+                        if (o <= e || mark[o] == e) return;
+                        mark[o] = e;
+                        const auto& A = s.edges[e];
+                        const auto& B = s.edges[o];
+                        if (!keep(A[0], B[0])) return;
+                        if (A[0] == B[0] || A[0] == B[1] || A[1] == B[0] || A[1] == B[1]) return;
+                        if (overlap(eb[e], eb[o])) part[w].ee.push_back({e, o});
+                    });
             });
+        }
+        for (auto& p : part) {
+            out.vf.insert(out.vf.end(), p.vf.begin(), p.vf.end());
+            out.ee.insert(out.ee.end(), p.ee.begin(), p.ee.end());
+        }
     }
     return out;
 }
@@ -457,79 +515,67 @@ inline void substep(Cloth& s, const Config& c, Stats& st) {
     // cloth's own: every pair near enough to matter, its side read from
     // where it started, kept `thickness` apart on that side.
     const double cell = 1.5 * c.spacing;
-    auto cand = broad_phase(s, from, c.thickness, cell);
+    auto cand = broad_phase(s, from, c.thickness, cell, c.threads);
     st.vf += cand.vf.size();
     st.ee += cand.ee.size();
-    struct VF { std::uint32_t v, f; double side; };
-    struct EE { std::uint32_t e, o; V3 side; };
-    std::vector<VF> vfs;
-    std::vector<EE> ees;
-    // A pair farther apart at the start than the thickness and both moves
-    // cannot come within it this substep: neighbours in one flat sheet are
-    // most of what the boxes find, and none of them can.
+    // Each pair's closest points and direction are taken once, at the
+    // predicted positions, and held for the substep's iterations -- the
+    // constraint is then linear in the four positions, n . (sum of w x) >=
+    // thickness, one dot product an iteration. A pair farther than twice
+    // the thickness there is dropped: the solver's own corrections do not
+    // carry a pair that far.
+    struct Contact { std::array<std::uint32_t, 4> id; std::array<double, 4> w; V3 n; };
+    std::vector<Contact> cts;
     const auto move = [&](std::uint32_t i) { return V3{s.parts[i].x - from[i]}.norm(); };
     for (const auto& [v, f] : cand.vf) {
         const auto& F = s.faces[f];
-        const auto w = closest_on_triangle(from[v], from[F[0]], from[F[1]], from[F[2]]);
-        const V3 q{from[F[0]] * w[0] + from[F[1]] * w[1] + from[F[2]] * w[2]};
+        const auto ws = closest_on_triangle(from[v], from[F[0]], from[F[1]], from[F[2]]);
+        const V3 q0{from[F[0]] * ws[0] + from[F[1]] * ws[1] + from[F[2]] * ws[2]};
         const double reach = c.thickness + move(v) + std::max({move(F[0]), move(F[1]), move(F[2])});
-        if (V3{from[v] - q}.norm() > reach) continue;
-        const V3 n{V3{from[F[1]] - from[F[0]]}.cross(V3{from[F[2]] - from[F[0]]})};
-        const double side = V3{from[v] - q}.dot(n);
-        if (side != 0) vfs.push_back({v, f, side > 0 ? 1.0 : -1.0});
+        if (V3{from[v] - q0}.norm() > reach) continue;
+        const V3 n0{V3{from[F[1]] - from[F[0]]}.cross(V3{from[F[2]] - from[F[0]]})};
+        const double side = V3{from[v] - q0}.dot(n0);
+        if (side == 0) continue;
+        const auto& P = s.parts;
+        const auto w = closest_on_triangle(P[v].x, P[F[0]].x, P[F[1]].x, P[F[2]].x);
+        const V3 q{P[F[0]].x * w[0] + P[F[1]].x * w[1] + P[F[2]].x * w[2]};
+        V3 n{V3{P[F[1]].x - P[F[0]].x}.cross(V3{P[F[2]].x - P[F[0]].x})};
+        const double nl = n.norm();
+        if (nl <= 0) continue;
+        n = V3{n * ((side > 0 ? 1.0 : -1.0) / nl)};
+        const V3 r{P[v].x - q};
+        if (V3{r - n * r.dot(n)}.norm() > c.thickness) continue;   // beside the triangle
+        if (r.dot(n) > 2 * c.thickness) continue;
+        cts.push_back({{v, F[0], F[1], F[2]}, {1.0, -w[0], -w[1], -w[2]}, n});
     }
     for (const auto& [e, o] : cand.ee) {
         const auto& A = s.edges[e];
         const auto& B = s.edges[o];
-        const auto [a, b] = closest_segments(from[A[0]], from[A[1]], from[B[0]], from[B[1]]);
-        const V3 d{V3{from[A[0]] + (from[A[1]] - from[A[0]]) * a} - V3{from[B[0]] + (from[B[1]] - from[B[0]]) * b}};
-        const double len = d.norm();
+        const auto [a0, b0] = closest_segments(from[A[0]], from[A[1]], from[B[0]], from[B[1]]);
+        const V3 d0{V3{from[A[0]] + (from[A[1]] - from[A[0]]) * a0} - V3{from[B[0]] + (from[B[1]] - from[B[0]]) * b0}};
+        const double len = d0.norm();
         const double reach = c.thickness + std::max(move(A[0]), move(A[1])) + std::max(move(B[0]), move(B[1]));
-        if (len > 0 && len <= reach) ees.push_back({e, o, V3{d * (1 / len)}});
+        if (!(len > 0) || len > reach) continue;
+        const V3 side{d0 * (1 / len)};
+        const auto& P = s.parts;
+        const auto [u, v] = closest_segments(P[A[0]].x, P[A[1]].x, P[B[0]].x, P[B[1]].x);
+        const V3 d{V3{P[A[0]].x + (P[A[1]].x - P[A[0]].x) * u} - V3{P[B[0]].x + (P[B[1]].x - P[B[0]].x) * v}};
+        if (d.norm() > 2 * c.thickness || d.dot(side) > 2 * c.thickness) continue;
+        cts.push_back({{A[0], A[1], B[0], B[1]}, {1 - u, u, -(1 - v), -v}, side});
     }
     const auto contacts = [&] {
-        for (const auto& k : vfs) {
-            const auto& F = s.faces[k.f];
-            auto& P = s.parts[k.v];
-            auto& A = s.parts[F[0]];
-            auto& B = s.parts[F[1]];
-            auto& C = s.parts[F[2]];
-            const auto w = closest_on_triangle(P.x, A.x, B.x, C.x);
-            const V3 q{A.x * w[0] + B.x * w[1] + C.x * w[2]};
-            V3 n{V3{B.x - A.x}.cross(V3{C.x - A.x})};
-            const double nl = n.norm();
-            if (nl <= 0) continue;
-            n = V3{n * (k.side / nl)};
-            const V3 r{P.x - q};
-            if (V3{r - n * r.dot(n)}.norm() > c.thickness) continue;   // beside the triangle
-            const double C0 = r.dot(n) - c.thickness;
-            if (C0 >= 0) continue;
-            const double wsum = 1 + w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
+        for (const auto& k : cts) {
+            double C0 = -c.thickness, wsum = 0;
+            for (int j = 0; j < 4; ++j) {
+                C0 += k.w[j] * k.n.dot(s.parts[k.id[j]].x);
+                wsum += k.w[j] * k.w[j];
+            }
+            if (C0 >= 0 || wsum <= 0) continue;
             const double l = -C0 / wsum;
-            P.x = V3{P.x + n * l};
-            A.x = V3{A.x - n * (l * w[0])};
-            B.x = V3{B.x - n * (l * w[1])};
-            C.x = V3{C.x - n * (l * w[2])};
-        }
-        for (const auto& k : ees) {
-            const auto& A = s.edges[k.e];
-            const auto& B = s.edges[k.o];
-            auto& a0 = s.parts[A[0]];
-            auto& a1 = s.parts[A[1]];
-            auto& b0 = s.parts[B[0]];
-            auto& b1 = s.parts[B[1]];
-            const auto [u, v] = closest_segments(a0.x, a1.x, b0.x, b1.x);
-            const V3 d{V3{a0.x + (a1.x - a0.x) * u} - V3{b0.x + (b1.x - b0.x) * v}};
-            const double C0 = d.dot(k.side) - c.thickness;
-            if (C0 >= 0 || d.norm() > 2 * c.thickness) continue;
-            const double wa0 = 1 - u, wa1 = u, wb0 = 1 - v, wb1 = v;
-            const double wsum = wa0 * wa0 + wa1 * wa1 + wb0 * wb0 + wb1 * wb1;
-            if (wsum <= 0) continue;
-            const double l = -C0 / wsum;
-            a0.x = V3{a0.x + k.side * (l * wa0)};
-            a1.x = V3{a1.x + k.side * (l * wa1)};
-            b0.x = V3{b0.x - k.side * (l * wb0)};
-            b1.x = V3{b1.x - k.side * (l * wb1)};
+            for (int j = 0; j < 4; ++j) {
+                auto& p = s.parts[k.id[j]];
+                p.x = V3{p.x + k.n * (l * k.w[j])};
+            }
         }
     };
     const auto bodies = [&] {
@@ -539,7 +585,7 @@ inline void substep(Cloth& s, const Config& c, Stats& st) {
             if (p.x[1] < c.floor + c.band) p.x[1] = c.floor + c.band;
         }
     };
-    st.near += vfs.size() + ees.size();
+    st.near += cts.size();
     auto t2 = clk::now();
     for (int it = 0; it < c.iterations; ++it) {
         for (auto& k : s.cons) xpbd_solve_distance(k, s.parts, dt);
@@ -564,37 +610,54 @@ inline void substep(Cloth& s, const Config& c, Stats& st) {
         bool clear = false;
         // The candidates once, after the push moved things: a stop only
         // shortens a move, so they cover every later round too.
-        cand = broad_phase(s, from, 0.0, cell);
+        cand = broad_phase(s, from, 0.0, cell, c.threads);
         for (int round = 0; round < c.ccd_rounds && !clear; ++round) {
+            // Every pair asked against the same positions, in parallel;
+            // the stops applied after, in order. A stop only shortens moves,
+            // and the next round asks everything again.
+            const std::size_t nvf = cand.vf.size(), nall = nvf + cand.ee.size();
+            std::vector<double> toi(nall, 2.0);
+            std::vector<std::size_t> asked(std::max(1u, c.threads), 0);
+            parallel_chunks(nall, c.threads, [&](std::size_t b, std::size_t e, unsigned w) {
+                for (std::size_t i = b; i < e; ++i) {
+                    Moves m;
+                    if (i < nvf) {
+                        const auto [v, f] = cand.vf[i];
+                        const auto& F = s.faces[f];
+                        m = {{from[v], from[F[0]], from[F[1]], from[F[2]]},
+                             {s.parts[v].x, s.parts[F[0]].x, s.parts[F[1]].x, s.parts[F[2]].x}};
+                    } else {
+                        const auto& A = s.edges[cand.ee[i - nvf].first];
+                        const auto& B = s.edges[cand.ee[i - nvf].second];
+                        m = {{from[A[0]], from[A[1]], from[B[0]], from[B[1]]},
+                             {s.parts[A[0]].x, s.parts[A[1]].x, s.parts[B[0]].x, s.parts[B[1]].x}};
+                    }
+                    if (!may_be_coplanar(m.from[0], m.from[1], m.from[2], m.from[3], m.to[0], m.to[1], m.to[2], m.to[3]))
+                        continue;
+                    ++asked[w];
+                    const auto r = i < nvf ? first_contact(point_chart(m, 0), triangle_chart(m, 1), 1e-6, std::size_t{1} << 16)
+                                           : first_contact(edge_chart(m, 0), edge_chart(m, 2), 1e-6, std::size_t{1} << 16);
+                    if (r.hit) toi[i] = r.toi;
+                }
+            });
+            for (auto a : asked) st.asked += a;
             std::size_t hits = 0;
-            // Stopped short of the moment they would meet: the pair's four
-            // vertices back along their moves to 0.8 of it.
-            const auto stop = [&](std::initializer_list<std::uint32_t> ids, double toi) {
-                const double k = std::max(0.0, 0.8 * toi);
+            const auto stop = [&](std::initializer_list<std::uint32_t> ids, double t) {
+                const double k = std::max(0.0, 0.8 * t);
                 for (auto i : ids) s.parts[i].x = V3{from[i] + (s.parts[i].x - from[i]) * k};
             };
-            for (const auto& [v, f] : cand.vf) {
-                const auto& F = s.faces[f];
-                if (!may_be_coplanar(from[v], from[F[0]], from[F[1]], from[F[2]], s.parts[v].x, s.parts[F[0]].x,
-                                     s.parts[F[1]].x, s.parts[F[2]].x))
-                    continue;
-                ++st.asked;
-                const Moves m{{from[v], from[F[0]], from[F[1]], from[F[2]]},
-                              {s.parts[v].x, s.parts[F[0]].x, s.parts[F[1]].x, s.parts[F[2]].x}};
-                const auto r = first_contact(point_chart(m, 0), triangle_chart(m, 1), 1e-6, std::size_t{1} << 16);
-                if (r.hit) { ++hits; stop({v, F[0], F[1], F[2]}, r.toi); }
-            }
-            for (const auto& [e, o] : cand.ee) {
-                const auto& A = s.edges[e];
-                const auto& B = s.edges[o];
-                if (!may_be_coplanar(from[A[0]], from[A[1]], from[B[0]], from[B[1]], s.parts[A[0]].x, s.parts[A[1]].x,
-                                     s.parts[B[0]].x, s.parts[B[1]].x))
-                    continue;
-                ++st.asked;
-                const Moves m{{from[A[0]], from[A[1]], from[B[0]], from[B[1]]},
-                              {s.parts[A[0]].x, s.parts[A[1]].x, s.parts[B[0]].x, s.parts[B[1]].x}};
-                const auto r = first_contact(edge_chart(m, 0), edge_chart(m, 2), 1e-6, std::size_t{1} << 16);
-                if (r.hit) { ++hits; stop({A[0], A[1], B[0], B[1]}, r.toi); }
+            for (std::size_t i = 0; i < nall; ++i) {
+                if (toi[i] > 1) continue;
+                ++hits;
+                if (i < nvf) {
+                    const auto [v, f] = cand.vf[i];
+                    const auto& F = s.faces[f];
+                    stop({v, F[0], F[1], F[2]}, toi[i]);
+                } else {
+                    const auto& A = s.edges[cand.ee[i - nvf].first];
+                    const auto& B = s.edges[cand.ee[i - nvf].second];
+                    stop({A[0], A[1], B[0], B[1]}, toi[i]);
+                }
             }
             st.hits += hits;
             clear = hits == 0;
