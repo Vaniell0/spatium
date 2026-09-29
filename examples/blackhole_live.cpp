@@ -240,6 +240,10 @@ rel::SpacetimeScene<double> make_scene(const Settings& st) {
     if (st.scene == 1) {
         const double m1 = 1.0 / (1.0 + st.mass_ratio), m2 = 1.0 - m1;
         scene.binary(m1, m2, st.separation, st.inspiral, 6.0, st.spin * m1, st.spin * m2);
+        // Each hole's term boosted by its velocity: the residual by the
+        // holes 2.4-5x lower (rsc/tools/metric_calibrate), the trace ~30%
+        // dearer (--check).
+        scene.boost(1.0);
     } else {
         scene.hole(1.0, st.spin);
     }
@@ -752,6 +756,12 @@ int main(int argc, char** argv) {
         pair.binary(0.5, 0.5, 12.0, /*inspiral=*/false);
         int rc = check_scene(ctx, "one Kerr hole, spin 0.9", one, rays, steps);
         rc |= check_scene(ctx, "binary, 12 M apart", pair, rays, steps);
+        // The same pair with each term boosted by its hole's velocity
+        // (SpacetimeScene::boost): what the boost costs the shader.
+        rel::SpacetimeScene<double> boosted;
+        boosted.binary(0.5, 0.5, 12.0, /*inspiral=*/false);
+        boosted.boost(1.0);
+        rc |= check_scene(ctx, "binary, 12 M apart, boosted", boosted, rays, steps);
         return rc;
     }
 

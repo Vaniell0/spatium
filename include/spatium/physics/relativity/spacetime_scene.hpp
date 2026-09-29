@@ -49,6 +49,10 @@ struct HoleSpec {
     T spin{0};    // about the z axis, |spin| < mass
     // Where the hole's centre is, as motion fields of time (Field::t()).
     F x{T{0}}, y{T{0}}, z{T{0}};
+    // Its velocity, as fields of time too: what the metric's boost reads
+    // (SpacetimeScene::boost). The field language has no derivative, so a
+    // path's velocity is written beside it; binary() writes both.
+    F vx{T{0}}, vy{T{0}}, vz{T{0}};
 };
 
 template<Scalar T = double>
@@ -116,13 +120,37 @@ public:
             phase = inspiral_phase + F(omega_stop) * max(t - F(t_stop), F(T{0}));
         }
         const F c = cos(phase), s = sin(phase);
+        // Velocities: phi' = sqrt(M / a^3) on both pieces (a is `stop` on
+        // the second), a' = -beta / a^3 while the pair is shrinking and 0
+        // after -- the switch a ramp of width 1e-6 at t_stop, since the
+        // field language has no step.
+        const F omega = sqrt(F(M) / (a * a * a));
+        F adot(T{0});
+        if (inspiral && stop < a0) {
+            const T t_stop = (a0 * a0 * a0 * a0 - stop * stop * stop * stop) / (T{4} * beta);
+            const F on = min(F(T{1}), max(F(T{0}), (F(t_stop) - t) * F(T{1e6})));
+            adot = F(T{0}) - F(beta) / (a * a * a) * on;
+        }
+        const F dx = adot * c - a * omega * s, dy = adot * s + a * omega * c;
         auto& h1 = hole(m1, spin1);
         h1.x = F(m2 / M) * a * c;
         h1.y = F(m2 / M) * a * s;
+        h1.vx = F(m2 / M) * dx;
+        h1.vy = F(m2 / M) * dy;
         auto& h2 = hole(m2, spin2);
         h2.x = F(T{0}) - F(m1 / M) * a * c;
         h2.y = F(T{0}) - F(m1 / M) * a * s;
+        h2.vx = F(T{0}) - F(m1 / M) * dx;
+        h2.vy = F(T{0}) - F(m1 / M) * dy;
     }
+
+    // How much of each hole's velocity its Kerr-Schild term is boosted by:
+    // 0 superposes terms at rest wherever the holes are (as this scene did
+    // first), 1 boosts each into the frame it moves in -- exact for a hole
+    // in uniform motion, and what rsc/tools/metric_calibrate finds by
+    // minimising the vacuum residual alone.
+    void boost(T b) { boost_ = b; }
+    T boost() const { return boost_; }
 
     DiskSettings<T>& disk() { return disk_; }
     DustSettings<T>& dust() { return dust_; }
@@ -162,7 +190,27 @@ public:
             if (!cx) return std::unexpected(cx.error());
             if (!cy) return std::unexpected(cy.error());
             if (!cz) return std::unexpected(cz.error());
-            const F x = F::coord(1) - *cx, y = F::coord(2) - *cy, z = F::coord(3) - *cz;
+            auto ux = h.vx.in_spacetime(), uy = h.vy.in_spacetime(), uz = h.vz.in_spacetime();
+            if (!ux) return std::unexpected(ux.error());
+            if (!uy) return std::unexpected(uy.error());
+            if (!uz) return std::unexpected(uz.error());
+            // The event in the hole's rest frame. With b = boost * velocity
+            // and gamma = 1 / sqrt(1 - b.b), an offset d taken at one lab
+            // time is x' = d + k (b.d) b in the frame the hole is at rest
+            // in, k = gamma^2 / (gamma + 1) -- which is (gamma - 1) / b.b,
+            // written so it stays finite at b = 0. Kerr-Schild is stationary
+            // there, so x' is all it reads.
+            // At boost 0 none of this is written, so the pool -- and the
+            // shader made from it -- is what it was before the boost existed.
+            const bool boosted = boost_ != T{0};
+            const F bs(boost_);
+            const F bx = bs * *ux, by = bs * *uy, bz = bs * *uz;
+            const F gam = boosted ? F(T{1}) / sqrt(F(T{1}) - (bx * bx + by * by + bz * bz)) : F(T{1});
+            const F k = gam * gam / (gam + F(T{1}));
+            const F dx0 = F::coord(1) - *cx, dy0 = F::coord(2) - *cy, dz0 = F::coord(3) - *cz;
+            const F bd = bx * dx0 + by * dy0 + bz * dz0;
+            const F x = boosted ? dx0 + k * bd * bx : dx0, y = boosted ? dy0 + k * bd * by : dy0,
+                    z = boosted ? dz0 + k * bd * bz : dz0;
             const F M(h.mass), a(h.spin), two(T{2}), half(T{0.5}), quarter(T{0.25});
             const F w = x * x + y * y + z * z - a * a;
             const F r2 = half * w + sqrt(quarter * w * w + a * a * z * z);
@@ -171,8 +219,15 @@ public:
             const bool out = form == Form::outgoing;
             const F sa = out ? F(T{0}) - a : a;          // the spin the reversed form is written with
             const F sign(out ? T{-1} : T{1});
-            const std::array<F, 4> l{F(T{1}), sign * (r * x + sa * y) / den, sign * (r * y - sa * x) / den,
-                                     sign * z / r};
+            const std::array<F, 4> lr{F(T{1}), sign * (r * x + sa * y) / den, sign * (r * y - sa * x) / den,
+                                      sign * z / r};
+            // Back to the lab: a covector goes by the transpose of the boost,
+            // l_t = gamma (l'_t - b.l'), l_j = -gamma b_j l'_t + l'_j + k b_j (b.l').
+            const F bl = bx * lr[1] + by * lr[2] + bz * lr[3];
+            const std::array<F, 4> l = boosted
+                ? std::array<F, 4>{gam * (lr[0] - bl), lr[1] - gam * bx * lr[0] + k * bx * bl,
+                                   lr[2] - gam * by * lr[0] + k * by * bl, lr[3] - gam * bz * lr[0] + k * bz * bl}
+                : lr;
             const F f = two * M * r2 * r / (r2 * r2 + a * a * z * z);
             for (std::size_t e = 0; e < 10; ++e) {
                 const auto [i, j] = MetricField<T>::kEntries[e];
@@ -199,6 +254,7 @@ public:
 
 private:
     std::vector<HoleSpec<T>> holes_;
+    T boost_{0};
     DiskSettings<T> disk_;
     DustSettings<T> dust_;
     SkySettings<T> sky_;
