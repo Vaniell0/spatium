@@ -258,6 +258,13 @@ rel::SpacetimeScene<double> make_scene(const Settings& st) {
 }
 
 // The shader for one scene, its buffers, and one frame's push constants.
+// The ray's step multiplier (--step): 1 as the scene was tuned; the
+// geometry holds to 3x (--step-sweep: 0.03% of pixels off by more than 8
+// levels at 960x540, the pair included).
+double g_step = 1.0;
+double g_step_max = 1.5;   // --step-max: the largest step, in M, far from the holes
+bool step_given = false;
+
 struct Renderer {
     vc::Context& ctx;
     rel::SpacetimeScene<double> scene;
@@ -279,8 +286,9 @@ struct Renderer {
     double move_pack_ms = 0;
     vc::DeviceLbvh::Timing tree_ms{};
 
-    Renderer(vc::Context& c, rel::SpacetimeScene<double> sc, std::uint32_t w, std::uint32_t h) : ctx(c), scene(std::move(sc)) {
-        const auto src = spatium::render::blackhole_shader(scene);
+    Renderer(vc::Context& c, rel::SpacetimeScene<double> sc, std::uint32_t w, std::uint32_t h, double step_scale = g_step)
+        : ctx(c), scene(std::move(sc)) {
+        const auto src = spatium::render::blackhole_shader(scene, step_scale, g_step_max);
         if (!src) {
             std::println(stderr, "shader: {}", src.error().message);
             std::exit(1);
@@ -653,7 +661,7 @@ int run_live(int max_frames, const std::string& screenshot) {
             }
             if (save || (!screenshot.empty() && max_frames > 0 && frame == max_frames - 1)) {
                 vkDeviceWaitIdle(ctx.device());
-                Renderer big(ctx, make_scene(st), 1920, 1080);
+                Renderer big(ctx, make_scene(st), 1920, 1080, 1.0);   // the saved frame at the tuned step
                 // The dust as it is now, not as it started.
                 if (big.dust_count > 0 && big.dust_count == renderer->dust_count)
                     std::memcpy(big.particles->data(), renderer->particles->data(), big.particles->size());
@@ -724,6 +732,9 @@ int main(int argc, char** argv) {
         else if (a == "--bench") mode = "bench";
         else if (a == "--live") mode = "live";
         else if (a == "--frame") { mode = "frame"; out = next(); }
+        else if (a == "--step-sweep") mode = "step-sweep";
+        else if (a == "--step") { g_step = std::stod(next()); step_given = true; }
+        else if (a == "--step-max") g_step_max = std::stod(next());
         else if (a == "--video") { mode = "video"; out = next(); }
         else if (a == "--fps") fps_video = std::stod(next());
         else if (a == "--orbit") orbit = std::stod(next());
@@ -746,6 +757,10 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    // The window steps at 3x, capped at 5 M instead of 1.5, unless told
+    // otherwise: the geometry holds there (--step-sweep) and the frame rate
+    // is several times the tuned step's (--bench --step 3 --step-max 5).
+    if (mode == "live" && !step_given) { g_step = 3.0; g_step_max = 5.0; }
     if (mode == "live") return run_live(frames, screenshot);
     vc::Context ctx("blackhole_live");
 
@@ -768,6 +783,7 @@ int main(int argc, char** argv) {
     if (mode == "bench") {
         std::println("{:<6} {:>9} {:>6} | {:>10} {:>9} {:>9} {:>9} | {:>9} | {:>8}", "scene", "particles", "height",
                      "move+pack", "boxes", "sort", "nodes", "trace", "frame");
+        std::println("(ray step x{})", g_step);
         for (int which_scene : {0, 1})
             for (int dust_i : {0, 1, 2, 3})
                 for (std::uint32_t h : {144u, 540u}) {
@@ -793,9 +809,9 @@ int main(int argc, char** argv) {
                     }
                     auto med = [](std::vector<double> v) { std::sort(v.begin(), v.end()); return v[v.size() / 2]; };
                     const double total = med(trace) + med(mp) + med(bx) + med(so) + med(no);
-                    std::println("{:<6} {:>9} {:>5}p | {:>8.2f}ms {:>7.2f}ms {:>7.2f}ms {:>7.2f}ms | {:>7.2f}ms | {:>6.1f}ms",
+                    std::println("{:<6} {:>9} {:>5}p | {:>8.2f}ms {:>7.2f}ms {:>7.2f}ms {:>7.2f}ms | {:>7.2f}ms | {:>6.1f}ms {:>5.0f} fps",
                                  which_scene ? "pair" : "one", kDustCounts[dust_i], h, med(mp), med(bx), med(so),
-                                 med(no), med(trace), total);
+                                 med(no), med(trace), total, 1000.0 / total);
                 }
         return 0;
     }
@@ -907,6 +923,46 @@ int main(int argc, char** argv) {
         std::println("{} frames {}x{} in {}, {:.0f} ms of device time a frame; "
                      "ffmpeg -framerate {} -i {}/frame_%04d.png -pix_fmt yuv420p out.mp4",
                      n, W, H, out, total_ms / n, fps_video, out);
+        return 0;
+    }
+
+    // The ray's step against the picture: a reference with steps four times
+    // finer, then each scale's device time and how far its frame is from
+    // the reference -- mean and worst pixel difference, the share of pixels
+    // off by more than 8 levels of 255.
+    if (mode == "step-sweep") {
+        Settings st;
+        st.scene = which == "binary" ? 1 : 0;
+        st.spin = static_cast<float>(which == "binary" ? spin * 0.5 : spin);
+        st.disk = disk;
+        const auto frame_at = [&](double scale, double& ms) {
+            Renderer r(ctx, make_scene(st), static_cast<std::uint32_t>(W), static_cast<std::uint32_t>(H), scale);
+            r.doppler = static_cast<float>(doppler);
+            r.render_samples(t, exposure, static_cast<int>(max_steps / scale) + 1, 1);   // warm
+            ms = r.render_samples(t, exposure, static_cast<int>(max_steps / scale) + 1, 1);
+            return r.read();
+        };
+        double ref_ms = 0;
+        const auto ref = frame_at(0.25, ref_ms);
+        std::println("{} at {}x{}: reference step x0.25, {:.1f} ms", which, W, H, ref_ms);
+        std::println("{:>6} | {:>9} {:>7} | {:>9} {:>6} {:>9}", "step", "ms", "speed", "mean diff", "worst", "off > 8");
+        for (double scale : {0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0}) {
+            double ms = 0;
+            const auto px = frame_at(scale, ms);
+            double sum = 0;
+            int worst = 0;
+            std::size_t off = 0;
+            for (std::size_t i = 0; i < px.size(); ++i) {
+                int d = 0;
+                for (int c = 0; c < 3; ++c)
+                    d = std::max(d, std::abs(int((px[i] >> (8 * c)) & 255u) - int((ref[i] >> (8 * c)) & 255u)));
+                sum += d;
+                worst = std::max(worst, d);
+                off += d > 8;
+            }
+            std::println("{:>5.2f}x | {:>8.1f}m {:>6.2f}x | {:>9.3f} {:>6} {:>8.2f}%", scale, ms, ref_ms / ms,
+                         sum / double(px.size()), worst, 100.0 * double(off) / double(px.size()));
+        }
         return 0;
     }
 

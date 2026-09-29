@@ -156,7 +156,11 @@ float hash_f(uvec3 v) {{ return float(hash_u(v) & 0xffffffu) / 16777216.0; }}
 // The whole shader for `scene`. Bindings: 0 pixels (uint, RGBA8), 1 the
 // blackbody table, 2 and 3 the field tables the hole paths may read, 4 the
 // unused, 5 the accumulation, 6 and 7 the matter's tree and instances.
-inline Result<std::string> blackhole_shader(const physics::relativity::SpacetimeScene<double>& scene) {
+// `step_scale` multiplies the ray's step everywhere: 1 is the step the
+// scene was tuned with; `blackhole_live --step-sweep` measures what larger
+// ones cost the picture against one four times finer.
+inline Result<std::string> blackhole_shader(const physics::relativity::SpacetimeScene<double>& scene,
+                                            double step_scale = 1.0, double step_max = 1.5) {
     auto common = scene_common_glsl(scene);
     if (!common) return std::unexpected(common.error());
     const auto& dust = scene.dust();
@@ -179,7 +183,10 @@ layout(push_constant) uniform Push {
 const bool MATTER_ON = {0};
 const uint SKY_SEED = {2}u;
 const float MATTER_GAIN = {1};
-)GLSL", dust.count > 0 ? "true" : "false", io::build::detail::glsl_float(120000.0 / std::max<double>(1.0, dust.count)), scene.sky().seed);
+const float STEP_SCALE = {3};
+const float STEP_MAX = {4};
+)GLSL", dust.count > 0 ? "true" : "false", io::build::detail::glsl_float(120000.0 / std::max<double>(1.0, dust.count)), scene.sky().seed,
+                       io::build::detail::glsl_float(step_scale), io::build::detail::glsl_float(step_max));
     src += R"GLSL(
 // ── Noise and stars, from integer hashes only ────────────────────
 float value_noise(vec3 p) {
@@ -310,6 +317,13 @@ bool seg_box(vec3 a, vec3 inv, float len, vec3 lo, vec3 hi) {
     float f = min(min(tf.x, tf.y), min(tf.z, len));
     return n <= f;
 }
+// erf, Abramowitz and Stegun 7.1.26: absolute error below 1.5e-7.
+float erf_as(float x) {
+    float s = sign(x), ax = abs(x);
+    float t = 1.0 / (1.0 + 0.3275911 * ax);
+    float y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-ax * ax);
+    return s * y;
+}
 vec3 matter_along(vec3 a, vec3 b, vec4 k, float g[10], uint node_count) {
     vec3 light = vec3(0.0);
     if (!MATTER_ON || node_count == 0u) return light;
@@ -332,16 +346,26 @@ vec3 matter_along(vec3 a, vec3 b, vec4 k, float g[10], uint node_count) {
             Instance q = insts[n.left & 0x7fffffffu];
             vec3 c = vec3(q.r0.w, q.r1.w, q.r2.w);
             float sigma = q.scale_quadric.x;
-            float t = clamp(dot(c - a, dir), 0.0, len);
-            vec3 off = a + dir * t - c;
-            float w = exp(-0.5 * dot(off, off) / (sigma * sigma));
+            // The blob's Gaussian integrated exactly along the chord, in
+            // units of sigma: exp(-d^2 / 2 sigma^2) sqrt(pi / 2) times the
+            // difference of two erfs. Summed over a ray's chords it is the
+            // integral over the whole ray, however the ray was cut -- the
+            // peak value times min(len, 2.5 sigma), as this was, counted a
+            // blob on the border of two chords twice, and the picture
+            // changed with the step (blackhole_live --step-sweep).
+            float s0 = dot(c - a, dir);
+            vec3 foot = a + dir * s0 - c;
+            float w = exp(-0.5 * dot(foot, foot) / (sigma * sigma));
             if (w < 1e-3) continue;
+            float span = 0.70710678 / sigma;
+            float along = 1.25331414 * (erf_as((len - s0) * span) + erf_as(s0 * span));   // sqrt(pi / 2)
+            if (along < 1e-4) continue;
             float R = max(length(c.xy), inner * 0.5);
             float shift = 1.0 / dot(pl, q.color_rough);   // camera value is 1, see the disk above
             shift = 1.0 + pc.disk.z * (shift - 1.0);
             float T = pc.disk.w * 7000.0 * pow(inner / R, 0.75) * shift;
             float I = pow(inner / R, 3.0) * pow(shift, 4.0);
-            light += bb_color(T) * I * w * min(len, 2.5 * sigma) / sigma * MATTER_GAIN;
+            light += bb_color(T) * I * w * along * MATTER_GAIN;
             continue;
         }
         LNode l = nodes[n.left], r = nodes[n.right];
@@ -378,10 +402,11 @@ void main() {
         if (length(x.yzw) > escape) { escaped = true; break; }
         // The step grows with the distance to the nearest horizon, in its
         // radii: fine near a hole, where the path bends, coarse far out.
-        float dl = clamp(0.05 * hd, 0.01, 1.5);
+        float dl = clamp(0.05 * hd, 0.01, STEP_MAX);
         // Finer near the photon orbit, where a ray winds and the rings
         // of higher order are exponentially thin.
         if (hd < 2.5) dl *= 0.35;
+        dl *= STEP_SCALE;
         float ds = dl * length(k.yzw);
         vec4 x0 = x, k0 = k;
         geodesic_step(x, k, dl);
