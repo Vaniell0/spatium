@@ -3,6 +3,12 @@
 // The cells that compile, and the level each reached, for
 // tests/test_connectivity.cpp. X(scalar type, scalar name, space, probe, level).
 #define CONNECTIVITY_CELLS(X) \
+    X(spatium::Dual<double>, "Dual", CylinderADL, Derivative, 3) \
+    X(spatium::Dual<double>, "Dual", CylinderADL, DerivedDistance, 3) \
+    X(spatium::Dual<double>, "Dual", CylinderADL, ExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", CylinderADL, FrechetMean, 3) \
+    X(spatium::Dual<double>, "Dual", CylinderADL, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", CylinderADL, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", E3, Derivative, 3) \
     X(spatium::Dual<double>, "Dual", E3, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", E3, ExpLog, 3) \
@@ -17,6 +23,13 @@
     X(spatium::Dual<double>, "Dual", H2, MetricAxioms, 3) \
     X(spatium::Dual<double>, "Dual", H2, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", H2, VerifyExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, Derivative, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, DerivedDistance, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, ExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, FrechetMean, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, Midpoint, 3) \
+    X(spatium::Dual<double>, "Dual", H2xE3, VerifyExpLog, 3) \
     X(spatium::Dual<double>, "Dual", S2, Derivative, 3) \
     X(spatium::Dual<double>, "Dual", S2, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", S2, ExpLog, 3) \
@@ -31,6 +44,20 @@
     X(spatium::Dual<double>, "Dual", S2xE1, MetricAxioms, 3) \
     X(spatium::Dual<double>, "Dual", S2xE1, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", S2xE1, VerifyExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, Derivative, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, DerivedDistance, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, ExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, FrechetMean, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, Midpoint, 3) \
+    X(spatium::Dual<double>, "Dual", S2xH2, VerifyExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, Derivative, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, DerivedDistance, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, ExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, FrechetMean, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, Midpoint, 3) \
+    X(spatium::Dual<double>, "Dual", S2xS2, VerifyExpLog, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, ExpLog, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, FrechetMean, 3) \
@@ -44,6 +71,19 @@
     X(spatium::Dual<double>, "Dual", SPDLogE, MetricAxioms, 3) \
     X(spatium::Dual<double>, "Dual", SPDLogE, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", SPDLogE, VerifyExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, Derivative, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, DerivedDistance, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, ExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, FrechetMean, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, Midpoint, 3) \
+    X(spatium::Dual<double>, "Dual", SPDLogExS2, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, Derivative, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, DerivedDistance, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, ExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, FrechetMean, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, MetricAxioms, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", E3, Derivative, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", E3, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", E3, ExpLog, 3) \
@@ -58,6 +98,13 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2, MetricAxioms, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, Derivative, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, DerivedDistance, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, ExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, FrechetMean, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, MetricAxioms, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, Midpoint, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", H2xE3, VerifyExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2, Derivative, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2, ExpLog, 3) \
@@ -72,6 +119,20 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xE1, MetricAxioms, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xE1, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xE1, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, Derivative, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, DerivedDistance, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, ExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, FrechetMean, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, MetricAxioms, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, Midpoint, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xH2, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, Derivative, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, DerivedDistance, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, ExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, FrechetMean, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, MetricAxioms, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, Midpoint, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, VerifyExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, ExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, FrechetMean, 3) \
@@ -85,6 +146,19 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogE, MetricAxioms, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogE, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogE, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, Derivative, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, DerivedDistance, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, ExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, FrechetMean, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, MetricAxioms, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, Midpoint, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, VerifyExpLog, 3) \
+    X(double, "double", CylinderADL, Derivative, 2) \
+    X(double, "double", CylinderADL, DerivedDistance, 2) \
+    X(double, "double", CylinderADL, ExpLog, 2) \
+    X(double, "double", CylinderADL, FrechetMean, 2) \
+    X(double, "double", CylinderADL, MetricAxioms, 2) \
+    X(double, "double", CylinderADL, Midpoint, 2) \
     X(double, "double", E3, Derivative, 3) \
     X(double, "double", E3, DerivedDistance, 3) \
     X(double, "double", E3, ExpLog, 3) \
@@ -99,6 +173,13 @@
     X(double, "double", H2, MetricAxioms, 3) \
     X(double, "double", H2, Midpoint, 3) \
     X(double, "double", H2, VerifyExpLog, 3) \
+    X(double, "double", H2xE3, Derivative, 3) \
+    X(double, "double", H2xE3, DerivedDistance, 3) \
+    X(double, "double", H2xE3, ExpLog, 3) \
+    X(double, "double", H2xE3, FrechetMean, 3) \
+    X(double, "double", H2xE3, MetricAxioms, 3) \
+    X(double, "double", H2xE3, Midpoint, 3) \
+    X(double, "double", H2xE3, VerifyExpLog, 3) \
     X(double, "double", S2, Derivative, 3) \
     X(double, "double", S2, DerivedDistance, 3) \
     X(double, "double", S2, ExpLog, 3) \
@@ -113,6 +194,20 @@
     X(double, "double", S2xE1, MetricAxioms, 3) \
     X(double, "double", S2xE1, Midpoint, 3) \
     X(double, "double", S2xE1, VerifyExpLog, 3) \
+    X(double, "double", S2xH2, Derivative, 3) \
+    X(double, "double", S2xH2, DerivedDistance, 3) \
+    X(double, "double", S2xH2, ExpLog, 3) \
+    X(double, "double", S2xH2, FrechetMean, 3) \
+    X(double, "double", S2xH2, MetricAxioms, 3) \
+    X(double, "double", S2xH2, Midpoint, 3) \
+    X(double, "double", S2xH2, VerifyExpLog, 3) \
+    X(double, "double", S2xS2, Derivative, 3) \
+    X(double, "double", S2xS2, DerivedDistance, 3) \
+    X(double, "double", S2xS2, ExpLog, 3) \
+    X(double, "double", S2xS2, FrechetMean, 3) \
+    X(double, "double", S2xS2, MetricAxioms, 3) \
+    X(double, "double", S2xS2, Midpoint, 3) \
+    X(double, "double", S2xS2, VerifyExpLog, 3) \
     X(double, "double", SPDAff, Derivative, 2) \
     X(double, "double", SPDAff, DerivedDistance, 2) \
     X(double, "double", SPDAff, ExpLog, 2) \
@@ -127,10 +222,23 @@
     X(double, "double", SPDLogE, MetricAxioms, 3) \
     X(double, "double", SPDLogE, Midpoint, 3) \
     X(double, "double", SPDLogE, VerifyExpLog, 3) \
+    X(double, "double", SPDLogExS2, Derivative, 3) \
+    X(double, "double", SPDLogExS2, DerivedDistance, 3) \
+    X(double, "double", SPDLogExS2, ExpLog, 3) \
+    X(double, "double", SPDLogExS2, FrechetMean, 3) \
+    X(double, "double", SPDLogExS2, MetricAxioms, 3) \
+    X(double, "double", SPDLogExS2, Midpoint, 3) \
+    X(double, "double", SPDLogExS2, VerifyExpLog, 3) \
     X(double, "double", SphereLevelSet, Derivative, 2) \
     X(double, "double", SphereLevelSet, MetricAxioms, 2) \
     X(double, "double", TorusChart, Derivative, 2) \
     X(double, "double", TorusChart, MetricAxioms, 2) \
+    X(float, "float", CylinderADL, Derivative, 3) \
+    X(float, "float", CylinderADL, DerivedDistance, 3) \
+    X(float, "float", CylinderADL, ExpLog, 3) \
+    X(float, "float", CylinderADL, FrechetMean, 3) \
+    X(float, "float", CylinderADL, MetricAxioms, 3) \
+    X(float, "float", CylinderADL, Midpoint, 3) \
     X(float, "float", E3, Derivative, 3) \
     X(float, "float", E3, DerivedDistance, 3) \
     X(float, "float", E3, ExpLog, 3) \
@@ -145,6 +253,13 @@
     X(float, "float", H2, MetricAxioms, 3) \
     X(float, "float", H2, Midpoint, 3) \
     X(float, "float", H2, VerifyExpLog, 3) \
+    X(float, "float", H2xE3, Derivative, 3) \
+    X(float, "float", H2xE3, DerivedDistance, 3) \
+    X(float, "float", H2xE3, ExpLog, 3) \
+    X(float, "float", H2xE3, FrechetMean, 3) \
+    X(float, "float", H2xE3, MetricAxioms, 3) \
+    X(float, "float", H2xE3, Midpoint, 3) \
+    X(float, "float", H2xE3, VerifyExpLog, 3) \
     X(float, "float", S2, Derivative, 3) \
     X(float, "float", S2, DerivedDistance, 3) \
     X(float, "float", S2, ExpLog, 3) \
@@ -159,6 +274,20 @@
     X(float, "float", S2xE1, MetricAxioms, 3) \
     X(float, "float", S2xE1, Midpoint, 3) \
     X(float, "float", S2xE1, VerifyExpLog, 3) \
+    X(float, "float", S2xH2, Derivative, 3) \
+    X(float, "float", S2xH2, DerivedDistance, 3) \
+    X(float, "float", S2xH2, ExpLog, 3) \
+    X(float, "float", S2xH2, FrechetMean, 3) \
+    X(float, "float", S2xH2, MetricAxioms, 3) \
+    X(float, "float", S2xH2, Midpoint, 3) \
+    X(float, "float", S2xH2, VerifyExpLog, 3) \
+    X(float, "float", S2xS2, Derivative, 3) \
+    X(float, "float", S2xS2, DerivedDistance, 3) \
+    X(float, "float", S2xS2, ExpLog, 3) \
+    X(float, "float", S2xS2, FrechetMean, 3) \
+    X(float, "float", S2xS2, MetricAxioms, 3) \
+    X(float, "float", S2xS2, Midpoint, 3) \
+    X(float, "float", S2xS2, VerifyExpLog, 3) \
     X(float, "float", SPDAff, Derivative, 3) \
     X(float, "float", SPDAff, DerivedDistance, 3) \
     X(float, "float", SPDAff, ExpLog, 3) \
@@ -173,10 +302,23 @@
     X(float, "float", SPDLogE, MetricAxioms, 3) \
     X(float, "float", SPDLogE, Midpoint, 3) \
     X(float, "float", SPDLogE, VerifyExpLog, 3) \
+    X(float, "float", SPDLogExS2, Derivative, 3) \
+    X(float, "float", SPDLogExS2, DerivedDistance, 3) \
+    X(float, "float", SPDLogExS2, ExpLog, 3) \
+    X(float, "float", SPDLogExS2, FrechetMean, 3) \
+    X(float, "float", SPDLogExS2, MetricAxioms, 3) \
+    X(float, "float", SPDLogExS2, Midpoint, 3) \
+    X(float, "float", SPDLogExS2, VerifyExpLog, 3) \
     X(float, "float", SphereLevelSet, Derivative, 3) \
     X(float, "float", SphereLevelSet, MetricAxioms, 3) \
     X(float, "float", TorusChart, Derivative, 3) \
     X(float, "float", TorusChart, MetricAxioms, 3) \
+    X(long double, "long double", CylinderADL, Derivative, 3) \
+    X(long double, "long double", CylinderADL, DerivedDistance, 3) \
+    X(long double, "long double", CylinderADL, ExpLog, 3) \
+    X(long double, "long double", CylinderADL, FrechetMean, 3) \
+    X(long double, "long double", CylinderADL, MetricAxioms, 3) \
+    X(long double, "long double", CylinderADL, Midpoint, 3) \
     X(long double, "long double", E3, Derivative, 3) \
     X(long double, "long double", E3, DerivedDistance, 3) \
     X(long double, "long double", E3, ExpLog, 3) \
@@ -191,6 +333,13 @@
     X(long double, "long double", H2, MetricAxioms, 3) \
     X(long double, "long double", H2, Midpoint, 3) \
     X(long double, "long double", H2, VerifyExpLog, 3) \
+    X(long double, "long double", H2xE3, Derivative, 3) \
+    X(long double, "long double", H2xE3, DerivedDistance, 3) \
+    X(long double, "long double", H2xE3, ExpLog, 3) \
+    X(long double, "long double", H2xE3, FrechetMean, 3) \
+    X(long double, "long double", H2xE3, MetricAxioms, 3) \
+    X(long double, "long double", H2xE3, Midpoint, 3) \
+    X(long double, "long double", H2xE3, VerifyExpLog, 3) \
     X(long double, "long double", S2, Derivative, 3) \
     X(long double, "long double", S2, DerivedDistance, 3) \
     X(long double, "long double", S2, ExpLog, 3) \
@@ -205,6 +354,20 @@
     X(long double, "long double", S2xE1, MetricAxioms, 3) \
     X(long double, "long double", S2xE1, Midpoint, 3) \
     X(long double, "long double", S2xE1, VerifyExpLog, 3) \
+    X(long double, "long double", S2xH2, Derivative, 3) \
+    X(long double, "long double", S2xH2, DerivedDistance, 3) \
+    X(long double, "long double", S2xH2, ExpLog, 3) \
+    X(long double, "long double", S2xH2, FrechetMean, 3) \
+    X(long double, "long double", S2xH2, MetricAxioms, 3) \
+    X(long double, "long double", S2xH2, Midpoint, 3) \
+    X(long double, "long double", S2xH2, VerifyExpLog, 3) \
+    X(long double, "long double", S2xS2, Derivative, 3) \
+    X(long double, "long double", S2xS2, DerivedDistance, 3) \
+    X(long double, "long double", S2xS2, ExpLog, 3) \
+    X(long double, "long double", S2xS2, FrechetMean, 3) \
+    X(long double, "long double", S2xS2, MetricAxioms, 3) \
+    X(long double, "long double", S2xS2, Midpoint, 3) \
+    X(long double, "long double", S2xS2, VerifyExpLog, 3) \
     X(long double, "long double", SPDAff, Derivative, 3) \
     X(long double, "long double", SPDAff, DerivedDistance, 3) \
     X(long double, "long double", SPDAff, ExpLog, 3) \
@@ -219,6 +382,13 @@
     X(long double, "long double", SPDLogE, MetricAxioms, 3) \
     X(long double, "long double", SPDLogE, Midpoint, 3) \
     X(long double, "long double", SPDLogE, VerifyExpLog, 3) \
+    X(long double, "long double", SPDLogExS2, Derivative, 3) \
+    X(long double, "long double", SPDLogExS2, DerivedDistance, 3) \
+    X(long double, "long double", SPDLogExS2, ExpLog, 3) \
+    X(long double, "long double", SPDLogExS2, FrechetMean, 3) \
+    X(long double, "long double", SPDLogExS2, MetricAxioms, 3) \
+    X(long double, "long double", SPDLogExS2, Midpoint, 3) \
+    X(long double, "long double", SPDLogExS2, VerifyExpLog, 3) \
     X(long double, "long double", SphereLevelSet, Derivative, 3) \
     X(long double, "long double", SphereLevelSet, MetricAxioms, 3) \
     X(long double, "long double", TorusChart, Derivative, 3) \
@@ -241,6 +411,13 @@
     X(spatium::Real50, "Real50", H2, MetricAxioms, 3) \
     X(spatium::Real50, "Real50", H2, Midpoint, 3) \
     X(spatium::Real50, "Real50", H2, VerifyExpLog, 3) \
+    X(spatium::Real50, "Real50", H2xE3, Derivative, 3) \
+    X(spatium::Real50, "Real50", H2xE3, DerivedDistance, 3) \
+    X(spatium::Real50, "Real50", H2xE3, ExpLog, 3) \
+    X(spatium::Real50, "Real50", H2xE3, FrechetMean, 3) \
+    X(spatium::Real50, "Real50", H2xE3, MetricAxioms, 3) \
+    X(spatium::Real50, "Real50", H2xE3, Midpoint, 3) \
+    X(spatium::Real50, "Real50", H2xE3, VerifyExpLog, 3) \
     X(spatium::Real50, "Real50", S2, Derivative, 3) \
     X(spatium::Real50, "Real50", S2, DerivedDistance, 3) \
     X(spatium::Real50, "Real50", S2, ExpLog, 3) \
@@ -255,6 +432,20 @@
     X(spatium::Real50, "Real50", S2xE1, MetricAxioms, 3) \
     X(spatium::Real50, "Real50", S2xE1, Midpoint, 3) \
     X(spatium::Real50, "Real50", S2xE1, VerifyExpLog, 3) \
+    X(spatium::Real50, "Real50", S2xH2, Derivative, 3) \
+    X(spatium::Real50, "Real50", S2xH2, DerivedDistance, 3) \
+    X(spatium::Real50, "Real50", S2xH2, ExpLog, 3) \
+    X(spatium::Real50, "Real50", S2xH2, FrechetMean, 3) \
+    X(spatium::Real50, "Real50", S2xH2, MetricAxioms, 3) \
+    X(spatium::Real50, "Real50", S2xH2, Midpoint, 3) \
+    X(spatium::Real50, "Real50", S2xH2, VerifyExpLog, 3) \
+    X(spatium::Real50, "Real50", S2xS2, Derivative, 3) \
+    X(spatium::Real50, "Real50", S2xS2, DerivedDistance, 3) \
+    X(spatium::Real50, "Real50", S2xS2, ExpLog, 3) \
+    X(spatium::Real50, "Real50", S2xS2, FrechetMean, 3) \
+    X(spatium::Real50, "Real50", S2xS2, MetricAxioms, 3) \
+    X(spatium::Real50, "Real50", S2xS2, Midpoint, 3) \
+    X(spatium::Real50, "Real50", S2xS2, VerifyExpLog, 3) \
     X(spatium::Real50, "Real50", SPDLogE, Derivative, 3) \
     X(spatium::Real50, "Real50", SPDLogE, DerivedDistance, 3) \
     X(spatium::Real50, "Real50", SPDLogE, ExpLog, 3) \
@@ -262,6 +453,13 @@
     X(spatium::Real50, "Real50", SPDLogE, MetricAxioms, 3) \
     X(spatium::Real50, "Real50", SPDLogE, Midpoint, 3) \
     X(spatium::Real50, "Real50", SPDLogE, VerifyExpLog, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, Derivative, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, DerivedDistance, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, ExpLog, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, FrechetMean, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, MetricAxioms, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, Midpoint, 3) \
+    X(spatium::Real50, "Real50", SPDLogExS2, VerifyExpLog, 3) \
 
 #else
 #define CONNECTIVITY_CELLS_BOOST(X)

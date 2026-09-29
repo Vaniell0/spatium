@@ -7,6 +7,7 @@
 #  include <spatium/algebra/vector.hpp>
 #  include <cmath>
 #  include <tuple>
+#  include <type_traits>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
@@ -105,12 +106,24 @@ struct ProductSpace {
         return space1.metric_at(first(p), u1, v1) + space2.metric_at(second(p), u2, v2);
     }
 
-    // Surface: componentwise project/normal
+    // Componentwise projection: each part by its own space's project, a
+    // part whose space has none -- one where every coordinate is a point,
+    // like SPD's log-Euclidean chart -- left as it is. It used to need both
+    // factors to be Surfaces, so SPD x S2 had no projection at all and its
+    // points could not be put back on the sphere in a finer arithmetic
+    // (found by the connectivity matrix: a product of two spaces green over
+    // Real50 on their own, red together).
     PointType project(const PointType& p) const
-        requires Surface<S1> && Surface<S2>
+        requires HasProject<S1> || HasProject<S2>
     {
-        return join(space1.project(first(p)), space2.project(second(p)));
+        const auto part = [](const auto& space, const auto& x) {
+            if constexpr (HasProject<std::remove_cvref_t<decltype(space)>>) return space.project(x);
+            else return x;
+        };
+        return join(part(space1, first(p)), part(space2, second(p)));
     }
+
+    // Surface: componentwise normal
 
     TangentVector normal(const PointType& p) const
         requires Surface<S1> && Surface<S2>

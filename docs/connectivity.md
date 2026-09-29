@@ -13,7 +13,7 @@ scalar, in its own translation unit, and graded:
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**255 of 336 cells at L2 or above.**
+**453 of 630 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -73,6 +73,55 @@ holds every cell to the level recorded here.
 | SphereLevelSet | FrechetMean | ✗ L0 [65] | ✗ L0 [66] | ✗ L0 [67] | ✗ L0 [68] | ✗ L0 [69] | ✗ L0 [70] |
 | SphereLevelSet | VerifyExpLog | ✗ L0 [71] | ✗ L0 [72] | ✗ L0 [73] | ✗ L0 [74] | ✗ L0 [75] | ✗ L0 [76] |
 | SphereLevelSet | Derivative | L2 | L3 | L3 | ✗ L0 [77] | ✗ L0 [78] | ✗ L0 [79] |
+| CylinderADL | MetricAxioms | L2 | L3 | L3 | ✗ L0 [80] | L3 | L3 |
+| CylinderADL | DerivedDistance | L2 | L3 | L3 | ✗ L0 [81] | L3 | L3 |
+| CylinderADL | ExpLog | L2 | L3 | L3 | ✗ L0 [82] | L3 | L3 |
+| CylinderADL | Midpoint | L2 | L3 | L3 | ✗ L0 [83] | L3 | L3 |
+| CylinderADL | FrechetMean | L2 | L3 | L3 | ✗ L0 [84] | L3 | L3 |
+| CylinderADL | VerifyExpLog | ✗ L0 [85] | ✗ L0 [86] | ✗ L0 [87] | ✗ L0 [88] | ✗ L0 [89] | ✗ L0 [90] |
+| CylinderADL | Derivative | L2 | L3 | L3 | ✗ L0 [91] | L3 | L3 |
+| S2xH2 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xH2 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xH2 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xH2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xH2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xH2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xH2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2xE3 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2xS2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDLogExS2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
+| SPDAffxS2 | MetricAxioms | ✗ L0 [92] | ✗ L0 [93] | ✗ L0 [94] | ✗ L0 [95] | ✗ L0 [96] | ✗ L0 [97] |
+| SPDAffxS2 | DerivedDistance | ✗ L0 [98] | ✗ L0 [99] | ✗ L0 [100] | ✗ L0 [101] | ✗ L0 [102] | ✗ L0 [103] |
+| SPDAffxS2 | ExpLog | ✗ L0 [104] | ✗ L0 [105] | ✗ L0 [106] | ✗ L0 [107] | ✗ L0 [108] | ✗ L0 [109] |
+| SPDAffxS2 | Midpoint | ✗ L0 [110] | ✗ L0 [111] | ✗ L0 [112] | ✗ L0 [113] | ✗ L0 [114] | ✗ L0 [115] |
+| SPDAffxS2 | FrechetMean | ✗ L0 [116] | ✗ L0 [117] | ✗ L0 [118] | ✗ L0 [119] | ✗ L0 [120] | ✗ L0 [121] |
+| SPDAffxS2 | VerifyExpLog | ✗ L0 [122] | ✗ L0 [123] | ✗ L0 [124] | ✗ L0 [125] | ✗ L0 [126] | ✗ L0 [127] |
+| SPDAffxS2 | Derivative | ✗ L0 [128] | ✗ L0 [129] | ✗ L0 [130] | ✗ L0 [131] | ✗ L0 [132] | ✗ L0 [133] |
+| CylxE3 | MetricAxioms | ✗ L0 [134] | ✗ L0 [135] | ✗ L0 [136] | ✗ L0 [137] | ✗ L0 [138] | ✗ L0 [139] |
+| CylxE3 | DerivedDistance | ✗ L0 [140] | ✗ L0 [141] | ✗ L0 [142] | ✗ L0 [143] | ✗ L0 [144] | ✗ L0 [145] |
+| CylxE3 | ExpLog | ✗ L0 [146] | ✗ L0 [147] | ✗ L0 [148] | ✗ L0 [149] | ✗ L0 [150] | ✗ L0 [151] |
+| CylxE3 | Midpoint | ✗ L0 [152] | ✗ L0 [153] | ✗ L0 [154] | ✗ L0 [155] | ✗ L0 [156] | ✗ L0 [157] |
+| CylxE3 | FrechetMean | ✗ L0 [158] | ✗ L0 [159] | ✗ L0 [160] | ✗ L0 [161] | ✗ L0 [162] | ✗ L0 [163] |
+| CylxE3 | VerifyExpLog | ✗ L0 [164] | ✗ L0 [165] | ✗ L0 [166] | ✗ L0 [167] | ✗ L0 [168] | ✗ L0 [169] |
+| CylxE3 | Derivative | ✗ L0 [170] | ✗ L0 [171] | ✗ L0 [172] | ✗ L0 [173] | ✗ L0 [174] | ✗ L0 [175] |
 
 ## Notes
 
@@ -155,3 +204,99 @@ holds every cell to the level recorded here.
 77. SphereLevelSet / Derivative / Real50: no matching function for call to ‘abs(boost::multiprecision::number<boost::multiprecision::backends::cpp_dec_float<50> >&)’
 78. SphereLevelSet / Derivative / Dual: no matching function for call to ‘abs(spatium::algebra::Dual<double>&)’
 79. SphereLevelSet / Derivative / Dual2: no matching function for call to ‘abs(spatium::algebra::Dual<spatium::algebra::Dual<double> >&)’
+80. CylinderADL / MetricAxioms / Real50: no matching function for call to ‘boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::multi
+81. CylinderADL / DerivedDistance / Real50: no matching function for call to ‘boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::multi
+82. CylinderADL / ExpLog / Real50: no matching function for call to ‘boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::multi
+83. CylinderADL / Midpoint / Real50: no matching function for call to ‘boost::multiprecision::detail::expression<boost::multiprecision::detail::multiply_add, boost::multiprecisi
+84. CylinderADL / FrechetMean / Real50: no matching function for call to ‘boost::multiprecision::detail::expression<boost::multiprecision::detail::subtract_immediates, boost::multi
+85. CylinderADL / VerifyExpLog / double: no matching function for call to ‘verify_exp_log(const third_party::Cyl<double>&, std::span<const spatium::algebra::Vec<double, 2>, 18446744
+86. CylinderADL / VerifyExpLog / float: no matching function for call to ‘verify_exp_log(const third_party::Cyl<float>&, std::span<const spatium::algebra::Vec<float, 2>, 1844674407
+87. CylinderADL / VerifyExpLog / long double: no matching function for call to ‘verify_exp_log(const third_party::Cyl<long double>&, std::span<const spatium::algebra::Vec<long double, 2>
+88. CylinderADL / VerifyExpLog / Real50: no matching function for call to ‘verify_exp_log(const third_party::Cyl<boost::multiprecision::number<boost::multiprecision::backends::cpp_d
+89. CylinderADL / VerifyExpLog / Dual: no matching function for call to ‘verify_exp_log(const third_party::Cyl<spatium::algebra::Dual<double> >&, std::span<const spatium::algebra:
+90. CylinderADL / VerifyExpLog / Dual2: no matching function for call to ‘verify_exp_log(const third_party::Cyl<spatium::algebra::Dual<spatium::algebra::Dual<double> > >&, std::spa
+91. CylinderADL / Derivative / Real50: no matching function for call to ‘boost::multiprecision::detail::expression<boost::multiprecision::detail::multiply_add, boost::multiprecisi
+92. SPDAffxS2 / MetricAxioms / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+93. SPDAffxS2 / MetricAxioms / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+94. SPDAffxS2 / MetricAxioms / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+95. SPDAffxS2 / MetricAxioms / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+96. SPDAffxS2 / MetricAxioms / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+97. SPDAffxS2 / MetricAxioms / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+98. SPDAffxS2 / DerivedDistance / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+99. SPDAffxS2 / DerivedDistance / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+100. SPDAffxS2 / DerivedDistance / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+101. SPDAffxS2 / DerivedDistance / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+102. SPDAffxS2 / DerivedDistance / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+103. SPDAffxS2 / DerivedDistance / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+104. SPDAffxS2 / ExpLog / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+105. SPDAffxS2 / ExpLog / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+106. SPDAffxS2 / ExpLog / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+107. SPDAffxS2 / ExpLog / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+108. SPDAffxS2 / ExpLog / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+109. SPDAffxS2 / ExpLog / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+110. SPDAffxS2 / Midpoint / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+111. SPDAffxS2 / Midpoint / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+112. SPDAffxS2 / Midpoint / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+113. SPDAffxS2 / Midpoint / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+114. SPDAffxS2 / Midpoint / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+115. SPDAffxS2 / Midpoint / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+116. SPDAffxS2 / FrechetMean / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+117. SPDAffxS2 / FrechetMean / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+118. SPDAffxS2 / FrechetMean / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+119. SPDAffxS2 / FrechetMean / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+120. SPDAffxS2 / FrechetMean / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+121. SPDAffxS2 / FrechetMean / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+122. SPDAffxS2 / VerifyExpLog / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+123. SPDAffxS2 / VerifyExpLog / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+124. SPDAffxS2 / VerifyExpLog / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+125. SPDAffxS2 / VerifyExpLog / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+126. SPDAffxS2 / VerifyExpLog / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+127. SPDAffxS2 / VerifyExpLog / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+128. SPDAffxS2 / Derivative / double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+129. SPDAffxS2 / Derivative / float: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+130. SPDAffxS2 / Derivative / long double: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+131. SPDAffxS2 / Derivative / Real50: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+132. SPDAffxS2 / Derivative / Dual: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+133. SPDAffxS2 / Derivative / Dual2: no match for ‘operator[]’ (operand types are ‘const spatium::SPDAffineInvariant<2>::PointType’ {aka ‘const spatium::algebra::Matrix<double, 
+134. CylxE3 / MetricAxioms / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+135. CylxE3 / MetricAxioms / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+136. CylxE3 / MetricAxioms / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+137. CylxE3 / MetricAxioms / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+138. CylxE3 / MetricAxioms / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+139. CylxE3 / MetricAxioms / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+140. CylxE3 / DerivedDistance / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+141. CylxE3 / DerivedDistance / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+142. CylxE3 / DerivedDistance / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+143. CylxE3 / DerivedDistance / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+144. CylxE3 / DerivedDistance / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+145. CylxE3 / DerivedDistance / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+146. CylxE3 / ExpLog / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+147. CylxE3 / ExpLog / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+148. CylxE3 / ExpLog / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+149. CylxE3 / ExpLog / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+150. CylxE3 / ExpLog / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+151. CylxE3 / ExpLog / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+152. CylxE3 / Midpoint / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+153. CylxE3 / Midpoint / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+154. CylxE3 / Midpoint / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+155. CylxE3 / Midpoint / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+156. CylxE3 / Midpoint / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+157. CylxE3 / Midpoint / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+158. CylxE3 / FrechetMean / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+159. CylxE3 / FrechetMean / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+160. CylxE3 / FrechetMean / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+161. CylxE3 / FrechetMean / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+162. CylxE3 / FrechetMean / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+163. CylxE3 / FrechetMean / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+164. CylxE3 / VerifyExpLog / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+165. CylxE3 / VerifyExpLog / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+166. CylxE3 / VerifyExpLog / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+167. CylxE3 / VerifyExpLog / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+168. CylxE3 / VerifyExpLog / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+169. CylxE3 / VerifyExpLog / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+170. CylxE3 / Derivative / double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+171. CylxE3 / Derivative / float: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+172. CylxE3 / Derivative / long double: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+173. CylxE3 / Derivative / Real50: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+174. CylxE3 / Derivative / Dual: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal
+175. CylxE3 / Derivative / Dual2: template constraint failure for ‘template<class S1, class S2>  requires (MetricSpace<S1>) && (MetricSpace<S2>) && (same_as<typename S1::Scal

@@ -190,6 +190,12 @@ Dual<T> floor(const Dual<T>& x) {
     return {floor(x.value), T{0}};
 }
 
+template<Scalar T>
+Dual<T> trunc(const Dual<T>& x) {
+    using std::trunc;
+    return {trunc(x.value), T{0}};
+}
+
 // x - y * trunc(x / y): the quotient is piecewise constant.
 template<Scalar T>
 Dual<T> fmod(const Dual<T>& x, const Dual<T>& y) {

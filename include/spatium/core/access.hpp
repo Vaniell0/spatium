@@ -34,6 +34,7 @@
 #  include <spatium/core/concepts.hpp>
 #  include <cmath>
 #  include <concepts>
+#  include <type_traits>
 #endif
 
 SPATIUM_EXPORT namespace spatium::spaces {
@@ -59,9 +60,13 @@ struct space_traits<S> {
     using scalar_type  = typename S::ScalarType;
 };
 
-template<class S> using point_t   = typename space_traits<S>::point_type;
-template<class S> using tangent_t = typename space_traits<S>::tangent_type;
-template<class S> using scalar_t  = typename space_traits<S>::scalar_type;
+// Read through cv and references: a traits specialisation is written for
+// the bare type, and `const S` from a `const auto s = ...` must find it --
+// which a space's own nested names did silently and a specialisation did
+// not, found by the connectivity matrix's ADL-only space.
+template<class S> using point_t   = typename space_traits<std::remove_cvref_t<S>>::point_type;
+template<class S> using tangent_t = typename space_traits<std::remove_cvref_t<S>>::tangent_type;
+template<class S> using scalar_t  = typename space_traits<std::remove_cvref_t<S>>::scalar_type;
 
 namespace access_detail {
 
