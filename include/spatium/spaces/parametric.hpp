@@ -96,7 +96,10 @@ public:
 
     TangentVector log_map(const PointType& p, const PointType& q) const {
         // Project (q-p) onto tangent plane at p
-        auto diff = q - p;
+        // A TangentVector, not `auto`: q - p is an expression template that
+        // refers to its operands, and assigning to it below did not compile
+        // -- for every scalar, found by the connectivity matrix.
+        TangentVector diff{q - p};
         auto n = normal(p);
         auto n2 = n.dot(n);
         if (n2 > epsilon<T>())
