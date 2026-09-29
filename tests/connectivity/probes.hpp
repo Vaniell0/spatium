@@ -93,6 +93,14 @@ Matrix<T, R, C> cast(const Matrix<double, R, C>& m) {
     return r;
 }
 
+// A product's points when a factor's are not Vecs.
+template<class T, class A, class B>
+auto cast(const spatium::product_detail::Pair<A, B>& p) {
+    using CA = decltype(cast<T>(p.first));
+    using CB = decltype(cast<T>(p.second));
+    return spatium::product_detail::Pair<CA, CB>{cast<T>(p.first), cast<T>(p.second)};
+}
+
 // ── Spaces ──────────────────────────────────────────────────────
 // Each gives the space over any scalar and sample points and tangents,
 // generated once in double and cast, so every scalar sees the same inputs.
@@ -293,7 +301,8 @@ struct Prod {
     }
     static auto points(Rand& r) {
         const auto s = make<double>();
-        const auto pa = A::points(r), pb = B::points(r);
+        const auto pa = A::points(r);
+        const auto pb = B::points(r);
         std::vector<decltype(s.join(pa[0], pb[0]))> p;
         for (std::size_t i = 0; i < pa.size() && i < pb.size(); ++i) p.push_back(s.join(pa[i], pb[i]));
         return p;
