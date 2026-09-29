@@ -301,7 +301,8 @@ struct Prod {
     }
     static auto points(Rand& r) {
         const auto s = make<double>();
-        const auto pa = A::points(r), pb = B::points(r);
+        const auto pa = A::points(r);
+        const auto pb = B::points(r);
         std::vector<decltype(s.join(pa[0], pb[0]))> p;
         for (std::size_t i = 0; i < pa.size() && i < pb.size(); ++i) p.push_back(s.join(pa[i], pb[i]));
         return p;
