@@ -2,6 +2,7 @@
 
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
+#  include <spatium/core/access.hpp>
 #  include <spatium/core/concepts.hpp>
 #  include <cmath>
 #  include <initializer_list>
@@ -37,22 +38,26 @@ struct VerifyResult {
 // 3. d(x, y) == d(y, x)               (symmetry)
 // 4. d(x, z) <= d(x, y) + d(y, z)     (triangle inequality)
 
-template<MetricSpace S>
+// Through core/access.hpp, so a space whose distance is a free function or
+// derived from its log and metric is checked like one with a member.
+template<class S>
+    requires spaces::Distanced<S>
 VerifyResult verify_metric(const S& space,
-                           std::span<const typename S::PointType> samples,
-                           typename S::ScalarType tolerance = typename S::ScalarType{1e-8}) {
-    using T = typename S::ScalarType;
+                           std::span<const spaces::point_t<S>> samples,
+                           spaces::scalar_t<S> tolerance = spaces::scalar_t<S>{1e-8}) {
+    using T = spaces::scalar_t<S>;
     using std::abs;
+    const auto dist = [&](const auto& a, const auto& b) { return T(spaces::distance(space, a, b)); };
 
     for (std::size_t i = 0; i < samples.size(); ++i) {
         // Non-negativity
-        auto d_ii = space.distance(samples[i], samples[i]);
+        auto d_ii = dist(samples[i], samples[i]);
         if (d_ii < T{0} || abs(d_ii) > tolerance)
             return VerifyResult::fail("d(x,x) != 0");
 
         for (std::size_t j = i + 1; j < samples.size(); ++j) {
-            auto d_ij = space.distance(samples[i], samples[j]);
-            auto d_ji = space.distance(samples[j], samples[i]);
+            auto d_ij = dist(samples[i], samples[j]);
+            auto d_ji = dist(samples[j], samples[i]);
 
             // Non-negativity
             if (d_ij < -tolerance)
@@ -64,8 +69,8 @@ VerifyResult verify_metric(const S& space,
 
             // Triangle inequality
             for (std::size_t k = 0; k < samples.size(); ++k) {
-                auto d_ik = space.distance(samples[i], samples[k]);
-                auto d_kj = space.distance(samples[k], samples[j]);
+                auto d_ik = dist(samples[i], samples[k]);
+                auto d_kj = dist(samples[k], samples[j]);
                 if (d_ij > d_ik + d_kj + tolerance)
                     return VerifyResult::fail("triangle inequality violated");
             }
@@ -114,20 +119,24 @@ VerifyResult verify_inner_product(const S& space,
 // ── Manifold axioms (exp/log roundtrip) ────────────────────────
 // exp(p, log(p, q), 1) ≈ q
 
-template<Manifold S>
+// Through core/access.hpp, like verify_metric.
+template<class S>
+    requires spaces::Exponential<S> && spaces::Logarithmic<S>
 VerifyResult verify_exp_log(const S& space,
-                            std::span<const typename S::PointType> samples,
-                            typename S::ScalarType tolerance = typename S::ScalarType{1e-6}) {
+                            std::span<const spaces::point_t<S>> samples,
+                            spaces::scalar_t<S> tolerance = spaces::scalar_t<S>{1e-6}) {
     using std::abs;
+    using P = spaces::point_t<S>;
+    using V = spaces::tangent_t<S>;
 
     for (std::size_t i = 0; i < samples.size(); ++i) {
         for (std::size_t j = 0; j < samples.size(); ++j) {
             if (i == j) continue;
-            auto v = space.log_map(samples[i], samples[j]);
-            auto recovered = space.exp_map(samples[i], v, typename S::ScalarType{1});
+            auto v = V(spaces::log_map(space, samples[i], samples[j]));
+            auto recovered = P(spaces::exp_map(space, samples[i], v, spaces::scalar_t<S>{1}));
 
-            if constexpr (MetricSpace<S>) {
-                auto err = space.distance(samples[j], recovered);
+            if constexpr (spaces::Distanced<S>) {
+                auto err = spaces::distance(space, samples[j], recovered);
                 if (err > tolerance)
                     return VerifyResult::fail("exp(p, log(p,q), 1) != q");
             }
@@ -156,12 +165,13 @@ VerifyResult verify_norm_consistency(const S& space,
 
 // ── Convenience overloads (initializer_list) ──────────────────
 
-template<MetricSpace S>
+template<class S>
+    requires spaces::Distanced<S>
 VerifyResult verify_metric(const S& space,
-                           std::initializer_list<typename S::PointType> samples,
-                           typename S::ScalarType tolerance = typename S::ScalarType{1e-8}) {
-    std::vector<typename S::PointType> v(samples);
-    return verify_metric(space, std::span{v}, tolerance);
+                           std::initializer_list<spaces::point_t<S>> samples,
+                           spaces::scalar_t<S> tolerance = spaces::scalar_t<S>{1e-8}) {
+    std::vector<spaces::point_t<S>> v(samples);
+    return verify_metric(space, std::span<const spaces::point_t<S>>{v}, tolerance);
 }
 
 template<InnerProductSpace S>
@@ -172,12 +182,13 @@ VerifyResult verify_inner_product(const S& space,
     return verify_inner_product(space, std::span{v}, tolerance);
 }
 
-template<Manifold S>
+template<class S>
+    requires spaces::Exponential<S> && spaces::Logarithmic<S>
 VerifyResult verify_exp_log(const S& space,
-                            std::initializer_list<typename S::PointType> samples,
-                            typename S::ScalarType tolerance = typename S::ScalarType{1e-6}) {
-    std::vector<typename S::PointType> v(samples);
-    return verify_exp_log(space, std::span{v}, tolerance);
+                            std::initializer_list<spaces::point_t<S>> samples,
+                            spaces::scalar_t<S> tolerance = spaces::scalar_t<S>{1e-6}) {
+    std::vector<spaces::point_t<S>> v(samples);
+    return verify_exp_log(space, std::span<const spaces::point_t<S>>{v}, tolerance);
 }
 
 template<InnerProductSpace S>

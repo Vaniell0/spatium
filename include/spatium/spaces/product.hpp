@@ -2,10 +2,13 @@
 
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
+#  include <spatium/core/access.hpp>
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <spatium/algebra/vector.hpp>
 #  include <cmath>
+#  include <concepts>
+#  include <cstddef>
 #  include <tuple>
 #  include <type_traits>
 #endif
@@ -13,127 +16,203 @@
 SPATIUM_EXPORT namespace spatium {
 
 // Cartesian product of two spaces.
-// Points are stored as a single Vec of combined dimension for mesh/viewer compat.
-// Components split/join at indices [0, D1) and [D1, D1+D2).
+//
+// A factor is anything core/access.hpp can reach -- by its members, by
+// free functions found by ADL, or by derivation -- so a space someone else
+// wrote is a factor as readily as one of ours. Every operation of the
+// product is its factors' operation, through the customization points:
+// distance sqrt(d1^2 + d2^2), exp and log componentwise, the metric the
+// sum of the two, projection part by part.
+//
+// Points: when both factors' points and tangents are Vecs, a product point
+// is one Vec of the combined size, [0, A1) the first factor, [A1, A1 + A2)
+// the second -- what the mesh and viewer code reads. Any other point type
+// (a matrix, for SPD's affine-invariant form) makes the product's points a
+// Pair carrying the vector arithmetic generic algorithms use on tangents.
+//
+// It used to ask both factors for the member-based MetricSpace and for Vec
+// points, so neither a matrix-valued space nor one reached by ADL could be
+// a factor; the connectivity matrix showed both, as products of spaces
+// green on their own and red together.
+
+namespace product_detail {
+
+// A Vec, exactly: a Matrix stores its entries in `data` as well, and
+// asking for that member alone took a matrix for a vector.
+template<class P> struct is_vec : std::false_type {};
+template<class T, std::size_t N> struct is_vec<Vec<T, N>> : std::true_type {};
+template<class P>
+concept VecLike = is_vec<std::remove_cvref_t<P>>::value;
+
+template<class P>
+constexpr std::size_t size_of() {
+    if constexpr (VecLike<P>) return std::tuple_size_v<decltype(P{}.data)>;
+    else return 0;
+}
+
+// Two components with the vector arithmetic tangents need: sums, scaling,
+// negation, comparison.
+template<class A, class B>
+struct Pair {
+    A first{};
+    B second{};
+    friend constexpr Pair operator+(const Pair& x, const Pair& y) { return {A(x.first + y.first), B(x.second + y.second)}; }
+    friend constexpr Pair operator-(const Pair& x, const Pair& y) { return {A(x.first - y.first), B(x.second - y.second)}; }
+    friend constexpr Pair operator-(const Pair& x) { return {A(-x.first), B(-x.second)}; }
+    template<class S> requires requires(const A& a, S s) { A(a * s); }
+    friend constexpr Pair operator*(const Pair& x, S s) { return {A(x.first * s), B(x.second * s)}; }
+    template<class S> requires requires(const A& a, S s) { A(a * s); }
+    friend constexpr Pair operator*(S s, const Pair& x) { return {A(x.first * s), B(x.second * s)}; }
+    friend constexpr bool operator==(const Pair& x, const Pair& y) { return x.first == y.first && x.second == y.second; }
+};
+
+// A factor's intrinsic dimension: its own, or, for a space that states
+// none, the length of its tangent vectors.
+template<class S>
+constexpr std::size_t dimension_of() {
+    if constexpr (requires { S::dimension; }) return S::dimension;
+    else return size_of<spaces::tangent_t<S>>();
+}
+
+template<class S>
+constexpr bool complete_of() {
+    if constexpr (requires { S::is_complete; }) return S::is_complete;
+    else return false;
+}
+
+}  // namespace product_detail
 
 template<typename S1, typename S2>
-    requires MetricSpace<S1> && MetricSpace<S2>
-          && std::same_as<typename S1::ScalarType, typename S2::ScalarType>
+    requires std::same_as<spaces::scalar_t<S1>, spaces::scalar_t<S2>>
 struct ProductSpace {
-    using T = typename S1::ScalarType;
+    using T = spaces::scalar_t<S1>;
     using ScalarType = T;
-    // Ambient dimensions from PointType array size (safe, no sizeof tricks)
-    static constexpr std::size_t A1 = std::tuple_size_v<decltype(typename S1::PointType{}.data)>;
-    static constexpr std::size_t A2 = std::tuple_size_v<decltype(typename S2::PointType{}.data)>;
+    using P1 = spaces::point_t<S1>;
+    using P2 = spaces::point_t<S2>;
+    using V1 = spaces::tangent_t<S1>;
+    using V2 = spaces::tangent_t<S2>;
+
+    // One Vec when every component is one and tangents are the size of
+    // points; a Pair otherwise.
+    static constexpr std::size_t A1 = product_detail::size_of<P1>();
+    static constexpr std::size_t A2 = product_detail::size_of<P2>();
+    static constexpr bool flat = product_detail::VecLike<P1> && product_detail::VecLike<P2> &&
+                                 product_detail::VecLike<V1> && product_detail::VecLike<V2> &&
+                                 product_detail::size_of<V1>() == A1 && product_detail::size_of<V2>() == A2;
     static constexpr std::size_t total_ambient = A1 + A2;
 
-    using PointType = Vec<T, total_ambient>;
-    using TangentVector = Vec<T, total_ambient>;
+    using PointType = std::conditional_t<flat, Vec<T, A1 + A2>, product_detail::Pair<P1, P2>>;
+    using TangentVector = std::conditional_t<flat, Vec<T, A1 + A2>, product_detail::Pair<V1, V2>>;
 
-    static constexpr std::size_t dimension = S1::dimension + S2::dimension;
-    static constexpr bool is_complete = S1::is_complete && S2::is_complete;
+    static constexpr std::size_t dimension =
+        product_detail::dimension_of<S1>() + product_detail::dimension_of<S2>();
+    static constexpr bool is_complete = product_detail::complete_of<S1>() && product_detail::complete_of<S2>();
 
     S1 space1;
     S2 space2;
 
-    // Split combined point into components
-    typename S1::PointType first(const PointType& p) const {
-        typename S1::PointType r;
-        for (std::size_t i = 0; i < A1; ++i) r[i] = p[i];
-        return r;
+    // Split and join. For a flat product the same three serve points and
+    // tangents, which share a type there.
+    template<class X, class A, class B>
+    static X join_as(const A& a, const B& b) {
+        if constexpr (flat) {
+            X p;
+            for (std::size_t i = 0; i < A1; ++i) p[i] = a[i];
+            for (std::size_t i = 0; i < A2; ++i) p[A1 + i] = b[i];
+            return p;
+        } else {
+            return X{a, b};
+        }
+    }
+    template<class Part, class X>
+    static Part first_of(const X& x) {
+        if constexpr (flat) {
+            Part r;
+            for (std::size_t i = 0; i < A1; ++i) r[i] = x[i];
+            return r;
+        } else {
+            return x.first;
+        }
+    }
+    template<class Part, class X>
+    static Part second_of(const X& x) {
+        if constexpr (flat) {
+            Part r;
+            for (std::size_t i = 0; i < A2; ++i) r[i] = x[A1 + i];
+            return r;
+        } else {
+            return x.second;
+        }
     }
 
-    typename S2::PointType second(const PointType& p) const {
-        typename S2::PointType r;
-        for (std::size_t i = 0; i < A2; ++i) r[i] = p[A1 + i];
-        return r;
-    }
+    P1 first(const PointType& p) const { return first_of<P1>(p); }
+    P2 second(const PointType& p) const { return second_of<P2>(p); }
+    PointType join(const P1& a, const P2& b) const { return join_as<PointType>(a, b); }
 
-    // Join two component points into combined
-    PointType join(const typename S1::PointType& a, const typename S2::PointType& b) const {
-        PointType p;
-        for (std::size_t i = 0; i < A1; ++i) p[i] = a[i];
-        for (std::size_t i = 0; i < A2; ++i) p[A1 + i] = b[i];
-        return p;
-    }
-
-    // TopologicalSpace
+    // TopologicalSpace: in both factors; a factor with no test of its own
+    // takes every point.
     bool contains(const PointType& p) const {
-        return space1.contains(first(p)) && space2.contains(second(p));
+        const auto in = [](const auto& s, const auto& x) {
+            if constexpr (requires { s.contains(x); }) return s.contains(x);
+            else return true;
+        };
+        return in(space1, first(p)) && in(space2, second(p));
     }
 
-    // MetricSpace: product metric d = sqrt(d1^2 + d2^2)
-    ScalarType distance(const PointType& a, const PointType& b) const {
+    // MetricSpace: d = sqrt(d1^2 + d2^2), each factor's distance its own or
+    // derived.
+    ScalarType distance(const PointType& a, const PointType& b) const
+        requires spaces::Distanced<S1> && spaces::Distanced<S2>
+    {
         using std::sqrt;
-        auto d1 = space1.distance(first(a), first(b));
-        auto d2 = space2.distance(second(a), second(b));
+        const T d1 = spaces::distance(space1, first(a), first(b));
+        const T d2 = spaces::distance(space2, second(a), second(b));
         return sqrt(d1 * d1 + d2 * d2);
     }
 
-    // Manifold: componentwise exp/log
+    // Manifold: componentwise exp and log.
     PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const
-        requires Manifold<S1> && Manifold<S2>
+        requires spaces::Exponential<S1> && spaces::Exponential<S2>
     {
-        typename S1::TangentVector v1;
-        for (std::size_t i = 0; i < A1; ++i) v1[i] = v[i];
-        typename S2::TangentVector v2;
-        for (std::size_t i = 0; i < A2; ++i) v2[i] = v[A1 + i];
-
-        auto r1 = space1.exp_map(first(p), v1, t);
-        auto r2 = space2.exp_map(second(p), v2, t);
-        return join(r1, r2);
+        return join(P1(spaces::exp_map(space1, first(p), first_of<V1>(v), t)),
+                    P2(spaces::exp_map(space2, second(p), second_of<V2>(v), t)));
     }
 
     TangentVector log_map(const PointType& p, const PointType& q) const
-        requires Manifold<S1> && Manifold<S2>
+        requires spaces::Logarithmic<S1> && spaces::Logarithmic<S2>
     {
-        auto v1 = space1.log_map(first(p), first(q));
-        auto v2 = space2.log_map(second(p), second(q));
-        TangentVector v;
-        for (std::size_t i = 0; i < A1; ++i) v[i] = v1[i];
-        for (std::size_t i = 0; i < A2; ++i) v[A1 + i] = v2[i];
-        return v;
+        return join_as<TangentVector>(V1(spaces::log_map(space1, first(p), first(q))),
+                                      V2(spaces::log_map(space2, second(p), second(q))));
     }
 
-    // RiemannianManifold
+    // RiemannianManifold: the sum of the factors' metrics.
     ScalarType metric_at(const PointType& p, const TangentVector& u, const TangentVector& v) const
-        requires RiemannianManifold<S1> && RiemannianManifold<S2>
+        requires spaces::Metrized<S1> && spaces::Metrized<S2>
     {
-        typename S1::TangentVector u1, v1;
-        typename S2::TangentVector u2, v2;
-        for (std::size_t i = 0; i < A1; ++i) { u1[i] = u[i]; v1[i] = v[i]; }
-        for (std::size_t i = 0; i < A2; ++i) { u2[i] = u[A1 + i]; v2[i] = v[A1 + i]; }
-        return space1.metric_at(first(p), u1, v1) + space2.metric_at(second(p), u2, v2);
+        return spaces::metric(space1, first(p), first_of<V1>(u), first_of<V1>(v)) +
+               spaces::metric(space2, second(p), second_of<V2>(u), second_of<V2>(v));
     }
 
     // Componentwise projection: each part by its own space's project, a
     // part whose space has none -- one where every coordinate is a point,
-    // like SPD's log-Euclidean chart -- left as it is. It used to need both
-    // factors to be Surfaces, so SPD x S2 had no projection at all and its
-    // points could not be put back on the sphere in a finer arithmetic
-    // (found by the connectivity matrix: a product of two spaces green over
-    // Real50 on their own, red together).
+    // like SPD's log-Euclidean chart -- left as it is.
     PointType project(const PointType& p) const
-        requires HasProject<S1> || HasProject<S2>
+        requires requires(const S1& s, const P1& x) { spaces::project(s, x); } ||
+                 requires(const S2& s, const P2& x) { spaces::project(s, x); }
     {
         const auto part = [](const auto& space, const auto& x) {
-            if constexpr (HasProject<std::remove_cvref_t<decltype(space)>>) return space.project(x);
+            using X = std::remove_cvref_t<decltype(x)>;
+            if constexpr (requires { spaces::project(space, x); }) return X(spaces::project(space, x));
             else return x;
         };
         return join(part(space1, first(p)), part(space2, second(p)));
     }
 
-    // Surface: componentwise normal
-
+    // Surface: componentwise normal, for a flat product of Surfaces.
     TangentVector normal(const PointType& p) const
-        requires Surface<S1> && Surface<S2>
+        requires flat && Surface<S1> && Surface<S2>
     {
-        auto n1 = space1.normal(first(p));
-        auto n2 = space2.normal(second(p));
-        TangentVector n;
-        for (std::size_t i = 0; i < A1; ++i) n[i] = n1[i];
-        for (std::size_t i = 0; i < A2; ++i) n[A1 + i] = n2[i];
-        return n;
+        return join_as<TangentVector>(space1.normal(first(p)), space2.normal(second(p)));
     }
 };
 
