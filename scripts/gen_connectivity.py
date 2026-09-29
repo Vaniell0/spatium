@@ -36,7 +36,9 @@ SCALARS = [
     ("Dual", "spatium::Dual<double>", 2.220446049250313e-16, False),
     ("Dual2", "spatium::Dual<spatium::Dual<double>>", 2.220446049250313e-16, False),
 ]
-SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereLevelSet"]
+SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereLevelSet", "CylinderADL",
+          # products of spaces green on their own: green together by symmetry
+          "S2xH2", "H2xE3", "S2xS2", "SPDLogExS2", "SPDAffxS2", "CylxE3"]
 PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative"]
 REFERENCE = {"double": "Real50"}   # every other scalar is held against double
 

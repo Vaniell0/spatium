@@ -104,6 +104,13 @@ Measured by `docs/connectivity.md` (first run 2026-09-29), beyond items
 listed below:
 - `Real50` fails in `solve_quadratic` (SPD affine-invariant's eigenvalues)
   and `fmod` on a Boost expression (`ParametricSurface`'s periodic wrap).
+- Gaps the matrix predicted by symmetry (a product of two green spaces is
+  green) and found red: `ProductSpace` takes only `Vec` points (SPD
+  affine-invariant, whose points are matrices, cannot be a factor) and asks
+  for the member-based `MetricSpace` (a space reached by ADL alone, the
+  matrix's cylinder, cannot be a factor either); the library's own
+  `verify_exp_log`/`verify_metric` ask for member concepts too, so they
+  cannot check an ADL space. Fix: both through `core/access.hpp`.
 
 - Mesh calculus is Euclidean-ambient: cotangents by `cross`, `face_area_3d`, `heat_geodesic` ignores the space. On `Hyperbolic<2>` heat errs 342%, `Mesh::area` 22.0 vs 2.23; Dijkstra on the same mesh is right, so the two methods answer different questions. Fix: intrinsic edge lengths (law of cosines, Heron). Doc `concept-driven-physics.md:147` promises a `metric_at` Laplacian that does not exist.
 - SO3/SE3 are LieGroups but not Riemannian spaces: add `LieGroupManifold<G>` (exp_map = p·exp(tv), log_map = log(p⁻¹q)); then `frechet_mean` averages rotations. With `core/access.hpp` this can be ADL functions instead of an adapter type.

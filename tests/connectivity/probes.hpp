@@ -227,6 +227,90 @@ struct SphereLevelSet {
     static Vec<double, 3> tangent(Rand& r, const Vec<double, 3>& at) { return S2::tangent(r, at); }
 };
 
+// ── A space with no members, over any scalar ────────────────────
+// The flat cylinder R x S^1 of test_space_access.cpp, templated: exp, log
+// and the metric as free functions found by ADL, the types through
+// space_traits. Every cell of it goes through the customization points'
+// ADL route; a cell that needs a member (the library's own verifier, a
+// product, which asks for MetricSpace) shows where that route stops.
+
+}  // namespace connectivity
+
+namespace third_party {
+template<class T> struct Cyl { T radius{2}; };
+template<class T> T wrap(T a) {
+    using std::fmod;
+    const T pi = connectivity::from_double<T>(std::numbers::pi);
+    a = fmod(a + pi, pi + pi);
+    if (a < T{0}) a = a + pi + pi;
+    return a - pi;
+}
+template<class T>
+spatium::Vec<T, 2> exp_map(const Cyl<T>&, const spatium::Vec<T, 2>& p, const spatium::Vec<T, 2>& v, T t) {
+    return spatium::Vec<T, 2>{p[0] + t * v[0], wrap(p[1] + t * v[1])};
+}
+template<class T>
+spatium::Vec<T, 2> log_map(const Cyl<T>&, const spatium::Vec<T, 2>& p, const spatium::Vec<T, 2>& q) {
+    return spatium::Vec<T, 2>{q[0] - p[0], wrap(q[1] - p[1])};
+}
+template<class T>
+T metric_at(const Cyl<T>& c, const spatium::Vec<T, 2>&, const spatium::Vec<T, 2>& u, const spatium::Vec<T, 2>& v) {
+    return u[0] * v[0] + c.radius * c.radius * u[1] * v[1];
+}
+}  // namespace third_party
+
+template<class T>
+struct spatium::spaces::space_traits<third_party::Cyl<T>> {
+    using point_type = spatium::Vec<T, 2>;
+    using tangent_type = spatium::Vec<T, 2>;
+    using scalar_type = T;
+};
+
+namespace connectivity {
+
+struct CylinderADL {
+    static constexpr const char* name = "Cylinder-ADL";
+    template<class T> static third_party::Cyl<T> make() { return {from_double<T>(2)}; }
+    static std::vector<Vec<double, 2>> points(Rand& r) {
+        std::vector<Vec<double, 2>> p;
+        for (int i = 0; i < 6; ++i) p.push_back({r(-2, 2), r(-1, 1)});
+        return p;
+    }
+    static Vec<double, 2> tangent(Rand& r, const Vec<double, 2>&) { return {r(), r() * 0.5}; }
+};
+
+// ── Products of spaces ──────────────────────────────────────────
+// Two spaces the matrix finds green one by one must be green together: a
+// product is a symmetry of the matrix. ProductSpace joins points through
+// the double product itself, so a factor it cannot take fails in the
+// library, not here.
+template<class A, class B>
+struct Prod {
+    template<class T> static auto make() {
+        using SA = decltype(A::template make<T>());
+        using SB = decltype(B::template make<T>());
+        return ProductSpace<SA, SB>{A::template make<T>(), B::template make<T>()};
+    }
+    static auto points(Rand& r) {
+        const auto s = make<double>();
+        const auto pa = A::points(r), pb = B::points(r);
+        std::vector<decltype(s.join(pa[0], pb[0]))> p;
+        for (std::size_t i = 0; i < pa.size() && i < pb.size(); ++i) p.push_back(s.join(pa[i], pb[i]));
+        return p;
+    }
+    template<class Pt>
+    static auto tangent(Rand& r, const Pt& at) {
+        const auto s = make<double>();
+        return s.join(A::tangent(r, s.first(at)), B::tangent(r, s.second(at)));
+    }
+};
+using S2xH2 = Prod<S2, H2>;
+using H2xE3 = Prod<H2, E3>;
+using S2xS2 = Prod<S2, S2>;
+using SPDLogExS2 = Prod<SPDLogE, S2>;
+using SPDAffxS2 = Prod<SPDAff, S2>;
+using CylxE3 = Prod<CylinderADL, E3>;
+
 // ── Probes ──────────────────────────────────────────────────────
 // run(space, points, tangents, signature) returns 1 or 2 and appends the
 // numbers the level-3 comparison reads.
