@@ -273,9 +273,19 @@
     X(double, "double", SPDLogExS2, Midpoint, 3) \
     X(double, "double", SPDLogExS2, VerifyExpLog, 3) \
     X(double, "double", SphereLevelSet, Derivative, 2) \
+    X(double, "double", SphereLevelSet, DerivedDistance, 1) \
+    X(double, "double", SphereLevelSet, ExpLog, 1) \
+    X(double, "double", SphereLevelSet, FrechetMean, 2) \
     X(double, "double", SphereLevelSet, MetricAxioms, 2) \
+    X(double, "double", SphereLevelSet, Midpoint, 1) \
+    X(double, "double", SphereLevelSet, VerifyExpLog, 1) \
     X(double, "double", TorusChart, Derivative, 2) \
+    X(double, "double", TorusChart, DerivedDistance, 1) \
+    X(double, "double", TorusChart, ExpLog, 1) \
+    X(double, "double", TorusChart, FrechetMean, 1) \
     X(double, "double", TorusChart, MetricAxioms, 2) \
+    X(double, "double", TorusChart, Midpoint, 1) \
+    X(double, "double", TorusChart, VerifyExpLog, 1) \
     X(float, "float", CylinderADL, Derivative, 3) \
     X(float, "float", CylinderADL, DerivedDistance, 3) \
     X(float, "float", CylinderADL, ExpLog, 3) \
@@ -368,9 +378,19 @@
     X(float, "float", SPDLogExS2, Midpoint, 3) \
     X(float, "float", SPDLogExS2, VerifyExpLog, 3) \
     X(float, "float", SphereLevelSet, Derivative, 3) \
+    X(float, "float", SphereLevelSet, DerivedDistance, 1) \
+    X(float, "float", SphereLevelSet, ExpLog, 1) \
+    X(float, "float", SphereLevelSet, FrechetMean, 3) \
     X(float, "float", SphereLevelSet, MetricAxioms, 3) \
+    X(float, "float", SphereLevelSet, Midpoint, 1) \
+    X(float, "float", SphereLevelSet, VerifyExpLog, 1) \
     X(float, "float", TorusChart, Derivative, 3) \
+    X(float, "float", TorusChart, DerivedDistance, 3) \
+    X(float, "float", TorusChart, ExpLog, 3) \
+    X(float, "float", TorusChart, FrechetMean, 3) \
     X(float, "float", TorusChart, MetricAxioms, 3) \
+    X(float, "float", TorusChart, Midpoint, 3) \
+    X(float, "float", TorusChart, VerifyExpLog, 2) \
     X(long double, "long double", CylinderADL, Derivative, 3) \
     X(long double, "long double", CylinderADL, DerivedDistance, 3) \
     X(long double, "long double", CylinderADL, ExpLog, 3) \
@@ -463,9 +483,19 @@
     X(long double, "long double", SPDLogExS2, Midpoint, 3) \
     X(long double, "long double", SPDLogExS2, VerifyExpLog, 3) \
     X(long double, "long double", SphereLevelSet, Derivative, 3) \
+    X(long double, "long double", SphereLevelSet, DerivedDistance, 1) \
+    X(long double, "long double", SphereLevelSet, ExpLog, 1) \
+    X(long double, "long double", SphereLevelSet, FrechetMean, 3) \
     X(long double, "long double", SphereLevelSet, MetricAxioms, 3) \
+    X(long double, "long double", SphereLevelSet, Midpoint, 1) \
+    X(long double, "long double", SphereLevelSet, VerifyExpLog, 1) \
     X(long double, "long double", TorusChart, Derivative, 3) \
+    X(long double, "long double", TorusChart, DerivedDistance, 1) \
+    X(long double, "long double", TorusChart, ExpLog, 1) \
+    X(long double, "long double", TorusChart, FrechetMean, 1) \
     X(long double, "long double", TorusChart, MetricAxioms, 3) \
+    X(long double, "long double", TorusChart, Midpoint, 1) \
+    X(long double, "long double", TorusChart, VerifyExpLog, 1) \
     CONNECTIVITY_CELLS_BOOST(X)
 
 #if SPATIUM_HAS_BOOST_MULTIPRECISION
