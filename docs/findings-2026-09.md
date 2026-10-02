@@ -250,7 +250,7 @@ over spacetime, the same refine-earliest loop CCD uses.
 Concept gap the scene exposes: spacetime is pseudo-Riemannian (no distance,
 log not general); the hierarchy stops at `RiemannianManifold`, so
 `MetricField` lives outside `spaces/`. Add `PseudoRiemannianManifold` with
-exp via Christoffel.
+exp via Christoffel (the derivation itself exists now: `spaces/metric_chart.hpp`).
 
 ## 6. The root: from implementations back to interfaces
 
@@ -269,8 +269,12 @@ and nested Dual worked there with zero changes.
 Five pillars, in migration order:
 1. **Customization points with derivations** -- started by `core/access.hpp`
    (member → ADL → derived). Next: move algorithms onto them one at a time;
-   derive `exp_map` from any metric callable via Christoffel + ODE for any
-   dimension (generalise `geodesic.hpp` off `Vec<T,4>`).
+   `exp_map` from any metric callable via Christoffel + ODE for any
+   dimension is done (`spaces/metric_chart.hpp`, `MetricChart`; `geodesic.hpp`
+   now names its four-dimensional form): held against the closed forms of
+   `Sphere<2>` and the hyperbolic plane, bit-identical to the old relativity
+   path on 1280 values. Next: the chart-surfaces use it, which needs the typed
+   charts of pillar 2 for exact derivatives.
 2. **One laziness model, two backends**: `ParametricSurface<F>` /
    `ImplicitSurface<F>` templated on the callable with an explicit `Erased`
    alias at boundaries; the Field IR moved into core as the expression
@@ -494,7 +498,7 @@ has the first four):
 | `distance` | the norm of `log` in the metric |
 | `midpoint`, geodesic interpolation | `exp(log / 2)` |
 | parallel transport | Schild's ladder through `exp`/`log` |
-| `exp_map` for any metric function | Christoffel symbols through `Dual`, then an ODE (works in relativity; to become the default for all) |
+| `exp_map` for any metric function | Christoffel symbols through `Dual`, then an extrapolated ODE (`MetricChart`, any dimension, any scalar; `log_map` by shooting on it) |
 | curvature | `Dual<Dual>` on the metric |
 | `normal` | a chart's `d_u × d_v` |
 | `bounds` | a support function `support(dir)` |

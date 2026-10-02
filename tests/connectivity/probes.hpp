@@ -28,6 +28,7 @@
 #include <spatium/spaces/euclidean.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/implicit.hpp>
+#include <spatium/spaces/metric_chart.hpp>
 #include <spatium/spaces/parametric.hpp>
 #include <spatium/spaces/product.hpp>
 #include <spatium/spaces/spd.hpp>
@@ -235,6 +236,53 @@ struct SphereLevelSet {
     static Vec<double, 3> tangent(Rand& r, const Vec<double, 3>& at) { return S2::tangent(r, at); }
 };
 
+// ── Spaces given by their metric alone ──────────────────────────
+// exp and log are derived (spaces/metric_chart.hpp): the geodesic equation
+// through the Christoffel symbols, the partials of g by Dual, the flow by
+// extrapolation to the scalar's own precision, log by shooting. The sphere
+// in (theta, phi) and the hyperbolic upper half-plane have closed forms in
+// the library, which tests/test_metric_chart.cpp holds these to; here the
+// same generic algorithms run on the derived ones.
+struct SphereMetric {
+    template<class S> Matrix<S, 2, 2> operator()(const Vec<S, 2>& x) const {
+        using std::sin;
+        Matrix<S, 2, 2> g{};
+        g(0, 0) = S(1);
+        g(1, 1) = sin(x[0]) * sin(x[0]);
+        return g;
+    }
+};
+
+struct HalfPlaneMetric {
+    template<class S> Matrix<S, 2, 2> operator()(const Vec<S, 2>& x) const {
+        Matrix<S, 2, 2> g{};
+        g(0, 0) = g(1, 1) = S(1) / (x[1] * x[1]);
+        return g;
+    }
+};
+
+struct S2Derived {
+    static constexpr const char* name = "S2-derived";
+    template<class T> static auto make() { return spaces::metric_chart<T, 2>(SphereMetric{}); }
+    static std::vector<Vec<double, 2>> points(Rand& r) {
+        std::vector<Vec<double, 2>> p;
+        for (int i = 0; i < 6; ++i) p.push_back({r(0.9, 2.2), r(-0.6, 0.6)});   // away from the poles
+        return p;
+    }
+    static Vec<double, 2> tangent(Rand& r, const Vec<double, 2>&) { return {r() * 0.4, r() * 0.4}; }
+};
+
+struct H2Derived {
+    static constexpr const char* name = "H2-derived";
+    template<class T> static auto make() { return spaces::metric_chart<T, 2>(HalfPlaneMetric{}); }
+    static std::vector<Vec<double, 2>> points(Rand& r) {
+        std::vector<Vec<double, 2>> p;
+        for (int i = 0; i < 6; ++i) p.push_back({r(-1, 1), r(0.7, 1.8)});
+        return p;
+    }
+    static Vec<double, 2> tangent(Rand& r, const Vec<double, 2>&) { return {r() * 0.4, r() * 0.4}; }
+};
+
 // ── A space with no members, over any scalar ────────────────────
 // The flat cylinder R x S^1 of test_space_access.cpp, templated: exp, log
 // and the metric as free functions found by ADL, the types through
@@ -319,6 +367,7 @@ using S2xS2 = Prod<S2, S2>;
 using SPDLogExS2 = Prod<SPDLogE, S2>;
 using SPDAffxS2 = Prod<SPDAff, S2>;
 using CylxE3 = Prod<CylinderADL, E3>;
+using H2DerivedxS2 = Prod<H2Derived, S2>;   // a derived factor beside a closed-form one
 
 // ── Probes ──────────────────────────────────────────────────────
 // run(space, points, tangents, signature) returns 1 or 2 and appends the
@@ -334,18 +383,23 @@ struct MetricAxioms {
     static int run(const S& s, const std::vector<P<S>>& p, const std::vector<V<S>>&, std::vector<double>& sig) {
         using T = T_<S>;
         const double tol = tolerance<T>();
+        // Each distance once: a derived one is a shooting, and the triangle
+        // inequality asks for all of them n times over.
+        const std::size_t n = p.size();
+        std::vector<double> d(n * n);
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t j = 0; j < n; ++j) {
+                d[i * n + j] = to_double(spaces::distance(s, p[i], p[j]));
+                if (!std::isfinite(d[i * n + j])) return 0;
+            }
         bool ok = true;
-        for (std::size_t i = 0; i < p.size(); ++i)
-            for (std::size_t j = 0; j < p.size(); ++j) {
-                const double dij = to_double(spaces::distance(s, p[i], p[j]));
-                const double dji = to_double(spaces::distance(s, p[j], p[i]));
-                if (!std::isfinite(dij)) return 0;
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t j = 0; j < n; ++j) {
+                const double dij = d[i * n + j], dji = d[j * n + i];
                 if (j > i) sig.push_back(dij);
                 ok = ok && dij >= -tol && std::abs(dij - dji) <= tol * (1 + dij);
                 if (i == j) ok = ok && std::abs(dij) <= tol;
-                for (std::size_t k = 0; k < p.size(); ++k)
-                    ok = ok && dij <= to_double(spaces::distance(s, p[i], p[k])) +
-                                          to_double(spaces::distance(s, p[k], p[j])) + tol;
+                for (std::size_t k = 0; k < n; ++k) ok = ok && dij <= d[i * n + k] + d[k * n + j] + tol;
             }
         return ok ? 2 : 1;
     }
@@ -421,8 +475,11 @@ struct FrechetMean {
         std::vector<P<S>> pts;
         for (std::size_t k = 1; k < 4 && k < p.size(); ++k) {
             const auto w = V<S>{spaces::log_map(s, c, p[k])};
-            pts.push_back(P<S>{spaces::exp_map(s, c, w, from_double<T>(1))});
-            pts.push_back(P<S>{spaces::exp_map(s, c, w, from_double<T>(-1))});
+            // Half the way out: the Karcher iteration contracts by about
+            // 1 - d cot d on a sphere, 0.64 at d = 1.3, and a derived space
+            // over Real50 pays a shooting per sample per step.
+            pts.push_back(P<S>{spaces::exp_map(s, c, w, from_double<T>(0.5))});
+            pts.push_back(P<S>{spaces::exp_map(s, c, w, from_double<T>(-0.5))});
         }
         const auto m = algebra::frechet_mean(s, pts, pts.front(), from_double<T>(tolerance<T>() * 1e-3), 200);
         const double err = to_double(spaces::distance(s, m, c));

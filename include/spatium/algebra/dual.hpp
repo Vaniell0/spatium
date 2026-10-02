@@ -2,6 +2,7 @@
 
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
+#  include <compare>
 #  include <spatium/core/concepts.hpp>
 #  include <cmath>
 #  include <type_traits>
@@ -26,6 +27,13 @@ struct Dual {
 
     constexpr Dual() = default;
     constexpr Dual(T v) : value(v), deriv(T{0}) {}
+    // A built-in number straight to any depth of nesting: Dual<Dual<Dual<T>>>
+    // from an int would need three user conversions in a row, which C++ does
+    // not chain, so `T{0}` -- and with it the Scalar concept -- failed at the
+    // third level, the one a Christoffel symbol over a Dual<Dual<T>> metric
+    // reaches.
+    template<class U> requires (std::is_arithmetic_v<U> && !std::is_same_v<U, T>)
+    constexpr Dual(U v) : value(T(v)), deriv(T{0}) {}
     constexpr Dual(T v, T d) : value(v), deriv(d) {}
 
     // An independent variable: seed the derivative to 1 so downstream
@@ -82,7 +90,15 @@ struct Dual {
     // Ordering compares the primal value only — the derivative carries no
     // magnitude information, same convention every dual-number AD library uses.
     constexpr bool operator==(const Dual& o) const { return value == o.value; }
-    constexpr auto operator<=>(const Dual& o) const { return value <=> o.value; }
+    // Through < and == rather than <=>: a Boost multiprecision number has no
+    // three-way comparison, and `Dual<Real50>` (derivatives at fifty digits)
+    // did not compile for want of one. For double this is its own ordering.
+    constexpr std::partial_ordering operator<=>(const Dual& o) const {
+        if (value < o.value) return std::partial_ordering::less;
+        if (o.value < value) return std::partial_ordering::greater;
+        if (value == o.value) return std::partial_ordering::equivalent;
+        return std::partial_ordering::unordered;
+    }
 };
 
 // ── Chain rule for common transcendentals ─────────────────────

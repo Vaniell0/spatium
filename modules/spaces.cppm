@@ -15,6 +15,7 @@ import spatium.mesh;
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/spd.hpp>
 #include <spatium/spaces/product.hpp>
+#include <spatium/spaces/metric_chart.hpp>
 #include <spatium/spaces/parametric.hpp>
 #include <spatium/spaces/implicit.hpp>
 #include <spatium/spaces/chart.hpp>
