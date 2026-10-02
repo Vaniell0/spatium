@@ -228,6 +228,28 @@ Aliases: `H1`, `H2`, `H3`.
 
 Cartesian product. Product metric: d = √(d₁² + d₂²). Conditional Manifold/Riemannian/Surface methods when both components satisfy them (lines 71, 84, 96, 107).
 
+### `MetricChart<T, N, Metric>` (`spaces/metric_chart.hpp`)
+
+A space given by its metric in coordinates and nothing else. The metric is a callable on any scalar, `Vec<S,N> -> Matrix<S,N,N>` (a generic lambda or a functor, never `std::function`, so `S` can be `Dual<T>`); `exp_map`, `log_map` and, through `core/access.hpp`, `distance`, `geodesic` and `midpoint` are derived from it.
+
+```cpp
+struct HalfPlane {                                   // ds^2 = (dx^2 + dy^2) / y^2
+    template<class S> Matrix<S, 2, 2> operator()(const Vec<S, 2>& x) const {
+        Matrix<S, 2, 2> g{};  g(0, 0) = g(1, 1) = S(1) / (x[1] * x[1]);  return g;
+    }
+};
+auto h2 = spaces::metric_chart<double, 2>(HalfPlane{});
+auto d  = spaces::distance(h2, p, q);                // |log_p q|_g, no distance written anywhere
+```
+
+| Operation | Derivation |
+|-----------|------------|
+| `metric_at(p, u, v)` | `u^T g(p) v` |
+| `exp_map(p, v, t)` | the geodesic equation, Christoffel symbols from `Dual` partials of g, integrated by `integrate_extrapolated` to the scalar's own precision; NaN where the metric does not invert or the flow leaves the chart |
+| `log_map(p, q)` | Newton's shooting on exp from the chord, the Jacobian kept while it works; unique inside the injectivity radius |
+
+Free functions in the same header: `christoffel(metric, x)` and `christoffel_checked` (a `Result`, refusing where g does not invert), `geodesic_rhs`, `geodesic_step` -- N-dimensional; `physics/relativity/geodesic.hpp` names them for four. The accuracy argument defaults to eps^(2/3) of the scalar (4e-11 on double, 2e-33 on `Real50`). Held against the closed forms of `Sphere<2>` in (theta, phi) and the hyperbolic plane in `tests/test_metric_chart.cpp`.
+
 ### `ParametricSurface<T>` (`spaces/parametric.hpp`)
 
 User-defined surface via f(u,v) → R³. Auto-computes metric, normal, exp/log via finite differences and Newton iteration.

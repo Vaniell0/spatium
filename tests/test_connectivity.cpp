@@ -53,6 +53,10 @@ void run_all() {
 #define CONNECTIVITY_RUN(T, NAME, SPACE, PROBE, LEVEL) \
     run_one<T, connectivity::SPACE, connectivity::PROBE>(NAME, #SPACE, #PROBE, LEVEL);
     CONNECTIVITY_CELLS(CONNECTIVITY_RUN)
+    // Minutes each over Real50: run on request, held in CI by regeneration.
+#ifdef SPATIUM_CONNECTIVITY_HEAVY
+    CONNECTIVITY_CELLS_HEAVY(CONNECTIVITY_RUN)
+#endif
 #undef CONNECTIVITY_RUN
 }
 

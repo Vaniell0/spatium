@@ -13,7 +13,7 @@ scalar, in its own translation unit, and graded:
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**534 of 630 cells at L2 or above.**
+**660 of 756 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -122,6 +122,27 @@ holds every cell to the level recorded here.
 | CylxE3 | FrechetMean | L2 | L3 | L3 | ✗ L0 [68] | L3 | L3 |
 | CylxE3 | VerifyExpLog | L2 | L3 | L3 | ✗ L0 [69] | L3 | L3 |
 | CylxE3 | Derivative | L2 | L3 | L3 | ✗ L0 [70] | L3 | L3 |
+| S2Derived | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2Derived | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2Derived | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2Derived | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2Derived | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2Derived | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| S2Derived | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2Derived | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | ExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
+| H2DerivedxS2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 
 ## Notes
 

@@ -29,6 +29,7 @@
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/spd.hpp>
 #include <spatium/spaces/product.hpp>
+#include <spatium/spaces/metric_chart.hpp>
 #include <spatium/geometry/geometry.hpp>
 #include <spatium/spatial/bvh.hpp>
 #include <spatium/io/table.hpp>

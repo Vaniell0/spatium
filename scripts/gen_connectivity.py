@@ -38,9 +38,21 @@ SCALARS = [
 ]
 SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereLevelSet", "CylinderADL",
           # products of spaces green on their own: green together by symmetry
-          "S2xH2", "H2xE3", "S2xS2", "SPDLogExS2", "SPDAffxS2", "CylxE3"]
+          "S2xH2", "H2xE3", "S2xS2", "SPDLogExS2", "SPDAffxS2", "CylxE3",
+          # spaces given by their metric alone: exp and log derived
+          "S2Derived", "H2Derived", "H2DerivedxS2"]
 PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative"]
 REFERENCE = {"double": "Real50"}   # every other scalar is held against double
+# Cells a unit test would take minutes to run: a derived space is a shooting
+# of geodesic flows, and over fifty digits each of its cells costs one to ten
+# minutes. They are held where the matrix is regenerated from scratch (the
+# CI job, `--check`), not in tests/test_connectivity.cpp, which defines
+# SPATIUM_CONNECTIVITY_HEAVY to run them too.
+HEAVY_SPACES = {"S2Derived", "H2Derived", "H2DerivedxS2"}
+
+
+def is_heavy(sname, space):
+    return sname == "Real50" and space in HEAVY_SPACES
 
 
 def tolerance(eps, scale):
@@ -72,7 +84,7 @@ def build_and_run(workdir, sname, ctype, boost, space, probe):
         first = next((l for l in c.stderr.splitlines() if "error" in l), "compile error")
         return (sname, space, probe, -1, [], first.split("error:")[-1].strip()[:140])
     try:
-        r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+        r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
         return (sname, space, probe, 0, [], "run timeout")
     if r.returncode != 0 or "|" not in r.stdout:
@@ -152,12 +164,13 @@ def render_hpp(graded, boost):
         "// tests/test_connectivity.cpp. X(scalar type, scalar name, space, probe, level).",
         "#define CONNECTIVITY_CELLS(X) \\",
     ]
-    body = []
+    body, heavy = [], []
     for (sname, space, probe), (lvl, _) in sorted(graded.items()):
         if lvl < 1:
             continue
         needs_boost = next(s[3] for s in SCALARS if s[0] == sname)
-        body.append((needs_boost, f"    X({ctype[sname]}, \"{sname}\", {space}, {probe}, {lvl})"))
+        line = f"    X({ctype[sname]}, \"{sname}\", {space}, {probe}, {lvl})"
+        (heavy if is_heavy(sname, space) else body).append((needs_boost, line))
     lines += [b + " \\" for nb, b in body if not nb]
     lines.append("    CONNECTIVITY_CELLS_BOOST(X)")
     lines.append("")
@@ -168,6 +181,15 @@ def render_hpp(graded, boost):
     lines.append("#else")
     lines.append("#define CONNECTIVITY_CELLS_BOOST(X)")
     lines.append("#endif")
+    lines.append("")
+    lines.append("// Minutes each; run only with SPATIUM_CONNECTIVITY_HEAVY (the CI job regenerates them).")
+    lines.append("#if SPATIUM_HAS_BOOST_MULTIPRECISION")
+    lines.append("#define CONNECTIVITY_CELLS_HEAVY(X) \\")
+    lines += [b + " \\" for nb, b in heavy]
+    lines.append("")
+    lines.append("#else")
+    lines.append("#define CONNECTIVITY_CELLS_HEAVY(X)")
+    lines.append("#endif")
     return "\n".join(lines) + "\n"
 
 
@@ -176,15 +198,21 @@ def main():
     ap.add_argument("-j", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--no-boost", action="store_true")
+    ap.add_argument("--only", help="build only the spaces whose name contains this (a trial: writes nothing)")
     a = ap.parse_args()
     boost = not a.no_boost
     scalars = [s for s in SCALARS if boost or not s[3]]
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(tmp)
-        jobs = [(s[0], s[1], s[3], sp, pr) for s in scalars for sp in SPACES for pr in PROBES]
+        spaces = [sp for sp in SPACES if not a.only or a.only in sp]
+        jobs = [(s[0], s[1], s[3], sp, pr) for s in scalars for sp in spaces for pr in PROBES]
         with cf.ThreadPoolExecutor(a.j) as ex:
             results = list(ex.map(lambda j: build_and_run(work, *j), jobs))
     graded = grade_l3(results)
+    if a.only:
+        for (sname, space, probe), (lvl, note) in sorted(graded.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
+            print(f"{space:14} {probe:16} {sname:12} {SYMBOL[lvl]:5} {note}")
+        return 0
     md, hpp = render_md(graded, boost), render_hpp(graded, boost)
     md_path, hpp_path = ROOT / "docs/connectivity.md", ROOT / "tests/connectivity/expected.hpp"
     if a.check:

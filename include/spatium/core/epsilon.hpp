@@ -6,6 +6,8 @@
 #  include <algorithm>
 #  include <cmath>
 #  include <limits>
+#  include <type_traits>
+#  include <utility>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
@@ -23,6 +25,29 @@ constexpr T epsilon() {
         // Multiprecision or custom types: conservative default
         return T{1} / T{10000000000}; // 1e-10
     }
+}
+
+// The unit roundoff of the arithmetic underneath a scalar, as a double: a
+// Dual carries its value's, so Dual<Dual<double>> is double's 2.2e-16 and
+// Dual<Real50> is 1e-50. What a tolerance that must follow the scalar --
+// an ODE solved to the precision of the numbers it is solved in -- reads;
+// `epsilon<T>()` above is a comparison threshold with a fixed fallback for
+// types std::numeric_limits does not know, which a Dual is.
+template<class T>
+constexpr double machine_epsilon() {
+    if constexpr (requires(const T& x) { x.value; x.deriv; })
+        return machine_epsilon<std::remove_cvref_t<decltype(std::declval<const T&>().value)>>();
+    else
+        return static_cast<double>(std::numeric_limits<T>::epsilon());
+}
+
+// A scalar's value as a double, through any Dual layers: what a decision --
+// has it converged, how big is this -- reads, where a Dual's derivative
+// carries no magnitude (its ordering compares the value alone).
+template<class T>
+constexpr double primal_double(const T& x) {
+    if constexpr (requires { x.value; x.deriv; }) return primal_double(x.value);
+    else return static_cast<double>(x);
 }
 
 // Relative epsilon: max(eps, eps * scale)

@@ -25,6 +25,7 @@ add_executable(spatium_tests
     test_matrix.cpp
     test_transform.cpp
     test_product.cpp
+    test_metric_chart.cpp
     test_convex_hull.cpp
     test_algebra.cpp
     test_surface_adapter.cpp
