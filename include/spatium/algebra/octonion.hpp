@@ -20,7 +20,7 @@ inline namespace algebra {
 // alternative: the subalgebra any two elements generate is associative, so
 // a(ab) = (aa)b, and |ab| = |a||b| holds. That identity is why they are here:
 // the 7-dimensional cross product, a global tangent frame on S^7, and the
-// row of docs/dimensions.md that said "allowed by the theorem, not written".
+// rows of the dimension table in tests/test_dimension_theorems.cpp that said "allowed by the theorem, not written".
 //
 // Built by the Cayley-Dickson doubling of the quaternions the library already
 // has, rather than from a table of structure constants:

@@ -67,6 +67,7 @@ SKIP_DIRS = {".git", ".direnv", "result", "vendor"}
 # Names the docs may use without a file behind them, each with its reason.
 NOT_IN_TREE = {
     # -- the doc records a deletion, so it has to name the deleted thing
+    "dimensions.md": "folded into tests/test_dimension_theorems.cpp 2026-10-06 (it only repeated that test's header); ROADMAP's history entries name it",
     "CHANGELOG.md": "deleted by the 2026-08-26 audit; the entry naming it records the deletion",
     "blackhole_gr_demo.cpp": "deleted 2026-09-26, replaced by blackhole_live.cpp; ROADMAP's history entries name it",
     "blackhole_demo.cpp": "deleted 2026-09-26, replaced by blackhole_live.cpp; ROADMAP's history entries name it",

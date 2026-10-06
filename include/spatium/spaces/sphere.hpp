@@ -114,7 +114,7 @@ struct Sphere {
     // They are the spheres of the normed division algebras -- complex numbers,
     // quaternions, octonions -- and the frame is p times each imaginary unit:
     // |p e_i| = |p| and <p e_i, p e_j> = |p|^2 <e_i, e_j>, which is the
-    // composition property again. docs/dimensions.md.
+    // composition property again; tests/test_dimension_theorems.cpp.
     std::array<TangentVector, N> tangent_frame(const PointType& p) const
         requires (N == 1 || N == 3 || N == 7)
     {
