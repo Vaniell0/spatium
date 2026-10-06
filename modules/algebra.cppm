@@ -11,6 +11,7 @@ export import :complex;
 export import :polynomial;
 export import :functions;
 export import :quaternion;
+export import :octonion;
 export import :verify;
 export import :groups_so3;
 export import :groups_se3;
