@@ -62,6 +62,17 @@ struct Dual {
     friend constexpr Dual operator*(T s, const Dual& d) { return {s * d.value, s * d.deriv}; }
     friend constexpr Dual operator/(T s, const Dual& d) { return Dual(s) / d; }
 
+    // The same on the right. Without them `Dual<Dual<Dual<double>>> - Dual<double>`
+    // did not compile: the member operators take a Dual, so a Dual of a lower
+    // depth on the right needs two converting constructors in a row, which C++
+    // does not chain. A constant on the left worked (`T - Dual` is above), on the
+    // right it did not -- found by the matrix's typed level-set sphere, whose
+    // function is `sqrt(x*x + y*y + z*z) - one`.
+    friend constexpr Dual operator+(const Dual& d, T s) { return d + Dual(s); }
+    friend constexpr Dual operator-(const Dual& d, T s) { return d - Dual(s); }
+    friend constexpr Dual operator*(const Dual& d, T s) { return {d.value * s, d.deriv * s}; }
+    friend constexpr Dual operator/(const Dual& d, T s) { return {d.value / s, d.deriv / s}; }
+
     // A built-in number on either side, whatever T is: for Dual<Dual<double>>
     // an int reaches Dual only through two conversions, which C++ does not
     // chain, so `x / 2` did not compile at the second level of nesting.

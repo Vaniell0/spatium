@@ -376,6 +376,21 @@ struct H2Derived {
     static Vec<double, 2> tangent(Rand& r, const Vec<double, 2>&) { return {r() * 0.4, r() * 0.4}; }
 };
 
+// The same level set with its function kept as a type: the gradient exact
+// through a Dual, exp and log the geodesics of the surface in the ambient
+// space (spaces/implicit.hpp). The erased SphereLevelSet is a retraction.
+struct SphereLevelSetTyped {
+    static constexpr const char* name = "Sphere-implicit-typed";
+    template<class T> static auto make() {
+        const T lo = from_double<T>(-2), hi = from_double<T>(2), one = from_double<T>(1.0);
+        return make_implicit<T>(
+            [one](auto x, auto y, auto z) { using std::sqrt; return sqrt(x * x + y * y + z * z) - one; },
+            {lo, hi, lo, hi, lo, hi});
+    }
+    static std::vector<Vec<double, 3>> points(Rand& r) { return S2::points(r); }
+    static Vec<double, 3> tangent(Rand& r, const Vec<double, 3>& at) { return S2::tangent(r, at); }
+};
+
 // ── A space with no members, over any scalar ────────────────────
 // The flat cylinder R x S^1 of test_space_access.cpp, templated: exp, log
 // and the metric as free functions found by ADL, the types through

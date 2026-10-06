@@ -79,3 +79,23 @@ TEST_CASE("Dual satisfies Scalar and drops into existing generic code unchanged"
     // d/dx sqrt(x^2+16) at x=3 -> x/sqrt(x^2+16) = 3/5
     CHECK_THAT(n.deriv, WithinAbs(0.6, 1e-12));
 }
+
+TEST_CASE("A Dual of a lower depth is a legal operand on either side of a deeper one", "[dual]") {
+    // Dual<Dual<Dual<double>>> - Dual<double> needed two converting
+    // constructors in a row and did not compile, while the same constant on the
+    // left did. A function written `sqrt(x*x + y*y + z*z) - one` with `one` a
+    // Dual<double>, evaluated on the third level a Hessian reaches, found it.
+    using D1 = Dual<double>;
+    using D3 = Dual<Dual<Dual<double>>>;
+    const D1 c{2.0, 0.5};
+    D3 x{Dual<Dual<double>>{D1{3.0, 1.0}, D1{1.0, 0.0}}, Dual<Dual<double>>{D1{1.0, 0.0}, D1{0.0, 0.0}}};
+
+    const D3 minus_right = x - c, minus_left = c - x;
+    CHECK_THAT(minus_right.value.value.value, WithinAbs(1.0, 1e-15));      // 3 - 2
+    CHECK_THAT(minus_left.value.value.value, WithinAbs(-1.0, 1e-15));
+    CHECK_THAT((x + c).value.value.value, WithinAbs(5.0, 1e-15));
+    CHECK_THAT((x * c).value.value.value, WithinAbs(6.0, 1e-15));
+    CHECK_THAT((x / c).value.value.value, WithinAbs(1.5, 1e-15));
+    // the derivative of the lowest level rides through: d(x - c) = dx - dc
+    CHECK_THAT(minus_right.value.value.deriv, WithinAbs(1.0 - 0.5, 1e-15));
+}

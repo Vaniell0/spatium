@@ -44,7 +44,7 @@ SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereL
           # the three families at other dimensions (S2, H2, E3 are above)
           "E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8",
           # a surface whose function is a type: exact partials, geodesic exp and log
-          "TorusTyped"]
+          "TorusTyped", "SphereLevelSetTyped"]
 # A dimension is a property of a space, not of a scalar: these run over a
 # native, a reference and a derivative-carrying scalar, not all six.
 DIMENSION_SPACES = {"E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8"}
@@ -54,8 +54,8 @@ DIMENSION_SCALARS = {"double", "Real50", "Dual"}
 # minutes, and the compile of Dual2's depth is heavier still, so it rides on
 # four, and double is held against long double (eps 1e-19) in place of Real50.
 SPACE_SCALARS = {sp: DIMENSION_SCALARS for sp in DIMENSION_SPACES}
-SPACE_SCALARS["TorusTyped"] = {"double", "float", "long double", "Dual"}
-SPACE_REFERENCE = {"TorusTyped": "long double"}   # what double is held against, instead of Real50
+SPACE_SCALARS["TorusTyped"] = SPACE_SCALARS["SphereLevelSetTyped"] = {"double", "float", "long double", "Dual"}
+SPACE_REFERENCE = {"TorusTyped": "long double", "SphereLevelSetTyped": "long double"}   # what double is held against, instead of Real50
 PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative",
           "Infinity"]
 REFERENCE = {"double": "Real50"}   # every other scalar is held against double
@@ -147,8 +147,8 @@ def render_md(graded, boost):
         "- **·** not run: the spaces at other dimensions (E1, E4, E8, S1, S3, S4, S7,",
         "  H1, H4, H8) ride on double, Real50 and Dual -- a dimension belongs to the",
         "  space, not to the scalar; what depends on it by theorem is held by `tests/test_dimension_theorems.cpp`.",
-        "  The typed torus rides on double, float, long double and Dual (a geodesic flow",
-        "  of nested Duals over fifty digits is minutes a cell), double held against long double.",
+        "  The typed torus and the typed level-set sphere ride on double, float, long double and Dual",
+        "  (a geodesic flow of nested Duals over fifty digits is minutes a cell), double held against long double.",
         "",
         "Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`",
         "holds every cell to the level recorded here.",
