@@ -10,7 +10,9 @@
 #  include <spatium/core/access.hpp>
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
+#  include <cmath>
 #  include <cstddef>
+#  include <limits>
 #  include <vector>
 #endif
 
@@ -54,41 +56,144 @@ constexpr T simpson_panel(T a, T b, T fa, T fm, T fb) {
     return (b - a) / T{6} * (fa + T{4} * fm + fb);
 }
 
+// What the recursion accumulates besides the value.
+template<Scalar T>
+struct SimpsonState {
+    T error{0};             // sum of the panels' |left + right - whole| / 15
+    T first{0};             // the estimate of the whole interval, level 0
+    T second{0};            // the sum of the estimates of its two halves, level 1
+    long evaluations = 0;
+    bool finite = true;     // false at the first value that is NaN or infinite
+    bool capped = false;    // a panel was accepted only because the depth ran out
+};
+
+// A value the rule can use. Read through the primal: a Dual's derivative has
+// no magnitude, and every comparison with NaN is false, which is how a NaN
+// used to walk the recursion to its depth limit instead of stopping.
+template<Scalar T>
+bool usable(const T& x) { return std::isfinite(primal_double(x)); }
+
 // Adaptive refinement: recurse into a half only if its Simpson estimate
 // doesn't already agree with the whole-panel estimate to within eps.
 // `depth` bounds recursion so a pathological f can't spin forever.
 template<Scalar T, typename F>
-T adaptive_simpson(F&& f, T a, T b, T fa, T fm, T fb, T whole, T eps, int depth) {
+T adaptive_simpson(F& f, T a, T b, T fa, T fm, T fb, T whole, T eps, int depth,
+                   SimpsonState<T>& st, int level = 0) {
+    if (!st.finite) return T{0};
     T m = (a + b) / T{2};
     T lm = (a + m) / T{2};
     T rm = (m + b) / T{2};
     T flm = f(lm);
     T frm = f(rm);
+    st.evaluations += 2;
+    if (!usable(flm) || !usable(frm)) { st.finite = false; return T{0}; }
     T left = simpson_panel(a, m, fa, flm, fm);
     T right = simpson_panel(m, b, fm, frm, fb);
 
     using std::abs;
-    if (depth <= 0 || abs(left + right - whole) <= T{15} * eps)
+    const T diff = abs(T(left + right - whole));
+    if (level == 0) st.first = diff / T{15};
+    if (level == 1) st.second = st.second + diff / T{15};
+    // The whole interval is never accepted on its first look: five samples are
+    // no evidence of convergence, and the second level is what the rate of
+    // convergence is read from.
+    if (depth <= 0 || (level >= 1 && diff <= T{15} * eps)) {
+        if (diff > T{15} * eps) st.capped = true;
+        st.error = st.error + diff / T{15};
         return left + right + (left + right - whole) / T{15};
+    }
 
-    return adaptive_simpson(f, a, m, fa, flm, fm, left, eps / T{2}, depth - 1)
-         + adaptive_simpson(f, m, b, fm, frm, fb, right, eps / T{2}, depth - 1);
+    return adaptive_simpson(f, a, m, fa, flm, fm, left, eps / T{2}, depth - 1, st, level + 1)
+         + adaptive_simpson(f, m, b, fm, frm, fb, right, eps / T{2}, depth - 1, st, level + 1);
 }
 
 } // namespace calculus_detail
 
-// Definite integral of f: T -> T over [a,b] via adaptive Simpson's rule.
+// What a rule can say about its own answer. `converged` as one bool joined
+// three cases that must not be: converged with a small estimate (good),
+// "converged" with a small estimate that the rule has reason to doubt
+// (dangerous, and it looks exactly like the first), and not converged with
+// an estimate that says so (honestly bad).
+//
+//   Converged    every panel met its tolerance, and the estimate fell between
+//                the first two levels at the rate a smooth integrand's does
+//   Suspicious   every panel met its tolerance, but the estimate did not fall
+//                as it should -- under-sampling or an oscillation the first
+//                levels cannot resolve (sin(20x) at eps = 1e-6): the value is
+//                a number the rule cannot vouch for. It is not a detector of
+//                every small-and-wrong estimate: x^0.7 at a loose tolerance
+//                passes as Converged with a true error several times its
+//                estimate, which only a second witness sees
+//   DepthCapped  panels were accepted only because the depth ran out; the
+//                estimate is large and says so
+//   Failed       a bound or a value was NaN or infinite; the value is NaN
+//
+// Two rules that agree and are both under-sampling are still both wrong; no
+// status of one rule can see that. It takes a third witness that samples
+// differently (tanh-sinh, or intervals on a partition), and a disagreement
+// among witnesses is the signal.
+enum class IntegralStatus { Converged, Suspicious, DepthCapped, Failed };
+
+// The answer of a quadrature: the value, and what the rule knows about it.
+//
+// `error_estimate` is the rule's own estimate of |value - integral|, the sum
+// over accepted panels of |two halves - whole| / 15 -- an estimate, not a
+// bound: nothing here proves it, and a pathological integrand can fool it.
+// A proven bound is `Certified<T>`'s (interval arithmetic); an answer that
+// carries neither is a number with no region where it is true. `status` says
+// which of the cases above this is; a bound of the interval or a value of f
+// that is NaN or infinite gives NaN at once, not after the recursion has
+// spent its depth. `evaluations` is the second half of the answer: an
+// estimate means little without what it cost.
+template<Scalar T>
+struct IntegralResult {
+    T value{};
+    T error_estimate{};
+    long evaluations = 0;
+    IntegralStatus status = IntegralStatus::Failed;
+
+    // Converged, and nothing in how it converged gives a reason to look twice.
+    constexpr bool trusted() const { return status == IntegralStatus::Converged; }
+};
+
+// Definite integral of f: T -> T over [a,b] via adaptive Simpson's rule, with
+// the rule's error estimate and its cost.
 // Scoped to 1-D on purpose — region-aware integration over Spatium's own
 // geometry (Box/Sphere/Polygon volumes, intersection overlap) is a separate,
 // bigger next step, not folded in here.
 template<Scalar T, typename F>
     requires Function<F, T, T>
-T integrate(F&& f, T a, T b, T eps = epsilon<T>() * T{1000}) {
+IntegralResult<T> integrate_with_error(F&& f, T a, T b, T eps = epsilon<T>() * T{1000}) {
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    // Endpoints must be finite: the rule samples them, and an interval with an
+    // infinite end is a different problem (a change of variable), not this one.
+    if (!calculus_detail::usable(a) || !calculus_detail::usable(b))
+        return {nan, nan, 0, IntegralStatus::Failed};
+    calculus_detail::SimpsonState<T> st;
     T fa = f(a);
     T fb = f(b);
     T fm = f((a + b) / T{2});
+    st.evaluations = 3;
+    if (!calculus_detail::usable(fa) || !calculus_detail::usable(fb) || !calculus_detail::usable(fm))
+        return {nan, nan, st.evaluations, IntegralStatus::Failed};
     T whole = calculus_detail::simpson_panel(a, b, fa, fm, fb);
-    return calculus_detail::adaptive_simpson(f, a, b, fa, fm, fb, whole, eps, 20);
+    const T value = calculus_detail::adaptive_simpson(f, a, b, fa, fm, fb, whole, eps, 20, st);
+    if (!st.finite) return {nan, nan, st.evaluations, IntegralStatus::Failed};
+    if (st.capped) return {value, st.error, st.evaluations, IntegralStatus::DepthCapped};
+    // The estimate of a smooth integrand falls about eight-fold from the whole
+    // interval to the sum over its halves (two panels, each sixteen times
+    // smaller). Less than a three-fold fall, above the noise, is not smooth.
+    const T noise = T{15} * eps;
+    const bool rate_ok = st.first <= noise || st.second * T{3} <= st.first;
+    return {value, st.error, st.evaluations,
+            rate_ok ? IntegralStatus::Converged : IntegralStatus::Suspicious};
+}
+
+// The value alone, for a caller that wants no more.
+template<Scalar T, typename F>
+    requires Function<F, T, T>
+T integrate(F&& f, T a, T b, T eps = epsilon<T>() * T{1000}) {
+    return integrate_with_error(f, a, b, eps).value;
 }
 
 // Calibration, not a trained model: minimizes a scalar loss f: Vec<T,N> -> T

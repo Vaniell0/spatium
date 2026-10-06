@@ -3,7 +3,10 @@
 #include <spatium/algebra/calculus.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/sphere.hpp>
+#include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <numbers>
 
 using namespace spatium;
@@ -212,4 +215,111 @@ TEST_CASE("riemannian_minimize finds the closest point on a hyperboloid to a tar
     CHECK_THAT(result[0], WithinAbs(1.0, 1e-3));
     CHECK_THAT(result[1], WithinAbs(0.0, 1e-3));
     CHECK_THAT(result[2], WithinAbs(0.0, 1e-3));
+}
+
+// ── The answer carries what the rule knows about it ──────────
+
+TEST_CASE("integrate_with_error returns an estimate that covers the true error, and its cost", "[calculus]") {
+    struct Case { std::function<double(double)> f; double a, b, truth; };
+    const Case cases[] = {
+        {[](double x) { return x * x; }, 0.0, 1.0, 1.0 / 3.0},
+        {[](double x) { return std::sin(x); }, 0.0, std::numbers::pi, 2.0},
+        {[](double x) { return std::exp(x); }, 0.0, 1.0, std::numbers::e - 1.0},
+        {[](double x) { return 1.0 / (1.0 + x * x); }, 0.0, 1.0, std::numbers::pi / 4.0},
+    };
+    for (const auto& c : cases) {
+        long calls = 0;
+        const auto f = [&](double x) { ++calls; return c.f(x); };
+        const auto r = integrate_with_error<double>(f, c.a, c.b);
+        CHECK(r.trusted());
+        CHECK(r.evaluations == calls);                       // the cost it reports is the cost it paid
+        CHECK(std::abs(r.value - c.truth) <= std::max(r.error_estimate, 1e-14));
+        // and the value alone is the same number
+        CHECK(integrate<double>(c.f, c.a, c.b) == r.value);
+    }
+}
+
+TEST_CASE("A bound or a value that is not finite stops the rule at once, with no answer", "[calculus][infinity]") {
+    // Before, a NaN walked the recursion to its depth limit of 20 -- up to 2^20
+    // evaluations, minutes over Real50 -- and came back NaN anyway.
+    const double inf = std::numeric_limits<double>::infinity();
+    {
+        const auto r = integrate_with_error<double>([](double x) { return std::exp(-x); }, 0.0, inf);
+        CHECK(r.status == IntegralStatus::Failed);
+        CHECK(std::isnan(r.value));
+        CHECK(r.evaluations == 0);                           // the integrand was never asked
+    }
+    {   // an integrable singularity at an endpoint: f(0) = infinity
+        const auto r = integrate_with_error<double>([](double x) { return 1.0 / std::sqrt(x); }, 0.0, 1.0);
+        CHECK(r.status == IntegralStatus::Failed);
+        CHECK(std::isnan(r.value));
+        CHECK(r.evaluations == 3);
+    }
+    {   // a NaN on the first refinement point, 0.25: found there, after 5 evaluations
+        const auto f = [](double x) { return (x > 0.2 && x < 0.3) ? std::numeric_limits<double>::quiet_NaN() : 1.0; };
+        const auto r = integrate_with_error<double>(f, 0.0, 1.0);
+        CHECK(r.status == IntegralStatus::Failed);
+        CHECK(std::isnan(r.value));
+        CHECK(r.evaluations == 5);
+    }
+    {   // the limit, stated: an adaptive rule sees only where it samples. A NaN in
+        // (0.4, 0.45) lies between the nodes of a constant integrand, which
+        // converges at once -- the answer is 1 and the status is Converged.
+        const auto f = [](double x) { return (x > 0.4 && x < 0.45) ? std::numeric_limits<double>::quiet_NaN() : 1.0; };
+        const auto r = integrate_with_error<double>(f, 0.0, 1.0);
+        CHECK(r.trusted());
+        CHECK_THAT(r.value, WithinAbs(1.0, 1e-14));
+    }
+}
+
+TEST_CASE("A depth cap that decided the answer is reported, not hidden", "[calculus]") {
+    // sin(1/(x + 1e-6)) oscillates faster than 20 halvings resolve at this
+    // tolerance: panels are accepted because the depth ran out.
+    const auto r = integrate_with_error<double>([](double x) { return std::sin(1.0 / (x + 1e-6)); }, 0.0, 1.0, 1e-14);
+    CHECK(r.status == IntegralStatus::DepthCapped);
+    CHECK(std::isfinite(r.value));
+    CHECK(r.error_estimate > 1e-14);
+}
+
+TEST_CASE("The rate of convergence flags what the rule cannot resolve, and the limit of that is stated", "[calculus]") {
+    // sin(20x) on [0, 1]: five samples at the root cannot resolve twenty
+    // radians, so the estimate falls between the first two levels by far less
+    // than the factor 8 of a smooth integrand, though every panel goes on to
+    // meet its tolerance. Suspicious -- here the true error turns out small, but
+    // the rule could not know that, and says so.
+    const auto wiggly = integrate_with_error<double>([](double x) { return std::sin(20.0 * x); }, 0.0, 1.0, 1e-6);
+    CHECK(wiggly.status == IntegralStatus::Suspicious);
+    CHECK_FALSE(wiggly.trusted());
+
+    // A smooth integrand at the same tolerance is Converged.
+    const auto smooth = integrate_with_error<double>([](double x) { return std::sin(x); }, 0.0, std::numbers::pi, 1e-6);
+    CHECK(smooth.status == IntegralStatus::Converged);
+
+    // sqrt(x) at the default tolerance runs into the depth limit; the estimate
+    // is large and says so: DepthCapped is the honest case.
+    CHECK(integrate_with_error<double>([](double x) { return std::sqrt(x); }, 0.0, 1.0).status == IntegralStatus::DepthCapped);
+
+    // The limit. x^0.7 at a loose tolerance is accepted as Converged, and its
+    // true error is several times its estimate: one rule's estimate can be
+    // small and wrong, and no status of that rule sees it. It takes a second
+    // witness that samples differently (Gauss-Kronrod, tanh-sinh), and a
+    // disagreement between witnesses is the signal.
+    const auto rough = integrate_with_error<double>([](double x) { return std::pow(x, 0.7); }, 0.0, 1.0, 1e-3);
+    CHECK(rough.status == IntegralStatus::Converged);
+    CHECK(std::abs(rough.value - 1.0 / 1.7) > 3.0 * rough.error_estimate);
+
+    // A polynomial Simpson integrates exactly has an estimate of zero at every
+    // level: nothing to fall, nothing to doubt.
+    const auto q = integrate_with_error<double>([](double x) { return x * x * x; }, 0.0, 2.0);
+    CHECK(q.trusted());
+    CHECK_THAT(q.value, WithinAbs(4.0, 1e-13));
+}
+
+TEST_CASE("The estimate and the derivative both pass through a Dual", "[calculus][dual]") {
+    using D = Dual<double>;
+    const D a = D::variable(2.0);
+    const auto r = integrate_with_error<D>([](D x) { return x * x; }, D(0.0), a);
+    CHECK(r.trusted());
+    CHECK_THAT(r.value.value, WithinAbs(8.0 / 3.0, 1e-12));
+    CHECK_THAT(r.value.deriv, WithinAbs(4.0, 1e-9));         // d/da of the integral is f(a) = a^2
 }
