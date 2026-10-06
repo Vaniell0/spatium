@@ -2,6 +2,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/point.hpp>
+#include <spatium/algebra/calculus.hpp>
+#include <spatium/core/access.hpp>
+#include <cmath>
+#include <random>
+#include <vector>
 
 using namespace spatium;
 using Catch::Matchers::WithinAbs;
@@ -84,4 +89,29 @@ TEST_CASE("Hyperbolic typed Point", "[hyperbolic]") {
     Vec3 q_raw{std::cosh(1.0), std::sinh(1.0), 0.0};
     auto q = pt<H2>(q_raw);
     CHECK_THAT(p.distance_to(q, space), WithinAbs(1.0, 1e-10));
+}
+
+TEST_CASE("The Frechet mean converges on widely spread hyperbolic points", "[hyperbolic][frechet]") {
+    // Found by the connectivity matrix's dimension axis, at H^8, where random
+    // tangents are longer: the Karcher step of 1 overshoots when d coth d
+    // exceeds 2 (a spread past about 1.5), so the iteration diverged to NaN.
+    // The mean of a point set symmetric about the origin is the origin.
+    std::mt19937_64 g(7);
+    std::uniform_real_distribution<double> u(-1, 1);
+    for (const double spread : {1.0, 2.0, 3.0}) {
+        const Hyperbolic<8> h;
+        const auto c = Hyperbolic<8>::origin();
+        std::vector<Vec<double, 9>> pts;
+        for (int k = 0; k < 3; ++k) {
+            Vec<double, 9> w;
+            w[0] = 0;
+            for (std::size_t i = 1; i < 9; ++i) w[i] = u(g) * spread;
+            pts.push_back(h.exp_map(c, w, 1.0));
+            pts.push_back(h.exp_map(c, w, -1.0));
+        }
+        const auto m = frechet_mean(h, pts, pts.front(), 1e-12, 500);
+        INFO("spread " << spread);
+        CHECK(std::isfinite(h.distance(m, c)));
+        CHECK(h.distance(m, c) < 1e-6);
+    }
 }

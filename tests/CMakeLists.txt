@@ -27,6 +27,7 @@ add_executable(spatium_tests
     test_product.cpp
     test_metric_chart.cpp
     test_cos_sinc.cpp
+    test_dimension_theorems.cpp
     test_convex_hull.cpp
     test_algebra.cpp
     test_surface_adapter.cpp

@@ -252,6 +252,24 @@ spaces::point_t<S> frechet_mean(
 
     auto mean = initial_guess;
     T inv_n = T{1} / static_cast<T>(points.size());
+
+    // The variance F(m) = mean of d(m, p_i)^2, whose descent the iteration is:
+    // -avg is half its gradient. A step of 1 is exact in a flat space and
+    // right near the mean of a positively curved one, but where curvature is
+    // negative it overshoots as soon as d coth d passes 2 -- a spread of about
+    // 1.5 -- and the iteration ran off to NaN (found by the dimension axis of
+    // the connectivity matrix, at H^8, where random tangents are longer). So
+    // the step is taken whole and halved until F falls by a fraction of what
+    // the gradient promises; near the solution that is the first try.
+    const auto variance = [&](const spaces::point_t<S>& m) {
+        T acc{0};
+        for (const auto& p : points) {
+            const T d = spaces::distance(space, m, p);
+            acc += d * d;
+        }
+        return acc * inv_n;
+    };
+
     for (int iter = 0; iter < max_iters; ++iter) {
         Tangent avg{};
         for (const auto& p : points)
@@ -261,7 +279,20 @@ spaces::point_t<S> frechet_mean(
         T avg_norm2 = abs(spaces::metric(space, mean, avg, avg));
         if (sqrt(avg_norm2) < tol) break;
 
-        mean = spaces::exp_map(space, mean, avg, T{1});
+        const T f0 = variance(mean);
+        // Rounding of F itself: near the solution the promised decrease is
+        // below it, and without the slack every step would be refused.
+        const T slack = T(8 * machine_epsilon<T>()) * (f0 + T{1});
+        T step{1};
+        auto next = spaces::exp_map(space, mean, avg, step);
+        for (int back = 0; back < 30; ++back) {
+            // Armijo: F(next) <= F(mean) - c * step * 2 |avg|^2 (+ rounding).
+            // A NaN fails the comparison and is backed away from.
+            if (variance(next) <= f0 - T{1e-4} * T{2} * step * avg_norm2 + slack) break;
+            step = step * T{0.5};
+            next = spaces::exp_map(space, mean, avg, step);
+        }
+        mean = next;
     }
     return mean;
 }
