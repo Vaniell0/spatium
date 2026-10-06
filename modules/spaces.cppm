@@ -11,6 +11,7 @@ import spatium.algebra;
 import spatium.mesh;
 #define SPATIUM_BUILDING_MODULE 1
 #include <spatium/spaces/euclidean.hpp>
+#include <spatium/spaces/cos_sinc.hpp>
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/spd.hpp>

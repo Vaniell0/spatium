@@ -297,17 +297,17 @@ template<class T> struct Cyl { T radius{2}; };
 template<class T> T wrap(T a) {
     using std::fmod;
     const T pi = connectivity::from_double<T>(std::numbers::pi);
-    a = fmod(a + pi, pi + pi);
-    if (a < T{0}) a = a + pi + pi;
-    return a - pi;
+    a = fmod(T(a + pi), T(pi + pi));
+    if (a < T{0}) a = T(a + pi + pi);
+    return T(a - pi);
 }
 template<class T>
 spatium::Vec<T, 2> exp_map(const Cyl<T>&, const spatium::Vec<T, 2>& p, const spatium::Vec<T, 2>& v, T t) {
-    return spatium::Vec<T, 2>{p[0] + t * v[0], wrap(p[1] + t * v[1])};
+    return spatium::Vec<T, 2>{T(p[0] + t * v[0]), wrap<T>(T(p[1] + t * v[1]))};   // wrap<T>: T is not deduced from a Boost expression
 }
 template<class T>
 spatium::Vec<T, 2> log_map(const Cyl<T>&, const spatium::Vec<T, 2>& p, const spatium::Vec<T, 2>& q) {
-    return spatium::Vec<T, 2>{q[0] - p[0], wrap(q[1] - p[1])};
+    return spatium::Vec<T, 2>{T(q[0] - p[0]), wrap<T>(T(q[1] - p[1]))};
 }
 template<class T>
 T metric_at(const Cyl<T>& c, const spatium::Vec<T, 2>&, const spatium::Vec<T, 2>& u, const spatium::Vec<T, 2>& v) {
@@ -533,6 +533,79 @@ struct Derivative {
         }
         return ok ? 2 : 1;
     }
+};
+
+// What a space does with the values a finite number cannot reach.
+//
+// Not by enumeration -- there are 2^64 doubles -- but by the classes whose
+// behaviour differs: a zero step, NaN in each argument, an infinite step,
+// and two steps so long that a derived space must refuse them. The
+// invariants are the ones a caller can lean on:
+//   * a zero step leaves the point where it is;
+//   * NaN in the point, the tangent or the step comes out as non-finite,
+//     never as a finite point that looks like an answer;
+//   * an infinite step does not reach a finite point;
+//   * a very long step may overflow or be refused, but returns -- no hang,
+//     no crash (an exception counts as the refusal it is).
+// The class of a result is read through the distance from the start, which
+// a space cannot make finite from a point that is not.
+struct Infinity {
+    static constexpr const char* name = "infinity";
+    template<class S>
+    static int run(const S& s, const std::vector<P<S>>& p, const std::vector<V<S>>& v, std::vector<double>& sig) {
+        using T = T_<S>;
+        const T nan = from_double<T>(std::numeric_limits<double>::quiet_NaN());
+        const T inf = from_double<T>(std::numeric_limits<double>::infinity());
+
+        // 0 = NaN, 1 = infinite, 2 = finite; a refusal by exception is 1.
+        const auto classify = [&](const P<S>& from, const auto& go) {
+            try {
+                const P<S> q{go()};
+                const double d = to_double(spaces::distance(s, from, q));
+                return std::isnan(d) ? 0 : std::isinf(d) ? 1 : 2;
+            } catch (...) {
+                return 1;
+            }
+        };
+
+        bool ok = true;
+        const std::size_t n = std::min<std::size_t>(p.size(), 3);
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto at = [&](const P<S>& q, const V<S>& w, const T& t) { return spaces::exp_map(s, q, w, t); };
+            const P<S> bad_p{p[i] * nan};
+            const V<S> bad_v{v[i] * nan};
+
+            // A zero step stays put.
+            double stay = 0;
+            try { stay = to_double(spaces::distance(s, p[i], P<S>{at(p[i], v[i], from_double<T>(0))})); }
+            catch (...) { stay = std::numeric_limits<double>::infinity(); }
+            if (!std::isfinite(stay)) return 0;
+            sig.push_back(stay);
+            ok = ok && stay <= tolerance<T>();
+
+            // NaN and infinity do not become a finite point.
+            const int nan_p = classify(p[i], [&] { return at(bad_p, v[i], from_double<T>(1)); });
+            const int nan_v = classify(p[i], [&] { return at(p[i], bad_v, from_double<T>(1)); });
+            const int nan_t = classify(p[i], [&] { return at(p[i], v[i], nan); });
+            const int up = classify(p[i], [&] { return at(p[i], v[i], inf); });
+            const int down = classify(p[i], [&] { return at(p[i], v[i], -inf); });
+            for (const int c : {nan_p, nan_v, nan_t, up, down}) {
+                ok = ok && c != 2;
+                sig.push_back(c == 2 ? 1.0 : 0.0);
+            }
+        }
+
+        // Steps too long to be answered: they must return, whatever they return.
+        volatile double sink = 0;
+        for (const double t : {1e3, 1e300}) {
+            sink = sink + classify(p[0], [&] { return at_long(s, p[0], v[0], from_double<T>(t)); });
+        }
+        (void)sink;
+        return ok ? 2 : 1;
+    }
+
+    template<class S, class Pt, class Vt, class T>
+    static auto at_long(const S& s, const Pt& q, const Vt& w, const T& t) { return spaces::exp_map(s, q, w, t); }
 };
 
 // ── A cell ──────────────────────────────────────────────────────

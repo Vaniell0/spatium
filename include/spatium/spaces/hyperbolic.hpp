@@ -5,6 +5,7 @@
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <spatium/algebra/vector.hpp>
+#  include <spatium/spaces/cos_sinc.hpp>
 #  include <algorithm>
 #  include <cmath>
 #endif
@@ -36,24 +37,31 @@ struct Hyperbolic {
     }
 
     ScalarType distance(const PointType& a, const PointType& b) const {
-        using std::acosh; using std::max;
-        auto inner = max(-minkowski(a, b), T{1});
+        using std::acosh;
+        // Raised to 1 by a comparison, not by max(): max(NaN, 1) is NaN for
+        // double but 1 for a Boost number (its max drops the NaN), which made
+        // a NaN point sit at distance 0 -- found by the infinity probe over
+        // Real50. `NaN < 1` is false everywhere, so the NaN stays.
+        T inner = -minkowski(a, b);
+        if (inner < T{1}) inner = T{1};
         return acosh(inner);
     }
 
     // As Sphere::exp_map: the arc length t |v|_L is signed and linear in t,
     // so exp is smooth through t = 0 and a Dual t carries its derivative v.
     PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const {
-        using std::cosh; using std::sinh; using std::sqrt; using std::abs;
-        const T speed = sqrt(abs(minkowski(v, v)));
-        if (speed == T{0}) return p;
-        const T s = t * speed;
-        return PointType{p * cosh(s) + v * (sinh(s) / speed)};
+        using std::abs;
+        // p cosh(s) + v t sinhc(s) with s^2 = t^2 |v|_L^2, smooth in v
+        // through v = 0 (see spaces/cos_sinc.hpp).
+        const T s2 = t * t * abs(minkowski(v, v));
+        const auto [c, sinhc] = cos_sinc_of_square(s2, /*hyperbolic=*/true);
+        return PointType{p * c + v * (t * sinhc)};
     }
 
     TangentVector log_map(const PointType& p, const PointType& q) const {
-        using std::acosh; using std::max; using std::sqrt; using std::abs;
-        auto inner = max(-minkowski(p, q), T{1});
+        using std::acosh; using std::sqrt; using std::abs;
+        T inner = -minkowski(p, q);       // raised to 1 as in distance(): NaN stays NaN
+        if (inner < T{1}) inner = T{1};
         auto d = acosh(inner);
         if (d < epsilon<T>()) return TangentVector{};
         auto proj = q + p * minkowski(p, q);

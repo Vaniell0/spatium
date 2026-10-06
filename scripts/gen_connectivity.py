@@ -41,7 +41,8 @@ SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereL
           "S2xH2", "H2xE3", "S2xS2", "SPDLogExS2", "SPDAffxS2", "CylxE3",
           # spaces given by their metric alone: exp and log derived
           "S2Derived", "H2Derived", "H2DerivedxS2"]
-PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative"]
+PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative",
+          "Infinity"]
 REFERENCE = {"double": "Real50"}   # every other scalar is held against double
 # Cells a unit test would take minutes to run: a derived space is a shooting
 # of geodesic flows, and over fifty digits each of its cells costs one to ten

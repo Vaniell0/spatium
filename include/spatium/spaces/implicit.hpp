@@ -44,7 +44,8 @@ public:
     // ── Surface concept ───────────────────────────────────────
 
     bool contains(const PointType& p) const {
-        return std::abs(fn_(p[0], p[1], p[2])) < epsilon<T>() * T{100};
+        using std::abs;   // ADL: a qualified std::abs does not compile for Dual or Real50
+        return abs(fn_(p[0], p[1], p[2])) < epsilon<T>() * T{100};
     }
 
     // Euclidean distance in ambient R³ — a valid metric but NOT the geodesic
@@ -55,10 +56,11 @@ public:
 
     PointType project(const PointType& p) const {
         // Newton projection onto F=0
+        using std::abs;
         auto q = p;
         for (int i = 0; i < 20; ++i) {
             T val = fn_(q[0], q[1], q[2]);
-            if (std::abs(val) < epsilon<T>()) break;
+            if (abs(val) < epsilon<T>()) break;
             auto g = gradient(q);
             T g2 = g.dot(g);
             if (g2 < epsilon<T>()) break;
@@ -483,7 +485,8 @@ mesh::Mesh<ImplicitSurface<T>> marching_cubes(
             return it->second;
 
         T va = values[ia], vb = values[ib];
-        T t = (std::abs(va - vb) > epsilon<T>()) ? va / (va - vb) : T{0.5};
+        using std::abs;
+        T t = (abs(T(va - vb)) > epsilon<T>()) ? va / (va - vb) : T{0.5};
         t = std::clamp(t, T{0}, T{1});
 
         Vec<T, 3> pa{
@@ -555,7 +558,8 @@ ImplicitSurface<T> make_implicit_torus(T major_r = T{2}, T minor_r = T{1}) {
     T bound = (major_r + minor_r) * T{1.5};
     return ImplicitSurface<T>(
         [=](T x, T y, T z) {
-            T d = std::sqrt(x * x + y * y) - major_r;
+            using std::sqrt;
+            T d = sqrt(x * x + y * y) - major_r;
             return d * d + z * z - minor_r * minor_r;
         },
         {-bound, bound, -bound, bound, -minor_r * T{1.5}, minor_r * T{1.5}}

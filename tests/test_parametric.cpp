@@ -4,6 +4,7 @@
 #include <spatium/mesh/topology.hpp>
 #include <spatium/mesh/geodesic.hpp>
 #include <cmath>
+#include <limits>
 
 using namespace spatium;
 using namespace spatium::mesh;
@@ -144,4 +145,26 @@ TEST_CASE("ParametricSurface anisotropy diverges near a cone's apex", "[parametr
     double a_base = cone.parametrization_anisotropy(0.0, 0.1);
     double a_near_apex = cone.parametrization_anisotropy(0.0, 1.99);
     CHECK(a_near_apex > a_base);
+}
+
+TEST_CASE("A point that is not finite has no projection: NaN and infinity come out non-finite",
+          "[parametric][infinity]") {
+    // Found by the connectivity matrix's infinity probe: every comparison with
+    // NaN is false, so the nearest-parameter search kept its first grid point
+    // and projected NaN -- or an infinite step -- onto a finite point of the
+    // surface, which then looked like an answer.
+    auto torus = make_torus();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    const Vec3 on{3.0, 0.0, 0.0}, along{0.0, 1.0, 0.0};
+
+    CHECK(std::isnan(torus.project(Vec3{nan, 0.0, 0.0})[0]));
+    CHECK(std::isnan(torus.project(Vec3{inf, 0.0, 0.0})[0]));
+    CHECK(std::isnan(torus.normal(Vec3{nan, 1.0, 0.0})[0]));
+    CHECK_FALSE(std::isfinite(torus.exp_map(on, along, nan)[0]));
+    CHECK_FALSE(std::isfinite(torus.exp_map(on, along, inf)[0]));
+    CHECK_FALSE(std::isfinite(torus.exp_map(on, Vec3{along * nan}, 1.0)[0]));
+
+    // A finite point is unaffected.
+    CHECK(std::isfinite(torus.project(on)[0]));
 }

@@ -34,7 +34,9 @@ template<Scalar T>
 EigenSym2<T> eigen_sym(const Matrix<T, 2, 2>& S) {
     using std::abs;
     T a = S(0, 0), b = S(0, 1), d = S(1, 1);
-    auto roots = solve_quadratic(T{1}, -(a + d), a * d - b * b);
+    // Arguments as T, not expressions: solve_quadratic<T> is deduced from all
+    // three, and for a Boost number `-(a + d)` is an expression type.
+    auto roots = solve_quadratic(T{1}, T(-(a + d)), T(a * d - b * b));
     Vec<T, 2> values{roots[0].re, roots[1].re};
 
     Matrix<T, 2, 2> vecs;
