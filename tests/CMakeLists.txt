@@ -42,6 +42,7 @@ add_executable(spatium_tests
     test_parametric.cpp
     test_parametric_typed.cpp
     test_implicit_typed.cpp
+    test_fermat_family.cpp
     test_mesh_ops.cpp
     test_quaternion.cpp
     test_implicit.cpp
