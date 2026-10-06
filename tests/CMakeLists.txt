@@ -40,6 +40,7 @@ add_executable(spatium_tests
     test_transport.cpp
     test_voronoi.cpp
     test_parametric.cpp
+    test_parametric_typed.cpp
     test_mesh_ops.cpp
     test_quaternion.cpp
     test_implicit.cpp

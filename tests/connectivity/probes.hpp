@@ -224,6 +224,26 @@ struct TorusChart {
     }
 };
 
+// The same torus with its function kept as a type: partials exact through a
+// Dual, exp and log the induced metric's geodesics (spaces/parametric.hpp). The
+// erased TorusChart above is a retraction and stays red where that matters;
+// this is the pair that shows what typing the function buys.
+struct TorusTyped {
+    static constexpr const char* name = "Torus-typed";
+    template<class T> static auto make() {
+        const T R = from_double<T>(1.0), q = from_double<T>(0.3);
+        return make_parametric<T>(
+            [R, q](auto u, auto v) {
+                using std::cos; using std::sin;
+                return Vec<decltype(u), 3>{(R + q * cos(v)) * cos(u), (R + q * cos(v)) * sin(u), q * sin(v)};
+            },
+            {from_double<T>(0), from_double<T>(2 * std::numbers::pi), from_double<T>(0), from_double<T>(2 * std::numbers::pi)},
+            true, true);
+    }
+    static std::vector<Vec<double, 3>> points(Rand& r) { return TorusChart::points(r); }
+    static Vec<double, 3> tangent(Rand& r, const Vec<double, 3>& at) { return TorusChart::tangent(r, at); }
+};
+
 struct SphereLevelSet {
     static constexpr const char* name = "Sphere-implicit";
     template<class T> static ImplicitSurface<T> make() {

@@ -4,12 +4,17 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
+#  include <spatium/algebra/dual.hpp>
+#  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/mesh/mesh.hpp>
+#  include <spatium/spaces/metric_chart.hpp>
 #  include <array>
 #  include <cmath>
+#  include <concepts>
 #  include <functional>
 #  include <limits>
+#  include <utility>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
@@ -17,8 +22,54 @@ SPATIUM_EXPORT namespace spatium {
 // ParametricSurface: f(u,v) → R³ becomes a full Surface.
 // Automatically computes exp/log/distance/project/normal from the parameterization.
 // Works with all geodesic algorithms.
+//
+// The function is a type, `F`, and by default the erased one a
+// std::function is -- so `ParametricSurface<T>` means what it always did and
+// every algorithm that takes one still does. Give it a callable generic over
+// the scalar instead (`[](auto u, auto v) { ... }`, made by `make_parametric`)
+// and the description stays lazy: it can be called on a `Dual`, so its
+// partials are exact where the erased form takes finite differences (about
+// 1e-8), and its geodesics -- exp and log -- are those of the induced metric,
+// through `spaces::MetricChart`, where the erased form can only offer a step
+// in the ambient space projected back. The erased form is an explicit
+// boundary, `erased()`, for what takes only that: tessellate, the ray code,
+// the scene DSL.
 
-template<Scalar T = double>
+namespace parametric_detail {
+
+// F can be called on a Dual<T>: a generic callable, not a
+// std::function<Vec<T,3>(T,T)>.
+template<class F, class T>
+concept DualEvaluable = requires(const F& f, Dual<T> u, Dual<T> v) {
+    { f(u, v) } -> std::convertible_to<Vec<Dual<T>, 3>>;
+};
+
+// The first fundamental form of f, g = J^T J, as a metric on the parameters:
+// a callable on any scalar S (it evaluates f on Dual<S> for J), which is the
+// shape spaces::MetricChart takes -- and, there, differentiated once more for
+// the Christoffel symbols.
+template<class F>
+struct InducedMetric {
+    F f;
+    template<class S>
+    Matrix<S, 2, 2> operator()(const Vec<S, 2>& x) const {
+        const Dual<S> u1 = Dual<S>::variable(x[0]), v0 = Dual<S>::constant(x[1]);
+        const Dual<S> u0 = Dual<S>::constant(x[0]), v1 = Dual<S>::variable(x[1]);
+        const Vec<Dual<S>, 3> fu = f(u1, v0);
+        const Vec<Dual<S>, 3> fv = f(u0, v1);
+        const Vec<S, 3> a{fu[0].deriv, fu[1].deriv, fu[2].deriv};
+        const Vec<S, 3> b{fv[0].deriv, fv[1].deriv, fv[2].deriv};
+        Matrix<S, 2, 2> g{};
+        g(0, 0) = a.dot(a);
+        g(0, 1) = g(1, 0) = a.dot(b);
+        g(1, 1) = b.dot(b);
+        return g;
+    }
+};
+
+}  // namespace parametric_detail
+
+template<Scalar T = double, class F = std::function<Vec<T, 3>(T, T)>>
 class ParametricSurface {
 public:
     using ScalarType = T;
@@ -28,13 +79,17 @@ public:
     static constexpr std::size_t dimension = 2;
     static constexpr bool is_complete = false;  // not always
 
-    using ParamFn = std::function<PointType(T, T)>;
+    using ParamFn = F;
+
+    // True when F can be called on a Dual<T>: the partials are then exact and
+    // the geodesics are the induced metric's.
+    static constexpr bool exact = parametric_detail::DualEvaluable<F, T>;
 
     struct Domain {
         T u_min, u_max, v_min, v_max;
     };
 
-    ParametricSurface(ParamFn fn, Domain domain, bool periodic_u = false, bool periodic_v = false)
+    ParametricSurface(F fn, Domain domain, bool periodic_u = false, bool periodic_v = false)
         : fn_(std::move(fn)), domain_(domain),
           periodic_u_(periodic_u), periodic_v_(periodic_v) {}
 
@@ -74,7 +129,14 @@ public:
 
     // Euclidean distance in ambient R³ — a valid metric but NOT the geodesic
     // (intrinsic) distance along the surface. Acts as a lower bound for geodesic distance.
-    T distance(const PointType& a, const PointType& b) const {
+    // Only for the erased form: a surface that has its geodesics has no member
+    // `distance`, so core/access.hpp derives it as |log|_g, the intrinsic one.
+    T distance(const PointType& a, const PointType& b) const requires (!exact) {
+        return (a - b).norm();
+    }
+
+    // The chord, for any surface, under its own name.
+    T chord_distance(const PointType& a, const PointType& b) const {
         return (a - b).norm();
     }
 
@@ -90,12 +152,49 @@ public:
         return normal_at(u, v);
     }
 
-    PointType exp_map(const PointType& p, const TangentVector& v, T t) const {
-        // First-order: move in ambient space, project back
+    // The erased form: a retraction, not the exponential map -- a step in the
+    // ambient space projected back, first order in t. exp(log) is not the
+    // identity on it, and the matrix says so. Make the surface with
+    // `make_parametric` for the geodesic.
+    PointType exp_map(const PointType& p, const TangentVector& v, T t) const requires (!exact) {
         return project(PointType{p + v * t});
     }
 
-    TangentVector log_map(const PointType& p, const PointType& q) const {
+    // The geodesic: the induced metric g = J^T J on (u, v), its Christoffel
+    // symbols by Dual, the flow by spaces::MetricChart, and f evaluated at the
+    // end. The tangent vector, in R^3, is put into the chart's basis by the
+    // normal equations. Where the chart degenerates -- a sphere's pole in
+    // latitude-longitude -- g does not invert and the answer is NaN.
+    PointType exp_map(const PointType& p, const TangentVector& w, T t) const requires (exact) {
+        const auto [u, v] = find_params(p);
+        const auto coords = chart_coordinates(u, v, w);
+        const auto flow = spaces::metric_chart<T, 2>(parametric_detail::InducedMetric<F>{fn_});
+        const Vec<T, 2> end = flow.exp_map(Vec<T, 2>{u, v}, coords, t);
+        return fn_(end[0], end[1]);
+    }
+
+    // Shooting in the parameters from p to q, and the result carried back into
+    // R^3 as the combination of the partials. On a periodic chart q's
+    // parameters are the representative nearest p's: u = 0.1 and u = 6.2 on a
+    // 2 pi chart are 0.18 apart, not 6.1.
+    TangentVector log_map(const PointType& p, const PointType& q) const requires (exact) {
+        using std::floor;
+        const auto [u, v] = find_params(p);
+        auto [u2, v2] = find_params(q);
+        if (periodic_u_) {
+            const T range = domain_.u_max - domain_.u_min;
+            u2 = u2 - range * floor(T((u2 - u) / range + T{0.5}));
+        }
+        if (periodic_v_) {
+            const T range = domain_.v_max - domain_.v_min;
+            v2 = v2 - range * floor(T((v2 - v) / range + T{0.5}));
+        }
+        const auto flow = spaces::metric_chart<T, 2>(parametric_detail::InducedMetric<F>{fn_});
+        const Vec<T, 2> d = flow.log_map(Vec<T, 2>{u, v}, Vec<T, 2>{u2, v2});
+        return TangentVector{du(u, v) * d[0] + dv(u, v) * d[1]};
+    }
+
+    TangentVector log_map(const PointType& p, const PointType& q) const requires (!exact) {
         // Project (q-p) onto tangent plane at p
         // A TangentVector, not `auto`: q - p is an expression template that
         // refers to its operands, and assigning to it below did not compile
@@ -143,9 +242,9 @@ public:
     T parametrization_anisotropy(T u, T v) const {
         auto fu = du(u, v);
         auto fv = dv(u, v);
-        T E = fu.dot(fu), F = fu.dot(fv), G = fv.dot(fv);
+        T E = fu.dot(fu), Fuv = fu.dot(fv), G = fv.dot(fv);   // Fuv: F is the function's type
         T tr = E + G;
-        T disc_sq = tr * tr - T{4} * (E * G - F * F);
+        T disc_sq = tr * tr - T{4} * (E * G - Fuv * Fuv);
         using std::sqrt;   // unqualified calls from here on: ADL finds Dual's and Real50's
         T disc = disc_sq > T{0} ? sqrt(disc_sq) : T{0};
         T lambda_min = (tr - disc) / T{2};
@@ -163,28 +262,71 @@ public:
     T area_element(T u, T v) const {
         auto fu = du(u, v);
         auto fv = dv(u, v);
-        T E = fu.dot(fu), F = fu.dot(fv), G = fv.dot(fv);
-        T disc = E * G - F * F;
+        T E = fu.dot(fu), Fuv = fu.dot(fv), G = fv.dot(fv);
+        T disc = E * G - Fuv * Fuv;
         using std::sqrt;
         return disc > T{0} ? sqrt(disc) : T{0};
     }
 
+    // The same surface with its function stored as a std::function: the form
+    // tessellate, the ray code and the scene DSL take. An explicit boundary,
+    // not a conversion -- what is lost crossing it is the exact partials and
+    // the geodesics.
+    ParametricSurface<T> erased() const {
+        if constexpr (std::same_as<F, std::function<PointType(T, T)>>) {
+            return *this;
+        } else {
+            // Domain is a nested type, one per instantiation: its fields cross, not the type.
+            ParametricSurface<T> out(std::function<PointType(T, T)>(fn_),
+                                     typename ParametricSurface<T>::Domain{domain_.u_min, domain_.u_max, domain_.v_min, domain_.v_max},
+                                     periodic_u_, periodic_v_);
+            if (project_fn_) out.with_closed_forms(project_fn_, normal_fn_);
+            return out;
+        }
+    }
+
 private:
-    ParamFn fn_;
+    F fn_;
     std::function<PointType(const PointType&)> project_fn_;
     std::function<TangentVector(const PointType&)> normal_fn_;
     Domain domain_;
     bool periodic_u_, periodic_v_;
 
-    // Partial derivatives (finite differences)
+    // Partial derivatives: exact, through a Dual, when F can be called on one;
+    // central differences otherwise.
     PointType du(T u, T v) const {
-        T h = (domain_.u_max - domain_.u_min) * T{1e-6};
-        return (fn_(u + h, v) - fn_(u - h, v)) / (T{2} * h);
+        if constexpr (exact) {
+            const Vec<Dual<T>, 3> r = fn_(Dual<T>::variable(u), Dual<T>::constant(v));
+            return PointType{r[0].deriv, r[1].deriv, r[2].deriv};
+        } else {
+            T h = (domain_.u_max - domain_.u_min) * T{1e-6};
+            return (fn_(u + h, v) - fn_(u - h, v)) / (T{2} * h);
+        }
     }
 
     PointType dv(T u, T v) const {
-        T h = (domain_.v_max - domain_.v_min) * T{1e-6};
-        return (fn_(u, v + h) - fn_(u, v - h)) / (T{2} * h);
+        if constexpr (exact) {
+            const Vec<Dual<T>, 3> r = fn_(Dual<T>::constant(u), Dual<T>::variable(v));
+            return PointType{r[0].deriv, r[1].deriv, r[2].deriv};
+        } else {
+            T h = (domain_.v_max - domain_.v_min) * T{1e-6};
+            return (fn_(u, v + h) - fn_(u, v - h)) / (T{2} * h);
+        }
+    }
+
+    // A tangent vector of R^3 at f(u, v) as coordinates (u', v') in the
+    // chart's basis: the least-squares solution of u' f_u + v' f_v = w, by the
+    // normal equations. NaN where f_u and f_v are parallel -- a pole.
+    Vec<T, 2> chart_coordinates(T u, T v, const TangentVector& w) const {
+        const PointType a = du(u, v), b = dv(u, v);
+        const T E = a.dot(a), Fuv = a.dot(b), G = b.dot(b);
+        const T det = E * G - Fuv * Fuv;
+        const T r0 = a.dot(w), r1 = b.dot(w);
+        if (!(det > T{0})) {
+            const T nan = T(std::numeric_limits<double>::quiet_NaN());
+            return Vec<T, 2>{nan, nan};
+        }
+        return Vec<T, 2>{T((G * r0 - Fuv * r1) / det), T((E * r1 - Fuv * r0) / det)};
     }
 
     // Find closest UV parameters for a 3D point (Newton-like search)
@@ -374,6 +516,16 @@ private:
         return {best_u, best_v};
     }
 };
+
+// A surface whose function stays a type, generic over the scalar: write it
+// `[](auto u, auto v) { using std::cos; using std::sin; return Vec<decltype(u), 3>{...}; }`
+// and give the scalar T it lives over. Its partials are exact and exp and log
+// are its geodesics (see ParametricSurface above); `.erased()` is the way back.
+template<Scalar T = double, class F>
+ParametricSurface<T, F> make_parametric(F fn, typename ParametricSurface<T, F>::Domain domain,
+                                        bool periodic_u = false, bool periodic_v = false) {
+    return ParametricSurface<T, F>(std::move(fn), domain, periodic_u, periodic_v);
+}
 
 // ── Tessellation (free function — class must be complete for Mesh<Surface>) ──
 

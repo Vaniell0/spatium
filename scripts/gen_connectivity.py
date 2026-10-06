@@ -42,11 +42,20 @@ SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereL
           # spaces given by their metric alone: exp and log derived
           "S2Derived", "H2Derived", "H2DerivedxS2",
           # the three families at other dimensions (S2, H2, E3 are above)
-          "E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8"]
+          "E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8",
+          # a surface whose function is a type: exact partials, geodesic exp and log
+          "TorusTyped"]
 # A dimension is a property of a space, not of a scalar: these run over a
 # native, a reference and a derivative-carrying scalar, not all six.
 DIMENSION_SPACES = {"E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8"}
 DIMENSION_SCALARS = {"double", "Real50", "Dual"}
+# Which scalars a space runs over, where not all six. The typed torus's geodesic
+# flow evaluates its function on nested Duals: over fifty digits a cell is
+# minutes, and the compile of Dual2's depth is heavier still, so it rides on
+# four, and double is held against long double (eps 1e-19) in place of Real50.
+SPACE_SCALARS = {sp: DIMENSION_SCALARS for sp in DIMENSION_SPACES}
+SPACE_SCALARS["TorusTyped"] = {"double", "float", "long double", "Dual"}
+SPACE_REFERENCE = {"TorusTyped": "long double"}   # what double is held against, instead of Real50
 PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative",
           "Infinity"]
 REFERENCE = {"double": "Real50"}   # every other scalar is held against double
@@ -107,8 +116,10 @@ def grade_l3(results):
     graded = {}
     for key, (sname, space, probe, level, sig, note) in by.items():
         lvl = level
-        ref = by.get((REFERENCE.get(sname, "double"), space, probe))
-        if level == 2 and sname != REFERENCE.get(sname, "double") and ref and ref[3] >= 1 and len(ref[4]) == len(sig) and sig:
+        ref_name = SPACE_REFERENCE.get(space, REFERENCE.get(sname, "double")) if sname == "double" \
+            else REFERENCE.get(sname, "double")
+        ref = by.get((ref_name, space, probe))
+        if level == 2 and sname != ref_name and ref and ref[3] >= 1 and len(ref[4]) == len(sig) and sig:
             worse = max(eps[sname], eps[ref[0]])
             if all(abs(a - b) <= tolerance(worse, abs(b)) for a, b in zip(sig, ref[4])):
                 lvl = 3
@@ -135,7 +146,9 @@ def render_md(graded, boost):
         "  (double against Real50, every other scalar against double)",
         "- **·** not run: the spaces at other dimensions (E1, E4, E8, S1, S3, S4, S7,",
         "  H1, H4, H8) ride on double, Real50 and Dual -- a dimension belongs to the",
-        "  space, not to the scalar; what depends on it by theorem is held by `tests/test_dimension_theorems.cpp`",
+        "  space, not to the scalar; what depends on it by theorem is held by `tests/test_dimension_theorems.cpp`.",
+        "  The typed torus rides on double, float, long double and Dual (a geodesic flow",
+        "  of nested Duals over fifty digits is minutes a cell), double held against long double.",
         "",
         "Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`",
         "holds every cell to the level recorded here.",
@@ -152,8 +165,8 @@ def render_md(graded, boost):
         for probe in PROBES:
             row = []
             for n in names:
-                if space in DIMENSION_SPACES and n not in DIMENSION_SCALARS:
-                    row.append("·")      # not run: a dimension rides on three scalars
+                if space in SPACE_SCALARS and n not in SPACE_SCALARS[space]:
+                    row.append("·")      # not run: this space rides on fewer scalars
                     continue
                 lvl, note = graded.get((n, space, probe), (-1, "missing"))
                 cell = SYMBOL[lvl]
@@ -219,7 +232,7 @@ def main():
         work = pathlib.Path(tmp)
         spaces = [sp for sp in SPACES if not a.only or a.only in sp]
         jobs = [(s[0], s[1], s[3], sp, pr) for s in scalars for sp in spaces for pr in PROBES
-                if sp not in DIMENSION_SPACES or s[0] in DIMENSION_SCALARS]
+                if sp not in SPACE_SCALARS or s[0] in SPACE_SCALARS[sp]]
         with cf.ThreadPoolExecutor(a.j) as ex:
             results = list(ex.map(lambda j: build_and_run(work, *j), jobs))
     graded = grade_l3(results)
