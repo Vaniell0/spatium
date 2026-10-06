@@ -11,12 +11,14 @@ scalar, in its own translation unit, and graded:
   (double against Real50, every other scalar against double)
 - **·** not run: the spaces at other dimensions (E1, E4, E8, S1, S3, S4, S7,
   H1, H4, H8) ride on double, Real50 and Dual -- a dimension belongs to the
-  space, not to the scalar; what depends on it by theorem is held by `tests/test_dimension_theorems.cpp`
+  space, not to the scalar; what depends on it by theorem is held by `tests/test_dimension_theorems.cpp`.
+  The typed torus rides on double, float, long double and Dual (a geodesic flow
+  of nested Duals over fifty digits is minutes a cell), double held against long double.
 
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**1051 of 1104 cells at L2 or above.**
+**1083 of 1136 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -244,3 +246,11 @@ holds every cell to the level recorded here.
 | H8 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
 | H8 | Derivative | L3 | · | · | L3 | L3 | · |
 | H8 | Infinity | L3 | · | · | L3 | L3 | · |
+| TorusTyped | MetricAxioms | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | DerivedDistance | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | ExpLog | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | Midpoint | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | FrechetMean | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | VerifyExpLog | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | Derivative | L3 | L3 | L3 | · | L3 | · |
+| TorusTyped | Infinity | L3 | L3 | L3 | · | L3 | · |

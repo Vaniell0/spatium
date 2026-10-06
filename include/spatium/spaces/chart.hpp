@@ -71,6 +71,14 @@ ParametricSurface<T> chart_of(const ParametricSurface<T>& surface) {
     return surface;
 }
 
+// A typed surface enters the DSL through its erased form -- the one boundary
+// where its function becomes a std::function.
+template<Scalar T, class F>
+    requires (!std::same_as<F, std::function<Vec<T, 3>(T, T)>>)
+ParametricSurface<T> chart_of(const ParametricSurface<T, F>& surface) {
+    return surface.erased();
+}
+
 // Sphere<2, T>'s first parametrization: the standard spherical chart,
 // azimuth u in [0, 2pi) around the z axis, polar angle v in [0, pi] from
 // the north pole.

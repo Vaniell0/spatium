@@ -225,6 +225,14 @@
     X(spatium::Dual<double>, "Dual", TorusChart, MetricAxioms, 3) \
     X(spatium::Dual<double>, "Dual", TorusChart, Midpoint, 1) \
     X(spatium::Dual<double>, "Dual", TorusChart, VerifyExpLog, 1) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, Derivative, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, DerivedDistance, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, ExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, FrechetMean, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, Infinity, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, Midpoint, 3) \
+    X(spatium::Dual<double>, "Dual", TorusTyped, VerifyExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, Derivative, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", CylinderADL, ExpLog, 3) \
@@ -591,6 +599,14 @@
     X(double, "double", TorusChart, MetricAxioms, 3) \
     X(double, "double", TorusChart, Midpoint, 1) \
     X(double, "double", TorusChart, VerifyExpLog, 1) \
+    X(double, "double", TorusTyped, Derivative, 3) \
+    X(double, "double", TorusTyped, DerivedDistance, 3) \
+    X(double, "double", TorusTyped, ExpLog, 3) \
+    X(double, "double", TorusTyped, FrechetMean, 3) \
+    X(double, "double", TorusTyped, Infinity, 3) \
+    X(double, "double", TorusTyped, MetricAxioms, 3) \
+    X(double, "double", TorusTyped, Midpoint, 3) \
+    X(double, "double", TorusTyped, VerifyExpLog, 3) \
     X(float, "float", CylinderADL, Derivative, 3) \
     X(float, "float", CylinderADL, DerivedDistance, 3) \
     X(float, "float", CylinderADL, ExpLog, 3) \
@@ -735,6 +751,14 @@
     X(float, "float", TorusChart, MetricAxioms, 3) \
     X(float, "float", TorusChart, Midpoint, 3) \
     X(float, "float", TorusChart, VerifyExpLog, 2) \
+    X(float, "float", TorusTyped, Derivative, 3) \
+    X(float, "float", TorusTyped, DerivedDistance, 3) \
+    X(float, "float", TorusTyped, ExpLog, 3) \
+    X(float, "float", TorusTyped, FrechetMean, 3) \
+    X(float, "float", TorusTyped, Infinity, 3) \
+    X(float, "float", TorusTyped, MetricAxioms, 3) \
+    X(float, "float", TorusTyped, Midpoint, 3) \
+    X(float, "float", TorusTyped, VerifyExpLog, 3) \
     X(long double, "long double", CylinderADL, Derivative, 3) \
     X(long double, "long double", CylinderADL, DerivedDistance, 3) \
     X(long double, "long double", CylinderADL, ExpLog, 3) \
@@ -879,6 +903,14 @@
     X(long double, "long double", TorusChart, MetricAxioms, 3) \
     X(long double, "long double", TorusChart, Midpoint, 1) \
     X(long double, "long double", TorusChart, VerifyExpLog, 1) \
+    X(long double, "long double", TorusTyped, Derivative, 3) \
+    X(long double, "long double", TorusTyped, DerivedDistance, 3) \
+    X(long double, "long double", TorusTyped, ExpLog, 3) \
+    X(long double, "long double", TorusTyped, FrechetMean, 3) \
+    X(long double, "long double", TorusTyped, Infinity, 3) \
+    X(long double, "long double", TorusTyped, MetricAxioms, 3) \
+    X(long double, "long double", TorusTyped, Midpoint, 3) \
+    X(long double, "long double", TorusTyped, VerifyExpLog, 3) \
     CONNECTIVITY_CELLS_BOOST(X)
 
 #if SPATIUM_HAS_BOOST_MULTIPRECISION
