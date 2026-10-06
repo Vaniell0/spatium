@@ -135,7 +135,7 @@ def render_md(graded, boost):
         "  (double against Real50, every other scalar against double)",
         "- **·** not run: the spaces at other dimensions (E1, E4, E8, S1, S3, S4, S7,",
         "  H1, H4, H8) ride on double, Real50 and Dual -- a dimension belongs to the",
-        "  space, not to the scalar; what depends on it by theorem is `docs/dimensions.md`",
+        "  space, not to the scalar; what depends on it by theorem is held by `tests/test_dimension_theorems.cpp`",
         "",
         "Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`",
         "holds every cell to the level recorded here.",

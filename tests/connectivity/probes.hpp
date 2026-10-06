@@ -239,7 +239,7 @@ struct SphereLevelSet {
 // ── The three families over any dimension ──────────────────────
 // What a space may do depends on N by theorem (normed division algebras in
 // 1, 2, 4, 8; a cross product in 3 and 7; parallelizable spheres in 1, 3, 7;
-// a group structure on S^1 and S^3 -- docs/dimensions.md), and the code that
+// a group structure on S^1 and S^3 -- tests/test_dimension_theorems.cpp), and the code that
 // is written for one N may quietly assume it. The same probes run over the
 // families at several N, on double, Real50 and Dual: a dimension is a
 // property of the space, not of the scalar, so three scalars carry it.

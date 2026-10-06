@@ -1,5 +1,5 @@
 // What the library offers at each dimension against what mathematics allows
-// there (docs/dimensions.md).
+// there.
 //
 // Some capabilities exist only at certain dimensions, by theorem:
 //   a cross product (bilinear, orthogonal to both factors, with
@@ -16,6 +16,11 @@
 // gap of glue and is listed, not failed. Where the two meet the gap is closed:
 // the cross product at 3 and 7, the division algebras at 1, 2, 4 and 8 and the
 // tangent frames on S^1, S^3 and S^7 are all implemented, no more and no less.
+//
+// So a red cell of the connectivity matrix is one of three kinds: no glue (the
+// pieces exist and nothing joins them), no support (a missing basis), or
+// impossible by theorem -- asking `Vec<T,4>` for a cross product, or
+// `Sphere<2>` for a tangent frame, does not compile, and should not.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
