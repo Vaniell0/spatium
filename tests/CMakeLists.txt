@@ -55,6 +55,7 @@ add_executable(spatium_tests
     test_complex.cpp
     test_dual.cpp
     test_calculus.cpp
+    test_quadrature.cpp
     test_ode.cpp
     test_linear_solve.cpp
     test_render.cpp
