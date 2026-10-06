@@ -195,6 +195,21 @@ TEST_CASE("A singular metric gives NaN, not a straight line", "[metric_chart]") 
     CHECK_FALSE(G.has_value());
 }
 
+TEST_CASE("A singular metric gives NaN over a Dual as well, not zero", "[metric_chart][dual]") {
+    // numeric_limits<Dual>::quiet_NaN() was zero before it was specialised,
+    // so the "no answer" over a Dual was the point (0, 0) -- found by the
+    // matrix's infinity probe on the derived spaces over Dual.
+    using D = Dual<double>;
+    const auto bad = spaces::metric_chart<D, 2>(Degenerate{});
+    const Vec<D, 2> p{D(0.0), D(0.3)}, v{D(0.1), D(0.1)};
+    const auto r = bad.exp_map(p, v, D(1.0));
+    CHECK(std::isnan(r[0].value));
+    // And a NaN step is not integrated into a number.
+    const auto s = spaces::metric_chart<D, 2>(SphereMetric{});
+    const auto q = s.exp_map(Vec<D, 2>{D(1.1), D(0.2)}, Vec<D, 2>{D(0.3), D(0.2)}, D(std::numeric_limits<double>::quiet_NaN()));
+    CHECK_FALSE(std::isfinite(q[0].value));
+}
+
 TEST_CASE("The 4D relativity names are the generic ones", "[metric_chart]") {
     // Schwarzschild's exact Christoffel symbols from the generic code at
     // N = 4 are what physics/relativity has always called christoffel().

@@ -102,11 +102,18 @@ was not re-read before new work.
 
 Measured by `docs/connectivity.md` (first run 2026-09-29), beyond items
 listed below:
-- `Real50` fails in `solve_quadratic` (SPD affine-invariant's eigenvalues)
-  and `fmod` on a Boost expression (`ParametricSurface`'s periodic wrap).
 - SPD affine-invariant over Dual: the derivative cell runs to a non-finite
   value, alone and as a product's factor -- its eigen-decomposition's
-  derivative, not yet looked at.
+  derivative, not yet looked at (the one red cell in the matrix that is not
+  a first-order surface).
+- The matrix's infinity probe (a zero step, NaN in the point, the tangent and
+  the step, an infinite step, two steps too long to answer) is green on every
+  cell; what it found is fixed and listed in ROADMAP (2026-10-06). The classes
+  it did not reach are the lint of plan stage 1b item 13: qualified `std::`
+  math calls in templates over `Scalar` (about 40 left in `geometry/`),
+  `== 0` on scalars (the polynomial solvers above), minimum searches that
+  keep their first candidate on NaN (about 17), and `Vec::norm` overflowing
+  for components near 1e154.
 
 - Mesh calculus is Euclidean-ambient: cotangents by `cross`, `face_area_3d`, `heat_geodesic` ignores the space. On `Hyperbolic<2>` heat errs 342%, `Mesh::area` 22.0 vs 2.23; Dijkstra on the same mesh is right, so the two methods answer different questions. Fix: intrinsic edge lengths (law of cosines, Heron). Doc `concept-driven-physics.md:147` promises a `metric_at` Laplacian that does not exist.
 - SO3/SE3 are LieGroups but not Riemannian spaces: add `LieGroupManifold<G>` (exp_map = p·exp(tv), log_map = log(p⁻¹q)); then `frechet_mean` averages rotations. With `core/access.hpp` this can be ADL functions instead of an adapter type.

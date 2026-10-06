@@ -91,8 +91,9 @@ Vec<T, N> integrate_fixed(F&& f, T t0, Vec<T, N> y0, T dt, int steps, Stepper&& 
 // same order, which the connectivity matrix's derivative cells hold.
 //
 // Returns NotConverged where it cannot reach `tol` -- a step that halves to
-// nothing, or a right-hand side that is not finite, as at a coordinate
-// singularity -- never a silently wrong state.
+// nothing, a right-hand side that is not finite (as at a coordinate
+// singularity), or more than `max_evals` evaluations of it -- never a
+// silently wrong state.
 
 namespace ode_detail {
 
@@ -129,7 +130,8 @@ double scaled_difference(const Vec<T, N>& a, const Vec<T, N>& b) {
 
 template<Scalar T, std::size_t N, typename F, int MaxColumns = 14>
     requires OdeRhs<F, T, N>
-Result<Vec<T, N>> integrate_extrapolated(F&& f, T t0, const Vec<T, N>& y0, T t1, double tol) {
+Result<Vec<T, N>> integrate_extrapolated(F&& f, T t0, const Vec<T, N>& y0, T t1, double tol,
+                                         long max_evals = 200000) {
     static_assert(MaxColumns >= 2 && MaxColumns <= 24);
     const double span = std::abs(primal_double(t1) - primal_double(t0));
     if (!std::isfinite(span)) return std::unexpected(Error{ErrorCode::NotConverged, "the interval is not finite"});
@@ -143,7 +145,14 @@ Result<Vec<T, N>> integrate_extrapolated(F&& f, T t0, const Vec<T, N>& y0, T t1,
     Vec<T, N> y = y0;
     T t = t0;
     T H = T(t1 - t0);
+    long evals = 0;
     for (long steps = 0; steps < 100000; ++steps) {
+        // The work is bounded in right-hand-side evaluations, not in steps:
+        // an interval of 1e10 at unit speed needs 1e10 steps and a caller is
+        // better told so at once than after the budget of a hundred thousand
+        // full tableaux (hours over fifty digits).
+        if (evals > max_evals)
+            return std::unexpected(Error{ErrorCode::NotConverged, "evaluation budget spent"});
         const double left = std::abs(primal_double(t1) - primal_double(t));
         const bool last = std::abs(primal_double(H)) >= left * (1.0 - 1e-12);
         const T Hs = last ? T(t1 - t) : H;
@@ -164,6 +173,7 @@ Result<Vec<T, N>> integrate_extrapolated(F&& f, T t0, const Vec<T, N>& y0, T t1,
                 row[k] = Vec<T, N>{row[k - 1] + (row[k - 1] - above[k - 1]) * (T(b * b) / T(a * a - b * b))};
             }
             used = j + 1;
+            evals += 2 * (j + 1) + 1;
             if (j >= 1 && ode_detail::scaled_difference(row[j], row[j - 1]) <= tol) {
                 accepted = row[j];
                 break;

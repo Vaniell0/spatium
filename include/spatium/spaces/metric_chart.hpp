@@ -145,7 +145,7 @@ Vec<T, M> geodesic_rhs(const Metric& metric, T /*lambda*/, const Vec<T, M>& stat
             for (std::size_t i = 0; i < N; ++i)
                 for (std::size_t j = 0; j < N; ++j) acc += (*G)[l](i, j) * u[i] * u[j];
         } else {
-            acc = std::numeric_limits<T>::quiet_NaN();
+            acc = T(std::numeric_limits<double>::quiet_NaN());
         }
         ds[N + l] = -acc;
     }
@@ -286,7 +286,7 @@ private:
 
     static PointType nan_point() {
         PointType n;
-        for (std::size_t i = 0; i < N; ++i) n[i] = std::numeric_limits<T>::quiet_NaN();
+        for (std::size_t i = 0; i < N; ++i) n[i] = T(std::numeric_limits<double>::quiet_NaN());
         return n;
     }
 

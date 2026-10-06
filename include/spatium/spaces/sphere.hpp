@@ -5,6 +5,7 @@
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <spatium/algebra/vector.hpp>
+#  include <spatium/spaces/cos_sinc.hpp>
 #  include <algorithm>
 #  include <cmath>
 #endif
@@ -45,11 +46,12 @@ struct Sphere {
     // which compares only a Dual's value, returned p with a zero derivative
     // -- found by the connectivity matrix's derivative cells.
     PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const {
-        using std::cos; using std::sin;
-        const T speed = v.norm();
-        if (speed == T{0}) return p;
-        const T theta = t * speed / radius;
-        return PointType{p * cos(theta) + v * (radius * sin(theta) / speed)};
+        // p cos(theta) + v t sinc(theta), theta^2 = t^2 |v|^2 / r^2: smooth
+        // in v through v = 0 as well (see spaces/cos_sinc.hpp), where the
+        // |v| form returned p with a zero derivative for a Dual tangent.
+        const T theta2 = t * t * v.dot(v) / (radius * radius);
+        const auto [c, sinc] = cos_sinc_of_square(theta2);
+        return PointType{p * c + v * (t * sinc)};
     }
 
     TangentVector log_map(const PointType& p, const PointType& q) const {

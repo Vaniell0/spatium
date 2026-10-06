@@ -247,3 +247,27 @@ struct std::formatter<spatium::Dual<T>> : std::formatter<T> {
         return std::format_to(ctx.out(), "({}+{}ε)", d.value, d.deriv);
     }
 };
+
+// numeric_limits of a Dual are its value type's.
+//
+// Without a specialisation `std::numeric_limits<Dual<T>>` is the primary
+// template: is_specialized false and every function returning T() -- so
+// quiet_NaN(), infinity(), max() and epsilon() of a Dual are all zero, with
+// no diagnostic. Two defects of the same shape came from it: MetricChart's
+// NaN for "no answer" was a zero over Dual, and ParametricSurface's nearest-
+// parameter search started from max() == 0 and never improved. A Dual's
+// limits are those of the arithmetic underneath (a derivative has no range
+// of its own), at any depth of nesting.
+template<class T>
+struct std::numeric_limits<spatium::Dual<T>> : std::numeric_limits<T> {
+    using D = spatium::Dual<T>;
+    static constexpr D min() noexcept { return D(std::numeric_limits<T>::min()); }
+    static constexpr D max() noexcept { return D(std::numeric_limits<T>::max()); }
+    static constexpr D lowest() noexcept { return D(std::numeric_limits<T>::lowest()); }
+    static constexpr D epsilon() noexcept { return D(std::numeric_limits<T>::epsilon()); }
+    static constexpr D round_error() noexcept { return D(std::numeric_limits<T>::round_error()); }
+    static constexpr D infinity() noexcept { return D(std::numeric_limits<T>::infinity()); }
+    static constexpr D quiet_NaN() noexcept { return D(std::numeric_limits<T>::quiet_NaN()); }
+    static constexpr D signaling_NaN() noexcept { return D(std::numeric_limits<T>::signaling_NaN()); }
+    static constexpr D denorm_min() noexcept { return D(std::numeric_limits<T>::denorm_min()); }
+};

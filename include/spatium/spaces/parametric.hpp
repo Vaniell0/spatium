@@ -9,6 +9,7 @@
 #  include <array>
 #  include <cmath>
 #  include <functional>
+#  include <limits>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
@@ -145,11 +146,11 @@ public:
         T E = fu.dot(fu), F = fu.dot(fv), G = fv.dot(fv);
         T tr = E + G;
         T disc_sq = tr * tr - T{4} * (E * G - F * F);
-        T disc = disc_sq > T{0} ? std::sqrt(disc_sq) : T{0};
+        using std::sqrt;   // unqualified calls from here on: ADL finds Dual's and Real50's
+        T disc = disc_sq > T{0} ? sqrt(disc_sq) : T{0};
         T lambda_min = (tr - disc) / T{2};
         T lambda_max = (tr + disc) / T{2};
         if (lambda_min < epsilon<T>()) return std::numeric_limits<T>::max();
-        using std::sqrt;
         return sqrt(lambda_max / lambda_min);
     }
 
@@ -223,6 +224,15 @@ private:
     // defect the polynomial solvers were fixed for, and it wants its own
     // change rather than riding in on this one.
     std::pair<T, T> find_params(const PointType& target) const {
+        // A target that is not finite has no nearest parameters. Every
+        // comparison with NaN is false, so the search below kept its first
+        // grid point and handed back a finite surface point for NaN or an
+        // infinite step -- an answer where there is none, found by the
+        // connectivity matrix's infinity probe. Non-finite in, non-finite out.
+        if (!std::isfinite(primal_double(target.norm_squared()))) {
+            const T nan = T(std::numeric_limits<double>::quiet_NaN());
+            return {nan, nan};
+        }
         // A finer grid than before: 17x17 samples rather than 9x9, which
         // costs nothing measurable and starts the refinement inside a
         // basin rather than up to 45 degrees outside one.
@@ -245,16 +255,17 @@ private:
         // Bring a candidate back into the domain, wrapping where the
         // surface is periodic and clamping where it is not.
         const auto settle = [&](T& u, T& v) {
+            using std::fmod;   // not std::fmod(...): qualified, it blocks ADL for Dual and Real50
             if (periodic_u_) {
                 const T range = domain_.u_max - domain_.u_min;
-                u = domain_.u_min + std::fmod(u - domain_.u_min, range);
+                u = domain_.u_min + fmod(T(u - domain_.u_min), range);
                 if (u < domain_.u_min) u += range;
             } else {
                 u = std::clamp(u, domain_.u_min, domain_.u_max);
             }
             if (periodic_v_) {
                 const T range = domain_.v_max - domain_.v_min;
-                v = domain_.v_min + std::fmod(v - domain_.v_min, range);
+                v = domain_.v_min + fmod(T(v - domain_.v_min), range);
                 if (v < domain_.v_min) v += range;
             } else {
                 v = std::clamp(v, domain_.v_max < domain_.v_min ? domain_.v_max : domain_.v_min,
@@ -278,12 +289,13 @@ private:
             // Scale the singularity test against the matrix itself: an
             // absolute epsilon calls a small surface degenerate
             // everywhere and a large one degenerate nowhere.
-            if (std::abs(det) > epsilon<T>() * std::max(T{1}, a11 * a22)) {
+            using std::abs;
+            if (abs(det) > epsilon<T>() * std::max(T{1}, T(a11 * a22))) {
                 step_u = (a22 * b1 - a12 * b2) / det;
                 step_v = (a11 * b2 - a12 * b1) / det;
             } else {
                 // Rank-deficient: descend the residual instead of solving.
-                const T scale = std::max(a11 + a22, epsilon<T>());
+                const T scale = std::max(T(a11 + a22), epsilon<T>());
                 step_u = b1 / scale;
                 step_v = b2 / scale;
             }
@@ -332,7 +344,7 @@ private:
         // blind spot where the parametrization collapses.
         {
             const T nudge = dv_step * T{0.25};
-            for (const T v_probe : {best_v - nudge, best_v + nudge}) {
+            for (const T v_probe : {T(best_v - nudge), T(best_v + nudge)}) {   // T(...): an initializer_list of Boost expressions does not deduce
                 for (int i = 0; i <= GRID; ++i) {
                     T u = domain_.u_min + static_cast<T>(i) * du_step;
                     T v = v_probe;
@@ -471,54 +483,62 @@ bool is_closed(const ParametricSurface<T>& surf) {
 
 template<Scalar T = double>
 ParametricSurface<T> make_torus(T major_r = T{2}, T minor_r = T{1}) {
+    using std::acos;
     return ParametricSurface<T>(
         [=](T u, T v) -> Vec<T, 3> {
+            using std::cos; using std::sin;
             return {
-                (major_r + minor_r * std::cos(v)) * std::cos(u),
-                (major_r + minor_r * std::cos(v)) * std::sin(u),
-                minor_r * std::sin(v)
+                (major_r + minor_r * cos(v)) * cos(u),
+                (major_r + minor_r * cos(v)) * sin(u),
+                minor_r * sin(v)
             };
         },
-        {T{0}, T{2} * std::acos(T{-1}), T{0}, T{2} * std::acos(T{-1})},
+        {T{0}, T{2} * acos(T{-1}), T{0}, T{2} * acos(T{-1})},
         true, true  // periodic in both u and v
     );
 }
 
 template<Scalar T = double>
 ParametricSurface<T> make_cylinder(T radius = T{1}, T height = T{2}) {
+    using std::acos;
     return ParametricSurface<T>(
         [=](T u, T v) -> Vec<T, 3> {
-            return {radius * std::cos(u), radius * std::sin(u), v};
+            using std::cos; using std::sin;
+            return {radius * cos(u), radius * sin(u), v};
         },
-        {T{0}, T{2} * std::acos(T{-1}), T{0}, height},
+        {T{0}, T{2} * acos(T{-1}), T{0}, height},
         true, false
     );
 }
 
 template<Scalar T = double>
 ParametricSurface<T> make_cone(T radius = T{1}, T height = T{2}) {
+    using std::acos;
     return ParametricSurface<T>(
         [=](T u, T v) -> Vec<T, 3> {
+            using std::cos; using std::sin;
             T r = radius * (T{1} - v / height);
-            return {r * std::cos(u), r * std::sin(u), v};
+            return {r * cos(u), r * sin(u), v};
         },
-        {T{0}, T{2} * std::acos(T{-1}), T{0}, height},
+        {T{0}, T{2} * acos(T{-1}), T{0}, height},
         true, false
     );
 }
 
 template<Scalar T = double>
 ParametricSurface<T> make_mobius(T radius = T{2}, T half_width = T{0.5}) {
+    using std::acos;
     return ParametricSurface<T>(
         [=](T u, T v) -> Vec<T, 3> {
+            using std::cos; using std::sin;
             T half_u = u / T{2};
             return {
-                (radius + v * std::cos(half_u)) * std::cos(u),
-                (radius + v * std::cos(half_u)) * std::sin(u),
-                v * std::sin(half_u)
+                (radius + v * cos(half_u)) * cos(u),
+                (radius + v * cos(half_u)) * sin(u),
+                v * sin(half_u)
             };
         },
-        {T{0}, T{2} * std::acos(T{-1}), -half_width, half_width},
+        {T{0}, T{2} * acos(T{-1}), -half_width, half_width},
         false, false  // Möbius is not globally periodic in the simple sense
     );
 }
