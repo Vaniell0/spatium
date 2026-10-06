@@ -12,13 +12,16 @@
 // library offers at a dimension the theorem forbids is a defect of the
 // library or of the theorem's statement as coded -- a 4-dimensional `cross`
 // that returned something would be wrong however plausible it looked. The
-// other direction, allowed and not implemented (a 7-dimensional cross, the
-// octonions), is a gap of glue and is listed, not failed.
+// other direction, allowed and not implemented (the groups S^1 and S^3), is a
+// gap of glue and is listed, not failed. Where the two meet the gap is closed:
+// the cross product at 3 and 7, the division algebras at 1, 2, 4 and 8 and the
+// tangent frames on S^1, S^3 and S^7 are all implemented, no more and no less.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/algebra/complex.hpp>
 #include <spatium/algebra/concepts.hpp>
+#include <spatium/algebra/octonion.hpp>
 #include <spatium/algebra/quaternion.hpp>
 #include <spatium/algebra/vector.hpp>
 #include <spatium/spaces/sphere.hpp>
@@ -33,10 +36,18 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-// Does Vec<double, N> offer a cross product?
+// Does Vec<double, N> offer a cross product: the member of R^3, or the free
+// function of R^7 (algebra/octonion.hpp)?
 template<std::size_t N>
 constexpr bool has_cross() {
-    return requires(const Vec<double, N>& a, const Vec<double, N>& b) { a.cross(b); };
+    return requires(const Vec<double, N>& a, const Vec<double, N>& b) { a.cross(b); } ||
+           requires(const Vec<double, N>& a, const Vec<double, N>& b) { cross7(a, b); };
+}
+
+// Does Sphere<N> offer a global tangent frame?
+template<std::size_t N>
+constexpr bool has_frame() {
+    return requires(const Sphere<N, double>& s, const Vec<double, N + 1>& p) { s.tangent_frame(p); };
 }
 
 // Is Sphere<N> a group in the library's own sense?
@@ -47,6 +58,12 @@ template<std::size_t... Ns>
 std::set<std::size_t> cross_dimensions(std::index_sequence<Ns...>) {
     std::set<std::size_t> found;
     ((has_cross<Ns + 1>() ? (void)found.insert(Ns + 1) : void()), ...);
+    return found;
+}
+template<std::size_t... Ns>
+std::set<std::size_t> frame_dimensions(std::index_sequence<Ns...>) {
+    std::set<std::size_t> found;
+    ((has_frame<Ns + 1>() ? (void)found.insert(Ns + 1) : void()), ...);
     return found;
 }
 template<std::size_t... Ns>
@@ -62,10 +79,10 @@ TEST_CASE("The cross product exists only where a theorem allows one", "[dimensio
     const std::set<std::size_t> allowed{3, 7};
     const auto implemented = cross_dimensions(std::make_index_sequence<12>{});
     for (const auto n : implemented) CHECK(allowed.count(n) == 1);
-    // Today: three dimensions only. 7 is allowed and not written (octonion
-    // structure constants); the day it is, this line moves and the one above
-    // keeps it honest.
-    CHECK(implemented == std::set<std::size_t>{3});
+    // Both dimensions the theorem allows are written, and no other: the
+    // member of R^3 and `cross7` of R^7. The line above is what keeps a
+    // third from being added.
+    CHECK(implemented == allowed);
 }
 
 TEST_CASE("The three-dimensional cross product is the one the theorem describes", "[dimensions]") {
@@ -81,10 +98,10 @@ TEST_CASE("The three-dimensional cross product is the one the theorem describes"
     }
 }
 
-TEST_CASE("The normed division algebras the library has are at dimensions 1, 2 and 4", "[dimensions]") {
-    // |ab| = |a||b|: the defining property, at N = 2 (Complex) and N = 4
-    // (Quaternion). N = 1 is the reals; N = 8 (octonions) is allowed and not
-    // implemented. No other dimension has a type to test, and none may.
+TEST_CASE("The normed division algebras the library has are at dimensions 1, 2, 4 and 8", "[dimensions]") {
+    // |ab| = |a||b|: the defining property, at N = 2 (Complex), N = 4
+    // (Quaternion) and N = 8 (Octonion). N = 1 is the reals. No other
+    // dimension has a type to test, and none may.
     std::mt19937_64 g(5);
     std::uniform_real_distribution<double> u(-2, 2);
     for (int i = 0; i < 100; ++i) {
@@ -94,7 +111,21 @@ TEST_CASE("The normed division algebras the library has are at dimensions 1, 2 a
 
         const Quaternion<double> p{u(g), u(g), u(g), u(g)}, q{u(g), u(g), u(g), u(g)};
         CHECK_THAT((p * q).norm(), WithinAbs(p.norm() * q.norm(), 1e-12));
+
+        const Octonion<double> x{u(g), u(g), u(g), u(g), u(g), u(g), u(g), u(g)},
+                               y{u(g), u(g), u(g), u(g), u(g), u(g), u(g), u(g)};
+        CHECK_THAT((x * y).norm(), WithinAbs(x.norm() * y.norm(), 1e-11));
     }
+}
+
+TEST_CASE("A global tangent frame exists on S^1, S^3 and S^7 and on no other sphere", "[dimensions]") {
+    // Parallelizable spheres (Bott-Milnor, Kervaire, 1958): the three of the
+    // division algebras. The member `tangent_frame` exists at those N only, so
+    // asking S^2 for one does not compile -- which is the theorem, not a gap.
+    const std::set<std::size_t> allowed{1, 3, 7};
+    const auto implemented = frame_dimensions(std::make_index_sequence<12>{});
+    for (const auto n : implemented) CHECK(allowed.count(n) == 1);
+    CHECK(implemented == allowed);
 }
 
 TEST_CASE("No sphere is a group in the library; two could be", "[dimensions]") {

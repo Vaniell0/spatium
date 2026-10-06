@@ -17,6 +17,7 @@
 #include <spatium/algebra/vector.hpp>
 #include <spatium/algebra/matrix.hpp>
 #include <spatium/algebra/quaternion.hpp>
+#include <spatium/algebra/octonion.hpp>
 #include <spatium/algebra/complex.hpp>
 #include <spatium/algebra/polynomial.hpp>
 #include <spatium/algebra/functions.hpp>

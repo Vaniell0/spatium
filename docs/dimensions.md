@@ -10,11 +10,11 @@ each, and says where the library stands.
 
 | Capability | Exists at N | Theorem | Library today |
 |---|---|---|---|
-| Cross product: bilinear, orthogonal to both factors, `\|a×b\|² = \|a\|²\|b\|² − (a·b)²` | 3, 7 (and trivially 0, 1) | Brown and Gray, 1967 (Eckmann, 1943) | `Vec<T,3>::cross` only; N = 7 would need octonion structure constants |
-| Normed division algebra, `\|ab\| = \|a\|\|b\|` | 1, 2, 4, 8 | Hurwitz, 1898 | reals (1), `Complex` (2), `Quaternion` (4); N = 8, the octonions, is not implemented and is not associative |
+| Cross product: bilinear, orthogonal to both factors, `\|a×b\|² = \|a\|²\|b\|² − (a·b)²` | 3, 7 (and trivially 0, 1) | Brown and Gray, 1967 (Eckmann, 1943) | `Vec<T,3>::cross`, and `cross7` for R⁷ from the imaginary octonions (no Jacobi identity, unlike R³'s) |
+| Normed division algebra, `\|ab\| = \|a\|\|b\|` | 1, 2, 4, 8 | Hurwitz, 1898 | reals (1), `Complex` (2), `Quaternion` (4), `Octonion` (8: Cayley–Dickson doubling of the quaternions; alternative, not associative) |
+| Global tangent frame on S^N (parallelizable) | 1, 3, 7 | Bott and Milnor, 1958; Kervaire, 1958 | `Sphere<N>::tangent_frame(p)`, the point times each imaginary unit; the member exists at those N only |
 | Group structure on the sphere S^N | 1, 3 | Hopf; Serre | none: S¹ (unit complex numbers) and S³ (unit quaternions) are not exposed as groups; `SO3`, `SE3` are separate types |
-| Global tangent frame on S^N (parallelizable) | 1, 3, 7 | Bott and Milnor, 1958; Kervaire, 1958 | no code |
-| A nowhere-vanishing tangent field on S^N | N odd | hairy ball, Brouwer, 1912 (even N) | no code; `unit_tangent` in tests is a pointwise choice, not a field |
+| A nowhere-vanishing tangent field on S^N | N odd | hairy ball, Brouwer, 1912 (even N) | implied by the frames at 1, 3, 7; no code for the other odd N |
 
 ## Two directions, one of them checkable
 
@@ -23,7 +23,9 @@ machine can check: **what the library implements lies inside what the
 theorem allows.** A cross product at N = 4, or a group structure on S², would
 be a defect however plausible it looked, and the test fails on it. The other
 direction -- allowed and not implemented -- is a gap of glue, listed in the
-last column and not a failure.
+last column and not a failure; for the cross product, the division algebras
+and the tangent frames it is closed, and the test says so (the implemented set
+equals the allowed one).
 
 A red cell of the connectivity matrix can therefore be of three kinds:
 
@@ -31,10 +33,9 @@ A red cell of the connectivity matrix can therefore be of three kinds:
   as a product factor, before `ProductSpace` took one);
 - **no support** -- a missing basis (geodesics on a chart, before
   `MetricChart`);
-- **impossible by theorem** -- no code can turn it green. The first
-  capability of that kind the library has a type to ask about is the cross
-  product at N ≠ 3, 7: asking `Vec<T,4>` for one does not compile, and
-  should not.
+- **impossible by theorem** -- no code can turn it green. Asking `Vec<T,4>`
+  for a cross product, or `Sphere<2>` for a tangent frame, does not compile,
+  and should not.
 
 ## What the dimension axis found
 

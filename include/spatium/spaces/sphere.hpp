@@ -4,8 +4,11 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
+#  include <spatium/algebra/octonion.hpp>
+#  include <spatium/algebra/quaternion.hpp>
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/spaces/cos_sinc.hpp>
+#  include <array>
 #  include <algorithm>
 #  include <cmath>
 #endif
@@ -101,6 +104,37 @@ struct Sphere {
 
     TangentVector normal(const PointType& p) const {
         return p / p.norm();
+    }
+
+    // A global orthonormal tangent frame: N unit vectors at p, tangent and
+    // mutually orthogonal, depending polynomially -- so continuously -- on p.
+    // It exists on S^1, S^3 and S^7 and on no other sphere (Bott and Milnor,
+    // Kervaire, 1958; the even spheres have not even a nonvanishing tangent
+    // field, the hairy ball theorem), so the member exists at those N only.
+    // They are the spheres of the normed division algebras -- complex numbers,
+    // quaternions, octonions -- and the frame is p times each imaginary unit:
+    // |p e_i| = |p| and <p e_i, p e_j> = |p|^2 <e_i, e_j>, which is the
+    // composition property again. docs/dimensions.md.
+    std::array<TangentVector, N> tangent_frame(const PointType& p) const
+        requires (N == 1 || N == 3 || N == 7)
+    {
+        std::array<TangentVector, N> frame{};
+        if constexpr (N == 1) {
+            frame[0] = TangentVector{-p[1] / radius, p[0] / radius};      // p times i
+        } else if constexpr (N == 3) {
+            const Quaternion<T> q{p[0], p[1], p[2], p[3]};
+            const Quaternion<T> unit[3] = {{T{0}, T{1}, T{0}, T{0}}, {T{0}, T{0}, T{1}, T{0}},
+                                           {T{0}, T{0}, T{0}, T{1}}};
+            for (std::size_t k = 0; k < 3; ++k) {
+                const Quaternion<T> r = q * unit[k];
+                frame[k] = TangentVector{r.w / radius, r.x / radius, r.y / radius, r.z / radius};
+            }
+        } else {
+            const Octonion<T> o = Octonion<T>::from_vec8(p);
+            for (std::size_t k = 0; k < 7; ++k)
+                frame[k] = TangentVector{(o * Octonion<T>::basis(k + 1)).to_vec8() * (T{1} / radius)};
+        }
+        return frame;
     }
 
     TangentVector project_tangent(const PointType& p, const TangentVector& v) const {
