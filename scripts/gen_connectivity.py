@@ -40,7 +40,13 @@ SPACES = ["E3", "S2", "H2", "S2xE1", "SPDLogE", "SPDAff", "TorusChart", "SphereL
           # products of spaces green on their own: green together by symmetry
           "S2xH2", "H2xE3", "S2xS2", "SPDLogExS2", "SPDAffxS2", "CylxE3",
           # spaces given by their metric alone: exp and log derived
-          "S2Derived", "H2Derived", "H2DerivedxS2"]
+          "S2Derived", "H2Derived", "H2DerivedxS2",
+          # the three families at other dimensions (S2, H2, E3 are above)
+          "E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8"]
+# A dimension is a property of a space, not of a scalar: these run over a
+# native, a reference and a derivative-carrying scalar, not all six.
+DIMENSION_SPACES = {"E1", "E4", "E8", "S1", "S3", "S4", "S7", "H1", "H4", "H8"}
+DIMENSION_SCALARS = {"double", "Real50", "Dual"}
 PROBES = ["MetricAxioms", "DerivedDistance", "ExpLog", "Midpoint", "FrechetMean", "VerifyExpLog", "Derivative",
           "Infinity"]
 REFERENCE = {"double": "Real50"}   # every other scalar is held against double
@@ -127,6 +133,9 @@ def render_md(graded, boost):
         "- **L2** its axiom or symmetry holds within the scalar's tolerance",
         "- **L3** its numbers agree with the same cell over the reference scalar",
         "  (double against Real50, every other scalar against double)",
+        "- **·** not run: the spaces at other dimensions (E1, E4, E8, S1, S3, S4, S7,",
+        "  H1, H4, H8) ride on double, Real50 and Dual -- a dimension belongs to the",
+        "  space, not to the scalar; what depends on it by theorem is `docs/dimensions.md`",
         "",
         "Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`",
         "holds every cell to the level recorded here.",
@@ -143,6 +152,9 @@ def render_md(graded, boost):
         for probe in PROBES:
             row = []
             for n in names:
+                if space in DIMENSION_SPACES and n not in DIMENSION_SCALARS:
+                    row.append("·")      # not run: a dimension rides on three scalars
+                    continue
                 lvl, note = graded.get((n, space, probe), (-1, "missing"))
                 cell = SYMBOL[lvl]
                 if note:
@@ -206,7 +218,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(tmp)
         spaces = [sp for sp in SPACES if not a.only or a.only in sp]
-        jobs = [(s[0], s[1], s[3], sp, pr) for s in scalars for sp in spaces for pr in PROBES]
+        jobs = [(s[0], s[1], s[3], sp, pr) for s in scalars for sp in spaces for pr in PROBES
+                if sp not in DIMENSION_SPACES or s[0] in DIMENSION_SCALARS]
         with cf.ThreadPoolExecutor(a.j) as ex:
             results = list(ex.map(lambda j: build_and_run(work, *j), jobs))
     graded = grade_l3(results)

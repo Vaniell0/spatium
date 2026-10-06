@@ -236,6 +236,79 @@ struct SphereLevelSet {
     static Vec<double, 3> tangent(Rand& r, const Vec<double, 3>& at) { return S2::tangent(r, at); }
 };
 
+// ── The three families over any dimension ──────────────────────
+// What a space may do depends on N by theorem (normed division algebras in
+// 1, 2, 4, 8; a cross product in 3 and 7; parallelizable spheres in 1, 3, 7;
+// a group structure on S^1 and S^3 -- docs/dimensions.md), and the code that
+// is written for one N may quietly assume it. The same probes run over the
+// families at several N, on double, Real50 and Dual: a dimension is a
+// property of the space, not of the scalar, so three scalars carry it.
+template<std::size_t N> struct EN {
+    static constexpr const char* name = "E^N";
+    template<class T> static Euclidean<N, T> make() { return {}; }
+    static std::vector<Vec<double, N>> points(Rand& r) {
+        std::vector<Vec<double, N>> p;
+        for (int i = 0; i < 6; ++i) {
+            Vec<double, N> x;
+            for (std::size_t k = 0; k < N; ++k) x[k] = r();
+            p.push_back(x);
+        }
+        return p;
+    }
+    static Vec<double, N> tangent(Rand& r, const Vec<double, N>&) {
+        Vec<double, N> v;
+        for (std::size_t k = 0; k < N; ++k) v[k] = r();
+        return v;
+    }
+};
+
+template<std::size_t N> struct SN {
+    static constexpr const char* name = "S^N";
+    template<class T> static Sphere<N, T> make() { return {}; }
+    static std::vector<Vec<double, N + 1>> points(Rand& r) {
+        std::vector<Vec<double, N + 1>> p;
+        for (int i = 0; i < 6; ++i) {
+            Vec<double, N + 1> x;
+            for (std::size_t k = 0; k < N + 1; ++k) x[k] = r();
+            x[N] += 1.5;   // one hemisphere and a margin: log is unique
+            p.push_back(Vec<double, N + 1>{x * (1 / x.norm())});
+        }
+        return p;
+    }
+    static Vec<double, N + 1> tangent(Rand& r, const Vec<double, N + 1>& at) {
+        Vec<double, N + 1> v;
+        for (std::size_t k = 0; k < N + 1; ++k) v[k] = r();
+        return Vec<double, N + 1>{(v - at * v.dot(at)) * 0.5};
+    }
+};
+
+template<std::size_t N> struct HN {
+    static constexpr const char* name = "H^N";
+    template<class T> static Hyperbolic<N, T> make() { return {}; }
+    static std::vector<Vec<double, N + 1>> points(Rand& r) {
+        const Hyperbolic<N> h;
+        std::vector<Vec<double, N + 1>> p;
+        for (int i = 0; i < 6; ++i) {
+            Vec<double, N + 1> v;
+            v[0] = 0;
+            for (std::size_t k = 1; k < N + 1; ++k) v[k] = r();
+            p.push_back(h.exp_map(Hyperbolic<N>::origin(), v, 1.0));
+        }
+        return p;
+    }
+    static Vec<double, N + 1> tangent(Rand& r, const Vec<double, N + 1>& at) {
+        // Minkowski-orthogonal to `at`: -v0 a0 + sum v_k a_k = 0.
+        Vec<double, N + 1> v;
+        double dot = 0;
+        for (std::size_t k = 1; k < N + 1; ++k) { v[k] = r(); dot += v[k] * at[k]; }
+        v[0] = dot / at[0];
+        return v;
+    }
+};
+using E1 = EN<1>;  using E4 = EN<4>;  using E8 = EN<8>;
+using S1 = SN<1>;  using S3 = SN<3>;  using S4 = SN<4>;  using S7 = SN<7>;
+using H1 = HN<1>;  using H4 = HN<4>;  using H8 = HN<8>;
+
 // ── Spaces given by their metric alone ──────────────────────────
 // exp and log are derived (spaces/metric_chart.hpp): the geodesic equation
 // through the Christoffel symbols, the partials of g by Dual, the flow by
@@ -382,24 +455,28 @@ struct MetricAxioms {
     template<class S>
     static int run(const S& s, const std::vector<P<S>>& p, const std::vector<V<S>>&, std::vector<double>& sig) {
         using T = T_<S>;
-        const double tol = tolerance<T>();
-        // Each distance once: a derived one is a shooting, and the triangle
-        // inequality asks for all of them n times over.
+        using std::abs;
+        const T tol = from_double<T>(tolerance<T>());
+        // Each distance once, kept in the cell's own arithmetic: a derived
+        // one is a shooting, the triangle inequality asks for all of them n
+        // times over, and over Real50 a sum rounded to double is off by
+        // 2e-16 where the tolerance is 4e-23 -- which showed at N = 1, where
+        // three points on a line meet the inequality with equality.
         const std::size_t n = p.size();
-        std::vector<double> d(n * n);
+        std::vector<T> d(n * n);
         for (std::size_t i = 0; i < n; ++i)
             for (std::size_t j = 0; j < n; ++j) {
-                d[i * n + j] = to_double(spaces::distance(s, p[i], p[j]));
-                if (!std::isfinite(d[i * n + j])) return 0;
+                d[i * n + j] = T(spaces::distance(s, p[i], p[j]));
+                if (!std::isfinite(to_double(d[i * n + j]))) return 0;
             }
         bool ok = true;
         for (std::size_t i = 0; i < n; ++i)
             for (std::size_t j = 0; j < n; ++j) {
-                const double dij = d[i * n + j], dji = d[j * n + i];
-                if (j > i) sig.push_back(dij);
-                ok = ok && dij >= -tol && std::abs(dij - dji) <= tol * (1 + dij);
-                if (i == j) ok = ok && std::abs(dij) <= tol;
-                for (std::size_t k = 0; k < n; ++k) ok = ok && dij <= d[i * n + k] + d[k * n + j] + tol;
+                const T dij = d[i * n + j], dji = d[j * n + i];
+                if (j > i) sig.push_back(to_double(dij));
+                ok = ok && dij >= T(-tol) && abs(T(dij - dji)) <= T(tol * T(T(1) + dij));
+                if (i == j) ok = ok && abs(dij) <= tol;
+                for (std::size_t k = 0; k < n; ++k) ok = ok && dij <= T(d[i * n + k] + d[k * n + j] + tol);
             }
         return ok ? 2 : 1;
     }

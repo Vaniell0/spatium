@@ -9,11 +9,14 @@ scalar, in its own translation unit, and graded:
 - **L2** its axiom or symmetry holds within the scalar's tolerance
 - **L3** its numbers agree with the same cell over the reference scalar
   (double against Real50, every other scalar against double)
+- **·** not run: the spaces at other dimensions (E1, E4, E8, S1, S3, S4, S7,
+  H1, H4, H8) ride on double, Real50 and Dual -- a dimension belongs to the
+  space, not to the scalar; what depends on it by theorem is `docs/dimensions.md`
 
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**811 of 864 cells at L2 or above.**
+**1051 of 1104 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -161,3 +164,83 @@ holds every cell to the level recorded here.
 | H2DerivedxS2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
 | H2DerivedxS2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | H2DerivedxS2 | Infinity | L3 | L3 | L3 | L3 | L3 | L3 |
+| E1 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| E1 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| E1 | ExpLog | L3 | · | · | L3 | L3 | · |
+| E1 | Midpoint | L3 | · | · | L3 | L3 | · |
+| E1 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| E1 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| E1 | Derivative | L3 | · | · | L3 | L3 | · |
+| E1 | Infinity | L3 | · | · | L3 | L3 | · |
+| E4 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| E4 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| E4 | ExpLog | L3 | · | · | L3 | L3 | · |
+| E4 | Midpoint | L3 | · | · | L3 | L3 | · |
+| E4 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| E4 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| E4 | Derivative | L3 | · | · | L3 | L3 | · |
+| E4 | Infinity | L3 | · | · | L3 | L3 | · |
+| E8 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| E8 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| E8 | ExpLog | L3 | · | · | L3 | L3 | · |
+| E8 | Midpoint | L3 | · | · | L3 | L3 | · |
+| E8 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| E8 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| E8 | Derivative | L3 | · | · | L3 | L3 | · |
+| E8 | Infinity | L3 | · | · | L3 | L3 | · |
+| S1 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| S1 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| S1 | ExpLog | L3 | · | · | L3 | L3 | · |
+| S1 | Midpoint | L3 | · | · | L3 | L3 | · |
+| S1 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| S1 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| S1 | Derivative | L3 | · | · | L3 | L3 | · |
+| S1 | Infinity | L3 | · | · | L3 | L3 | · |
+| S3 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| S3 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| S3 | ExpLog | L3 | · | · | L3 | L3 | · |
+| S3 | Midpoint | L3 | · | · | L3 | L3 | · |
+| S3 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| S3 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| S3 | Derivative | L3 | · | · | L3 | L3 | · |
+| S3 | Infinity | L3 | · | · | L3 | L3 | · |
+| S4 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| S4 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| S4 | ExpLog | L3 | · | · | L3 | L3 | · |
+| S4 | Midpoint | L3 | · | · | L3 | L3 | · |
+| S4 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| S4 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| S4 | Derivative | L3 | · | · | L3 | L3 | · |
+| S4 | Infinity | L3 | · | · | L3 | L3 | · |
+| S7 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| S7 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| S7 | ExpLog | L3 | · | · | L3 | L3 | · |
+| S7 | Midpoint | L3 | · | · | L3 | L3 | · |
+| S7 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| S7 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| S7 | Derivative | L3 | · | · | L3 | L3 | · |
+| S7 | Infinity | L3 | · | · | L3 | L3 | · |
+| H1 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| H1 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| H1 | ExpLog | L3 | · | · | L3 | L3 | · |
+| H1 | Midpoint | L3 | · | · | L3 | L3 | · |
+| H1 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| H1 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| H1 | Derivative | L3 | · | · | L3 | L3 | · |
+| H1 | Infinity | L3 | · | · | L3 | L3 | · |
+| H4 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| H4 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| H4 | ExpLog | L3 | · | · | L3 | L3 | · |
+| H4 | Midpoint | L3 | · | · | L3 | L3 | · |
+| H4 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| H4 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| H4 | Derivative | L3 | · | · | L3 | L3 | · |
+| H4 | Infinity | L3 | · | · | L3 | L3 | · |
+| H8 | MetricAxioms | L3 | · | · | L3 | L3 | · |
+| H8 | DerivedDistance | L3 | · | · | L3 | L3 | · |
+| H8 | ExpLog | L3 | · | · | L3 | L3 | · |
+| H8 | Midpoint | L3 | · | · | L3 | L3 | · |
+| H8 | FrechetMean | L3 | · | · | L3 | L3 | · |
+| H8 | VerifyExpLog | L3 | · | · | L3 | L3 | · |
+| H8 | Derivative | L3 | · | · | L3 | L3 | · |
+| H8 | Infinity | L3 | · | · | L3 | L3 | · |
