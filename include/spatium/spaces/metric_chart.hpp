@@ -84,6 +84,19 @@ MetricDerivatives<T, N> metric_derivatives(const Metric& metric, const Vec<T, N>
     return md;
 }
 
+// The volume element sqrt(|det g|): what a metric measures a coordinate box by,
+// dV = sqrt(|det g|) dx^1 ... dx^N. A consequence of the metric, not a separate
+// notion -- the same g that gives the Christoffel symbols gives it -- so it
+// lives beside them, and the two are tied by an identity that holds for every
+// metric: the contraction Gamma^k_{ki} is d_i ln sqrt(|det g|). The absolute
+// value is what makes it right for a Lorentzian metric (det < 0) as well.
+template<Scalar T, std::size_t N, typename Metric>
+T volume_element(const Metric& metric, const Vec<T, N>& x) {
+    using std::sqrt; using std::abs;
+    const Matrix<T, N, N> g = metric(x);
+    return sqrt(abs(g.determinant()));
+}
+
 namespace metric_chart_detail {
 
 template<Scalar T, std::size_t N>
@@ -182,6 +195,11 @@ public:
           tol_(accuracy > 0 ? accuracy : std::pow(machine_epsilon<T>(), 2.0 / 3.0)) {}
 
     Matrix<T, N, N> metric_tensor(const PointType& p) const { return metric_(p); }
+
+    // sqrt(|det g|) at p: the weight of a coordinate box there.
+    ScalarType volume_element(const PointType& p) const {
+        return spaces::volume_element(metric_, p);
+    }
 
     ScalarType metric_at(const PointType& p, const TangentVector& u, const TangentVector& v) const {
         const Matrix<T, N, N> g = metric_(p);

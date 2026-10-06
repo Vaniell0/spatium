@@ -15,11 +15,15 @@
 #include <spatium/core/access.hpp>
 #include <spatium/core/precision.hpp>
 #include <spatium/core/verify.hpp>
+#include <spatium/algebra/calculus.hpp>
 #include <spatium/algebra/dual.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/metric_chart.hpp>
+#include <spatium/physics/relativity/kerr.hpp>
 #include <spatium/spaces/sphere.hpp>
+#include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -243,3 +247,64 @@ TEST_CASE("Over fifty digits the derived exp and log keep fifty-digit accuracy",
     CHECK_THAT(static_cast<double>(d), WithinAbs(closed, 1e-9));
 }
 #endif
+
+// ── The volume element: a consequence of the metric ──────────
+
+namespace {
+
+// A metric with off-diagonal terms, so that nothing is diagonal by accident.
+struct Skew {
+    template<class S> Matrix<S, 2, 2> operator()(const Vec<S, 2>& x) const {
+        Matrix<S, 2, 2> g{};
+        g(0, 0) = S(1) + x[0] * x[0];
+        g(0, 1) = g(1, 0) = x[0] * x[1];
+        g(1, 1) = S(2) + x[1] * x[1];
+        return g;
+    }
+};
+
+// d_i ln sqrt|det g| by Dual, and the contraction Gamma^k_{ki}, for one metric
+// at one point: two descriptions of one number.
+template<class Metric, std::size_t N>
+double worst_gap(const Metric& metric, const Vec<double, N>& x) {
+    const auto gamma = spaces::christoffel(metric, x);
+    double worst = 0;
+    for (std::size_t i = 0; i < N; ++i) {
+        Vec<Dual<double>, N> dx;
+        for (std::size_t k = 0; k < N; ++k)
+            dx[k] = (k == i) ? Dual<double>::variable(x[k]) : Dual<double>::constant(x[k]);
+        const auto vol = spaces::volume_element(metric, dx);
+        const double log_derivative = vol.deriv / vol.value;
+        double contraction = 0;
+        for (std::size_t k = 0; k < N; ++k) contraction += gamma[k](k, i);
+        worst = std::max(worst, std::abs(log_derivative - contraction));
+    }
+    return worst;
+}
+
+}  // namespace
+
+TEST_CASE("The volume element is sqrt det g: sin(theta) on the sphere, 1/y^2 on the half-plane", "[metric_chart][volume]") {
+    const auto s = spaces::metric_chart<double, 2>(SphereMetric{});
+    CHECK_THAT(s.volume_element(Vec<double, 2>{1.1, 0.4}), WithinAbs(std::sin(1.1), 1e-15));
+    const auto h = spaces::metric_chart<double, 2>(HalfPlaneMetric{});
+    CHECK_THAT(h.volume_element(Vec<double, 2>{0.3, 2.0}), WithinAbs(1.0 / 4.0, 1e-15));
+    // the area of the sphere is the integral of the volume element: 4 pi
+    const auto area = integrate_with_error<double>(
+        [&](double theta) { return s.volume_element(Vec<double, 2>{theta, 0.0}); }, 0.0, std::numbers::pi);
+    CHECK(area.trusted());
+    CHECK_THAT(2 * std::numbers::pi * area.value, WithinAbs(4 * std::numbers::pi, 1e-9));
+}
+
+TEST_CASE("The trace of the connection is the derivative of the log volume, for every metric", "[metric_chart][volume]") {
+    // Gamma^k_{ki} = d_i ln sqrt|det g|. Neither side knows the other: one is
+    // the contraction of the Christoffel symbols, the other a Dual through
+    // the determinant.
+    CHECK(worst_gap(SphereMetric{}, Vec<double, 2>{1.1, 0.4}) < 1e-12);
+    CHECK(worst_gap(HalfPlaneMetric{}, Vec<double, 2>{0.3, 2.0}) < 1e-12);
+    CHECK(worst_gap(Skew{}, Vec<double, 2>{0.7, -1.3}) < 1e-12);
+    // and on a four-dimensional Lorentzian metric with off-diagonal terms: Kerr
+    // in Boyer-Lindquist coordinates, det g < 0 -- hence the absolute value.
+    const physics::relativity::KerrMetric<double> kerr{1.0, 0.7};
+    CHECK(worst_gap(kerr, Vec<double, 4>{0.0, 6.0, 1.2, 0.3}) < 1e-10);
+}
