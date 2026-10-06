@@ -37,6 +37,8 @@ template<class T>
 constexpr double machine_epsilon() {
     if constexpr (requires(const T& x) { x.value; x.deriv; })
         return machine_epsilon<std::remove_cvref_t<decltype(std::declval<const T&>().value)>>();
+    else if constexpr (requires { typename T::coefficient_type; })      // a Series
+        return machine_epsilon<typename T::coefficient_type>();
     else
         return static_cast<double>(std::numeric_limits<T>::epsilon());
 }
@@ -47,6 +49,7 @@ constexpr double machine_epsilon() {
 template<class T>
 constexpr double primal_double(const T& x) {
     if constexpr (requires { x.value; x.deriv; }) return primal_double(x.value);
+    else if constexpr (requires { x.limit_value(); }) return primal_double(x.limit_value());   // a Series: what it tends to
     else return static_cast<double>(x);
 }
 
