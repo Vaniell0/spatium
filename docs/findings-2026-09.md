@@ -68,7 +68,6 @@ was not re-read before new work.
 | 13 | Polygon booleans: [0,2]²−[1,3]² area 2 (should be 3); union of disjoint squares is the hull; CW input gives "no overlap" | `geometry/boolean.hpp:99, 231-292, 318` | open |
 | 14 | `Polygon<3>` area/normal by fan from centroid (L-shape 6.33 vs 5); `project` of an interior point returns an edge point | `geometry/polygon.hpp:45, 74, 129` | open |
 | 15 | `FiniteSet<FiniteSet>`: `<=` means subset, which is not a strict weak order; {{2},{1},{2},{3},{1}} has size 5; UB in sort | `discrete/finite_set.hpp:78, 84` | open |
-| 16 | Schild's ladder transports the full-length vector: 50% error at |v|=1 over a quarter great circle | `mesh/transport.hpp:41` | open |
 | 17 | `distance(Circle2, Circle2)` uses disk semantics (concentric r=1, r=3 give 0) | `geometry/distance.hpp:146` | open |
 | 18 | `mesh_quality` max angle = π − 2·min (30-60-90 reports 120°) | `mesh/quality.hpp:71` | open |
 | 19 | `mesh::transform(AffineTransform)` calls a nonexistent `.apply` with N off by one | `mesh/operations.hpp:39-45` | open |
