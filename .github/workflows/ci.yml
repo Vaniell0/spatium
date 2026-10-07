@@ -111,8 +111,16 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Check docs/capabilities.md matches what the headers declare
+      - name: Check docs/capabilities/ matches what the headers declare
         run: python3 scripts/gen_capabilities.py --check
+
+  roadmap:
+    name: roadmap entries are valid
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/roadmap/*.md (front matter, dates, listed files, closed findings rows)
+        run: python3 scripts/gen_roadmap.py --check
 
   bare-build:
     name: cmake build without Nix (gcc15)
