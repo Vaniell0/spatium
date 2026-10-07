@@ -204,3 +204,40 @@ TEST_CASE("fifty digits of a limit on Real50", "[series][precision]") {
     (void)sizeof(SR);
 }
 #endif
+
+// ── the library's own hand-written series, checked against a derived one ──
+
+#include <spatium/spaces/cos_sinc.hpp>
+
+TEST_CASE("cos_sinc's hand-written Taylor table agrees with the series Series derives", "[series][symmetry]") {
+    // Two paths to one function that share nothing: cos_sinc_of_square carries a six-term
+    // table below a threshold and the closed form above it; Series expands cos(sqrt(w)) and
+    // sin(sqrt(w))/sqrt(w) in t with w = t^2 by its own recurrences (a ramification of 2:
+    // sqrt of w is the monomial t).
+    using S16 = Series<double, 16>;
+    const S16 w = S16::variable(0.0, 2);
+    const S16 c = cos(sqrt(w));
+    const S16 s = sin(sqrt(w)) / sqrt(w);
+    REQUIRE(c.ok());
+    REQUIRE(s.ok());
+
+    const auto eval = [](const S16& f, double x) {          // sum of f's terms in w^k, at w = x
+        double acc = 0.0, p = 1.0;
+        for (int k = 0; k < 8; ++k) { acc += f.coefficient(2 * k) * p; p *= x; }
+        return acc;
+    };
+    // below the threshold (the table's branch), at it, and above it (the closed form); eight terms of the series bound x by 0.5
+    for (const double x : {1e-6, 1e-4, 2.5e-4, 1e-2, 0.2, 0.5}) {
+        const auto cs = cos_sinc_of_square(x);
+        CHECK_THAT(cs.cos, WithinAbs(eval(c, x), 1e-14));
+        CHECK_THAT(cs.sinc, WithinAbs(eval(s, x), 1e-14));
+        // and the hyperbolic one is the same function at -x
+        const auto ch = cos_sinc_of_square(x, true);
+        CHECK_THAT(ch.cos, WithinAbs(eval(c, -x), 1e-13));
+        CHECK_THAT(ch.sinc, WithinAbs(eval(s, -x), 1e-13));
+    }
+    // the coefficients themselves: (-1)^k / (2k)! and (-1)^k / (2k+1)!
+    CHECK_THAT(c.coefficient(2), WithinAbs(-0.5, 1e-15));
+    CHECK_THAT(s.coefficient(2), WithinAbs(-1.0 / 6.0, 1e-15));
+    CHECK_THAT(c.coefficient(4), WithinAbs(1.0 / 24.0, 1e-15));
+}
