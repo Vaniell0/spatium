@@ -52,7 +52,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # Documentation that gets checked. Everything a reader is pointed at.
-DOC_GLOBS = ["docs/*.md", "README.md", "CONTRIBUTING.md", "CLAUDE.md", "rsc/README.md"]
+DOC_GLOBS = ["docs/*.md", "docs/roadmap/*.md", "README.md", "CONTRIBUTING.md", "CLAUDE.md", "rsc/README.md"]
 
 # Extensions that name something in this tree rather than a concept.
 # `.dot` is deliberately absent: `n.dot(u)` in a code sample is a vector
