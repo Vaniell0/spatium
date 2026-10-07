@@ -107,6 +107,46 @@ TEST_CASE("quadrature does not claim an answer it does not have", "[quadrature]"
     CHECK(!integrate([](double x) { return std::exp(x); }, WholeLine{}).trusted());
 }
 
+TEST_CASE("a value that is not finite where the integrand still matters fails the integral", "[quadrature]") {
+    // NaN on half of [0, 1]: this used to be read as the end of that side and answered
+    // 0.5008 with DepthCapped. It is not an end; the integral has no value.
+    const auto half = integrate([](double x) { return x < 0.5 ? 1.0 : kNaN; }, Finite<double>{0.0, 1.0});
+    CHECK(half.status == IntegralStatus::Failed);
+    CHECK(std::isnan(half.value));
+
+    // sqrt of a negative number is the same thing from the other side of the middle.
+    const auto root = integrate([](double x) { return std::sqrt(x); }, Finite<double>{-1.0, 1.0});
+    CHECK(root.status == IntegralStatus::Failed);
+
+    // And on the half line, where the nodes far out are the ones that count.
+    const auto tail = integrate([](double x) { return x < 3.0 ? std::exp(-x) : kNaN; }, HalfLine<double>{0.0});
+    CHECK(tail.status == IntegralStatus::Failed);
+}
+
+TEST_CASE("a value that overflows where the integrand is already nothing does not fail it", "[quadrature]") {
+    // x^2 exp(-x): far out, x^2 overflows and exp(-x) underflows, so the product is inf * 0 = NaN
+    // at nodes that weigh nothing. The integral is 2.
+    auto r = integrate([](double x) { return x * x * std::exp(-x); }, HalfLine<double>{0.0});
+    CHECK(r.trusted());
+    CHECK_THAT(r.value, WithinAbs(2.0, 1e-9));
+
+    // sin(x)/x over [0, 1]: no node of the rule is at 0, so it is an ordinary integral.
+    r = integrate([](double x) { return std::sin(x) / x; }, Finite<double>{0.0, 1.0});
+    CHECK(r.trusted());
+    CHECK_THAT(r.value, WithinAbs(0.946083070367183, 1e-10));
+}
+
+TEST_CASE("a middle node that is not finite fails the integral instead of leaving its weight out", "[quadrature]") {
+    // Over [-1, 1] the middle node is x = 0, where sin(x)/x is 0/0. Dropping that node dropped its
+    // weight from every level's sum: 1.8891 for 1.8922, labelled untrusted. It is Failed now; the
+    // removable point is the caller's to remove (shift the interval, or return the limit).
+    const auto r = integrate([](double x) { return std::sin(x) / x; }, Finite<double>{-1.0, 1.0});
+    CHECK(r.status == IntegralStatus::Failed);
+    const auto fixed = integrate([](double x) { return x == 0.0 ? 1.0 : std::sin(x) / x; }, Finite<double>{-1.0, 1.0});
+    CHECK(fixed.trusted());
+    CHECK_THAT(fixed.value, WithinAbs(1.8921661407343662, 1e-10));
+}
+
 TEST_CASE("the tolerance follows the scalar: float and double both converge", "[quadrature]") {
     const auto f = integrate([](float x) { return std::exp(-x); }, HalfLine<float>{0.0f});
     CHECK(f.trusted());

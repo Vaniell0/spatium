@@ -44,7 +44,7 @@ inline namespace algebra {
 // `Converged` when it met the tolerance and fell by at least half, `Suspicious`
 // when it met it without falling (two levels agreeing by coincidence),
 // `DepthCapped` when the levels ran out, `Failed` when a bound of a finite
-// domain, or every value, was not finite.
+// domain, every value, or a value where the integrand still mattered, was not finite.
 //
 // One limit worth knowing: a node close to an end is stored as a point of the
 // scalar, so near an end b != 0 it cannot be closer than an ulp of b, and an
@@ -75,7 +75,10 @@ struct Node { T x{}; T w{}; bool ok = false; };
 // h from 1; level 0 walks t = k h for every k (k = 0 once), later levels only
 // the new odd multiples, and the sum is the previous level's halved plus them.
 // Each side (t > 0, t < 0) is walked until its nodes stop being usable or its
-// values stop being finite -- an overflow where the weights are already nothing.
+// values stop being finite. A value that stops being finite is an overflow at
+// the end only if what the side had added just before was already negligible;
+// if the side was still contributing, the integrand is not finite inside the
+// domain and the answer is Failed, not the sum of the nodes before it.
 template<Scalar T, typename F, typename NodeFn>
 IntegralResult<T> doubly_exponential(F& f, NodeFn node, T scale, T tol, int max_levels) {
     using std::abs;
@@ -86,28 +89,42 @@ IntegralResult<T> doubly_exponential(F& f, NodeFn node, T scale, T tol, int max_
     T total{0}, last_total{0};
     T delta{0}, previous_delta{0};
     bool any = false;
+    bool inside = false;                // a value was not finite where the side was still contributing
     T h{1};
 
     for (int level = 0; level <= max_levels; ++level) {
         T add{0}, add_l1{0};
+        T side_last{0};                 // h w |f| at the last finite node of the side being walked
+        bool side_seen = false;
         const auto visit = [&](T t, bool centre) -> bool {      // false: this side is done
             const Node<T> nd = node(t);
             if (!nd.ok) return false;
             const T fx = f(nd.x);
             ++evaluations;
             const T term = nd.w * fx;
-            if (!usable(fx) || !usable(term)) return centre;
+            if (!usable(fx) || !usable(term)) {
+                if (centre) { inside = true; return false; }    // a node the rule needs, skipped, would leave its weight out of every sum
+                const T seen_l1 = (level == 0) ? h * add_l1 : l1 / T{2} + h * add_l1;
+                if (!(side_seen && side_last <= tol * seen_l1)) inside = true;
+                return false;
+            }
             add = add + term;
             add_l1 = add_l1 + nd.w * abs(fx);
+            side_last = h * nd.w * abs(fx);
+            side_seen = true;
             any = true;
             return true;
         };
         if (level == 0) visit(T{0}, true);
         const int stride = (level == 0) ? 1 : 2;
         const long k_max = 10L << level;                        // t up to 10: past every usable node of a double, and of Real50 too
-        for (const int sign : {+1, -1})
+        for (const int sign : {+1, -1}) {
+            side_seen = false;
+            side_last = T{0};
             for (long k = 1; k <= k_max; k += stride)
                 if (!visit(T(static_cast<double>(k)) * h * T(sign), false)) break;
+        }
+        if (inside) return {nan, nan, evaluations, IntegralStatus::Failed};
 
         if (level == 0) { sum = h * add; l1 = h * add_l1; }
         else            { sum = sum / T{2} + h * add; l1 = l1 / T{2} + h * add_l1; }
