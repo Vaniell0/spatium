@@ -106,6 +106,14 @@ jobs:
       - name: Check every source file named in the docs is in the tree
         run: python3 scripts/check_doc_file_refs.py
 
+  capabilities:
+    name: capability index is up to date
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/capabilities.md matches what the headers declare
+        run: python3 scripts/gen_capabilities.py --check
+
   bare-build:
     name: cmake build without Nix (gcc15)
     runs-on: ubuntu-24.04
