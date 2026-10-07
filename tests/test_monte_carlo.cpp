@@ -12,8 +12,12 @@
 #include <spatium/algebra/monte_carlo.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/spaces/metric_chart.hpp>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
+#include <type_traits>
+#include <vector>
 
 using namespace spatium;
 using Catch::Matchers::WithinAbs;
@@ -114,4 +118,103 @@ TEST_CASE("a Dual passes through a sampled integral", "[monte_carlo][dual]") {
                                MonteCarloOptions{.samples = 1 << 16});
     CHECK(std::abs(r.value.deriv - 0.5) < 4 * r.error_estimate.value / 3.0 + 1e-3);
     CHECK_THAT(r.value.value, WithinAbs(1.5, 0.05));
+}
+
+// ── the Sobol sequence ─────────────────────────────────────────
+
+namespace {
+// The raw (unshifted) Sobol points of Gray-code order, n = 0 .. count-1, as fractions.
+std::vector<std::vector<double>> sobol_points(std::size_t dims, std::size_t count) {
+    std::vector<std::array<std::uint32_t, 33>> v;
+    for (std::size_t d = 0; d < dims; ++d) v.push_back(monte_carlo_detail::sobol_directions(d));
+    std::vector<std::vector<double>> out;
+    std::vector<std::uint32_t> state(dims, 0);
+    for (std::size_t n = 0; n < count; ++n) {
+        if (n > 0) {
+            std::uint64_t value = n - 1;
+            int c = 1;
+            while (value & 1u) { value >>= 1; ++c; }
+            for (std::size_t d = 0; d < dims; ++d) state[d] ^= v[d][c];
+        }
+        std::vector<double> p(dims);
+        for (std::size_t d = 0; d < dims; ++d) p[d] = static_cast<double>(state[d]) / 4294967296.0;
+        out.push_back(p);
+    }
+    return out;
+}
+}  // namespace
+
+TEST_CASE("the first Sobol points are the known ones", "[monte_carlo][sobol]") {
+    const auto p = sobol_points(2, 5);
+    const double d1[] = {0.0, 0.5, 0.75, 0.25, 0.375};          // van der Corput in Gray-code order
+    const double d2[] = {0.0, 0.5, 0.25, 0.75, 0.375};
+    for (std::size_t n = 0; n < 5; ++n) {
+        CHECK(p[n][0] == d1[n]);
+        CHECK(p[n][1] == d2[n]);
+    }
+}
+
+TEST_CASE("Sobol's first two coordinates are a (0, m, 2)-net: one point in every elementary box", "[monte_carlo][sobol][symmetry]") {
+    // 64 points, every box of width 2^-a by 2^-b with a + b = 6 holds exactly one: a property of
+    // the construction that a wrong recurrence or direction number would break
+    const auto p = sobol_points(2, 64);
+    for (int a = 0; a <= 6; ++a) {
+        const int b = 6 - a;
+        std::vector<int> count(64, 0);
+        for (const auto& q : p) {
+            const std::size_t i = static_cast<std::size_t>(q[0] * (1 << a)), j = static_cast<std::size_t>(q[1] * (1 << b));
+            ++count[i * (1u << b) + j];
+        }
+        for (int c : count) CHECK(c == 1);
+    }
+}
+
+TEST_CASE("every one of the 40 coordinates is stratified: 2^10 points, one per interval", "[monte_carlo][sobol][symmetry]") {
+    // the one-dimensional projection of the first 2^m Sobol points is a permutation of the grid
+    // i / 2^m -- for each coordinate, which holds the whole direction-number table to account
+    const auto p = sobol_points(40, 1024);
+    for (std::size_t d = 0; d < 40; ++d) {
+        std::vector<int> seen(1024, 0);
+        for (const auto& q : p) ++seen[static_cast<std::size_t>(q[d] * 1024)];
+        INFO("coordinate " << d);
+        for (int c : seen) CHECK(c == 1);
+    }
+}
+
+TEST_CASE("Sobol against Halton and random points in high dimensions", "[monte_carlo][sobol]") {
+    // a smooth integrand of low effective dimension: the product over i of the integral of exp(x_i / K)
+    const auto make = [](auto K_tag) {
+        constexpr std::size_t K = decltype(K_tag)::value;
+        return [](const Vec<double, K>& x) { double s = 0; for (std::size_t i = 0; i < K; ++i) s += x[i]; return std::exp(s / static_cast<double>(K)); };
+    };
+    const auto check = [&](auto K_tag, bool against_halton) {
+        constexpr std::size_t K = decltype(K_tag)::value;
+        const auto f = make(K_tag);
+        const double exact = std::pow(static_cast<double>(K) * (std::exp(1.0 / static_cast<double>(K)) - 1.0), static_cast<double>(K));
+        const auto lo = filled<K>(0.0), hi = filled<K>(1.0);
+        MonteCarloOptions o;
+        const auto mc = monte_carlo(f, lo, hi, o);
+        const auto so = quasi_monte_carlo(f, lo, hi, o);
+        INFO("K = " << K);
+        CHECK(std::abs(so.value - exact) < 4 * so.error_estimate + 1e-12);
+        CHECK(so.error_estimate < mc.error_estimate / 20);          // measured 65x at K = 40
+        if (against_halton) {
+            o.sequence = Sequence::Halton;
+            const auto ha = quasi_monte_carlo(f, lo, hi, o);
+            CHECK(so.error_estimate < ha.error_estimate / 4);       // measured 8x at K = 16, 18x at K = 32
+        }
+    };
+    check(std::integral_constant<std::size_t, 8>{}, false);
+    check(std::integral_constant<std::size_t, 16>{}, true);
+    check(std::integral_constant<std::size_t, 32>{}, true);
+    check(std::integral_constant<std::size_t, 40>{}, false);
+}
+
+TEST_CASE("more dimensions than a sequence has is a failure, not a quiet wrong answer", "[monte_carlo][sobol]") {
+    const auto f = [](const Vec<double, 41>&) { return 1.0; };
+    CHECK(quasi_monte_carlo(f, filled<41>(0.0), filled<41>(1.0)).status == IntegralStatus::Failed);
+    const auto g = [](const Vec<double, 33>&) { return 1.0; };
+    CHECK(quasi_monte_carlo(g, filled<33>(0.0), filled<33>(1.0), MonteCarloOptions{.sequence = Sequence::Halton}).status
+          == IntegralStatus::Failed);
+    CHECK(quasi_monte_carlo(g, filled<33>(0.0), filled<33>(1.0)).trusted());   // Sobol has 40
 }
