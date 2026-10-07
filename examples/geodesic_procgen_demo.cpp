@@ -33,6 +33,7 @@
 #include "io_helpers.hpp"
 
 #include <spatium/geometry/triangle.hpp>
+#include <spatium/mesh/tessellate.hpp>
 #include <spatium/mesh/topology.hpp>
 #include <spatium/mesh/voronoi.hpp>
 #include <spatium/render/camera.hpp>

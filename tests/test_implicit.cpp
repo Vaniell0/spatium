@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/spaces/implicit.hpp>
+#include <spatium/mesh/tessellate.hpp>
 #include <spatium/mesh/primitives.hpp>
 #include <spatium/io/stl.hpp>
 #include <cmath>

@@ -21,6 +21,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/algebra/calculus.hpp>
+#include <spatium/mesh/tessellate.hpp>
 #include <spatium/core/access.hpp>
 #include <spatium/spaces/implicit.hpp>
 #include <spatium/spaces/parametric.hpp>

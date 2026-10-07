@@ -1,5 +1,6 @@
 #include <benchmark/benchmark.h>
 #include <spatium/physics/atomic/orbital.hpp>
+#include <spatium/mesh/tessellate.hpp>
 #include <spatium/physics/atomic/atom_model.hpp>
 #include <spatium/spaces/implicit.hpp>
 

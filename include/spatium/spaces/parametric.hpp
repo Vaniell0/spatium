@@ -7,7 +7,6 @@
 #  include <spatium/algebra/dual.hpp>
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/vector.hpp>
-#  include <spatium/mesh/mesh.hpp>
 #  include <spatium/spaces/metric_chart.hpp>
 #  include <array>
 #  include <cmath>
@@ -525,47 +524,6 @@ template<Scalar T = double, class F>
 ParametricSurface<T, F> make_parametric(F fn, typename ParametricSurface<T, F>::Domain domain,
                                         bool periodic_u = false, bool periodic_v = false) {
     return ParametricSurface<T, F>(std::move(fn), domain, periodic_u, periodic_v);
-}
-
-// ── Tessellation (free function — class must be complete for Mesh<Surface>) ──
-
-template<Scalar T>
-mesh::Mesh<ParametricSurface<T>> tessellate(const ParametricSurface<T>& surf,
-                                             std::size_t nu, std::size_t nv) {
-    mesh::Mesh<ParametricSurface<T>> m;
-    auto dom = surf.domain();
-    bool pu = surf.periodic_u(), pv = surf.periodic_v();
-
-    T du = (dom.u_max - dom.u_min) / static_cast<T>(nu);
-    T dv = (dom.v_max - dom.v_min) / static_cast<T>(nv);
-
-    std::size_t nu_verts = pu ? nu : nu + 1;
-    std::size_t nv_verts = pv ? nv : nv + 1;
-
-    m.vertices.reserve(nu_verts * nv_verts);
-    for (std::size_t j = 0; j < nv_verts; ++j) {
-        T v = dom.v_min + static_cast<T>(j) * dv;
-        for (std::size_t i = 0; i < nu_verts; ++i) {
-            T u = dom.u_min + static_cast<T>(i) * du;
-            m.vertices.push_back(surf.evaluate(u, v));
-        }
-    }
-
-    m.faces.reserve(nu * nv * 2);
-    for (std::size_t j = 0; j < nv; ++j) {
-        for (std::size_t i = 0; i < nu; ++i) {
-            auto idx = [&](std::size_t ii, std::size_t jj) -> uint32_t {
-                if (pu) ii %= nu;
-                if (pv) jj %= nv;
-                return static_cast<uint32_t>(jj * nu_verts + ii);
-            };
-            uint32_t a = idx(i, j), b = idx(i + 1, j);
-            uint32_t c = idx(i + 1, j + 1), d = idx(i, j + 1);
-            m.faces.push_back({a, b, c});
-            m.faces.push_back({a, c, d});
-        }
-    }
-    return m;
 }
 
 // ── Closure: does the surface end anywhere? ───────────────────
