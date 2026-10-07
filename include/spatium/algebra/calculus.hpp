@@ -128,7 +128,7 @@ T adaptive_simpson(F& f, T a, T b, T fa, T fm, T fb, T whole, T eps, int depth,
 //                estimate is large and says so
 //   Failed       a bound or a value was NaN or infinite; the value is NaN
 //   Divergent    the integral does not exist, and the series of the
-//                integrand at an end proves it (`quadrature_checked`, the
+//                integrand at an end proves it (`integrate(f, checked(domain))`, the
 //                p-test: f ~ d^p at distance d from a finite end diverges for
 //                p <= -1, and f ~ x^-p at infinity for p <= 1); no number is
 //                computed, the value is NaN

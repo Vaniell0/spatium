@@ -119,40 +119,40 @@ TEST_CASE("fractional powers by ramification", "[series][limit]") {
 }
 
 TEST_CASE("the point at infinity is a chart", "[series][limit]") {
-    const auto ratio = limit_at_infinity([](auto x) { return (x * x + S(1.0)) / (x * x - S(1.0)); });
+    const auto ratio = limit([](auto x) { return (x * x + S(1.0)) / (x * x - S(1.0)); }, AtInfinity{});
     CHECK(ratio.kind == LimitKind::Finite);
     CHECK_THAT(ratio.value, WithinAbs(1.0, 1e-15));
 
     // x sin(1/x) -> 1
-    const auto xs = limit_at_infinity([](auto x) { return x * sin(S(1.0) / x); });
+    const auto xs = limit([](auto x) { return x * sin(S(1.0) / x); }, AtInfinity{});
     CHECK_THAT(xs.value, WithinAbs(1.0, 1e-15));
 
     // (1 + 1/x)^x -> e
-    const auto euler = limit_at_infinity([](auto x) { return exp(x * log(S(1.0) + S(1.0) / x)); });
+    const auto euler = limit([](auto x) { return exp(x * log(S(1.0) + S(1.0) / x)); }, AtInfinity{});
     CHECK_THAT(euler.value, WithinAbs(std::numbers::e, 1e-14));
 
     // x/(x^2 + 1) decays like 1/x: the order that decides an improper integral
-    const auto decay = limit_at_infinity([](auto x) { return x / (x * x + S(1.0)); });
+    const auto decay = limit([](auto x) { return x / (x * x + S(1.0)); }, AtInfinity{});
     CHECK(decay.kind == LimitKind::Finite);
     CHECK(decay.value == 0.0);
     CHECK(decay.order() == 1.0);
 
     // sqrt(x^2 + 1) - x -> 0 like 1/(2x): a difference of two infinities
-    const auto diff = limit_at_infinity([](auto x) { return sqrt(x * x + S(1.0)) - x; });
+    const auto diff = limit([](auto x) { return sqrt(x * x + S(1.0)) - x; }, AtInfinity{});
     CHECK(diff.value == 0.0);
     CHECK(diff.order() == 1.0);
     CHECK_THAT(diff.coefficient, WithinAbs(0.5, 1e-15));
 
     // x grows: a pole of the chart
-    CHECK(limit_at_infinity([](auto x) { return x * x; }).kind == LimitKind::Infinite);
-    CHECK(limit_at_infinity([](auto x) { return x * x * x; }, true).value == -kInf);
+    CHECK(limit([](auto x) { return x * x; }, AtInfinity{}).kind == LimitKind::Infinite);
+    CHECK(limit([](auto x) { return x * x * x; }, AtInfinity<>{true}).value == -kInf);
 }
 
 TEST_CASE("what is not a Laurent series is refused, not guessed", "[series][limit]") {
     CHECK(!limit([](auto x) { return exp(S(1.0) / x); }, 0.0).determined());     // essential singularity
     CHECK(!limit([](auto x) { return log(x); }, 0.0).determined());              // log(eps) is not a series
     CHECK(!limit([](auto x) { return sin(S(1.0) / x); }, 0.0).determined());     // oscillation
-    CHECK(!limit_at_infinity([](auto x) { return sin(x); }).determined());
+    CHECK(!limit([](auto x) { return sin(x); }, AtInfinity{}).determined());
     // division by an exact zero
     CHECK(!limit([](auto x) { return S(1.0) / (x - x); }, 0.0).determined());
 }

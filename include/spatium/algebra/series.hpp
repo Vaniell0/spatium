@@ -492,11 +492,17 @@ LimitResult<T> two_sided_limit(F&& f, T a) {
     return {LimitKind::Undetermined, std::numeric_limits<T>::quiet_NaN(), T{}, 0, 1, 0};
 }
 
-// The limit as x -> +infinity (or -infinity), through the chart x = 1/eps.
-template<int N = 8, Scalar T = double, typename F>
-LimitResult<T> limit_at_infinity(F&& f, bool toward_negative = false) {
+// x -> +infinity (or -infinity), through the chart x = 1/eps: `limit(f, AtInfinity{})`,
+// `limit(f, AtInfinity<Real50>{true})` toward minus infinity. The point carries its
+// scalar like the domains of quadrature.hpp, so `limit` reads the same at a number
+// and at infinity.
+template<Scalar T = double>
+struct AtInfinity { bool toward_negative = false; };
+
+template<int N = 8, Scalar T, typename F>
+LimitResult<T> limit(F&& f, AtInfinity<T> at) {
     return series_detail::limit_with<T, N>(f, [&](int r) {
-        return Series<T, N>::at_infinity(r, toward_negative);
+        return Series<T, N>::at_infinity(r, at.toward_negative);
     });
 }
 
