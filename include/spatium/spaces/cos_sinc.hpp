@@ -59,4 +59,18 @@ CosSinc<T> cos_sinc_of_square(const T& s, bool hyperbolic = false) {
     return {T(cos(r)), T(sin(r) / r)};
 }
 
+// The same two functions for a signed argument: cos(sqrt(w)) and
+// sin(sqrt(w)) / sqrt(w) are analytic in w through zero and into the negatives,
+// where they are cosh and sinh(sqrt(-w)) / sqrt(-w). So one function serves a
+// space of curvature kappa of either sign, with w = kappa * (squared length):
+// the sphere for w > 0, the plane at w = 0, the hyperbolic space for w < 0,
+// and no branch on the kind of space -- the branch is on the value of w, which
+// is all a choice may read, and a Dual's derivative in kappa is continuous
+// across it.
+template<Scalar T>
+CosSinc<T> cos_sinc_signed(const T& w) {
+    if (primal_double(w) >= 0.0) return cos_sinc_of_square(w, /*hyperbolic=*/false);
+    return cos_sinc_of_square(T(-w), /*hyperbolic=*/true);
+}
+
 } // namespace spatium

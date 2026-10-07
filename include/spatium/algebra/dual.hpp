@@ -192,6 +192,12 @@ Dual<T> acosh(const Dual<T>& x) {
 }
 
 template<Scalar T>
+Dual<T> atanh(const Dual<T>& x) {
+    using std::atanh;
+    return {atanh(x.value), x.deriv / (T{1} - x.value * x.value)};
+}
+
+template<Scalar T>
 Dual<T> asin(const Dual<T>& x) {
     using std::asin, std::sqrt;
     return {asin(x.value), x.deriv / sqrt(T{1} - x.value * x.value)};
