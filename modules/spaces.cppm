@@ -16,6 +16,7 @@ import spatium.mesh;
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/constant_curvature.hpp>
 #include <spatium/spaces/minkowski.hpp>
+#include <spatium/spaces/lie_group.hpp>
 #include <spatium/spaces/spd.hpp>
 #include <spatium/spaces/product.hpp>
 #include <spatium/spaces/metric_chart.hpp>
