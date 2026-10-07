@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/algebra/calculus.hpp>
+#include <spatium/spaces/constant_curvature.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/sphere.hpp>
 #include <algorithm>
@@ -322,4 +323,31 @@ TEST_CASE("The estimate and the derivative both pass through a Dual", "[calculus
     CHECK(r.trusted());
     CHECK_THAT(r.value.value, WithinAbs(8.0 / 3.0, 1e-12));
     CHECK_THAT(r.value.deriv, WithinAbs(4.0, 1e-9));         // d/da of the integral is f(a) = a^2
+}
+
+TEST_CASE("riemannian_minimize on a space with intrinsic coordinates agrees with the Frechet mean", "[calculus][symmetry]") {
+    // A space whose points are coordinates of the manifold itself (the kappa family, a chart)
+    // has no normal: the raised gradient is already tangent, and there is nothing to project.
+    // Two paths to the minimiser of the summed squared distances that share nothing: the
+    // gradient of that sum through a Dual, and the fixed point of the mean of the logs.
+    for (const double kappa : {-1.0, 0.0, 1.0}) {
+        const ConstantCurvature<2> space{kappa};
+        const std::vector<Vec<double, 2>> pts{{0.10, 0.20}, {-0.30, 0.05}, {0.25, -0.35}};
+
+        const auto sum_of_squares = [kappa, &pts](const auto& x) {
+            using Sc = std::decay_t<decltype(x[0])>;
+            const ConstantCurvature<2, Sc> sp{Sc(kappa)};
+            Sc acc{0};
+            for (const auto& p : pts) {
+                const auto d = sp.distance(x, Vec<Sc, 2>{Sc(p[0]), Sc(p[1])});
+                acc = acc + d * d;
+            }
+            return acc;
+        };
+        const auto by_gradient = riemannian_minimize(space, sum_of_squares, Vec<double, 2>{0.0, 0.0});
+        const auto by_logs = frechet_mean(space, pts, Vec<double, 2>{0.0, 0.0});
+        INFO("kappa " << kappa);
+        CHECK_THAT(by_gradient[0], WithinAbs(by_logs[0], 1e-6));
+        CHECK_THAT(by_gradient[1], WithinAbs(by_logs[1], 1e-6));
+    }
 }
