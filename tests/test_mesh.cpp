@@ -3,6 +3,7 @@
 #include <spatium/mesh/primitives.hpp>
 #include <spatium/mesh/subdivision.hpp>
 #include <spatium/mesh/lod.hpp>
+#include <spatium/spaces/hyperbolic.hpp>
 #include <numbers>
 
 using namespace spatium;
@@ -97,4 +98,30 @@ TEST_CASE("Sphere with custom radius mesh", "[mesh]") {
     auto m = icosahedron(sphere);
     for (const auto& v : m.vertices)
         CHECK_THAT(v.norm(), WithinAbs(5.0, 1e-8));
+}
+
+TEST_CASE("Subdividing a hyperbolic mesh puts new vertices at geodesic midpoints", "[mesh][symmetry]") {
+    // The midpoint of an edge is the point halfway along the geodesic, in the space's own
+    // metric. Projecting the chord's midpoint (the old rule) is that only on a sphere: on the
+    // hyperboloid it projects vertically, off the geodesic and not halfway (findings 25).
+    using H = Hyperbolic<2>;
+    const H space;
+    Mesh<H> m;
+    m.vertices = {space.project(Vec<double, 3>{0.0, 1.6, 0.2}),
+                  space.project(Vec<double, 3>{0.0, -0.5, 1.9}),
+                  space.project(Vec<double, 3>{0.0, -1.2, -1.4})};
+    m.faces = {{0, 1, 2}};
+
+    const auto sub = subdivide_once(m, space);
+    REQUIRE(sub.vertices.size() == 6);
+    const std::array<std::pair<int, int>, 3> ends{{{0, 1}, {1, 2}, {2, 0}}};
+    for (std::size_t e = 0; e < 3; ++e) {
+        const auto& a = m.vertices[ends[e].first];
+        const auto& b = m.vertices[ends[e].second];
+        const auto& mid = sub.vertices[3 + e];
+        const double whole = space.distance(a, b);
+        CHECK(space.contains(mid));
+        CHECK_THAT(space.distance(a, mid), WithinAbs(whole / 2, 1e-10));
+        CHECK_THAT(space.distance(mid, b), WithinAbs(whole / 2, 1e-10));
+    }
 }
