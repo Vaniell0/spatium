@@ -61,6 +61,7 @@ add_executable(spatium_tests
     test_calculus.cpp
     test_quadrature.cpp
     test_series.cpp
+    test_monte_carlo.cpp
     test_ode.cpp
     test_linear_solve.cpp
     test_render.cpp
