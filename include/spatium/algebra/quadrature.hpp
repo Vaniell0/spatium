@@ -59,7 +59,7 @@ inline namespace algebra {
 
 template<Scalar T> struct Finite { T a, b; };
 template<Scalar T> struct HalfLine { T from; bool toward_infinity = true; };
-struct WholeLine {};
+template<Scalar T = double> struct WholeLine {};
 
 namespace quadrature_detail {
 
@@ -135,11 +135,13 @@ T default_tolerance(double requested) {
 
 }  // namespace quadrature_detail
 
+namespace quadrature_detail {
+
 // ── Finite: tanh-sinh ─────────────────────────────────────────
 
 template<Scalar T, typename F>
     requires Function<F, T, T>
-IntegralResult<T> quadrature(F&& f, Finite<T> d, double tolerance = 0.0, int max_levels = 9) {
+IntegralResult<T> tanh_sinh(F&& f, Finite<T> d, double tolerance = 0.0, int max_levels = 9) {
     using std::exp; using std::sinh; using std::cosh;
     using quadrature_detail::Node;
     const T nan = T(std::numeric_limits<double>::quiet_NaN());
@@ -177,7 +179,7 @@ IntegralResult<T> quadrature(F&& f, Finite<T> d, double tolerance = 0.0, int max
 
 template<Scalar T, typename F>
     requires Function<F, T, T>
-IntegralResult<T> quadrature(F&& f, HalfLine<T> d, double tolerance = 0.0, int max_levels = 9) {
+IntegralResult<T> tanh_sinh(F&& f, HalfLine<T> d, double tolerance = 0.0, int max_levels = 9) {
     using std::exp; using std::sinh; using std::cosh;
     using quadrature_detail::Node;
     const T nan = T(std::numeric_limits<double>::quiet_NaN());
@@ -199,11 +201,9 @@ IntegralResult<T> quadrature(F&& f, HalfLine<T> d, double tolerance = 0.0, int m
 
 // ── Whole line: sinh-sinh ─────────────────────────────────────
 
-// The line has no endpoint to carry the scalar, so it is named: `quadrature<Real50>(f, WholeLine{})`;
-// double where it is not.
-template<Scalar T = double, typename F>
+template<Scalar T, typename F>
     requires Function<F, T, T>
-IntegralResult<T> quadrature(F&& f, WholeLine, double tolerance = 0.0, int max_levels = 9) {
+IntegralResult<T> tanh_sinh(F&& f, WholeLine<T>, double tolerance = 0.0, int max_levels = 9) {
     using std::sinh; using std::cosh;
     using quadrature_detail::Node;
     const T pi = T(std::numbers::pi);
@@ -217,6 +217,8 @@ IntegralResult<T> quadrature(F&& f, WholeLine, double tolerance = 0.0, int max_l
     return quadrature_detail::doubly_exponential<T>(f, node, T{1}, quadrature_detail::default_tolerance<T>(tolerance), max_levels);
 }
 
+}  // namespace quadrature_detail
+
 // ── A second witness for a finite interval: Gauss-Kronrod G7K15 ──
 //
 // Its nodes are fixed and its error estimate is |K15 - G7|, a different thing
@@ -226,6 +228,19 @@ IntegralResult<T> quadrature(F&& f, WholeLine, double tolerance = 0.0, int max_l
 // refused at compile time -- tanh-sinh is the rule for those.
 
 namespace quadrature_detail {
+
+// Whether Gauss-Kronrod's constants (33 digits, held in long double) are enough
+// for a scalar: float, double, long double, and a Dual or Series of one of them.
+// A property of the type, not a value of its epsilon, which a multiprecision
+// number cannot give at compile time.
+template<class T>
+constexpr bool gk_capable() {
+    if constexpr (std::is_floating_point_v<T>) return true;
+    else if constexpr (requires { typename T::coefficient_type; }) return gk_capable<typename T::coefficient_type>();
+    else if constexpr (requires(const T& x) { x.value; x.deriv; })
+        return gk_capable<std::remove_cvref_t<decltype(std::declval<const T&>().value)>>();
+    else return false;
+}
 
 struct GK15 {
     // abscissae of K15 in decreasing order; x[1], x[3], x[5], x[7] are the G7 nodes too
@@ -286,11 +301,13 @@ T gk15_adaptive(F& f, T a, T b, T tol, int depth, T& error, long& evaluations, b
 
 }  // namespace quadrature_detail
 
+namespace quadrature_detail {
+
 template<Scalar T, typename F>
     requires Function<F, T, T>
 IntegralResult<T> gauss_kronrod(F&& f, T a, T b, double tolerance = 0.0) {
-    static_assert(machine_epsilon<T>() >= 1e-19,
-                  "Gauss-Kronrod's constants go to long double's digits; use quadrature(f, Finite<T>{a, b}) beyond");
+    static_assert(gk_capable<T>(),
+                  "Gauss-Kronrod's constants go to long double's digits; the doubly exponential rule is the one beyond");
     const T nan = T(std::numeric_limits<double>::quiet_NaN());
     if (!quadrature_detail::usable(a) || !quadrature_detail::usable(b)) return {nan, nan, 0, IntegralStatus::Failed};
     if (a == b) return {T{0}, T{0}, 0, IntegralStatus::Converged};
@@ -308,6 +325,8 @@ IntegralResult<T> gauss_kronrod(F&& f, T a, T b, double tolerance = 0.0) {
     if (!finite_values) return {nan, nan, evaluations, IntegralStatus::Failed};
     return {value, error, evaluations, capped ? IntegralStatus::DepthCapped : IntegralStatus::Converged};
 }
+
+}  // namespace quadrature_detail
 
 // ── What the ends decide ──────────────────────────────────────
 //
@@ -372,43 +391,165 @@ EndsReport improper_ends(F&& f, Finite<T> d) {
 template<int N = 8, Scalar T, typename F>
 EndsReport improper_ends(F&& f, HalfLine<T> d) {
     return {quadrature_detail::finite_end(limit<N>(f, d.from, d.toward_infinity ? Approach::Right : Approach::Left)),
-            quadrature_detail::infinity_end(limit_at_infinity<N, T>(f, !d.toward_infinity))};
+            quadrature_detail::infinity_end(limit<N>(f, AtInfinity<T>{!d.toward_infinity}))};
 }
 
-template<int N = 8, Scalar T = double, typename F>
-EndsReport improper_ends(F&& f, WholeLine) {
-    return {quadrature_detail::infinity_end(limit_at_infinity<N, T>(f, true)),
-            quadrature_detail::infinity_end(limit_at_infinity<N, T>(f, false))};
+template<int N = 8, Scalar T, typename F>
+EndsReport improper_ends(F&& f, WholeLine<T>) {
+    return {quadrature_detail::infinity_end(limit<N>(f, AtInfinity<T>{true})),
+            quadrature_detail::infinity_end(limit<N>(f, AtInfinity<T>{false}))};
 }
 
-// `quadrature`, preceded by the proof that the integral exists: where the
-// series of f at an end shows it does not, the answer is `Divergent` at once,
-// with no number and no evaluations spent -- not `DepthCapped` after the rule
-// has run out of levels on 1/x. Where the series cannot say, the rule runs
-// as it always does.
-template<Scalar T, int N = 8, typename F>
+// ── The door ──────────────────────────────────────────────────
+//
+// One entry point for "the integral of f over a domain":
+//
+//   integrate(f, Finite{a, b})                 tanh-sinh: end singularities cost nothing
+//   integrate(f, HalfLine{from})               exp-sinh
+//   integrate(f, WholeLine{})                  sinh-sinh (`WholeLine<Real50>{}` for another scalar)
+//   integrate(f, checked(HalfLine{1.0}))       the same, after the series of f at the ends has had
+//                                              its say: `Divergent` with no evaluations where the
+//                                              integral provably does not exist
+//   integrate(f, Finite{a, b}, {.witness = true})   and a second rule that shares no node with the
+//                                              first, so two rules that disagree are `Suspicious`
+//
+// The domain is a type that carries its scalar, so nothing is spelled twice and
+// a call reads the same on float, double, Real50 and Dual. The answer is always
+// an `IntegralResult`. `integrate(f, a, b)` of calculus.hpp, the value alone by
+// adaptive Simpson, stays for the caller who wants no more, and is the same rule
+// as `{.method = Method::Simpson}`.
+
+enum class Method {
+    Auto,                // the doubly exponential rule for every domain
+    DoublyExponential,
+    GaussKronrod,        // Finite only, scalars up to long double
+    Simpson              // Finite only: adaptive Simpson, as integrate(f, a, b)
+};
+
+struct IntegralOptions {
+    double tolerance = 0.0;        // 0: the rule's own, which follows the scalar's epsilon
+    int max_levels = 9;            // doubly exponential levels
+    Method method = Method::Auto;
+    // Finite only: also run a rule that samples differently (Gauss-Kronrod, or
+    // Simpson beyond long double; the other doubly-exponential-or-Simpson pair when
+    // the primary is Gauss-Kronrod) and call the answer `Suspicious` where the two
+    // differ by more than their estimates allow -- the case no status of one rule
+    // sees (x^0.7 at a loose tolerance). Ignored on an infinite domain.
+    bool witness = false;
+};
+
+// A domain whose ends are read first: the p-test of `improper_ends`, which needs
+// f generic over the scalar. A type rather than a flag so that a function that is
+// not generic never has to compile the series path.
+template<class D> struct Checked { D domain; };
+template<class D> Checked<D> checked(D d) { return {d}; }
+
+namespace quadrature_detail {
+
+template<Scalar T, typename F>
+IntegralResult<T> run(F& f, const Finite<T>& d, const IntegralOptions& o) {
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    switch (o.method) {
+        case Method::Auto:
+        case Method::DoublyExponential: return tanh_sinh(f, d, o.tolerance, o.max_levels);
+        case Method::GaussKronrod:
+            if constexpr (gk_capable<T>()) return gauss_kronrod(f, d.a, d.b, o.tolerance);
+            else return {nan, nan, 0, IntegralStatus::Failed};     // its constants stop at long double
+        case Method::Simpson:
+            return integrate_with_error(f, d.a, d.b, o.tolerance > 0 ? T(o.tolerance) : T(epsilon<T>() * T{1000}));
+    }
+    return {nan, nan, 0, IntegralStatus::Failed};
+}
+
+template<Scalar T, typename F>
+IntegralResult<T> run(F& f, const HalfLine<T>& d, const IntegralOptions& o) {
+    if (o.method == Method::Auto || o.method == Method::DoublyExponential)
+        return tanh_sinh(f, d, o.tolerance, o.max_levels);
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    return {nan, nan, 0, IntegralStatus::Failed};                  // Gauss-Kronrod and Simpson are finite-interval rules
+}
+
+template<Scalar T, typename F>
+IntegralResult<T> run(F& f, const WholeLine<T>& d, const IntegralOptions& o) {
+    if (o.method == Method::Auto || o.method == Method::DoublyExponential)
+        return tanh_sinh(f, d, o.tolerance, o.max_levels);
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    return {nan, nan, 0, IntegralStatus::Failed};
+}
+
+// The primary's answer, and a second rule's: where they differ by more than the
+// sum of their estimates (and a few ulps of their size), neither is vouched for.
+template<Scalar T>
+IntegralResult<T> compare_witnesses(IntegralResult<T> a, const IntegralResult<T>& b) {
+    using std::abs; using std::max;
+    a.evaluations += b.evaluations;
+    if (a.status == IntegralStatus::Failed || b.status == IntegralStatus::Failed) return a;   // no second opinion to hold against it
+    const T gap = abs(T(a.value - b.value));
+    const T slack = T(8.0 * machine_epsilon<T>()) * max(abs(a.value), abs(b.value));
+    if (gap > a.error_estimate + b.error_estimate + slack) {
+        a.error_estimate = max(a.error_estimate, gap);
+        a.status = IntegralStatus::Suspicious;
+    }
+    return a;
+}
+
+}  // namespace quadrature_detail
+
+template<Scalar T, typename F>
     requires Function<F, T, T>
-IntegralResult<T> quadrature_checked(F&& f, Finite<T> d, double tolerance = 0.0, int max_levels = 9) {
-    if (improper_ends<N>(f, d).non_integrable())
-        return {T(std::numeric_limits<double>::quiet_NaN()), T(std::numeric_limits<double>::quiet_NaN()), 0, IntegralStatus::Divergent};
-    return quadrature(f, d, tolerance, max_levels);
+IntegralResult<T> integrate(F&& f, Finite<T> d, IntegralOptions o = {}) {
+    using namespace quadrature_detail;
+    IntegralResult<T> primary = run(f, d, o);
+    if (!o.witness) return primary;
+    IntegralOptions w = o;
+    w.witness = false;
+    w.tolerance = 0.0;       // a witness asks for the rule's own, strictest default: a loose one would weaken it
+    if (o.method == Method::GaussKronrod) w.method = Method::DoublyExponential;
+    else if constexpr (quadrature_detail::gk_capable<T>()) w.method = Method::GaussKronrod;
+    else w.method = Method::Simpson;
+    if (o.method == Method::Simpson && w.method == Method::Simpson) w.method = Method::DoublyExponential;
+    return compare_witnesses(primary, run(f, d, w));
 }
 
-template<Scalar T, int N = 8, typename F>
+template<Scalar T, typename F>
     requires Function<F, T, T>
-IntegralResult<T> quadrature_checked(F&& f, HalfLine<T> d, double tolerance = 0.0, int max_levels = 9) {
-    if (improper_ends<N>(f, d).non_integrable())
-        return {T(std::numeric_limits<double>::quiet_NaN()), T(std::numeric_limits<double>::quiet_NaN()), 0, IntegralStatus::Divergent};
-    return quadrature(f, d, tolerance, max_levels);
+IntegralResult<T> integrate(F&& f, HalfLine<T> d, IntegralOptions o = {}) {
+    return quadrature_detail::run(f, d, o);
 }
 
-// The line has no endpoint to carry the scalar: `quadrature_checked<Real50>(f, WholeLine{})`.
-template<Scalar T = double, int N = 8, typename F>
+template<Scalar T, typename F>
     requires Function<F, T, T>
-IntegralResult<T> quadrature_checked(F&& f, WholeLine d, double tolerance = 0.0, int max_levels = 9) {
-    if (improper_ends<N, T>(f, d).non_integrable())
-        return {T(std::numeric_limits<double>::quiet_NaN()), T(std::numeric_limits<double>::quiet_NaN()), 0, IntegralStatus::Divergent};
-    return quadrature<T>(f, d, tolerance, max_levels);
+IntegralResult<T> integrate(F&& f, WholeLine<T> d, IntegralOptions o = {}) {
+    return quadrature_detail::run(f, d, o);
+}
+
+namespace quadrature_detail {
+template<Scalar T>
+IntegralResult<T> divergent() {
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    return {nan, nan, 0, IntegralStatus::Divergent};
+}
+}  // namespace quadrature_detail
+
+template<Scalar T, typename F>
+    requires Function<F, T, T>
+IntegralResult<T> integrate(F&& f, Checked<Finite<T>> c, IntegralOptions o = {}) {
+    if (improper_ends(f, c.domain).non_integrable()) return quadrature_detail::divergent<T>();
+    return integrate(f, c.domain, o);
+}
+
+template<Scalar T, typename F>
+    requires Function<F, T, T>
+IntegralResult<T> integrate(F&& f, Checked<HalfLine<T>> c, IntegralOptions o = {}) {
+    if (improper_ends(f, c.domain).non_integrable()) return quadrature_detail::divergent<T>();
+    return integrate(f, c.domain, o);
+}
+
+template<Scalar T, typename F>
+    requires Function<F, T, T>
+IntegralResult<T> integrate(F&& f, Checked<WholeLine<T>> c, IntegralOptions o = {}) {
+    if (improper_ends(f, c.domain).non_integrable()) return quadrature_detail::divergent<T>();
+    return integrate(f, c.domain, o);
 }
 
 }  // namespace algebra
