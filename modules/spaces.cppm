@@ -20,6 +20,7 @@ import spatium.mesh;
 #include <spatium/spaces/spd.hpp>
 #include <spatium/spaces/product.hpp>
 #include <spatium/spaces/metric_chart.hpp>
+#include <spatium/spaces/pullback.hpp>
 #include <spatium/spaces/integrate_volume.hpp>
 #include <spatium/spaces/parametric.hpp>
 #include <spatium/spaces/implicit.hpp>
