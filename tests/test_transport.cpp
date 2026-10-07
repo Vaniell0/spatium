@@ -7,6 +7,7 @@
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/euclidean.hpp>
 #include <cmath>
+#include <numbers>
 
 using namespace spatium;
 using namespace spatium::mesh;
@@ -140,4 +141,33 @@ TEST_CASE("Transport on trivial path returns original", "[transport]") {
     CHECK_THAT(result[0], WithinAbs(0.1, 1e-15));
     CHECK_THAT(result[1], WithinAbs(0.2, 1e-15));
     CHECK_THAT(result[2], WithinAbs(0.0, 1e-15));
+}
+
+// ── Schild's ladder is a limit in the size of the vector ──────
+
+TEST_CASE("Transport of a unit vector along a quarter great circle is exact", "[transport][symmetry]") {
+    // Schild's ladder is parallel transport in the limit of a small vector; laddering a
+    // full-length one gave a 46% error here (findings 16). On the equator, from (1,0,0) to
+    // (0,1,0), the vector pointing at the pole stays pointing at the pole, with its length;
+    // the one pointing along the path turns with it. Both are known exactly. The tolerance
+    // is the floor of the method on a sphere, ~1e-8 relative, measured 3e-9 and 7e-9 (the acos in its log is good
+    // to eps / h for points h apart), with room.
+    S2 sphere;
+    Mesh<S2> mesh;
+    mesh.vertices = {Vec<double, 3>{1, 0, 0}, Vec<double, 3>{0, 1, 0}};
+    GeodesicPath<S2> path;
+    path.vertices = {0, 1};
+    path.total_length = std::numbers::pi / 2;
+
+    for (const double length : {1.0, 0.3, 2.0}) {
+        const auto north = parallel_transport(sphere, mesh, path, Vec<double, 3>{0, 0, length});
+        CHECK_THAT(north[0], WithinAbs(0.0, 1e-7 * length));
+        CHECK_THAT(north[1], WithinAbs(0.0, 1e-7 * length));
+        CHECK_THAT(north[2], WithinAbs(length, 1e-7 * length));
+
+        const auto along = parallel_transport(sphere, mesh, path, Vec<double, 3>{0, length, 0});
+        CHECK_THAT(along[0], WithinAbs(-length, 1e-7 * length));      // the direction of travel at (1,0,0) is +y; at (0,1,0) it is -x
+        CHECK_THAT(along[1], WithinAbs(0.0, 1e-7 * length));
+        CHECK_THAT(along[2], WithinAbs(0.0, 1e-7 * length));
+    }
 }
