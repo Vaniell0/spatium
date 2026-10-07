@@ -26,6 +26,7 @@ add_executable(spatium_tests
     test_transform.cpp
     test_product.cpp
     test_metric_chart.cpp
+    test_integrate_volume.cpp
     test_constant_curvature.cpp
     test_minkowski.cpp
     test_lie_group_manifold.cpp
