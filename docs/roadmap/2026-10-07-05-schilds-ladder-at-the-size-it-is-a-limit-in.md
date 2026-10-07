@@ -3,5 +3,11 @@ date: 2026-10-07
 title: Schild's ladder at the size it is a limit in
 stage: 2.1
 closes: [16]
+open:
+  - riemannian_minimize without HasNormal
+  - the geodesic and Lie-group algorithms on the customization points
+  - the floor of Schild's ladder, 1e-8, stays until the logs of close points are stable; the pole ladder, exact on symmetric spaces, is not implemented
+  - a stable angle (the atan2 form) for the distance and log of Sphere and Hyperbolic near p = q (stage 6)
+resolves: [2026-10-07-06#1]
 ---
 Stage 2.1, findings 16. Schild's ladder is parallel transport in the limit of a small vector, and `parallel_transport` laddered the vector at full length. Along a quarter of a great circle on the sphere, from (1,0,0) to (0,1,0), the vector pointing at the pole must stay pointing at the pole; measured, the error of the transported vector was 30%, 96% and 168% of its length for lengths 0.3, 1 and 2 (the one along the path was exact, the direction of travel being the ladder's own axis). Transport is linear, so the vector is now scaled to a small size h, laddered over the whole path and scaled back, which leaves a relative error of order h (the ladder's h^2 truncation divided by the scale); a second ladder at h/2 and the extrapolation 2 T(h/2) - T(h) removes that term. The size is what the rounding allows: a sphere's `log_map` between points h apart goes through `acos` and is good to eps/h in the angle, eps/h^2 relative to the vector -- the same acos-near-one that makes a distance of 1.5e-8 where the derived one is 0 (docs/open-problem-rsc.md) -- so truncation (h^2) and rounding (eps/h^2) meet at h = eps^(1/4). Measured after: 3.4e-9 for the pole vector and 7.1e-9 for the one along the path, at every length, since the answer is linear in the vector. The floor stays until the logs of close points are stable (stage 6, precision), and the test is written to that floor (1e-7), not past it. A test written to fail first holds it, exact on both directions at three lengths; the existing transport tests are unchanged. Not done: `riemannian_minimize` without `HasNormal`, the geodesic and Lie-group algorithms on the customization points.
