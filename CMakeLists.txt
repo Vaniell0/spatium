@@ -157,6 +157,7 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/octonion.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/quadrature.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/series.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/monte_carlo.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/verify.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_so3.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_se3.cppm
