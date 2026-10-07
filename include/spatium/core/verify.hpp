@@ -199,4 +199,57 @@ VerifyResult verify_norm_consistency(const S& space,
     return verify_norm_consistency(space, std::span{v}, tolerance);
 }
 
+
+// ── Lorentzian axioms ──────────────────────────────────────────
+// A Lorentzian space has no distance, so `verify_metric` does not apply; these
+// are the axioms it has instead.
+// 1. interval(x, x) == 0, interval(x, y) == interval(y, x)
+// 2. causal(x, y) agrees with the sign of interval(x, y)
+// 3. the reverse triangle inequality: for x << y << z (each in the timelike
+//    future of the one before), proper_time(x, z) >= proper_time(x, y) +
+//    proper_time(y, z) -- the longest time between two events is the straight one
+// Which is the one that tells a Lorentzian form from one with the wrong
+// signature: with two time directions it fails.
+template<class S>
+    requires LorentzianManifold<S>
+VerifyResult verify_lorentzian(const S& space,
+                               std::span<const typename S::PointType> samples,
+                               typename S::ScalarType tolerance = typename S::ScalarType{1e-9}) {
+    using T = typename S::ScalarType;
+    using std::abs;
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        if (abs(T(space.interval(samples[i], samples[i]))) > tolerance)
+            return VerifyResult::fail("interval(x, x) != 0");
+        for (std::size_t j = 0; j < samples.size(); ++j) {
+            const T sij = space.interval(samples[i], samples[j]);
+            if (abs(T(sij - space.interval(samples[j], samples[i]))) > tolerance)
+                return VerifyResult::fail("interval is not symmetric");
+            const Causal c = space.causal(samples[i], samples[j]);
+            if (sij < T{-1e-6} && c != Causal::Timelike) return VerifyResult::fail("negative interval not classed timelike");
+            if (sij > T{1e-6} && c != Causal::Spacelike) return VerifyResult::fail("positive interval not classed spacelike");
+        }
+    }
+    for (std::size_t i = 0; i < samples.size(); ++i)
+        for (std::size_t j = 0; j < samples.size(); ++j) {
+            if (!(space.causal(samples[i], samples[j]) == Causal::Timelike && space.precedes(samples[i], samples[j]))) continue;
+            for (std::size_t k = 0; k < samples.size(); ++k) {
+                if (!(space.causal(samples[j], samples[k]) == Causal::Timelike && space.precedes(samples[j], samples[k]))) continue;
+                const T direct = space.proper_time(samples[i], samples[k]);
+                const T via = T(space.proper_time(samples[i], samples[j]) + space.proper_time(samples[j], samples[k]));
+                if (direct + tolerance < via)
+                    return VerifyResult::fail("reverse triangle inequality fails: a detour through a timelike event is longer");
+            }
+        }
+    return VerifyResult::ok();
+}
+
+template<class S>
+    requires LorentzianManifold<S>
+VerifyResult verify_lorentzian(const S& space,
+                               std::initializer_list<typename S::PointType> samples,
+                               typename S::ScalarType tolerance = typename S::ScalarType{1e-9}) {
+    std::vector<typename S::PointType> v(samples);
+    return verify_lorentzian(space, std::span<const typename S::PointType>{v}, tolerance);
+}
+
 } // namespace spatium

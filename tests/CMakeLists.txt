@@ -27,6 +27,7 @@ add_executable(spatium_tests
     test_product.cpp
     test_metric_chart.cpp
     test_constant_curvature.cpp
+    test_minkowski.cpp
     test_cos_sinc.cpp
     test_dimension_theorems.cpp
     test_octonion.cpp

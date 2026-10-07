@@ -129,6 +129,7 @@ if(SPATIUM_USE_MODULES)
     spatium_module(NAME spatium_core_module
         PARTITIONS
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/causal.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/concepts.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/access.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/error.cppm
