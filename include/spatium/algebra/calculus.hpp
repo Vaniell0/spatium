@@ -127,12 +127,17 @@ T adaptive_simpson(F& f, T a, T b, T fa, T fm, T fb, T whole, T eps, int depth,
 //   DepthCapped  panels were accepted only because the depth ran out; the
 //                estimate is large and says so
 //   Failed       a bound or a value was NaN or infinite; the value is NaN
+//   Divergent    the integral does not exist, and the series of the
+//                integrand at an end proves it (`quadrature_checked`, the
+//                p-test: f ~ d^p at distance d from a finite end diverges for
+//                p <= -1, and f ~ x^-p at infinity for p <= 1); no number is
+//                computed, the value is NaN
 //
 // Two rules that agree and are both under-sampling are still both wrong; no
 // status of one rule can see that. It takes a third witness that samples
 // differently (tanh-sinh, or intervals on a partition), and a disagreement
 // among witnesses is the signal.
-enum class IntegralStatus { Converged, Suspicious, DepthCapped, Failed };
+enum class IntegralStatus { Converged, Suspicious, DepthCapped, Failed, Divergent };
 
 // The answer of a quadrature: the value, and what the rule knows about it.
 //

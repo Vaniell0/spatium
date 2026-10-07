@@ -3,6 +3,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/algebra/calculus.hpp>
+#  include <spatium/algebra/series.hpp>
 #  include <spatium/core/concepts.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <algorithm>
@@ -306,6 +307,108 @@ IntegralResult<T> gauss_kronrod(F&& f, T a, T b, double tolerance = 0.0) {
     const T value = quadrature_detail::gk15_adaptive(f, a, b, tol, 20, error, evaluations, capped, finite_values);
     if (!finite_values) return {nan, nan, evaluations, IntegralStatus::Failed};
     return {value, error, evaluations, capped ? IntegralStatus::DepthCapped : IntegralStatus::Converged};
+}
+
+// ── What the ends decide ──────────────────────────────────────
+//
+// Whether an improper integral exists is decided by how f behaves at the ends
+// of the domain, and that is what a Series reads exactly (series.hpp). Near a
+// finite end at distance d, f ~ c d^p is integrable iff p > -1; at infinity,
+// f ~ c x^-p is integrable iff p > 1. The test is the leading term alone,
+// which dominates a one-sided neighbourhood, so the verdict is a proof where
+// it is given, not an estimate -- and where f is not a Laurent series there
+// (exp(-x) at infinity, log x at 0, sin(x)/x, which is only conditionally
+// convergent) it is `Undetermined` and the numerical rule goes on alone.
+//
+// It reads the ends and only the ends: a singularity in the interior is not
+// seen. f must be callable on a Series as well as on a T, i.e. a generic
+// function with math through ADL, the codebase's rule.
+
+enum class EndBehaviour { Integrable, NonIntegrable, Undetermined };
+
+struct EndReport {
+    EndBehaviour verdict = EndBehaviour::Undetermined;
+    // f ~ d^order, in the distance d to a finite end or in 1/x at infinity.
+    double order = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct EndsReport {
+    EndReport first, second;     // Finite: a then b. HalfLine: `from` then infinity. WholeLine: -inf then +inf.
+    bool non_integrable() const {
+        return first.verdict == EndBehaviour::NonIntegrable || second.verdict == EndBehaviour::NonIntegrable;
+    }
+    bool integrable() const {
+        return first.verdict == EndBehaviour::Integrable && second.verdict == EndBehaviour::Integrable;
+    }
+};
+
+namespace quadrature_detail {
+
+template<Scalar T>
+EndReport finite_end(const LimitResult<T>& lr) {
+    if (!lr.determined()) return {};
+    if (lr.kind == LimitKind::Infinite)
+        return {lr.exponent <= -lr.ramification ? EndBehaviour::NonIntegrable : EndBehaviour::Integrable, lr.order()};
+    return {EndBehaviour::Integrable, lr.order()};
+}
+
+template<Scalar T>
+EndReport infinity_end(const LimitResult<T>& lr) {
+    if (!lr.determined()) return {};
+    // f ~ c t^e with x = 1/t^r, i.e. x^-(e/r): integrable iff e > r. A growing f
+    // (e < 0) and a constant (e = 0) are not.
+    return {lr.exponent > lr.ramification ? EndBehaviour::Integrable : EndBehaviour::NonIntegrable, lr.order()};
+}
+
+}  // namespace quadrature_detail
+
+template<int N = 8, Scalar T, typename F>
+EndsReport improper_ends(F&& f, Finite<T> d) {
+    if (d.b < d.a) std::swap(d.a, d.b);
+    return {quadrature_detail::finite_end(limit<N>(f, d.a, Approach::Right)),
+            quadrature_detail::finite_end(limit<N>(f, d.b, Approach::Left))};
+}
+
+template<int N = 8, Scalar T, typename F>
+EndsReport improper_ends(F&& f, HalfLine<T> d) {
+    return {quadrature_detail::finite_end(limit<N>(f, d.from, d.toward_infinity ? Approach::Right : Approach::Left)),
+            quadrature_detail::infinity_end(limit_at_infinity<N, T>(f, !d.toward_infinity))};
+}
+
+template<int N = 8, Scalar T = double, typename F>
+EndsReport improper_ends(F&& f, WholeLine) {
+    return {quadrature_detail::infinity_end(limit_at_infinity<N, T>(f, true)),
+            quadrature_detail::infinity_end(limit_at_infinity<N, T>(f, false))};
+}
+
+// `quadrature`, preceded by the proof that the integral exists: where the
+// series of f at an end shows it does not, the answer is `Divergent` at once,
+// with no number and no evaluations spent -- not `DepthCapped` after the rule
+// has run out of levels on 1/x. Where the series cannot say, the rule runs
+// as it always does.
+template<Scalar T, int N = 8, typename F>
+    requires Function<F, T, T>
+IntegralResult<T> quadrature_checked(F&& f, Finite<T> d, double tolerance = 0.0, int max_levels = 9) {
+    if (improper_ends<N>(f, d).non_integrable())
+        return {T(std::numeric_limits<double>::quiet_NaN()), T(std::numeric_limits<double>::quiet_NaN()), 0, IntegralStatus::Divergent};
+    return quadrature(f, d, tolerance, max_levels);
+}
+
+template<Scalar T, int N = 8, typename F>
+    requires Function<F, T, T>
+IntegralResult<T> quadrature_checked(F&& f, HalfLine<T> d, double tolerance = 0.0, int max_levels = 9) {
+    if (improper_ends<N>(f, d).non_integrable())
+        return {T(std::numeric_limits<double>::quiet_NaN()), T(std::numeric_limits<double>::quiet_NaN()), 0, IntegralStatus::Divergent};
+    return quadrature(f, d, tolerance, max_levels);
+}
+
+// The line has no endpoint to carry the scalar: `quadrature_checked<Real50>(f, WholeLine{})`.
+template<Scalar T = double, int N = 8, typename F>
+    requires Function<F, T, T>
+IntegralResult<T> quadrature_checked(F&& f, WholeLine d, double tolerance = 0.0, int max_levels = 9) {
+    if (improper_ends<N, T>(f, d).non_integrable())
+        return {T(std::numeric_limits<double>::quiet_NaN()), T(std::numeric_limits<double>::quiet_NaN()), 0, IntegralStatus::Divergent};
+    return quadrature<T>(f, d, tolerance, max_levels);
 }
 
 }  // namespace algebra
