@@ -29,6 +29,8 @@ add_executable(spatium_tests
     test_integrate_volume.cpp
     test_constant_curvature.cpp
     test_minkowski.cpp
+    test_l2.cpp
+    test_dimension.cpp
     test_lie_group_manifold.cpp
     test_cos_sinc.cpp
     test_dimension_theorems.cpp

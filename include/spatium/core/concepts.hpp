@@ -4,13 +4,12 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <concepts>
 #  include <spatium/core/causal.hpp>
+#  include <spatium/core/dimension.hpp>
 #  include <cstddef>
 #endif
 
 SPATIUM_EXPORT namespace spatium {
 
-// Sentinel for runtime-determined dimension
-inline constexpr std::size_t kDynamic = static_cast<std::size_t>(-1);
 
 // ── Scalar ─────────────────────────────────────────────────────
 
@@ -118,7 +117,7 @@ concept HilbertSpace = InnerProductSpace<S> && Complete<S>;
 template<typename S>
 concept EuclideanSpace = HilbertSpace<S>
     && requires {
-        requires (S::dimension != kDynamic);
+        requires Dimension(S::dimension).is_finite();    // a basis: not dynamic, not a space of functions
     };
 
 // ── Manifold sub-requirements ──────────────────────────────────
