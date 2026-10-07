@@ -4,6 +4,7 @@
 
 #include <benchmark/benchmark.h>
 #include <spatium/spatial/bvh.hpp>
+#include <spatium/mesh/tessellate.hpp>
 #include <spatium/geometry/triangle.hpp>
 #include <spatium/geometry/line.hpp>
 #include <spatium/geometry/ray_surface.hpp>

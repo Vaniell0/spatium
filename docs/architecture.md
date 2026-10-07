@@ -366,11 +366,11 @@ one, and shouldn't be read as one. The real, current dependency graph is
 generated from actual `#include` statements by `scripts/
 gen_dependency_graph.py` into `docs/dependency-graph.dot`, checked by CI
 so this can't drift silently again. Two things that listing order gets
-wrong: `spaces/` and `mesh/` have a genuine mutual dependency
-(`spaces/parametric.hpp` and `spaces/implicit.hpp` need `mesh/mesh.hpp`
-for tessellation; `mesh/primitives.hpp` needs `spaces/euclidean.hpp` and
-friends for the surfaces its generators build on) — neither is really
-"below" the other. `discrete/` (billed above as independent finite-set
+wrong: `spaces/` and `mesh/` had a mutual dependency until the
+materialisers moved (`tessellate` and `marching_cubes` live in
+`mesh/tessellate.hpp` now, so a surface in `spaces/` knows nothing of
+meshes and `mesh/` builds on `spaces/`, one way; the graph shows the edge
+`spaces -> mesh` gone). `discrete/` (billed above as independent finite-set
 theory) reaches into both `algebra/` and `geometry/`, so it isn't the
 zero-dependency base its position implies either. Regenerate the graph
 (`python3 scripts/gen_dependency_graph.py`) whenever this section

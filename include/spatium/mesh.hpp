@@ -22,6 +22,7 @@
 #include <spatium/mesh/subdivision.hpp>
 #include <spatium/mesh/lod.hpp>
 #include <spatium/mesh/primitives.hpp>
+#include <spatium/mesh/tessellate.hpp>
 #include <spatium/mesh/topology.hpp>
 #include <spatium/mesh/geodesic.hpp>
 #include <spatium/mesh/transport.hpp>
