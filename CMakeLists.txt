@@ -130,6 +130,7 @@ if(SPATIUM_USE_MODULES)
         PARTITIONS
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/causal.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/dimension.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/concepts.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/access.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/error.cppm

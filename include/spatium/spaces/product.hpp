@@ -69,9 +69,9 @@ struct Pair {
 // A factor's intrinsic dimension: its own, or, for a space that states
 // none, the length of its tangent vectors.
 template<class S>
-constexpr std::size_t dimension_of() {
-    if constexpr (requires { S::dimension; }) return S::dimension;
-    else return size_of<spaces::tangent_t<S>>();
+constexpr Dimension dimension_of() {
+    if constexpr (requires { S::dimension; }) return Dimension(S::dimension);
+    else return Dimension(size_of<spaces::tangent_t<S>>());
 }
 
 template<class S>
@@ -104,7 +104,8 @@ struct ProductSpace {
     using PointType = std::conditional_t<flat, Vec<T, A1 + A2>, product_detail::Pair<P1, P2>>;
     using TangentVector = std::conditional_t<flat, Vec<T, A1 + A2>, product_detail::Pair<V1, V2>>;
 
-    static constexpr std::size_t dimension =
+    // finite factors add; an infinite one makes the product infinite, a dynamic one dynamic
+    static constexpr Dimension dimension =
         product_detail::dimension_of<S1>() + product_detail::dimension_of<S2>();
     static constexpr bool is_complete = product_detail::complete_of<S1>() && product_detail::complete_of<S2>();
 
