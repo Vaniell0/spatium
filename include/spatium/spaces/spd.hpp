@@ -82,8 +82,10 @@ EigenSym3<T> eigen_sym(const Matrix<T, 3, 3>& S) {
     T det = a * (d * f - e * e) - b * (b * f - e * c) + c * (b * e - d * c);
 
     // lambda^3 - trace*lambda^2 + q*lambda - det = 0
-    auto roots = solve_cubic(T{1}, -trace, q, -det);
-    Vec<T, 3> values{roots[0].re, roots[1].re, roots[2].re};
+    // T(...) on every argument: a Boost.Multiprecision number<> returns a lazy expression
+    // from unary minus, and solve_cubic<T> cannot deduce T from four different types.
+    auto roots = solve_cubic(T{1}, T(-trace), q, T(-det));
+    Vec<T, 3> values{T(roots[0].re), T(roots[1].re), T(roots[2].re)};
 
     // Multiplicity detection, scaled to the matrix's own magnitude and
     // compared directly on the eigenvalues themselves (not inferred from a
