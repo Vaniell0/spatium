@@ -26,6 +26,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <type_traits>
 #include <vector>
 
 namespace symmetry {
@@ -335,9 +336,77 @@ inline Entry geometry_precision() {
     }};
 }
 
+// ── The derivative of a distance to a primitive: Dual against central differences ──
+//
+// The gradient of the distance from a point to a segment, a triangle and a box with respect to
+// the point, taken through `Dual` and by differences. Away from the places where the nearest
+// feature switches (a measure-zero set, and a step of 1e-6 does not reach it on these draws) the
+// distance is smooth, and the two must agree to what a difference allows, 1e-8 here (the worst measured is 7e-10).
+template<class T>
+std::vector<double> distance_gradients(const std::vector<double>& u, const Vec<double, 3>& p0, int axis, double shift) {
+    using namespace spatium::geometry;
+    const double* d = u.data();
+    Vec<T, 3> p{T(p0[0]), T(p0[1]), T(p0[2])};
+    if constexpr (std::is_same_v<T, spatium::Dual<double>>) {
+        p[axis] = T::variable(p0[axis]);
+    } else {
+        p[axis] = T(p0[axis] + shift);
+    }
+    const Segment<3, T> s{geometry_point<T>(d + 3), geometry_point<T>(d + 6)};
+    const Triangle<3, T> t(geometry_point<T>(d + 15), geometry_point<T>(d + 18), geometry_point<T>(d + 21));
+    const Vec<T, 3> lo = geometry_point<T>(d + 33);
+    const Box<3, T> box{lo, lo + Vec<T, 3>{T(1), T(1), T(1)}};
+    const T results[3] = {distance(p, s), distance(p, t), distance(p, box)};
+    std::vector<double> out;
+    for (const T& r : results) {
+        if constexpr (std::is_same_v<T, spatium::Dual<double>>) out.push_back(r.deriv);
+        else out.push_back(r);
+    }
+    return out;
+}
+
+inline Entry distance_derivatives() {
+    return {"geometry: the derivative of a distance, Dual against differences", 2000, [] {
+        return check<std::vector<double>>(
+            "geometry: the derivative of a distance, Dual against differences", Kind::Function, 2000,
+            [](std::size_t i) {
+                std::vector<double> u(40);
+                for (std::size_t k = 0; k < 40; ++k) u[k] = -2 + 4 * halton(k < 32 ? i : i + 104729, k % 32);
+                return u;
+            },
+            [](const std::vector<double>& u) {
+                std::vector<double> g;
+                const Vec<double, 3> p{u[0], u[1], u[2]};
+                for (int axis = 0; axis < 3; ++axis) {
+                    const auto v = distance_gradients<spatium::Dual<double>>(u, p, axis, 0.0);
+                    g.insert(g.end(), v.begin(), v.end());
+                }
+                return g;
+            },
+            [](const std::vector<double>& u) {
+                std::vector<double> g;
+                const Vec<double, 3> p{u[0], u[1], u[2]};
+                const double h = 1e-6;
+                for (int axis = 0; axis < 3; ++axis) {
+                    const auto hi = distance_gradients<double>(u, p, axis, +h);
+                    const auto lo = distance_gradients<double>(u, p, axis, -h);
+                    for (std::size_t k = 0; k < hi.size(); ++k) g.push_back((hi[k] - lo[k]) / (2 * h));
+                }
+                return g;
+            },
+            [](const std::vector<double>& a, const std::vector<double>& b) {
+                double worst = 0.0;
+                for (std::size_t k = 0; k < a.size(); ++k) worst = std::max(worst, std::abs(a[k] - b[k]));
+                return worst;
+            },
+            [](const std::vector<double>&) { return 1e-8; });
+    }};
+}
+
 inline std::vector<Entry> all_pairs() {
     return {ray_torus_precision(),         ray_torus_against_chart(), spd3_eigenvalues_precision(),
-            geometry_precision(),          gradient_dual_against_differences(), sphere_exp_log()};
+            geometry_precision(),          distance_derivatives(),    gradient_dual_against_differences(),
+            sphere_exp_log()};
 }
 
 }  // namespace symmetry
