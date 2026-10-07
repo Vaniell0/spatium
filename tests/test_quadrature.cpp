@@ -177,3 +177,71 @@ TEST_CASE("Gauss-Kronrod carries a derivative", "[quadrature][dual]") {
     const auto r = gauss_kronrod([p](D x) { return exp(p * log(x)); }, D(0.0), D(1.0));
     CHECK_THAT(r.value.deriv, WithinAbs(-1.0 / (2.5 * 2.5), 1e-8));
 }
+
+// ── the ends decide whether it exists ──────────────────────────
+
+TEST_CASE("the p-test reads the order of f at the ends, exactly", "[quadrature][series]") {
+    // 1/sqrt(x) on [0,1]: order -1/2 at 0, integrable; finite at 1.
+    auto inv_root = [](auto x) { return 1.0 / sqrt(x); };
+    auto e = improper_ends(inv_root, Finite<double>{0.0, 1.0});
+    CHECK(e.integrable());
+    CHECK(e.first.order == -0.5);
+
+    // 1/x on [0,1]: order -1 is the boundary, and it diverges (logarithmically).
+    auto inv = [](auto x) { return 1.0 / x; };
+    e = improper_ends(inv, Finite<double>{0.0, 1.0});
+    CHECK(e.first.verdict == EndBehaviour::NonIntegrable);
+    CHECK(e.second.verdict == EndBehaviour::Integrable);
+
+    // 1/x^2 on [1, inf): decays like x^-2, integrable; 1/x on [1, inf): x^-1, not.
+    e = improper_ends([](auto x) { return 1.0 / (x * x); }, HalfLine<double>{1.0});
+    CHECK(e.integrable());
+    CHECK(e.second.order == 2.0);
+    CHECK(improper_ends(inv, HalfLine<double>{1.0}).second.verdict == EndBehaviour::NonIntegrable);
+
+    // x^-1.5 integrates at infinity (ramification 2), 1/sqrt(x) does not.
+    CHECK(improper_ends([](auto x) { return pow(x, -1.5); }, HalfLine<double>{1.0}).second.verdict == EndBehaviour::Integrable);
+    CHECK(improper_ends(inv_root, HalfLine<double>{1.0}).second.verdict == EndBehaviour::NonIntegrable);
+
+    // a growing function and a constant do not decay at all
+    CHECK(improper_ends([](auto x) { return x * 1.0; }, HalfLine<double>{0.0}).non_integrable());
+    CHECK(improper_ends([](auto x) { return x * 0.0 + 1.0; }, HalfLine<double>{0.0}).non_integrable());
+
+    // the whole line: 1/(1+x^2) integrable at both infinities, x/(1+x^2) not
+    CHECK(improper_ends([](auto x) { return 1.0 / (x * x + 1.0); }, WholeLine{}).integrable());
+    CHECK(improper_ends([](auto x) { return x / (x * x + 1.0); }, WholeLine{}).non_integrable());
+}
+
+TEST_CASE("quadrature_checked names a divergence instead of running out of levels", "[quadrature][series]") {
+    auto inv = [](auto x) { return 1.0 / x; };
+    const auto d = quadrature_checked<double>(inv, Finite<double>{0.0, 1.0});
+    CHECK(d.status == IntegralStatus::Divergent);
+    CHECK(d.evaluations == 0);
+    CHECK(std::isnan(d.value));
+    CHECK(!d.trusted());
+
+    CHECK(quadrature_checked<double>(inv, HalfLine<double>{1.0}).status == IntegralStatus::Divergent);
+    CHECK(quadrature_checked<double>([](auto x) { return x * 1.0; }, WholeLine{}).status == IntegralStatus::Divergent);
+}
+
+TEST_CASE("where the series cannot say, the rule goes on alone", "[quadrature][series]") {
+    // log x at 0 is not a Laurent series: undetermined, and the numerical answer stands.
+    auto lg = [](auto x) { return log(x); };
+    CHECK(improper_ends(lg, Finite<double>{0.0, 1.0}).first.verdict == EndBehaviour::Undetermined);
+    const auto r = quadrature_checked<double>(lg, Finite<double>{0.0, 1.0});
+    CHECK(r.trusted());
+    CHECK_THAT(r.value, WithinAbs(-1.0, 1e-10));
+
+    // exp(-x) decays faster than any power: not a series at infinity either.
+    auto ex = [](auto x) { return exp(x * -1.0); };
+    CHECK(improper_ends(ex, HalfLine<double>{0.0}).second.verdict == EndBehaviour::Undetermined);
+    CHECK_THAT(quadrature_checked<double>(ex, HalfLine<double>{0.0}).value, WithinAbs(1.0, 1e-11));
+
+    // conditionally convergent: sin(x)/x is not a series at infinity; no verdict either way.
+    CHECK(improper_ends([](auto x) { return sin(x) / x; }, HalfLine<double>{1.0}).second.verdict == EndBehaviour::Undetermined);
+
+    // and where the ends are fine the number is the one `quadrature` gives
+    const auto g = quadrature_checked<double>([](auto x) { return 1.0 / (x * x + 1.0); }, WholeLine{});
+    CHECK(g.trusted());
+    CHECK_THAT(g.value, WithinAbs(kPi, 1e-10));
+}

@@ -5,5 +5,6 @@ import spatium.core;
 import :concepts;
 import :dual;
 import :calculus;
+import :series;
 #define SPATIUM_BUILDING_MODULE 1
 #include <spatium/algebra/quadrature.hpp>
