@@ -76,7 +76,6 @@ was not re-read before new work.
 | 22 | Scene save/load keeps only `base_color` | `io/scene.hpp:410-418` | open |
 | 23 | Truncated binary STL read as ok; OBJ face index out of range accepted; OBJ written with 6 fixed decimals | `io/stl.hpp`, `io/obj.hpp` | open |
 | 24 | `Morphism::invert()` dereferences an empty optional | `morphism.hpp:40-42` | open |
-| 25 | `Hyperbolic` subdivision projects vertically, not to the geodesic midpoint (area 9.42 vs 2.23 after 5 levels); fix: midpoint = `spaces::midpoint` | `spaces/hyperbolic.hpp:77`, `mesh/subdivision.hpp` | open |
 | 26 | `Hyperbolic::contains` absolute tolerance rejects 147/256 of its own exp_map outputs at r ≥ 3 | `spaces/hyperbolic.hpp:35` | open |
 | 27 | `GeodesicMethod` overload fails `static_assert` without Eigen even for Dijkstra | `mesh/geodesic.hpp:131` | open |
 | 28 | `MeshTopology` silently overwrites a third face on an edge | `mesh/topology.hpp:86` | open |

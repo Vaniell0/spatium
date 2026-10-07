@@ -2,6 +2,7 @@
 
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
+#  include <spatium/core/access.hpp>
 #  include <spatium/mesh/mesh.hpp>
 #  include <unordered_map>
 #  include <utility>
@@ -33,9 +34,10 @@ Mesh<S> subdivide_once(const Mesh<S>& m, const S& space) {
         if (auto it = midpoint_cache.find(key); it != midpoint_cache.end())
             return it->second;
 
-        auto mid_ambient = (result.vertices[a] + result.vertices[b])
-                           * typename S::ScalarType{0.5};
-        auto mid_on_surface = space.project(mid_ambient);
+        // The point halfway along the geodesic, in the space's own metric. Projecting
+        // the chord's midpoint is that only where the projection happens to be radial
+        // (a sphere): on the hyperboloid it goes vertically, off the geodesic.
+        auto mid_on_surface = spaces::midpoint(space, result.vertices[a], result.vertices[b]);
 
         auto idx = static_cast<uint32_t>(result.vertices.size());
         result.vertices.push_back(mid_on_surface);
@@ -115,9 +117,8 @@ Mesh<S> subdivide_adaptive(const Mesh<S>& m, const S& space,
             auto key = std::minmax(a, b);
             if (auto it = midpoint_cache.find(key); it != midpoint_cache.end())
                 return it->second;
-            auto mid = (next.vertices[a] + next.vertices[b]) * T{0.5};
             auto idx = static_cast<uint32_t>(next.vertices.size());
-            next.vertices.push_back(space.project(mid));
+            next.vertices.push_back(spaces::midpoint(space, next.vertices[a], next.vertices[b]));
             midpoint_cache[key] = idx;
             return idx;
         };
