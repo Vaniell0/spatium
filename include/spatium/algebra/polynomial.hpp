@@ -94,6 +94,49 @@ std::vector<T> real_roots_quadratic(T a, T b, T c, T eps = epsilon<T>()) {
     return result;
 }
 
+// ── Polishing the real roots of a closed form ────────────────
+//
+// Cardano's and Ferrari's formulas are exact on paper and lose digits on a
+// machine: the branch tests are absolute (`disc <= epsilon`), and a resolvent
+// root that is small or a pair of roots that nearly coincide sends the error
+// up by a power of the scalar's epsilon. Found by a pair of paths, not by a
+// test anybody wrote: ray_torus on `double` against `Real50`, random rays
+// through the torus's box, one ray in twenty thousand had both of its hits off
+// by 4e-4 with the other roots a gap of 3.8 away (the point from `double` was
+// not on the torus, the one from `Real50` was).
+//
+// Two Newton steps on the polynomial itself repair that: 4.3e-4 to 2e-11 on the
+// same rays, and nothing else moved. A step is taken only if it lowers |p|, so
+// a double root, where Newton is slow and p' is nearly 0, stays where the
+// closed form put it. On a `Dual` the same step carries the derivative of the
+// root through the implicit-function theorem, to first order.
+namespace polynomial_detail {
+
+template<Scalar T, std::size_t N>
+T polish_root(const std::array<T, N>& c, T x) {
+    using std::abs;
+    for (int it = 0; it < 2; ++it) {
+        T p = c[0], dp{0};
+        for (std::size_t k = 1; k < N; ++k) { dp = T(dp * x + p); p = T(p * x + c[k]); }
+        if (!(abs(dp) > T{0})) break;
+        const T x1 = T(x - p / dp);
+        T p1 = c[0];
+        for (std::size_t k = 1; k < N; ++k) p1 = T(p1 * x1 + c[k]);
+        if (!(abs(p1) < abs(p))) break;
+        x = x1;
+    }
+    return x;
+}
+
+template<Scalar T, std::size_t M, std::size_t N>
+UpTo<Complex<T>, M> polish_real_roots(UpTo<Complex<T>, M> roots, const std::array<T, N>& c) {
+    for (auto& r : roots)
+        if (r.im == T{0}) r.re = polish_root(c, r.re);
+    return roots;
+}
+
+}  // namespace polynomial_detail
+
 // ── Cubic solver (Cardano) ────────────────────────────────────
 // ax³ + bx² + cx + d = 0 → up to 3 roots
 
@@ -137,9 +180,11 @@ UpTo<Complex<T>, 3> solve_cubic(T a, T b, T c, T d) {
         // Complex roots via Vieta
         auto re_part = -(u + v) / T{2} + shift;
         auto im_part = (u - v) * sqrt(T{3}) / T{2};
-        return {Complex<T>{real_root},
-                Complex<T>{re_part, im_part},
-                Complex<T>{re_part, -im_part}};
+        return polynomial_detail::polish_real_roots<T>(
+            UpTo<Complex<T>, 3>{Complex<T>{real_root},
+                                Complex<T>{re_part, im_part},
+                                Complex<T>{re_part, -im_part}},
+            std::array<T, 4>{a, b, c, d});
     } else if (abs(disc) <= epsilon<T>()) {
         // All real, at least two equal. u = cbrt(-q1/2) in general, but
         // cbrt has an infinite derivative at 0 -- for the triple-root case
@@ -157,16 +202,20 @@ UpTo<Complex<T>, 3> solve_cubic(T a, T b, T c, T d) {
         // the third exactly double is the -u/-u/2u structure below showing
         // through). Skip the amplification entirely when it can't matter.
         auto u = (abs(q1) <= epsilon<T>()) ? T{0} : cbrt(-q1 / T{2});
-        return {Complex<T>{T{2} * u + shift},
-                Complex<T>{-u + shift},
-                Complex<T>{-u + shift}};
+        return polynomial_detail::polish_real_roots<T>(
+            UpTo<Complex<T>, 3>{Complex<T>{T{2} * u + shift},
+                                Complex<T>{-u + shift},
+                                Complex<T>{-u + shift}},
+            std::array<T, 4>{a, b, c, d});
     } else {
         // Three distinct real roots (casus irreducibilis)
         auto m = T{2} * sqrt(-p1 / T{3});
         auto theta = acos(T{3} * q1 / (p1 * m)) / T{3};
-        return {Complex<T>{m * cos(theta) + shift},
-                Complex<T>{m * cos(theta - T{2} * pi / T{3}) + shift},
-                Complex<T>{m * cos(theta - T{4} * pi / T{3}) + shift}};
+        return polynomial_detail::polish_real_roots<T>(
+            UpTo<Complex<T>, 3>{Complex<T>{m * cos(theta) + shift},
+                                Complex<T>{m * cos(theta - T{2} * pi / T{3}) + shift},
+                                Complex<T>{m * cos(theta - T{4} * pi / T{3}) + shift}},
+            std::array<T, 4>{a, b, c, d});
     }
 }
 
@@ -206,10 +255,12 @@ UpTo<Complex<T>, 4> solve_quartic(T a, T b, T c, T d, T e) {
         // and Complex<T>{expr, expr} can't implicitly convert both of a
         // 2-argument brace-init at once -- an explicit cast per argument
         // sidesteps that instead of relying on an implicit conversion.
-        return {Complex<T>{T(r0.re + shift), T(r0.im)},
-                Complex<T>{T(-r0.re + shift), T(-r0.im)},
-                Complex<T>{T(r1.re + shift), T(r1.im)},
-                Complex<T>{T(-r1.re + shift), T(-r1.im)}};
+        return polynomial_detail::polish_real_roots<T>(
+            UpTo<Complex<T>, 4>{Complex<T>{T(r0.re + shift), T(r0.im)},
+                                Complex<T>{T(-r0.re + shift), T(-r0.im)},
+                                Complex<T>{T(r1.re + shift), T(r1.im)},
+                                Complex<T>{T(-r1.re + shift), T(-r1.im)}},
+            std::array<T, 5>{a, b, c, d, e});
     }
 
     // Resolvent cubic: 8m³ + 8αm² + 2(α²-4γ)m - β² = 0
@@ -286,10 +337,12 @@ UpTo<Complex<T>, 4> solve_quartic(T a, T b, T c, T d, T e) {
     auto roots1 = solve_quadratic(T{1}, T(-sq_2m), T(half_alpha + m + half_beta_over_sq));
     auto roots2 = solve_quadratic(T{1}, T(sq_2m), T(half_alpha + m - half_beta_over_sq));
 
-    return {Complex<T>{T(roots1[0].re + shift), T(roots1[0].im)},
-            Complex<T>{T(roots1[1].re + shift), T(roots1[1].im)},
-            Complex<T>{T(roots2[0].re + shift), T(roots2[0].im)},
-            Complex<T>{T(roots2[1].re + shift), T(roots2[1].im)}};
+    return polynomial_detail::polish_real_roots<T>(
+        UpTo<Complex<T>, 4>{Complex<T>{T(roots1[0].re + shift), T(roots1[0].im)},
+                            Complex<T>{T(roots1[1].re + shift), T(roots1[1].im)},
+                            Complex<T>{T(roots2[0].re + shift), T(roots2[0].im)},
+                            Complex<T>{T(roots2[1].re + shift), T(roots2[1].im)}},
+        std::array<T, 5>{a, b, c, d, e});
 }
 
 // Convenience: real roots only

@@ -7,6 +7,7 @@
 
 using namespace spatium;
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 
 // ── Quadratic ────────────────────────────────────────────────
 
@@ -281,6 +282,33 @@ TEST_CASE("Quartic: torus resolvent coefficients that used to come back (inf,inf
 // to compare Spatium's own double vs. Real50 precision -- not a hypothetical
 // bug, solve_cubic<Real50> failed to compile at all before this fix, on
 // every branch.
+
+TEST_CASE("Cubic and quartic: the real roots are polished, so exact binary roots come back to the last digit",
+          "[polynomial]") {
+    // The closed forms test their branches against an absolute epsilon and lose digits when the
+    // roots differ in size: (x - 0.5)(x - 1)(x - 1024) came back with a relative error of 1.7e-11
+    // and (x - 1/4)(x - 2)(x - 64)(x - 4096) with 6.6e-10. Every coefficient here is exact in
+    // binary, so the roots are known exactly. Two Newton steps on the polynomial itself bring
+    // them to 1e-16 and 0.
+    const auto close = [](std::vector<double> got, std::vector<double> exact) {
+        std::sort(got.begin(), got.end());
+        std::sort(exact.begin(), exact.end());
+        REQUIRE(got.size() == exact.size());
+        for (std::size_t i = 0; i < got.size(); ++i)
+            CHECK_THAT(got[i], WithinRel(exact[i], 1e-14));
+    };
+    {
+        std::vector<double> got;
+        for (const auto& r : solve_cubic(1.0, -1025.5, 1536.5, -512.0)) if (r.is_real(0.0)) got.push_back(r.re);
+        close(got, {0.5, 1.0, 1024.0});
+    }
+    {
+        // e1..e4 of the roots 1/4, 2, 64, 4096, all exact.
+        std::vector<double> got;
+        for (const auto& r : solve_quartic(1.0, -4162.25, 271504.5, -591904.0, 131072.0)) if (r.is_real(0.0)) got.push_back(r.re);
+        close(got, {0.25, 2.0, 64.0, 4096.0});
+    }
+}
 
 TEST_CASE("Quadratic with Real50", "[polynomial]") {
     auto roots = solve_quadratic(Real50{1}, Real50{-5}, Real50{6});

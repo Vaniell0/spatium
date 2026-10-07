@@ -1,0 +1,19 @@
+---
+date: 2026-10-07
+title: The first pairs of the registry, and the root they found
+stage: 1
+files: [tests/symmetry/pair.hpp, tests/symmetry/pairs.hpp, tests/test_symmetry.cpp, tests/test_polynomial.cpp, tests/CMakeLists.txt, include/spatium/algebra/polynomial.hpp, include/spatium/geometry/ray_surface.hpp]
+open:
+  - the registry holds three pairs; the pairs that live as single tests (member / ADL / derived, erased / typed, interpret / eval_into, host / device, the closed form of a sweep against the chart, ray_torus against ray_parametric) are not moved into it
+  - nothing renders the registry, so there is no generated list of the pairs, their tolerances and how many inputs each was held on
+  - no pair declares its trusted base or the `uses` of its two paths, so the independence of a witness is not checked for any of them
+  - the closed forms still test their branches against an absolute epsilon (a cubic whose discriminant is within epsilon of 0 takes the double-root branch whatever its scale); the polish repairs the real roots that come out of a wrong branch, not the branch
+  - the sampler is a Halton sequence written for the registry, because the library's Sobol generator is private to its integrator
+  - qualified std:: math calls were found and fixed in three places of geometry/ray_surface.hpp; the rest of geometry/ was not audited here
+---
+
+`tests/symmetry/` is the registry the second stage of the plan asked for, and it starts with what it is for. A pair has a reference, a route, a sampler, a distance and a bound: the sum of what each of the two paths is allowed to be off by at that input, not a tolerance chosen by eye. A pair is a Function (another path to the same value) or a Relation (an axiom the route must satisfy), and they are two things, not two steps of one scale. The report says how many inputs the pair was held on and the measure of the set where it may still disagree: 3/N by the rule of three when nothing failed. A verifier gets a case it must fail, as everywhere else in the library, and a distance that is not finite is a failure, never a pass. Three pairs are in it: `ray_torus` on `double` against the same code on `Real50`, the gradient through `Dual` against central differences, and `log` after `exp` on the sphere.
+
+The first pair found a root that was wrong. `ray_torus<Real50>` did not compile: `torus_basis` called `std::abs` qualified, which blocks the scalar's own `abs` (the class of bug the plan lists for a lint, here met by a pair instead). With that fixed, 20 000 random rays through the box of a torus (15 846 of them hitting) had no hit gained or lost, and one ray, the 5 037th, had both of its hits off by 4.3e-4 against fifty digits while the other two roots were 3.8 away. The point from `double` did not lie on the torus (the implicit function read 6.5e-3 there), the point from `Real50` did (1e-15). The cause is in the closed forms: Cardano's and Ferrari's branch tests are absolute, and a small resolvent root or nearly coinciding roots send the error up by a power of epsilon. Two Newton steps on the polynomial itself, taken only when they lower |p|, repair it: 4.3e-4 to 2e-11 on the same rays, and nothing else moved. On polynomials whose roots are exact in binary and differ in size the repair is larger still: (x - 1/2)(x - 1)(x - 1024) came back with a relative error of 1.7e-11 before and 1.1e-16 after, (x - 1/4)(x - 2)(x - 64)(x - 4096) 6.6e-10 before and 0 after, held in `test_polynomial.cpp`. The consumers are the ones that were already there: `ray_torus`, and the eigenvalues of a 3 by 3 SPD matrix, which take their roots from `solve_cubic`.
+
+This is the old precision domain of the RSC module (which scalar a solver should run on) in its first real form: a call site with a real alternative, a reference (`Real50`) and a measured disagreement rate, 1 ray in 20 000.

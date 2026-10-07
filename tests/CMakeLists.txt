@@ -145,6 +145,7 @@ endif()
 if(SPATIUM_BOOST)
     target_sources(spatium_tests PRIVATE
         test_precision.cpp
+        test_symmetry.cpp
         test_rsc_registry.cpp
         test_rsc_task.cpp
         test_rsc_ccd.cpp
