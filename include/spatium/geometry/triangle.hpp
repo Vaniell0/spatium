@@ -91,6 +91,7 @@ struct Triangle {
     // Returns (u, v, w) where p ≈ u*v0 + v*v1 + w*v2, u+v+w=1.
     // Works by projecting onto the triangle's plane in N-D.
     Vec<T, 3> barycentric(const PointType& p) const {
+        using std::abs;
         auto v0 = e01();
         auto v1 = e02();
         auto v2 = p - vertices[0];
@@ -102,7 +103,7 @@ struct Triangle {
         auto d21 = v2.dot(v1);
 
         auto denom = d00 * d11 - d01 * d01;
-        if (std::abs(denom) < epsilon<T>() * epsilon<T>())
+        if (abs(denom) < epsilon<T>() * epsilon<T>())
             return Vec<T, 3>{T{1} / T{3}, T{1} / T{3}, T{1} / T{3}}; // degenerate
 
         auto v = (d11 * d20 - d01 * d21) / denom;
