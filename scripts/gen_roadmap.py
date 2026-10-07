@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Generate the history entries of docs/ROADMAP.md from docs/roadmap/*.md.
+"""The history entries of the roadmap: docs/roadmap/*.md, one file per entry.
 
-An entry of the roadmap's history -- what was done, what was measured, what was
-not done -- is one file, `docs/roadmap/<date>-<nn>-<slug>.md`:
+An entry is `docs/roadmap/<date>-<nn>-<slug>.md`:
 
     ---
     date: 2026-10-07
@@ -11,19 +10,17 @@ not done -- is one file, `docs/roadmap/<date>-<nn>-<slug>.md`:
     closes: [16, 25]                # optional: findings rows this entry closed (deleted)
     files: [include/spatium/algebra/calculus.hpp, tests/test_calculus.cpp]   # optional
     ---
-    The paragraph(s), as they should read in ROADMAP.md.
+    The paragraph(s), as they should read.
 
-and this script renders them, in file-name order, between the markers
+The files are the roadmap's history, listed by GitHub in name order (the date first).
+They are NOT rendered into docs/ROADMAP.md, and that is deliberate: a rendering
+committed with every change is a shared generated file that two changes in flight both
+edit at its end, and conflict on -- which is the problem the files exist to end. Instead
 
-    <!-- roadmap-entries:begin -->  ...  <!-- roadmap-entries:end -->
+    scripts/gen_roadmap.py            prints the entries as one page (`> page.md` to keep it)
+    scripts/gen_roadmap.py --check    validates them (run in CI)
 
-of docs/ROADMAP.md as `**Title (date).** body`. Why files: every change used to
-append a paragraph at the same place of one 1700-line file, so any two changes in
-flight conflicted at every merge; now each change adds its own file, and the file
-is checked rather than trusted.
-
-`--check` (run in CI) fails when
-  * the generated block is stale;
+`--check` fails when
   * an entry lacks a title or a date, or its date is not the one in its file name;
   * a listed file does not exist in the tree;
   * a findings row an entry says it closed is still in docs/findings-2026-09.md.
@@ -34,10 +31,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ENTRIES = ROOT / "docs" / "roadmap"
-ROADMAP = ROOT / "docs" / "ROADMAP.md"
 FINDINGS = ROOT / "docs" / "findings-2026-09.md"
-BEGIN = "<!-- roadmap-entries:begin -->"
-END = "<!-- roadmap-entries:end -->"
 
 
 def parse(path):
@@ -93,27 +87,16 @@ def render():
 
 def main():
     block, errors = render()
-    text = ROADMAP.read_text(encoding="utf-8")
-    if BEGIN not in text or END not in text:
-        print(f"docs/ROADMAP.md has no {BEGIN} ... {END} markers", file=sys.stderr)
-        return 1
-    head, rest = text.split(BEGIN, 1)
-    _, tail = rest.split(END, 1)
-    new = head + BEGIN + "\n\n" + block + "\n\n" + END + tail
     if "--check" in sys.argv:
-        bad = list(errors)
-        if new != text:
-            bad.append("docs/ROADMAP.md is stale; run scripts/gen_roadmap.py")
-        for b in bad:
+        for b in errors:
             print(b, file=sys.stderr)
-        if bad:
+        if errors:
             return 1
-        print(f"docs/ROADMAP.md is up to date ({len(list(ENTRIES.glob('*.md')))} entries)")
+        print(f"docs/roadmap: {len(list(ENTRIES.glob('*.md')))} entries are valid")
         return 0
     for e in errors:
         print("warning:", e, file=sys.stderr)
-    ROADMAP.write_text(new, encoding="utf-8")
-    print(f"wrote {ROADMAP.relative_to(ROOT)}")
+    print(block)
     return 0
 
 
