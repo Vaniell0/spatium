@@ -54,9 +54,21 @@ Set                         — PointType, ScalarType, dimension, equality
       │              └── (+ Complete) → HilbertSpace
       │                   └── (+ finite dim) → EuclideanSpace
       └── Manifold           — TangentVector, exp_map, log_map
-           ├── RiemannianManifold — metric_at(point, u, v)
+           ├── RiemannianManifold — metric_at(point, u, v), and a distance (it is a MetricSpace)
+           ├── LorentzianManifold — metric_at, interval, causal, proper_time, precedes; no distance
            └── Surface            — project(point), normal(point)
 ```
+
+`LorentzianManifold` is a different concept from `RiemannianManifold`, not a weaker one, and a
+space that satisfies it is deliberately not a `MetricSpace`: the metric is not positive definite,
+so two distinct points can be at interval zero (on a light cone), and for events a signal can join
+the triangle inequality runs the other way. What replaces the metric axioms is the squared
+interval, a causal class (`Causal`: timelike, null, spacelike), a proper time between
+timelike-related events and the reverse triangle inequality (`verify_lorentzian`). The first
+inhabitant is `Minkowski<N>` in geometric units (`spaces/minkowski.hpp`); `Hyperbolic<N>` is the
+space of its four-velocities. Because the concept is different, a Lorentzian space is checked
+against its own axioms and is not a red cell of the connectivity matrix, which grades the
+Riemannian concept.
 
 Orthogonal composition (all in `core/concepts.hpp`):
 - `VectorSpace` — `PointType` supports linear ops via `VectorType`

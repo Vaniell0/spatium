@@ -3,6 +3,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <concepts>
+#  include <spatium/core/causal.hpp>
 #  include <cstddef>
 #endif
 
@@ -189,6 +190,27 @@ concept Manifold = TopologicalSpace<S> && HasExpMap<S> && HasLogMap<S>;
 template<typename S>
 concept RiemannianManifold =
     Manifold<S> && MetricSpace<S> && HasRiemannianMetric<S>;
+
+// ── LorentzianManifold ─────────────────────────────────────────
+// A different concept from RiemannianManifold, not a weaker one: the metric is
+// not positive definite, so there is no distance (d(x, y) = 0 for distinct
+// points on a light cone, and for events a signal can join the triangle
+// inequality runs the other way). What replaces it is the squared interval, a
+// causal classification, a proper time between timelike-related events and the
+// reverse triangle inequality (`verify_lorentzian`). A space that is
+// Lorentzian is deliberately not a `MetricSpace`.
+
+template<typename S>
+concept HasInterval = requires { typename S::PointType; typename S::ScalarType; }
+    && requires(const S& space, const typename S::PointType& p, const typename S::PointType& q) {
+        { space.interval(p, q) }    -> std::convertible_to<typename S::ScalarType>;
+        { space.causal(p, q) }      -> std::convertible_to<Causal>;
+        { space.proper_time(p, q) } -> std::convertible_to<typename S::ScalarType>;
+        { space.precedes(p, q) }    -> std::convertible_to<bool>;
+    };
+
+template<typename S>
+concept LorentzianManifold = Manifold<S> && HasRiemannianMetric<S> && HasInterval<S>;
 
 // ── Surface ────────────────────────────────────────────────────
 // Manifold embedded in ambient space with projection and normals.

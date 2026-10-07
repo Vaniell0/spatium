@@ -1,6 +1,7 @@
 // Primary module unit for spatium.core. Re-exports all partitions so consumers
 // can `import spatium.core;` and receive the full surface.
 export module spatium.core;
+export import :causal;
 export import :concepts;
 export import :access;
 export import :error;
