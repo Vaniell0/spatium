@@ -97,7 +97,8 @@ ContactQuery<T> point_to_torus(const Vec<T, 3>& p,
     T y = delta.dot(v);
     // delta·w (axial component) is implicit in (p − centreline) below.
 
-    T planar = std::sqrt(x * x + y * y);
+    using std::sqrt;                 // unqualified: Dual and Real50 find their own
+    T planar = sqrt(T(x * x + y * y));
     if (planar < epsilon<T>()) {
         // Point sits on the torus axis — meridional ring is the
         // closest set; pick u as a canonical direction.
