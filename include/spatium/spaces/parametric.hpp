@@ -9,6 +9,7 @@
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/mesh/mesh.hpp>
 #  include <spatium/spaces/metric_chart.hpp>
+#  include <spatium/spaces/pullback.hpp>
 #  include <array>
 #  include <cmath>
 #  include <concepts>
@@ -53,17 +54,9 @@ struct InducedMetric {
     F f;
     template<class S>
     Matrix<S, 2, 2> operator()(const Vec<S, 2>& x) const {
-        const Dual<S> u1 = Dual<S>::variable(x[0]), v0 = Dual<S>::constant(x[1]);
-        const Dual<S> u0 = Dual<S>::constant(x[0]), v1 = Dual<S>::variable(x[1]);
-        const Vec<Dual<S>, 3> fu = f(u1, v0);
-        const Vec<Dual<S>, 3> fv = f(u0, v1);
-        const Vec<S, 3> a{fu[0].deriv, fu[1].deriv, fu[2].deriv};
-        const Vec<S, 3> b{fv[0].deriv, fv[1].deriv, fv[2].deriv};
-        Matrix<S, 2, 2> g{};
-        g(0, 0) = a.dot(a);
-        g(0, 1) = g(1, 0) = a.dot(b);
-        g(1, 1) = b.dot(b);
-        return g;
+        // The pullback of R^3's metric through (u, v) -> f(u, v), by spaces/pullback.hpp.
+        const auto as_map = [this](const auto& uv) { return f(uv[0], uv[1]); };
+        return spaces::pullback_metric<2, 3>(as_map)(x);
     }
 };
 
