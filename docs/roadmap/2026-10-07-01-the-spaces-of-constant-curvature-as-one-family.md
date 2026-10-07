@@ -1,5 +1,12 @@
 ---
 date: 2026-10-07
 title: The spaces of constant curvature as one family
+open:
+  - the family in the connectivity matrix as a row, so the matrix runs its probes on it
+  - Minkowski<N> in geometric units
+  - only the stereographic model: no embedded (hyperboloid, sphere in R^(N+1)) or gnomonic form
+  - the derivative in kappa is checked for distance only, not for exp and log
+resolves: [2026-10-06-10#1, 2026-10-06-11#2]
+stage: 2.9
 ---
 `spaces/constant_curvature.hpp`: `ConstantCurvature<N, T>{kappa}` in the kappa-stereographic model -- sphere for kappa > 0, plane at 0, hyperbolic space for kappa < 0, coordinates in R^N, Mobius addition, `exp_map`, `log_map`, `distance`, `metric_at`, `contains` (the ball of radius 1/sqrt(-kappa) for kappa < 0; a point outside is NaN, not a wrong number). kappa is a value of the space, not a parameter of its type, so a `Dual` kappa gives the derivative of a distance with respect to curvature (checked against a central difference at kappa = -0.7, 0 and 0.7) and a continuous family is one object. The bridge at kappa = 0 is what the audit found already built: `cos_sinc_of_square`, which gains `cos_sinc_signed` (cos(sqrt(w)) and sin(sqrt(w))/sqrt(w) are analytic in w = kappa s through zero and into the negatives), and a new `atan_sinc` for artan_kappa -- each a series near zero and a closed form beyond, so the same code is right at kappa = 1e-100 and at 0 on double, and at 1e-40 on Real50, with no separate case for the flat space (the instability at zero curvature that the kappa-stereographic model is known for is met the same way, by series near zero; what differs here is that one function serves both signs, so the space itself has no branch on which kind it is). Held by pairs that share nothing: kappa = 0 against `Euclidean` (distance, exp, log), kappa = 1 against `Sphere<2>` through the stereographic map and kappa = -1 against `Hyperbolic<2>` through the Poincare ball (distances to 1e-12), the scaling law d_kappa(x, y) = d_1(sqrt(kappa) x, sqrt(kappa) y)/sqrt(kappa) at six curvatures, exp and log inverse with a step of the length it was asked, `verify_metric` and `verify_exp_log` at -1, 0, 1, and the new class of probe: continuity through kappa = 0 (|d(kappa) - d(0)| = O(kappa) from 1e-3 down to 1e-100, both signs, exp and log too). Found on the way: `Dual` had no `atanh`. Not done: the family in the connectivity matrix as a row (so the matrix runs its probes on it), `Minkowski<N>` in geometric units.
