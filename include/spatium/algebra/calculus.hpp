@@ -290,14 +290,14 @@ typename S::TangentVector project_tangent(const S& space,
 }
 
 // Riemannian gradient descent: minimizes a scalar field f defined over a
-// manifold's ambient embedding, via retraction (exp_map) instead of a flat
+// manifold's coordinates (its ambient embedding, or its own), via retraction (exp_map) instead of a flat
 // update -- every iterate lands exactly back on the manifold rather than
 // drifting off and needing a separate projection step. Reuses the same
 // Dual<T>-seeded gradient() as minimize() above; raise_gradient() +
 // project_tangent() convert its ambient covector into the actual
 // Riemannian gradient before retracting along the manifold.
 template<typename S, typename F>
-    requires RiemannianManifold<S> && HasNormal<S>
+    requires RiemannianManifold<S>
           && Function<F, Vec<Dual<typename S::ScalarType>, S::PointType::size>, Dual<typename S::ScalarType>>
           && Function<F, typename S::PointType, typename S::ScalarType>
 typename S::PointType riemannian_minimize(const S& space, F&& f, typename S::PointType theta,
@@ -309,7 +309,12 @@ typename S::PointType riemannian_minimize(const S& space, F&& f, typename S::Poi
     const T armijo_c = T{1} / T{10000};
 
     for (int iter = 0; iter < max_iters; ++iter) {
-        auto g = project_tangent(space, theta, raise_gradient(space, theta, gradient(f, theta)));
+        typename S::TangentVector g = raise_gradient(space, theta, gradient(f, theta));
+        // A hypersurface of an ambient space (a Surface: Sphere, Hyperbolic) has a normal, and
+        // the raised gradient must lose its normal part. A space whose points are coordinates
+        // of the manifold itself (the kappa family, a chart) has none, and nothing to lose:
+        // the raised gradient is already tangent.
+        if constexpr (HasNormal<S>) g = project_tangent(space, theta, g);
         T g2 = abs(space.metric_at(theta, g, g));
         if (sqrt(g2) < grad_tol) break;
 
