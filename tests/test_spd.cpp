@@ -408,3 +408,100 @@ TEST_CASE("Naive matrix addition can break SPD validity; SPDAffineInvariant::exp
     }
     CHECK(naive_broke); // naive DOES break somewhere in these 14 steps
 }
+
+// ── A function of a matrix, differentiated through Dual ───────────────────────
+//
+// d/dt f(S + tM) is the Daleckii-Krein formula, and it must hold where the eigenvalues coincide:
+// the zero matrix and the identity are what exp_map(p, v, t) and a geodesic from the identity hand
+// to exp and log, and a derivative carried through the decomposition was NaN there.
+
+namespace {
+using D = Dual<double>;
+
+template<class F, class FD>
+double derivative_gap(F f, FD fd, const double s[3], const double m[3]) {
+    const auto at = [&](double t) {
+        Matrix<double, 2, 2> a;
+        a(0, 0) = s[0] + t * m[0]; a(0, 1) = a(1, 0) = s[1] + t * m[1]; a(1, 1) = s[2] + t * m[2];
+        return a;
+    };
+    Matrix<D, 2, 2> a;
+    a(0, 0) = D{s[0], m[0]}; a(0, 1) = a(1, 0) = D{s[1], m[1]}; a(1, 1) = D{s[2], m[2]};
+    const double h = 1e-6;
+    const auto plus = f(at(h)), minus = f(at(-h));
+    const auto exact = fd(a);
+    double worst = 0.0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j)
+            worst = std::max(worst, std::abs((plus(i, j) - minus(i, j)) / (2 * h) - exact(i, j).deriv));
+    return worst;
+}
+}  // namespace
+
+TEST_CASE("The derivative of a matrix function through Dual, apart and at a repeated eigenvalue", "[spd]") {
+    using Aff = SPDAffineInvariant<2, double>;
+    using AffD = SPDAffineInvariant<2, D>;
+    const double m[3] = {0.3, -0.2, 0.5};
+
+    SECTION("eigenvalues apart") {
+        const double s[3] = {2.0, 0.6, 1.3};
+        CHECK(derivative_gap([](auto a) { return Aff::sqrt_sym(a); }, [](auto a) { return AffD::sqrt_sym(a); }, s, m) < 1e-8);
+        CHECK(derivative_gap([](auto a) { return Aff::inv_sqrt_sym(a); }, [](auto a) { return AffD::inv_sqrt_sym(a); }, s, m) < 1e-8);
+        CHECK(derivative_gap([](auto a) { return detail::apply_eigen_sym(a, [](double x) { return std::log(x); }); },
+                             [](auto a) { return detail::apply_eigen_sym(a, [](D x) { using std::log; return log(x); }); }, s, m) < 1e-8);
+    }
+    SECTION("the identity: d/dt sqrt(I + tM) = M/2 and d/dt log(I + tM) = M") {
+        const double s[3] = {1.0, 0.0, 1.0};
+        CHECK(derivative_gap([](auto a) { return Aff::sqrt_sym(a); }, [](auto a) { return AffD::sqrt_sym(a); }, s, m) < 1e-8);
+        CHECK(derivative_gap([](auto a) { return detail::apply_eigen_sym(a, [](double x) { return std::log(x); }); },
+                             [](auto a) { return detail::apply_eigen_sym(a, [](D x) { using std::log; return log(x); }); }, s, m) < 1e-8);
+    }
+    SECTION("the zero matrix: d/dt exp(tM) = M, where it used to be NaN") {
+        const double s[3] = {0.0, 0.0, 0.0};
+        CHECK(derivative_gap([](auto a) { return detail::apply_eigen_sym(a, [](double x) { return std::exp(x); }); },
+                             [](auto a) { return detail::apply_eigen_sym(a, [](D x) { using std::exp; return exp(x); }); }, s, m) < 1e-8);
+    }
+    SECTION("the distance along a geodesic is differentiable at t = 0") {
+        const AffD space;
+        Matrix<D, 2, 2> p, q, v;
+        p(0, 0) = D{1.7, 0}; p(0, 1) = p(1, 0) = D{-0.1, 0}; p(1, 1) = D{1.9, 0};
+        q(0, 0) = D{1.6, 0}; q(0, 1) = q(1, 0) = D{0.06, 0}; q(1, 1) = D{0.7, 0};
+        v(0, 0) = D{0.8, 0}; v(0, 1) = v(1, 0) = D{-0.5, 0}; v(1, 1) = D{0.4, 0};
+        const auto d = [&](double t, double slope) { return space.distance(p, space.exp_map(q, v, D{t, slope})); };
+        const double exact = d(0.0, 1.0).deriv;
+        const double fd = (d(1e-6, 0.0).value - d(-1e-6, 0.0).value) / 2e-6;
+        CHECK(std::isfinite(exact));
+        CHECK_THAT(exact, WithinAbs(fd, 1e-6));
+    }
+}
+
+// ── A guard for a compiler: the product of nested Duals ───────────────────────
+//
+// GCC 15.2.0 at -O3 miscompiled the three nested loops of Matrix::operator* when the scalar is a
+// Dual of a Dual (the loop vectorizer): a product of symmetric 2x2 matrices came back with (0,1)
+// and (1,0) different, and the derivative of the SPD distance along a geodesic was wrong in a
+// Release build and right in a Debug one. The product is unrolled for small matrices now. A
+// chain A V A of symmetric matrices is symmetric whatever the arithmetic, so a compiler that gets
+// it wrong shows here, in whatever build type the tests are run.
+TEST_CASE("A chain of symmetric matrices of Dual2 stays symmetric (a guard against a miscompile)", "[spd][dual]") {
+    using D1 = Dual<double>;
+    using D2 = Dual<D1>;
+    const auto symmetric = [](double a, double b, double d) {
+        Matrix<D2, 2, 2> m;
+        m(0, 0) = D2{D1{a, 0}, D1{0, 0}};
+        m(0, 1) = m(1, 0) = D2{D1{b, 0}, D1{0, 0}};
+        m(1, 1) = D2{D1{d, 0}, D1{0, 0}};
+        return m;
+    };
+    const auto a = symmetric(0.79, -0.02, 1.08);
+    const auto v = symmetric(0.824062, -0.538622, 0.368402);
+    const D2 t{D1{0, 0}, D1{1, 0}};
+    const auto chain = a * (v * t) * a;
+    CHECK_THAT(chain(0, 1).deriv.value, WithinAbs(chain(1, 0).deriv.value, 1e-14));
+    CHECK_THAT(chain(0, 1).deriv.deriv, WithinAbs(chain(1, 0).deriv.deriv, 1e-14));
+    // and it is the product: d/dt (a v t a)(0,0) = sum a(0,k) v(k,l) a(l,0)
+    double want = 0.0;
+    for (int k = 0; k < 2; ++k)
+        for (int l = 0; l < 2; ++l) want += a(0, k).value.value * v(k, l).value.value * a(l, 0).value.value;
+    CHECK_THAT(chain(0, 0).deriv.value, WithinAbs(want, 1e-14));
+}

@@ -7,9 +7,11 @@
 #  include <spatium/algebra/vector.hpp>
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/complex.hpp>
+#  include <spatium/algebra/dual.hpp>
 #  include <spatium/algebra/polynomial.hpp>
 #  include <cmath>
 #  include <cstddef>
+#  include <limits>
 #  include <span>
 #endif
 
@@ -32,36 +34,41 @@ struct EigenSym2 {
 
 template<Scalar T>
 EigenSym2<T> eigen_sym(const Matrix<T, 2, 2>& S) {
-    using std::abs;
-    T a = S(0, 0), b = S(0, 1), d = S(1, 1);
-    // Arguments as T, not expressions: solve_quadratic<T> is deduced from all
-    // three, and for a Boost number `-(a + d)` is an expression type.
-    auto roots = solve_quadratic(T{1}, T(-(a + d)), T(a * d - b * b));
-    Vec<T, 2> values{roots[0].re, roots[1].re};
-
+    // The half-angle formulas, not the characteristic quadratic. Taking the eigenvalues from the
+    // quadratic and the vectors as (b, lambda - a) is exact on paper and loses the vectors where
+    // the eigenvalues are close: lambda - a is a difference of nearly equal numbers with an error
+    // of order sqrt(eps) in the root, so the direction is wrong by that over the gap, and
+    // V diag(f(lambda)) V^T missed S by 1e-3 at a distance of 1e-6 from the identity and by 0.15 at
+    // 1e-7 (error ~ eps / gap^2; found by a finite difference of sqrt_sym that did not match its
+    // derivative). Here c = (a - d)/2 and r = hypot(c, b) are formed without cancellation, the
+    // larger eigenvalue is m + r, and its vector is (c + r, b) when c >= 0 and (b, r - c) otherwise,
+    // whichever has no subtraction of like signs; the other vector is perpendicular by construction,
+    // so the pair is orthonormal to rounding whatever the gap.
+    using std::sqrt; using std::abs;
+    const T a = S(0, 0), b = S(0, 1), d = S(1, 1);
+    const T mean = T((a + d) / T{2});
+    const T c = T((a - d) / T{2});
+    // Scaled by the larger of |c| and |b|, so that squaring cannot underflow: a float matrix within
+    // 1e-23 of a scalar one has c*c + b*b = 0 or a denormal and the normalisation below was a 0/0
+    // (the Frechet mean on SPD x S2 in float came back NaN when its iteration converged).
+    const T s = (abs(c) >= abs(b)) ? T(abs(c)) : T(abs(b));
     Matrix<T, 2, 2> vecs;
-    for (std::size_t i = 0; i < 2; ++i) {
-        T lambda = values[i];
-        Vec<T, 2> v;
-        if (abs(b) > epsilon<T>()) {
-            v = Vec<T, 2>{b, lambda - a}.normalized();
-        } else if (abs(a - d) > epsilon<T>()) {
-            // Already diagonal, distinct entries: match each root back to
-            // the diagonal entry it came from.
-            v = (abs(lambda - a) <= abs(lambda - d)) ? Vec<T, 2>{T{1}, T{0}}
-                                                       : Vec<T, 2>{T{0}, T{1}};
-        } else {
-            // a == d (S is a scalar multiple of the identity): every
-            // direction is an eigenvector, so the tie-break above would
-            // pick the SAME one for both i -- e.g. sqrt_sym(I) would
-            // reconstruct U diag(1,1) U^T from a rank-1 (duplicate-column)
-            // U, silently returning a wrong matrix instead of I. Assign by
-            // slot index instead so the pair stays orthonormal.
-            v = (i == 0) ? Vec<T, 2>{T{1}, T{0}} : Vec<T, 2>{T{0}, T{1}};
-        }
-        vecs(0, i) = v[0];
-        vecs(1, i) = v[1];
+    if (s == T{0}) {                               // a scalar matrix: any orthonormal pair, by slot
+        vecs(0, 0) = T{1}; vecs(1, 0) = T{0}; vecs(0, 1) = T{0}; vecs(1, 1) = T{1};
+        return {Vec<T, 2>{mean, mean}, vecs};
     }
+    const T c1 = T(c / s), b1 = T(b / s);
+    const T r1 = T(sqrt(T(c1 * c1 + b1 * b1)));    // in [1, sqrt 2]
+    const T r = T(s * r1);
+    Vec<T, 2> values{T(mean + r), T(mean - r)};
+
+    Vec<T, 2> up;                                  // eigenvector of the larger eigenvalue
+    if (c1 >= T{0}) up = Vec<T, 2>{T(c1 + r1), b1}.normalized();
+    else            up = Vec<T, 2>{b1, T(r1 - c1)}.normalized();
+    vecs(0, 0) = up[0];
+    vecs(1, 0) = up[1];
+    vecs(0, 1) = T(-up[1]);
+    vecs(1, 1) = up[0];
     return {values, vecs};
 }
 
@@ -182,6 +189,53 @@ Matrix<T, N, N> apply_eigen_sym(const Matrix<T, N, N>& S, F&& f) {
     Matrix<T, N, N> D;
     for (std::size_t i = 0; i < N; ++i) D(i, i) = f(eig.values[i]);
     return eig.vectors * D * eig.vectors.transpose();
+}
+
+// The same spectral function of a matrix of Duals, differentiated by the Daleckii-Krein formula
+//     d f(S) = V ( Gamma o (V^T dS V) ) V^T,    Gamma_ij = (f(l_i) - f(l_j)) / (l_i - l_j),  f'(l) when l_i = l_j,
+// not by carrying the Dual through the eigendecomposition. Through it, a repeated eigenvalue is a
+// point where the derivative of a closed-form root is 0/0 or infinite (sqrt of a discriminant that is
+// zero), and the matrix 0 is exactly such a point: exp_map(p, v, t) at t = 0 hands exp the matrix
+// t * P^-1/2 V P^-1/2, whose eigenvalues coincide, and its derivative came back NaN, which is why
+// the affine-invariant SPD distance could not be differentiated along a geodesic. A function of a
+// matrix is analytic where its eigenvalues cross; only the decomposition is not, and this does not
+// differentiate the decomposition. f is called once per eigenvalue on a Dual with slope 1, which
+// gives f and f' together. The eigenvalues are told apart by sqrt(epsilon) of their scale.
+template<std::size_t N, Scalar U, typename F>
+Matrix<Dual<U>, N, N> apply_eigen_sym(const Matrix<Dual<U>, N, N>& S, F&& f) {
+    using D = Dual<U>;
+    Matrix<U, N, N> value, rate;
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j) {
+            value(i, j) = S(i, j).value;
+            rate(i, j) = S(i, j).deriv;
+        }
+    const auto eig = eigen_sym(value);
+    U fv[N], fd[N];
+    for (std::size_t i = 0; i < N; ++i) {
+        const D r = f(D{eig.values[i], U{1}});
+        fv[i] = r.value;
+        fd[i] = r.deriv;
+    }
+    const Matrix<U, N, N> vt = eig.vectors.transpose();
+    const Matrix<U, N, N> q = vt * rate * eig.vectors;      // the perturbation in the eigenbasis
+    Matrix<U, N, N> lambda, g;
+    for (std::size_t i = 0; i < N; ++i) {
+        lambda(i, i) = fv[i];
+        for (std::size_t j = 0; j < N; ++j) {
+            const U gap = eig.values[i] - eig.values[j];
+            const double scale = 1.0 + std::abs(primal_double(eig.values[i])) + std::abs(primal_double(eig.values[j]));
+            const bool apart = std::abs(primal_double(gap)) > std::sqrt(std::numeric_limits<double>::epsilon()) * scale;
+            const U gamma = apart ? U((fv[i] - fv[j]) / gap) : U((fd[i] + fd[j]) / U{2});
+            g(i, j) = gamma * q(i, j);
+        }
+    }
+    const Matrix<U, N, N> r = eig.vectors * lambda * vt;
+    const Matrix<U, N, N> dr = eig.vectors * g * vt;
+    Matrix<D, N, N> out;
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j) out(i, j) = D{r(i, j), dr(i, j)};
+    return out;
 }
 
 } // namespace detail
