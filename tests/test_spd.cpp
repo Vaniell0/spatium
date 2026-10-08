@@ -474,3 +474,34 @@ TEST_CASE("The derivative of a matrix function through Dual, apart and at a repe
         CHECK_THAT(exact, WithinAbs(fd, 1e-6));
     }
 }
+
+// ── A guard for a compiler: the product of nested Duals ───────────────────────
+//
+// GCC 15.2.0 at -O3 miscompiled the three nested loops of Matrix::operator* when the scalar is a
+// Dual of a Dual (the loop vectorizer): a product of symmetric 2x2 matrices came back with (0,1)
+// and (1,0) different, and the derivative of the SPD distance along a geodesic was wrong in a
+// Release build and right in a Debug one. The product is unrolled for small matrices now. A
+// chain A V A of symmetric matrices is symmetric whatever the arithmetic, so a compiler that gets
+// it wrong shows here, in whatever build type the tests are run.
+TEST_CASE("A chain of symmetric matrices of Dual2 stays symmetric (a guard against a miscompile)", "[spd][dual]") {
+    using D1 = Dual<double>;
+    using D2 = Dual<D1>;
+    const auto symmetric = [](double a, double b, double d) {
+        Matrix<D2, 2, 2> m;
+        m(0, 0) = D2{D1{a, 0}, D1{0, 0}};
+        m(0, 1) = m(1, 0) = D2{D1{b, 0}, D1{0, 0}};
+        m(1, 1) = D2{D1{d, 0}, D1{0, 0}};
+        return m;
+    };
+    const auto a = symmetric(0.79, -0.02, 1.08);
+    const auto v = symmetric(0.824062, -0.538622, 0.368402);
+    const D2 t{D1{0, 0}, D1{1, 0}};
+    const auto chain = a * (v * t) * a;
+    CHECK_THAT(chain(0, 1).deriv.value, WithinAbs(chain(1, 0).deriv.value, 1e-14));
+    CHECK_THAT(chain(0, 1).deriv.deriv, WithinAbs(chain(1, 0).deriv.deriv, 1e-14));
+    // and it is the product: d/dt (a v t a)(0,0) = sum a(0,k) v(k,l) a(l,0)
+    double want = 0.0;
+    for (int k = 0; k < 2; ++k)
+        for (int l = 0; l < 2; ++l) want += a(0, k).value.value * v(k, l).value.value * a(l, 0).value.value;
+    CHECK_THAT(chain(0, 0).deriv.value, WithinAbs(want, 1e-14));
+}

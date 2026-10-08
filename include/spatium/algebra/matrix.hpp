@@ -7,6 +7,7 @@
 #  include <spatium/core/epsilon.hpp>
 #  include <spatium/core/error.hpp>
 #  include <array>
+#  include <utility>
 #  include <cmath>
 #  include <cstddef>
 #  include <format>
@@ -77,10 +78,29 @@ struct Matrix {
     template<std::size_t C2>
     constexpr Matrix<T, R, C2> operator*(const Matrix<T, C, C2>& rhs) const {
         Matrix<T, R, C2> result;
-        for (std::size_t c = 0; c < C2; ++c)
-            for (std::size_t r = 0; r < R; ++r)
-                for (std::size_t k = 0; k < C; ++k)
-                    result(r, c) += (*this)(r, k) * rhs(k, c);
+        if constexpr (R * C * C2 <= 64) {
+            // Fully unrolled, for the small matrices this library is made of. Not for speed: GCC 15.2.0
+            // at -O3 miscompiles the three nested loops when T is a Dual of a Dual (the loop vectorizer;
+            // -fno-tree-loop-vectorize or this cures it): the product of two symmetric 2x2 matrices of
+            // Dual2 came back with its (0,1) and (1,0) entries different, and the derivative of the
+            // affine-invariant SPD distance along a geodesic was wrong in a Release build and right in a
+            // Debug one. Twenty-five lines of plain C++ with no library reproduce it.
+            [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+                (([&] {
+                    constexpr std::size_t r = Idx % R, c = Idx / R;
+                    T sum{};
+                    [&]<std::size_t... K>(std::index_sequence<K...>) {
+                        ((sum = sum + (*this)(r, K) * rhs(K, c)), ...);
+                    }(std::make_index_sequence<C>{});
+                    result(r, c) = sum;
+                }()), ...);
+            }(std::make_index_sequence<R * C2>{});
+        } else {
+            for (std::size_t c = 0; c < C2; ++c)
+                for (std::size_t r = 0; r < R; ++r)
+                    for (std::size_t k = 0; k < C; ++k)
+                        result(r, c) += (*this)(r, k) * rhs(k, c);
+        }
         return result;
     }
 
