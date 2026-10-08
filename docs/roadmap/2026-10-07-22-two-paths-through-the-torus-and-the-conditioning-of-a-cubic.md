@@ -2,7 +2,7 @@
 date: 2026-10-07
 title: Two paths through the torus, the conditioning of a cubic, and the primitives that did not compile on fifty digits
 stage: 1
-files: [tests/symmetry/pairs.hpp, tests/test_symmetry.cpp, include/spatium/spaces/spd.hpp, include/spatium/geometry/distance.hpp, include/spatium/geometry/intersection.hpp, include/spatium/geometry/triangle.hpp, include/spatium/geometry/polygon.hpp, include/spatium/physics/mechanics/narrow_phase.hpp]
+files: [tests/symmetry/pairs/ray_torus_chart.cpp, tests/symmetry/pairs/spd3_eigenvalues.cpp, tests/symmetry/pairs/geometry_precision.cpp, tests/symmetry/pairs/polygon_precision.cpp, tests/symmetry/pairs/distance_derivatives.cpp, tests/symmetry/pairs/contact_force.cpp, tests/test_symmetry.cpp, include/spatium/spaces/spd.hpp, include/spatium/geometry/distance.hpp, include/spatium/geometry/intersection.hpp, include/spatium/geometry/triangle.hpp, include/spatium/geometry/polygon.hpp, include/spatium/physics/mechanics/narrow_phase.hpp]
 open:
   - eigen_sym for a 3 by 3 matrix takes its eigenvalues from the characteristic cubic, so near a double eigenvalue it is good to about sqrt(epsilon) times the scale where a Jacobi or QR sweep is good to epsilon times the norm; the SPD log and exp inherit that, and the pair now states it instead of hiding it
   - the eigenvectors of eigen_sym are not in any pair, and a repeated eigenvalue's null space is the place they are most likely to disagree

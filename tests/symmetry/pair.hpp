@@ -89,4 +89,24 @@ struct Entry {
     std::function<Report()> run;
 };
 
+// The registry. A pair is a file in tests/symmetry/pairs/, and the file registers itself: a new
+// pair is a new file, nothing shared is edited, so any number of them can be written at once and
+// each compiles on its own. `build(n)` makes the entry for n inputs (the sweep asks for 300 000).
+struct Registered {
+    std::string name;
+    std::size_t default_samples = 0;
+    std::function<Entry(std::size_t)> build;
+};
+
+inline std::vector<Registered>& registry() {
+    static std::vector<Registered> r;
+    return r;
+}
+
+struct Registrar {
+    Registrar(std::string name, std::size_t default_samples, std::function<Entry(std::size_t)> build) {
+        registry().push_back({std::move(name), default_samples, std::move(build)});
+    }
+};
+
 }  // namespace symmetry

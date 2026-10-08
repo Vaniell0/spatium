@@ -5,15 +5,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "symmetry/pairs.hpp"
+#include "symmetry/common.hpp"
+#include "symmetry/pair.hpp"
 
 using Catch::Matchers::WithinAbs;
 
 TEST_CASE("every registered pair of paths agrees within what its paths can promise", "[symmetry]") {
-    for (const auto& entry : symmetry::all_pairs()) {
+    REQUIRE(symmetry::registry().size() >= 9);
+    for (const auto& registered : symmetry::registry()) {
+        const auto entry = registered.build(registered.default_samples);
         const auto r = entry.run();
-        INFO(r.name << ": " << r.samples << " inputs, " << r.failures << " failures, worst "
-                    << r.worst_ratio << " of the bound, first failure at input " << r.first_failure);
+        INFO(registered.name << " (" << r.name << "): " << r.samples << " inputs, " << r.failures
+                             << " failures, worst " << r.worst_ratio << " of the bound, first failure at input "
+                             << r.first_failure);
         CHECK(r.failures == 0);
         CHECK(r.samples >= entry.min_samples);
         CHECK(r.unmatched_measure() <= 3.0 / static_cast<double>(entry.min_samples) + 1e-12);

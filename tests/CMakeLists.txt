@@ -143,9 +143,15 @@ endif()
 # Same rule the SPATIUM_BUILD_RSC_TOOLS guard states in the top-level
 # CMakeLists: RSC needs arbitrary precision, full stop.
 if(SPATIUM_BOOST)
+    # The registry of pairs of paths: one file per pair in symmetry/pairs/, each registering itself,
+    # so a new pair is a new file and nothing shared is edited. symmetry_sweep runs them on many inputs.
+    file(GLOB SYMMETRY_PAIR_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symmetry/pairs/*.cpp)
+    target_sources(spatium_tests PRIVATE test_symmetry.cpp ${SYMMETRY_PAIR_SOURCES})
+    add_executable(symmetry_sweep EXCLUDE_FROM_ALL symmetry/sweep.cpp ${SYMMETRY_PAIR_SOURCES})
+    target_include_directories(symmetry_sweep PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(symmetry_sweep PRIVATE spatium_core)
     target_sources(spatium_tests PRIVATE
         test_precision.cpp
-        test_symmetry.cpp
         test_rsc_registry.cpp
         test_rsc_task.cpp
         test_rsc_ccd.cpp
