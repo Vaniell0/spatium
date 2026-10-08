@@ -461,8 +461,9 @@ Result<RayProximity<T>> ray_quadric_proximity(const Ray<3, T>& ray, const Quadri
                                      "no closest approach to report"});
 
     // Complex roots: real part = closest approach t, |imag| = miss metric
-    auto closest_t = std::max(roots[0].re, T{0});
-    auto miss = std::abs(roots[0].im);
+    using std::abs; using std::max;      // unqualified, so a scalar that is not a double finds its own
+    auto closest_t = max(roots[0].re, T{0});
+    auto miss = abs(roots[0].im);
     auto closest_pt = ray.origin + ray.direction * closest_t;
 
     return RayProximity<T>{closest_t, miss, closest_pt};
@@ -529,7 +530,8 @@ struct Torus {
 // Orthonormal basis (u, v, w=axis) with w given (unit length).
 template<Scalar T>
 inline void torus_basis(const Vec<T, 3>& w, Vec<T, 3>& u, Vec<T, 3>& v) {
-    Vec<T, 3> helper = std::abs(w[2]) < T{0.9}
+    using std::abs;
+    Vec<T, 3> helper = abs(w[2]) < T{0.9}
         ? Vec<T, 3>{T{0}, T{0}, T{1}}
         : Vec<T, 3>{T{1}, T{0}, T{0}};
     u = w.cross(helper);
@@ -644,7 +646,8 @@ Result<RayProximity<T>> ray_torus_proximity(const Ray<3, T>& ray, const Torus<T>
     T best_im = std::numeric_limits<T>::max();
     T best_t  = T{0};
     for (auto& root : roots) {
-        T im = std::abs(root.im);
+        using std::abs;
+        T im = abs(root.im);
         if (im > T{0} && im < best_im && root.re >= T{0}) {
             best_im = im;
             best_t  = root.re;
