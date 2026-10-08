@@ -17,11 +17,10 @@
 
 SPATIUM_EXPORT namespace spatium {
 
-// internal — do not use, no API stability. Closed-form eigendecomposition
-// of a real symmetric N×N matrix, for N=2,3 only: the eigenvalues are the
-// roots of the characteristic polynomial (degree N), always real for a
-// symmetric matrix, so solve_quadratic()/solve_cubic() give them directly
-// with no iterative eigensolver. General N needs the not-yet-built native
+// internal — do not use, no API stability. Eigendecomposition of a real
+// symmetric N×N matrix, for N=2,3 only: the half-angle formulas for 2 by 2
+// and cyclic Jacobi rotations for 3 by 3, both orthonormal to rounding
+// whatever the gap between the eigenvalues. General N needs the not-yet-built native
 // SVD/eigendecomposition (ROADMAP → Backlog → Native math); this is
 // deliberately scoped to the sizes SPD<N> below actually supports.
 namespace detail {
@@ -80,101 +79,47 @@ struct EigenSym3 {
 
 template<Scalar T>
 EigenSym3<T> eigen_sym(const Matrix<T, 3, 3>& S) {
-    using std::abs;
-    T a = S(0, 0), b = S(0, 1), c = S(0, 2),
-                    d = S(1, 1), e = S(1, 2),
-                                  f = S(2, 2);
-    T trace = a + d + f;
-    T q = (d * f - e * e) + (a * f - c * c) + (a * d - b * b); // sum of principal 2x2 minors
-    T det = a * (d * f - e * e) - b * (b * f - e * c) + c * (b * e - d * c);
-
-    // lambda^3 - trace*lambda^2 + q*lambda - det = 0
-    // T(...) on every argument: a Boost.Multiprecision number<> returns a lazy expression
-    // from unary minus, and solve_cubic<T> cannot deduce T from four different types.
-    auto roots = solve_cubic(T{1}, T(-trace), q, T(-det));
-    Vec<T, 3> values{T(roots[0].re), T(roots[1].re), T(roots[2].re)};
-
-    // Multiplicity detection, scaled to the matrix's own magnitude and
-    // compared directly on the eigenvalues themselves (not inferred from a
-    // shaky cross-product norm below): a general cubic solver locates a
-    // REPEATED root only to about sqrt(machine epsilon), not machine
-    // epsilon -- a double root's location is a genuinely square-root-
-    // sensitive function of the polynomial's coefficients, a standard
-    // numerical-analysis fact, not solve_cubic imprecision. Two roots that
-    // close are the same eigenvalue for null-space purposes even though
-    // they print as two slightly different doubles (e.g. an axisymmetric
-    // inertia tensor's repeated moment routinely comes back as
-    // 3.0000000284 and 2.9999999716, ~5.7e-8 apart).
-    using std::sqrt;
-    T scale = abs(trace) + abs(det);
-    T dup_tol = sqrt(epsilon<T>()) * (scale > T{1} ? scale : T{1});
-
-    Matrix<T, 3, 3> vecs;
-    for (std::size_t i = 0; i < 3; ++i) {
-        bool degenerate = false;
-        for (std::size_t j = 0; j < 3; ++j)
-            if (j != i && abs(values[i] - values[j]) < dup_tol) degenerate = true;
-
-        Matrix<T, 3, 3> A = S - Matrix<T, 3, 3>::identity() * values[i];
-        Vec<T, 3> r0 = A.row(0), r1 = A.row(1), r2 = A.row(2);
-        Vec<T, 3> v;
-
-        if (!degenerate) {
-            // Generic case: rank(A) == 2, null space is 1D -- the cross
-            // product of any two independent rows spans it. Picking the
-            // pair with the largest cross-product norm keeps this stable.
-            Vec<T, 3> c01 = r0.cross(r1), c02 = r0.cross(r2), c12 = r1.cross(r2);
-            T n01 = c01.norm(), n02 = c02.norm(), n12 = c12.norm();
-            v = (n01 >= n02 && n01 >= n12) ? c01 : (n02 >= n12 ? c02 : c12);
-            v = v / v.norm();
-        } else {
-            // rank(A) < 2: an eigenvalue with multiplicity >= 2 (e.g. an
-            // axisymmetric inertia tensor, or the fully degenerate S = c*I).
-            // A's rows are then all (numerically) parallel or all ~0, so
-            // EVERY pair's cross product above would be dominated by noise
-            // regardless of which two rows get picked -- not just the
-            // largest-norm one. Fall back to a construction that doesn't
-            // depend on two rows being independent: cross the single
-            // largest-norm row against a seed not (nearly) parallel to it,
-            // which still spans a genuine direction in the null space; if
-            // that row is itself ~0 (rank 0, triple root), any standard
-            // basis vector works. Two occurrences of the SAME repeated
-            // eigenvalue hit this branch with (numerically) the same A
-            // (hence the same r) -- starting the seed search from a
-            // different standard-basis vector per slot index (rather than
-            // always e_x first) keeps their raw candidates from coming out
-            // identical before Gram-Schmidt even gets a chance to separate
-            // them (which it cannot do to two near-equal vectors: that
-            // subtracts nearly the whole thing).
-            Vec<T, 3> e0{T{1}, T{0}, T{0}}, e1{T{0}, T{1}, T{0}}, e2{T{0}, T{0}, T{1}};
-            T rn0 = r0.norm(), rn1 = r1.norm(), rn2 = r2.norm();
-            Vec<T, 3> r = (rn0 >= rn1 && rn0 >= rn2) ? r0 : (rn1 >= rn2 ? r1 : r2);
-            auto rn = r.norm();
-            if (rn > dup_tol) {
-                Vec<T, 3> seed = (i == 0) ? e0 : (i == 1) ? e1 : e2;
-                if (abs(r.dot(seed)) > T{0.9} * rn) seed = (i == 0) ? e1 : (i == 1) ? e2 : e0;
-                v = r.cross(seed);
-                v = v / v.norm();
-            } else {
-                v = (i == 0) ? e0 : (i == 1) ? e1 : e2;
-            }
+    // Cyclic Jacobi rotations, not the characteristic cubic. The cubic gives the eigenvalues to
+    // sqrt(epsilon) near a repeated root, and the vectors taken from them (a cross product of rows of
+    // S - lambda I) are wrong where the eigenvalues are close: on I + hM the reconstruction
+    // V diag(l) V^T missed by 1.7e-3 at h = 1e-2 and by 0.95, with the vectors no longer orthonormal,
+    // at h = 1e-5. A rotation zeroes one off-diagonal entry of a symmetric matrix exactly and keeps
+    // V orthogonal to rounding whatever the eigenvalues are, so a repeated or a nearly repeated
+    // eigenvalue costs nothing; three entries, a few sweeps (quadratic convergence), 3 by 3 only.
+    // Sorted descending, as the 2 by 2 is.
+    using std::abs; using std::sqrt;
+    Matrix<T, 3, 3> A = S;
+    Matrix<T, 3, 3> V = Matrix<T, 3, 3>::identity();
+    const T eps = epsilon<T>();
+    constexpr std::size_t pairs[3][2] = {{0, 1}, {0, 2}, {1, 2}};
+    for (int sweep = 0; sweep < 32; ++sweep) {
+        bool rotated = false;
+        for (const auto& pq : pairs) {
+            const std::size_t p = pq[0], q = pq[1];
+            const T apq = A(p, q);
+            const T scale = T(abs(A(p, p)) + abs(A(q, q)));
+            if (abs(apq) <= eps * scale * T{0.01} || apq == T{0}) { A(p, q) = T{0}; A(q, p) = T{0}; continue; }
+            const T tau = T((A(q, q) - A(p, p)) / (T{2} * apq));
+            const T t = T((tau >= T{0} ? T{1} : T{-1}) / (abs(tau) + sqrt(T(T{1} + tau * tau))));
+            const T c = T(T{1} / sqrt(T(T{1} + t * t)));
+            const T s = T(t * c);
+            Matrix<T, 3, 3> J = Matrix<T, 3, 3>::identity();
+            J(p, p) = c; J(q, q) = c; J(p, q) = s; J(q, p) = T(-s);
+            A = J.transpose() * A * J;
+            A(p, q) = T{0}; A(q, p) = T{0};            // annihilated by construction; rounding left a speck
+            V = V * J;
+            rotated = true;
         }
-
-        // Gram-Schmidt against columns already placed: eigenvectors of a
-        // symmetric matrix for distinct eigenvalues are exactly orthogonal
-        // already, so this is close to a no-op there -- it earns its keep
-        // only when two roots are nearly equal, where the raw cross-product
-        // above can land anywhere inside the (near-)degenerate eigenspace
-        // instead of orthogonal to the vector already chosen for it.
-        for (std::size_t j = 0; j < i; ++j) {
-            Vec<T, 3> prev{vecs(0, j), vecs(1, j), vecs(2, j)};
-            v = v - prev * prev.dot(v);
-        }
-        auto gn = v.norm();
-        if (gn > epsilon<T>()) v = v / gn;
-
-        vecs(0, i) = v[0]; vecs(1, i) = v[1]; vecs(2, i) = v[2];
+        if (!rotated) break;
     }
+    Vec<T, 3> values{A(0, 0), A(1, 1), A(2, 2)};
+    Matrix<T, 3, 3> vecs = V;
+    for (std::size_t i = 0; i < 2; ++i)                // sort descending, columns with their values
+        for (std::size_t j = i + 1; j < 3; ++j)
+            if (values[j] > values[i]) {
+                const T tmp = values[i]; values[i] = values[j]; values[j] = tmp;
+                for (std::size_t k = 0; k < 3; ++k) { const T col = vecs(k, i); vecs(k, i) = vecs(k, j); vecs(k, j) = col; }
+            }
     return {values, vecs};
 }
 
