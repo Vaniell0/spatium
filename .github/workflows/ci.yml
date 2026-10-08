@@ -10,10 +10,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job has a timeout: a mirror that stops answering during `apt-get update` held a job for the six
+# hours GitHub allows (2026-10-07), twice, and a PR waited on it. The limits are well above the longest
+# run seen; `apt-get update` retries and times out on its own.
 jobs:
   nix-build:
     name: nix build (gcc15 + viewer + Eigen)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +53,7 @@ jobs:
   modules-build:
     name: C++23 modules build (SPATIUM_USE_MODULES=ON)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -69,6 +74,7 @@ jobs:
   connectivity:
     name: connectivity matrix is up to date
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +91,7 @@ jobs:
   dependency-graph:
     name: dependency graph is up to date
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Check docs/dependency-graph.dot matches the real #include graph
@@ -93,6 +100,7 @@ jobs:
   claude-md-layout:
     name: CLAUDE.md directory layout is up to date
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Check CLAUDE.md mentions every real include/spatium/ subdirectory
@@ -101,6 +109,7 @@ jobs:
   doc-file-refs:
     name: docs name only files that exist
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Check every source file named in the docs is in the tree
@@ -109,6 +118,7 @@ jobs:
   capabilities:
     name: capability index is up to date
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Check docs/capabilities/ matches what the headers declare
@@ -117,6 +127,7 @@ jobs:
   roadmap:
     name: roadmap entries are valid
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Check docs/roadmap/*.md (front matter, dates, listed files, closed findings rows)
@@ -125,13 +136,14 @@ jobs:
   bare-build:
     name: cmake build without Nix (gcc15)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends \
             gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev libboost-dev
           # catch2 is not optional when SPATIUM_BUILD_TESTS is on:
@@ -167,6 +179,7 @@ jobs:
   debug-build:
     name: Debug build (asserts actually run)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     # Every other job here builds Release, so NDEBUG removes assert() and
     # a whole class of defect passes CI green: misusing a dependency in a
     # way that dependency catches with an assertion. That is not
@@ -188,7 +201,7 @@ jobs:
       - name: Install toolchain
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends \
             gcc-15 g++-15 cmake ninja-build catch2 libeigen3-dev
 
@@ -214,13 +227,14 @@ jobs:
   bare-build-no-boost:
     name: cmake build with no optional deps at all (gcc15)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           # Deliberately no libboost-dev and no libeigen3-dev: this job is
           # the standing proof that both are genuinely optional. It is the
           # configuration someone evaluating Spatium gets from a bare
@@ -262,13 +276,14 @@ jobs:
   external-consumer:
     name: downstream FetchContent consumer
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends \
             gcc-15 g++-15 cmake ninja-build
 
@@ -292,13 +307,14 @@ jobs:
   installed-consumer:
     name: installed package + find_package(Spatium)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends gcc-15 g++-15 cmake ninja-build
 
       # The other consumer job proves FetchContent. This one proves the
@@ -345,6 +361,7 @@ jobs:
   clang:
     name: clang 19 (libstdc++, no optional deps)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     # This was expected to be red on introduction -- nothing in the tree had
     # ever been compiled by anything but GCC, and std::print appears in 25
     # example and test files. It passed on the first run that got as far as
@@ -360,7 +377,7 @@ jobs:
             | sudo tee /etc/apt/trusted.gpg.d/llvm.asc > /dev/null
           sudo add-apt-repository -y \
             "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main"
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           # libstdc++-14-dev, not libc++: libstdc++ 14 is the first with
           # <print>, and pairing clang with the platform's own standard
           # library is what a downstream user on Linux actually has.
