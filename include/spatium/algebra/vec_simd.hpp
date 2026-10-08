@@ -76,6 +76,17 @@ inline void cross_f4(const float* a, const float* b, float* out) {
     store_f(out, c);
 }
 
+#else // !__SSE2__ (WebAssembly, ARM): stubs so if-constexpr dead branches compile, as for the doubles below.
+      // Found by compiling the core to WASM, which did not build: the float branch of Vec<float,4>
+      // names these functions even where it is never taken.
+
+inline void add_f4(const float*, const float*, float*) {}
+inline void sub_f4(const float*, const float*, float*) {}
+inline void mul_scalar_f4(const float*, float, float*) {}
+inline void div_scalar_f4(const float*, float, float*) {}
+inline float dot_f4(const float*, const float*) { return 0.0f; }
+inline void cross_f4(const float*, const float*, float*) {}
+
 #endif // __SSE2__
 
 // ── double×4 ──────────────────────────────────────────────────
