@@ -273,6 +273,15 @@ jobs:
           g++-15 -std=c++23 -fsyntax-only -Iinclude /tmp/umbrella.cpp
           g++-15 -std=c++23 -fsyntax-only -Iinclude /tmp/core.cpp
 
+      - name: Core compiles for a target without SSE2 (WebAssembly, ARM)
+        run: |
+          # -U__SSE2__ takes the library down the path of a target with no x86 vector unit, on an
+          # x86 runner. It did not compile: the float branch of Vec<float,4> names functions that
+          # existed only under SSE2 (found by building the core for WebAssembly).
+          printf '#include <spatium/spatium.hpp>\nint main() { spatium::Vec<float,4> a{1,2,3,4}, b{4,3,2,1}; auto c = a + b; return (c[0] > 0 && a.dot(b) > 0) ? 0 : 1; }\n' > /tmp/nosse.cpp
+          g++-15 -std=c++23 -U__SSE2__ -Iinclude /tmp/nosse.cpp -o /tmp/nosse
+          /tmp/nosse
+
   external-consumer:
     name: downstream FetchContent consumer
     runs-on: ubuntu-24.04
