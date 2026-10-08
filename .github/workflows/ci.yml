@@ -164,6 +164,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check docs/capabilities/ matches what the headers declare
         run: python3 scripts/gen_capabilities.py --check
+      - name: No name is added without a consumer (the library's rule, counted)
+        run: python3 scripts/gen_consumers.py --check
 
   roadmap:
     name: roadmap entries are valid

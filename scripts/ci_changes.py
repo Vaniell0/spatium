@@ -29,7 +29,7 @@ DOCS_ONLY = [
     r"^LICENSE$",
     r"^gallery/",
     r"\.(png|svg|mp4|gif|jpg)$",
-    r"^scripts/(gen_roadmap|gen_capabilities|gen_dependency_graph|check_claude_md_layout|check_doc_file_refs)\.py$",
+    r"^scripts/(gen_roadmap|gen_capabilities|gen_consumers|gen_dependency_graph|check_claude_md_layout|check_doc_file_refs)\.py$",
 ]
 
 # What the matrix cells read: probes.hpp includes only algebra/, core/ and spaces/ (and the
