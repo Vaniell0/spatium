@@ -2,7 +2,7 @@
 date: 2026-10-07
 title: The first pairs of the registry, and the root they found
 stage: 1
-files: [tests/symmetry/pair.hpp, tests/symmetry/pairs.hpp, tests/test_symmetry.cpp, tests/test_polynomial.cpp, tests/CMakeLists.txt, include/spatium/algebra/polynomial.hpp, include/spatium/geometry/ray_surface.hpp]
+files: [tests/symmetry/pair.hpp, tests/symmetry/pairs/ray_torus_precision.cpp, tests/symmetry/pairs/gradient_dual.cpp, tests/symmetry/pairs/sphere_exp_log.cpp, tests/test_symmetry.cpp, tests/test_polynomial.cpp, tests/CMakeLists.txt, include/spatium/algebra/polynomial.hpp, include/spatium/geometry/ray_surface.hpp]
 open:
   - the registry holds three pairs; the pairs that live as single tests (member / ADL / derived, erased / typed, interpret / eval_into, host / device, the closed form of a sweep against the chart, ray_torus against ray_parametric) are not moved into it
   - nothing renders the registry, so there is no generated list of the pairs, their tolerances and how many inputs each was held on
