@@ -408,3 +408,69 @@ TEST_CASE("Naive matrix addition can break SPD validity; SPDAffineInvariant::exp
     }
     CHECK(naive_broke); // naive DOES break somewhere in these 14 steps
 }
+
+// ── A function of a matrix, differentiated through Dual ───────────────────────
+//
+// d/dt f(S + tM) is the Daleckii-Krein formula, and it must hold where the eigenvalues coincide:
+// the zero matrix and the identity are what exp_map(p, v, t) and a geodesic from the identity hand
+// to exp and log, and a derivative carried through the decomposition was NaN there.
+
+namespace {
+using D = Dual<double>;
+
+template<class F, class FD>
+double derivative_gap(F f, FD fd, const double s[3], const double m[3]) {
+    const auto at = [&](double t) {
+        Matrix<double, 2, 2> a;
+        a(0, 0) = s[0] + t * m[0]; a(0, 1) = a(1, 0) = s[1] + t * m[1]; a(1, 1) = s[2] + t * m[2];
+        return a;
+    };
+    Matrix<D, 2, 2> a;
+    a(0, 0) = D{s[0], m[0]}; a(0, 1) = a(1, 0) = D{s[1], m[1]}; a(1, 1) = D{s[2], m[2]};
+    const double h = 1e-6;
+    const auto plus = f(at(h)), minus = f(at(-h));
+    const auto exact = fd(a);
+    double worst = 0.0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j)
+            worst = std::max(worst, std::abs((plus(i, j) - minus(i, j)) / (2 * h) - exact(i, j).deriv));
+    return worst;
+}
+}  // namespace
+
+TEST_CASE("The derivative of a matrix function through Dual, apart and at a repeated eigenvalue", "[spd]") {
+    using Aff = SPDAffineInvariant<2, double>;
+    using AffD = SPDAffineInvariant<2, D>;
+    const double m[3] = {0.3, -0.2, 0.5};
+
+    SECTION("eigenvalues apart") {
+        const double s[3] = {2.0, 0.6, 1.3};
+        CHECK(derivative_gap([](auto a) { return Aff::sqrt_sym(a); }, [](auto a) { return AffD::sqrt_sym(a); }, s, m) < 1e-8);
+        CHECK(derivative_gap([](auto a) { return Aff::inv_sqrt_sym(a); }, [](auto a) { return AffD::inv_sqrt_sym(a); }, s, m) < 1e-8);
+        CHECK(derivative_gap([](auto a) { return detail::apply_eigen_sym(a, [](double x) { return std::log(x); }); },
+                             [](auto a) { return detail::apply_eigen_sym(a, [](D x) { using std::log; return log(x); }); }, s, m) < 1e-8);
+    }
+    SECTION("the identity: d/dt sqrt(I + tM) = M/2 and d/dt log(I + tM) = M") {
+        const double s[3] = {1.0, 0.0, 1.0};
+        CHECK(derivative_gap([](auto a) { return Aff::sqrt_sym(a); }, [](auto a) { return AffD::sqrt_sym(a); }, s, m) < 1e-8);
+        CHECK(derivative_gap([](auto a) { return detail::apply_eigen_sym(a, [](double x) { return std::log(x); }); },
+                             [](auto a) { return detail::apply_eigen_sym(a, [](D x) { using std::log; return log(x); }); }, s, m) < 1e-8);
+    }
+    SECTION("the zero matrix: d/dt exp(tM) = M, where it used to be NaN") {
+        const double s[3] = {0.0, 0.0, 0.0};
+        CHECK(derivative_gap([](auto a) { return detail::apply_eigen_sym(a, [](double x) { return std::exp(x); }); },
+                             [](auto a) { return detail::apply_eigen_sym(a, [](D x) { using std::exp; return exp(x); }); }, s, m) < 1e-8);
+    }
+    SECTION("the distance along a geodesic is differentiable at t = 0") {
+        const AffD space;
+        Matrix<D, 2, 2> p, q, v;
+        p(0, 0) = D{1.7, 0}; p(0, 1) = p(1, 0) = D{-0.1, 0}; p(1, 1) = D{1.9, 0};
+        q(0, 0) = D{1.6, 0}; q(0, 1) = q(1, 0) = D{0.06, 0}; q(1, 1) = D{0.7, 0};
+        v(0, 0) = D{0.8, 0}; v(0, 1) = v(1, 0) = D{-0.5, 0}; v(1, 1) = D{0.4, 0};
+        const auto d = [&](double t, double slope) { return space.distance(p, space.exp_map(q, v, D{t, slope})); };
+        const double exact = d(0.0, 1.0).deriv;
+        const double fd = (d(1e-6, 0.0).value - d(-1e-6, 0.0).value) / 2e-6;
+        CHECK(std::isfinite(exact));
+        CHECK_THAT(exact, WithinAbs(fd, 1e-6));
+    }
+}

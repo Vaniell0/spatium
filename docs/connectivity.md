@@ -18,7 +18,7 @@ scalar, in its own translation unit, and graded:
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**1115 of 1168 cells at L2 or above.**
+**1119 of 1168 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -68,7 +68,7 @@ holds every cell to the level recorded here.
 | SPDAff | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAff | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAff | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
-| SPDAff | Derivative | L3 | L3 | L3 | L3 | L0 | L0 |
+| SPDAff | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAff | Infinity | L3 | L3 | L3 | L3 | L3 | L3 |
 | TorusChart | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
 | TorusChart | DerivedDistance | L1 | L3 | L1 | L1 | L1 | L1 |
@@ -132,7 +132,7 @@ holds every cell to the level recorded here.
 | SPDAffxS2 | Midpoint | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAffxS2 | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAffxS2 | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
-| SPDAffxS2 | Derivative | L3 | L3 | L3 | L3 | L0 | L0 |
+| SPDAffxS2 | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAffxS2 | Infinity | L3 | L3 | L3 | L3 | L3 | L3 |
 | CylxE3 | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
 | CylxE3 | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |

@@ -179,6 +179,7 @@
     X(spatium::Dual<double>, "Dual", S7, MetricAxioms, 3) \
     X(spatium::Dual<double>, "Dual", S7, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", S7, VerifyExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", SPDAff, Derivative, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, ExpLog, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, FrechetMean, 3) \
@@ -186,6 +187,7 @@
     X(spatium::Dual<double>, "Dual", SPDAff, MetricAxioms, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", SPDAff, VerifyExpLog, 3) \
+    X(spatium::Dual<double>, "Dual", SPDAffxS2, Derivative, 3) \
     X(spatium::Dual<double>, "Dual", SPDAffxS2, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", SPDAffxS2, ExpLog, 3) \
     X(spatium::Dual<double>, "Dual", SPDAffxS2, FrechetMean, 3) \
@@ -337,6 +339,7 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, MetricAxioms, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", S2xS2, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, Derivative, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, ExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, FrechetMean, 3) \
@@ -344,6 +347,7 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, MetricAxioms, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAff, VerifyExpLog, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAffxS2, Derivative, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAffxS2, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAffxS2, ExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDAffxS2, FrechetMean, 3) \
