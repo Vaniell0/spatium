@@ -79,10 +79,10 @@ inline std::vector<double> torus_hits_real50(const TorusRay& s) {
     return t;
 }
 
-inline Entry ray_torus_precision() {
-    return {"ray_torus: double against Real50", 6000, [] {
+inline Entry ray_torus_precision(std::size_t n = 6000) {
+    return {"ray_torus: double against Real50", n, [n] {
         return check<TorusRay>(
-            "ray_torus: double against Real50", Kind::Function, 6000, torus_ray,
+            "ray_torus: double against Real50", Kind::Function, n, torus_ray,
             torus_hits_real50, torus_hits_double,
             [](const std::vector<double>& a, const std::vector<double>& b) {
                 if (a.size() != b.size()) return std::numeric_limits<double>::infinity();          // a hit gained or lost is not a rounding
@@ -105,10 +105,10 @@ T gradient_test_function(const Vec<T, 3>& x) {
     return sin(x[0] * x[1]) + exp(x[2]) * x[0];
 }
 
-inline Entry gradient_dual_against_differences() {
-    return {"gradient: Dual against central differences", 2000, [] {
+inline Entry gradient_dual_against_differences(std::size_t n = 2000) {
+    return {"gradient: Dual against central differences", n, [n] {
         return check<Vec<double, 3>>(
-            "gradient: Dual against central differences", Kind::Function, 2000,
+            "gradient: Dual against central differences", Kind::Function, n,
             [](std::size_t i) { return Vec<double, 3>{-2 + 4 * halton(i, 0), -2 + 4 * halton(i, 1), -2 + 4 * halton(i, 2)}; },
             [](const Vec<double, 3>& x) {
                 return spatium::gradient([](const Vec<spatium::Dual<double>, 3>& v) { return gradient_test_function(v); }, x);
@@ -148,11 +148,11 @@ inline SphereVector sphere_vector(std::size_t i, double radius) {
     return {n * radius, t};
 }
 
-inline Entry sphere_exp_log() {
-    return {"Sphere: log after exp is the identity", 2000, [] {
+inline Entry sphere_exp_log(std::size_t n = 2000) {
+    return {"Sphere: log after exp is the identity", n, [n] {
         const spatium::Sphere<2> s{.radius = 2.0};
         return check<SphereVector>(
-            "Sphere: log after exp is the identity", Kind::Relation, 2000,
+            "Sphere: log after exp is the identity", Kind::Relation, n,
             [](std::size_t i) { return sphere_vector(i, 2.0); },
             [](const SphereVector& x) { return x.v; },
             [&](const SphereVector& x) {
@@ -170,11 +170,11 @@ inline Entry sphere_exp_log() {
 // Newton search over the chart that knows nothing about quartics. Two paths that share no
 // code, on the rays of the first pair. The route's own promise is its Newton tolerance, 1e-6;
 // over the 3 000 rays the worst distance measured is 3.5e-7 and no hit is gained or lost.
-inline Entry ray_torus_against_chart() {
-    return {"ray_torus: the quartic against the parametric search", 3000, [] {
+inline Entry ray_torus_against_chart(std::size_t n = 3000) {
+    return {"ray_torus: the quartic against the parametric search", n, [n] {
         const auto surface = spatium::make_torus<double>(2.0, 0.5);
         return check<TorusRay>(
-            "ray_torus: the quartic against the parametric search", Kind::Function, 3000, torus_ray,
+            "ray_torus: the quartic against the parametric search", Kind::Function, n, torus_ray,
             torus_hits_double,
             [&](const TorusRay& s) {
                 std::vector<double> t;
@@ -250,10 +250,10 @@ std::array<double, 3> spd_eigenvalues(const SpdCase& s) {
     return v;
 }
 
-inline Entry spd3_eigenvalues_precision() {
-    return {"SPD(3) eigenvalues: double against Real50", 4000, [] {
+inline Entry spd3_eigenvalues_precision(std::size_t n = 4000) {
+    return {"SPD(3) eigenvalues: double against Real50", n, [n] {
         return check<SpdCase>(
-            "SPD(3) eigenvalues: double against Real50", Kind::Function, 4000, spd_case,
+            "SPD(3) eigenvalues: double against Real50", Kind::Function, n, spd_case,
             spd_eigenvalues<spatium::Real50>, spd_eigenvalues<double>,
             [](const std::array<double, 3>& a, const std::array<double, 3>& b) {
                 double worst = 0.0;
@@ -317,10 +317,10 @@ std::vector<double> geometry_answers(const std::vector<double>& u) {
     return out;
 }
 
-inline Entry geometry_precision() {
-    return {"geometry: distances and hits, double against Real50", 3000, [] {
+inline Entry geometry_precision(std::size_t n = 3000) {
+    return {"geometry: distances and hits, double against Real50", n, [n] {
         return check<std::vector<double>>(
-            "geometry: distances and hits, double against Real50", Kind::Function, 3000,
+            "geometry: distances and hits, double against Real50", Kind::Function, n,
             [](std::size_t i) {
                 std::vector<double> u(40);
                 for (std::size_t k = 0; k < 40; ++k) u[k] = -2 + 4 * halton(k < 32 ? i : i + 104729, k % 32);
@@ -340,9 +340,15 @@ inline Entry geometry_precision() {
 // ── The derivative of a distance to a primitive: Dual against central differences ──
 //
 // The gradient of the distance from a point to a segment, a triangle and a box with respect to
-// the point, taken through `Dual` and by differences. Away from the places where the nearest
-// feature switches (a measure-zero set, and a step of 1e-6 does not reach it on these draws) the
-// distance is smooth, and the two must agree to what a difference allows, 1e-8 here (the worst measured is 7e-10).
+// the point, taken through `Dual` and by central differences with a step of 1e-6. Away from the
+// places where the nearest feature switches the distance is smooth, and the two must agree to
+// what a difference allows: 1e-8. At a switch the distance is C^1 but its second derivative jumps,
+// and a difference whose step reaches across it is off by the jump times the step; and near a
+// feature, at perpendicular distance a, the third derivative is of order 1/a^2 and the truncation
+// grows with it. A sweep of 300 000 draws found two of each kind (9e-8 at worst). The difference
+// quotient knows when it is unreliable: the bound adds three times the distance between the
+// quotients at step h and h/2, so it opens exactly where the quotient is not to be trusted and
+// stays 1e-8 everywhere else.
 template<class T>
 std::vector<double> distance_gradients(const std::vector<double>& u, const Vec<double, 3>& p0, int axis, double shift) {
     using namespace spatium::geometry;
@@ -366,10 +372,21 @@ std::vector<double> distance_gradients(const std::vector<double>& u, const Vec<d
     return out;
 }
 
-inline Entry distance_derivatives() {
-    return {"geometry: the derivative of a distance, Dual against differences", 2000, [] {
+inline std::vector<double> distance_difference_quotients(const std::vector<double>& u, double h) {
+    std::vector<double> g;
+    const Vec<double, 3> p{u[0], u[1], u[2]};
+    for (int axis = 0; axis < 3; ++axis) {
+        const auto hi = distance_gradients<double>(u, p, axis, +h);
+        const auto lo = distance_gradients<double>(u, p, axis, -h);
+        for (std::size_t k = 0; k < hi.size(); ++k) g.push_back((hi[k] - lo[k]) / (2 * h));
+    }
+    return g;
+}
+
+inline Entry distance_derivatives(std::size_t n = 2000) {
+    return {"geometry: the derivative of a distance, Dual against differences", n, [n] {
         return check<std::vector<double>>(
-            "geometry: the derivative of a distance, Dual against differences", Kind::Function, 2000,
+            "geometry: the derivative of a distance, Dual against differences", Kind::Function, n,
             [](std::size_t i) {
                 std::vector<double> u(40);
                 for (std::size_t k = 0; k < 40; ++k) u[k] = -2 + 4 * halton(k < 32 ? i : i + 104729, k % 32);
@@ -384,23 +401,19 @@ inline Entry distance_derivatives() {
                 }
                 return g;
             },
-            [](const std::vector<double>& u) {
-                std::vector<double> g;
-                const Vec<double, 3> p{u[0], u[1], u[2]};
-                const double h = 1e-6;
-                for (int axis = 0; axis < 3; ++axis) {
-                    const auto hi = distance_gradients<double>(u, p, axis, +h);
-                    const auto lo = distance_gradients<double>(u, p, axis, -h);
-                    for (std::size_t k = 0; k < hi.size(); ++k) g.push_back((hi[k] - lo[k]) / (2 * h));
-                }
-                return g;
-            },
+            [](const std::vector<double>& u) { return distance_difference_quotients(u, 1e-6); },
             [](const std::vector<double>& a, const std::vector<double>& b) {
                 double worst = 0.0;
                 for (std::size_t k = 0; k < a.size(); ++k) worst = std::max(worst, std::abs(a[k] - b[k]));
                 return worst;
             },
-            [](const std::vector<double>&) { return 1e-8; });
+            [](const std::vector<double>& u) {
+                const auto a = distance_difference_quotients(u, 1e-6);
+                const auto b = distance_difference_quotients(u, 0.5e-6);
+                double apart = 0.0;
+                for (std::size_t k = 0; k < a.size(); ++k) apart = std::max(apart, std::abs(a[k] - b[k]));
+                return 1e-8 + 3.0 * apart;
+            });
     }};
 }
 
@@ -443,10 +456,10 @@ std::vector<double> polygon_answers(const std::vector<double>& u) {
     return out;
 }
 
-inline Entry polygon_precision() {
-    return {"geometry: polygons, double against Real50", 3000, [] {
+inline Entry polygon_precision(std::size_t n = 3000) {
+    return {"geometry: polygons, double against Real50", n, [n] {
         return check<std::vector<double>>(
-            "geometry: polygons, double against Real50", Kind::Function, 3000,
+            "geometry: polygons, double against Real50", Kind::Function, n,
             [](std::size_t i) {
                 std::vector<double> u(26);
                 for (std::size_t k = 0; k < 26; ++k) u[k] = -1 + 2 * halton(i, k);
@@ -505,10 +518,10 @@ inline std::vector<double> contact_forces_from_energy(const ContactDraw& s) {
     return {-gs[0], -gs[1], -gs[2], -gt[0], -gt[1], -gt[2]};
 }
 
-inline Entry contact_force_is_minus_energy_gradient() {
-    return {"contact: the barrier's force is minus the gradient of its energy", 3000, [] {
+inline Entry contact_force_is_minus_energy_gradient(std::size_t n = 3000) {
+    return {"contact: the barrier's force is minus the gradient of its energy", n, [n] {
         return check<ContactDraw>(
-            "contact: the barrier's force is minus the gradient of its energy", Kind::Function, 3000, contact_draw,
+            "contact: the barrier's force is minus the gradient of its energy", Kind::Function, n, contact_draw,
             contact_forces, contact_forces_from_energy,
             [](const std::vector<double>& a, const std::vector<double>& b) {
                 double worst = 0.0, scale = 1.0;
