@@ -17,6 +17,7 @@ Run inside `nix develop` from the repository root:
     python3 scripts/gen_connectivity.py [-j 8] [--check]
 """
 import argparse
+import time
 import concurrent.futures as cf
 import math
 import os
@@ -85,13 +86,42 @@ int main() {{
 """
 
 
+def compile_flags(boost):
+    return ["-std=c++23", "-O1", "-w", f"-I{ROOT}/include", f"-I{ROOT}/tests/connectivity",
+            f"-DSPATIUM_HAS_BOOST_MULTIPRECISION={1 if boost else 0}"]
+
+
+def precompile_probes(workdir, boost):
+    """probes.hpp is parsed by every one of the ~1200 cells and is most of what a cheap cell costs
+    (a double cell: 1.8 s without, 0.56 s with; a Real50 one 3.4 s and 2.3 s, same output). One
+    precompiled header, with exactly the flags of the cells, sits beside the sources, where the
+    compiler looks for it first. If it cannot be built the cells simply compile as before."""
+    cmd = ["g++", *compile_flags(boost), "-x", "c++-header", f"{ROOT}/tests/connectivity/probes.hpp",
+           "-o", str(workdir / "probes.hpp.gch")]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=True)
+        return True
+    except Exception:
+        return False
+
+
+TIMES = {}      # stem -> seconds (compile, run), for --times
+
+
 def build_and_run(workdir, sname, ctype, boost, space, probe):
+    t0 = time.perf_counter()
+    try:
+        return _build_and_run(workdir, sname, ctype, boost, space, probe)
+    finally:
+        TIMES[(sname, space, probe)] = time.perf_counter() - t0
+
+
+def _build_and_run(workdir, sname, ctype, boost, space, probe):
     stem = f"{sname.replace(' ', '_')}__{space}__{probe}"
     src = workdir / f"{stem}.cpp"
     exe = workdir / stem
     src.write_text(cell_source(ctype, space, probe, sname))
-    cmd = ["g++", "-std=c++23", "-O1", "-w", f"-I{ROOT}/include", f"-I{ROOT}/tests/connectivity",
-           f"-DSPATIUM_HAS_BOOST_MULTIPRECISION={1 if boost else 0}", str(src), "-o", str(exe)]
+    cmd = ["g++", *compile_flags(boost), str(src), "-o", str(exe)]
     try:
         c = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
@@ -224,6 +254,7 @@ def main():
     ap.add_argument("-j", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--no-boost", action="store_true")
+    ap.add_argument("--times", action="store_true", help="print the slowest cells and the CPU total (stderr)")
     ap.add_argument("--only", help="build only the spaces whose name contains this (a trial: writes nothing)")
     a = ap.parse_args()
     boost = not a.no_boost
@@ -233,8 +264,17 @@ def main():
         spaces = [sp for sp in SPACES if not a.only or a.only in sp]
         jobs = [(s[0], s[1], s[3], sp, pr) for s in scalars for sp in spaces for pr in PROBES
                 if sp not in SPACE_SCALARS or s[0] in SPACE_SCALARS[sp]]
+        precompile_probes(work, boost)
+        # Longest first: the few cells that cost minutes (a derived space over fifty digits) then
+        # start at once instead of last, and the run is as long as the longest cell, not that plus the queue.
+        jobs.sort(key=lambda j: (is_heavy(j[0], j[3]), j[0] in ("Real50", "Dual2", "Dual")), reverse=True)
         with cf.ThreadPoolExecutor(a.j) as ex:
             results = list(ex.map(lambda j: build_and_run(work, *j), jobs))
+    if a.times:
+        total = sum(TIMES.values())
+        print(f"{len(TIMES)} cells, {total:.0f} s of cell time, longest {max(TIMES.values()):.0f} s", file=sys.stderr)
+        for k, v in sorted(TIMES.items(), key=lambda kv: -kv[1])[:12]:
+            print(f"  {v:7.1f} s  {k[0]} {k[1]} {k[2]}", file=sys.stderr)
     graded = grade_l3(results)
     if a.only:
         for (sname, space, probe), (lvl, note) in sorted(graded.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
