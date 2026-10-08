@@ -54,6 +54,7 @@ T distance(const Vec<T, N>& p, const Box<N, T>& box) {
 
 template<Scalar T>
 T distance(const Line<3, T>& a, const Line<3, T>& b) {
+    using std::abs;                       // unqualified: a scalar that is not a double finds its own
     auto w = a.origin - b.origin;
     auto u = a.direction;
     auto v = b.direction;
@@ -64,7 +65,7 @@ T distance(const Line<3, T>& a, const Line<3, T>& b) {
     auto e_val = v.dot(w);
     auto denom = a_val * c_val - b_val * b_val;
 
-    if (std::abs(denom) < epsilon<T>()) {
+    if (abs(denom) < epsilon<T>()) {
         // Parallel lines: distance = distance from any point on a to line b
         return b.distance(a.origin);
     }
@@ -79,6 +80,7 @@ T distance(const Line<3, T>& a, const Line<3, T>& b) {
 
 template<std::size_t N, Scalar T>
 T distance(const Segment<N, T>& s1, const Segment<N, T>& s2) {
+    using std::abs; using std::clamp;     // unqualified: a scalar that is not a double finds its own
     // Brute force for correctness: check all combinations
     T min_d = std::numeric_limits<T>::max();
 
@@ -99,9 +101,9 @@ T distance(const Segment<N, T>& s1, const Segment<N, T>& s2) {
         auto b_val = d1.dot(d2);
         auto c_val = d1.dot(r);
         auto denom = a_val * e_val - b_val * b_val;
-        if (std::abs(denom) > epsilon<T>()) {
-            auto s = std::clamp((b_val * f_val - c_val * e_val) / denom, T{0}, T{1});
-            auto t = std::clamp((a_val * f_val - b_val * c_val) / denom, T{0}, T{1});
+        if (abs(denom) > epsilon<T>()) {
+            const T s = clamp(T((b_val * f_val - c_val * e_val) / denom), T{0}, T{1});
+            const T t = clamp(T((a_val * f_val - b_val * c_val) / denom), T{0}, T{1});
             auto closest = r + d1 * s - d2 * t;
             min_d = std::min(min_d, closest.norm());
         }

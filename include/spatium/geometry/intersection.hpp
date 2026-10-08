@@ -99,12 +99,13 @@ struct RayTriHit {
 
 template<Scalar T>
 Result<RayTriHit<T>> ray_triangle(const Ray<3, T>& ray, const Triangle<3, T>& tri) {
+    using std::abs;
     auto e1 = tri[1] - tri[0];
     auto e2 = tri[2] - tri[0];
     auto h = ray.direction.cross(e2);
     auto a = e1.dot(h);
 
-    if (std::abs(a) < epsilon<T>())
+    if (abs(a) < epsilon<T>())
         return std::unexpected(Error{ErrorCode::NoIntersection, "ray parallel to triangle"});
 
     auto f = T{1} / a;
@@ -165,20 +166,21 @@ Result<Vec<T, 3>> intersect(const Line<3, T>& line, const Triangle<3, T>& tri) {
 
 template<std::size_t N, Scalar T>
 Result<std::pair<T, T>> intersect_parameters(const Ray<N, T>& ray, const Box<N, T>& box) {
+    using std::abs; using std::max; using std::min; using std::swap;
     T tmin = T{0};
     T tmax = std::numeric_limits<T>::max();
 
     for (std::size_t i = 0; i < N; ++i) {
-        if (std::abs(ray.direction[i]) < epsilon<T>()) {
+        if (abs(ray.direction[i]) < epsilon<T>()) {
             if (ray.origin[i] < box.min_corner[i] || ray.origin[i] > box.max_corner[i])
                 return std::unexpected(Error{ErrorCode::NoIntersection});
         } else {
-            auto inv_d = T{1} / ray.direction[i];
-            auto t1 = (box.min_corner[i] - ray.origin[i]) * inv_d;
-            auto t2 = (box.max_corner[i] - ray.origin[i]) * inv_d;
-            if (t1 > t2) std::swap(t1, t2);
-            tmin = std::max(tmin, t1);
-            tmax = std::min(tmax, t2);
+            const T inv_d = T{1} / ray.direction[i];
+            T t1 = T((box.min_corner[i] - ray.origin[i]) * inv_d);
+            T t2 = T((box.max_corner[i] - ray.origin[i]) * inv_d);
+            if (t1 > t2) swap(t1, t2);
+            tmin = max(tmin, t1);
+            tmax = min(tmax, t2);
             if (tmin > tmax)
                 return std::unexpected(Error{ErrorCode::NoIntersection});
         }

@@ -31,6 +31,7 @@ struct Polygon {
 
     // Measure (2D: shoelace formula)
     T measure() const requires (N == 2) {
+        using std::abs;                   // unqualified: a scalar that is not a double finds its own
         T sum{0};
         auto n = vertices.size();
         for (std::size_t i = 0; i < n; ++i) {
@@ -38,7 +39,7 @@ struct Polygon {
             sum += vertices[i][0] * vertices[j][1];
             sum -= vertices[j][0] * vertices[i][1];
         }
-        return std::abs(sum) * T{0.5};
+        return abs(sum) * T{0.5};
     }
 
     // Measure (3D+: sum of triangle fan areas from centroid)
