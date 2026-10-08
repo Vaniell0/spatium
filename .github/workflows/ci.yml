@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A full run every night and on request: the filters below skip what a change cannot touch,
+  # and this is what notices when they are wrong.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 # Only run the latest push for each branch.
 concurrency:
@@ -14,10 +19,42 @@ concurrency:
 # hours GitHub allows (2026-10-07), twice, and a PR waited on it. The limits are well above the longest
 # run seen; `apt-get update` retries and times out on its own.
 jobs:
+  # What a change needs (scripts/ci_changes.py): documentation alone skips every build, and
+  # the connectivity matrix runs only for what its cells read (core/, algebra/, spaces/).
+  # A scheduled or manual run, or a diff that cannot be computed, runs everything.
+  changes:
+    name: what the change needs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.f.outputs.code }}
+      matrix: ${{ steps.f.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        run: |
+          python3 scripts/ci_changes.py --selftest
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+          fi
+          if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git diff --name-only "$base" HEAD | python3 scripts/ci_changes.py | tee -a "$GITHUB_OUTPUT"
+          else
+            python3 scripts/ci_changes.py --all | tee -a "$GITHUB_OUTPUT"
+          fi
+
   nix-build:
     name: nix build (gcc15 + viewer + Eigen)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +91,8 @@ jobs:
     name: C++23 modules build (SPATIUM_USE_MODULES=ON)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +114,8 @@ jobs:
     name: connectivity matrix is up to date
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.matrix == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -137,6 +178,8 @@ jobs:
     name: cmake build without Nix (gcc15)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -180,6 +223,8 @@ jobs:
     name: Debug build (asserts actually run)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # Every other job here builds Release, so NDEBUG removes assert() and
     # a whole class of defect passes CI green: misusing a dependency in a
     # way that dependency catches with an assertion. That is not
@@ -228,6 +273,8 @@ jobs:
     name: cmake build with no optional deps at all (gcc15)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -277,6 +324,8 @@ jobs:
     name: downstream FetchContent consumer
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -308,6 +357,8 @@ jobs:
     name: installed package + find_package(Spatium)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -362,6 +413,8 @@ jobs:
     name: clang 19 (libstdc++, no optional deps)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # This was expected to be red on introduction -- nothing in the tree had
     # ever been compiled by anything but GCC, and std::print appears in 25
     # example and test files. It passed on the first run that got as far as
