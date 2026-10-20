@@ -438,7 +438,8 @@ SurfaceContact<T> first_contact(const MovingChart<T, PA, WA>& a, const MovingCha
 
 // The same search with its policy picked per query by a chooser over
 // SurfaceCcdFeatures -- a constant, a table, or a tree RSC distilled from
-// measurements (rsc/include/generated/ccd_chooser_tree.hpp).
+// measurements (the prototype's was rsc/include/generated/ccd_chooser_tree.hpp
+// at tag rsc-prototype-final).
 template<Scalar T, class PA, class WA, class PB, class WB, typename C>
     requires Chooser<C, SurfaceCcdFeatures<T>>
 SurfaceContact<T> first_contact(const MovingChart<T, PA, WA>& a, const MovingChart<T, PB, WB>& b, T width,

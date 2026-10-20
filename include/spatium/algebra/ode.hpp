@@ -34,7 +34,7 @@ concept OdeRhs = requires(F f, T t, Vec<T, N> y) {
 // y'=-k*y it only stays bounded while |1-k*dt| <= 1, i.e. k*dt <= 2;
 // past that the numerical solution blows up even though the true
 // solution decays. That stability boundary is exactly the "recognize
-// the delicate case" signal rsc/include/ode_task.hpp dispatches on.
+// the delicate case" signal the RSC prototype (tag rsc-prototype-final, rsc/include/ode_task.hpp) dispatched on.
 template<Scalar T, std::size_t N, typename F>
     requires OdeRhs<F, T, N>
 Vec<T, N> euler_step(F&& f, T t, const Vec<T, N>& y, T dt) {

@@ -11,6 +11,7 @@
 #include <spatium/physics/mechanics/body.hpp>
 #include <spatium/physics/mechanics/force.hpp>
 #include <spatium/physics/mechanics/integrator.hpp>
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -113,6 +114,31 @@ TEST_CASE("SHO: Verlet preserves amplitude over 50 periods", "[mechanics][integr
 
     double E = body.kinetic_energy() + 0.5 * k * body.state.position[0] * body.state.position[0];
     REQUIRE(std::abs(E - E0) / E0 < 1e-3);   // drift bounded
+}
+
+// Symplectic Euler is first order but keeps the energy error bounded (it
+// oscillates, does not grow), where explicit Euler's grows every period.
+TEST_CASE("SHO: symplectic Euler's energy error is bounded, explicit Euler's grows", "[mechanics][integrator][sho]") {
+    constexpr double m = 1.0, k = 1.0;
+    constexpr double T_period = 2.0 * std::numbers::pi;
+    constexpr double dt = T_period / 200.0;
+    constexpr int steps = static_cast<int>(50 * T_period / dt);
+
+    const auto energy = [&](const PointMass<1, double>& b) {
+        return b.kinetic_energy() + 0.5 * k * b.state.position[0] * b.state.position[0];
+    };
+    PointMass<1, double> sym{m, Vec<double, 1>{1.0}, Vec<double, 1>{0.0}};
+    PointMass<1, double> expl{m, Vec<double, 1>{1.0}, Vec<double, 1>{0.0}};
+    Spring<1, double> spring{Vec<double, 1>{0.0}, k};
+    const double E0 = energy(sym);
+    double worst = 0;
+    for (int i = 0; i < steps; ++i) {
+        semi_implicit_euler_step(sym, spring, dt);
+        euler_step(expl, spring, dt);
+        worst = std::max(worst, std::abs(energy(sym) - E0) / E0);
+    }
+    REQUIRE(worst < 0.05);
+    REQUIRE(energy(expl) / E0 > 2.0);
 }
 
 // Compare drift at end of run — Euler should be much worse than Verlet/RK4.

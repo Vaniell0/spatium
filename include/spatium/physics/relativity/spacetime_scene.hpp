@@ -147,7 +147,7 @@ public:
     // How much of each hole's velocity its Kerr-Schild term is boosted by:
     // 0 superposes terms at rest wherever the holes are (as this scene did
     // first), 1 boosts each into the frame it moves in -- exact for a hole
-    // in uniform motion, and what rsc/tools/metric_calibrate finds by
+    // in uniform motion, and what the RSC prototype (tag rsc-prototype-final, rsc/tools/metric_calibrate.cpp) found by
     // minimising the vacuum residual alone.
     void boost(T b) { boost_ = b; }
     T boost() const { return boost_; }

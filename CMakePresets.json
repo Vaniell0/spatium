@@ -14,8 +14,8 @@
         },
         {
             "name": "release",
-            "displayName": "Release (Eigen, for RSC training)",
-            "description": "Release + Eigen3, kept alongside the default Debug config for RSC's training-heavy work -- see CLAUDE.md's own note that this hasn't measured a real wall-clock win over Debug yet, kept anyway.",
+            "displayName": "Release (Eigen)",
+            "description": "Release + Eigen3, kept alongside the default Debug config for heavy runs -- see CLAUDE.md's note that this hasn't measured a real wall-clock win over Debug yet, kept anyway.",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build-release",
             "cacheVariables": {
@@ -78,8 +78,7 @@
                 "SPATIUM_CUDA": "ON",
                 "SPATIUM_EIGEN": "OFF",
                 "SPATIUM_BOOST": "ON",
-                "SPATIUM_BUILD_TESTS": "OFF",
-                "SPATIUM_BUILD_RSC_TOOLS": "ON"
+                "SPATIUM_BUILD_TESTS": "OFF"
             }
         },
         {

@@ -196,8 +196,7 @@ jobs:
           # FetchContent fallback. (A comment here used to claim there was
           # one; there is not, and two new jobs below were written against
           # that claim and failed on it.)
-          # libboost-dev backs SPATIUM_BOOST=ON below (Real50/Real100 tests
-          # and the RSC precision domain). Header-only, so the -dev
+          # libboost-dev backs SPATIUM_BOOST=ON below (Real50/Real100 tests). Header-only, so the -dev
           # metapackage is enough and no boost libs need linking. Boost is
           # optional as of the SPATIUM_BOOST option -- this job installs it
           # deliberately so CI keeps gating the full test set.

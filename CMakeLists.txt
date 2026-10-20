@@ -14,70 +14,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # False when Spatium is pulled in via add_subdirectory()/FetchContent from
 # a downstream project that already called its own project() first. Used
 # below to default the "build everything" options (viewer, examples,
-# tests, RSC tools) OFF for downstream consumers, so FetchContent_MakeAvailable
+# tests) OFF for downstream consumers, so FetchContent_MakeAvailable
 # just yields the header-only Spatium::sdk target without forcing Vulkan,
 # Catch2, or anything else the consumer didn't ask for.
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set(SPATIUM_IS_TOP_LEVEL ON)
 else()
     set(SPATIUM_IS_TOP_LEVEL OFF)
-endif()
-
-# ── RSC reproducibility: commit SHA baked in at configure time ────
-# rsc/checkpoint.hpp pins a saved base checkpoint to the exact commit it
-# was trained against (ground truth IS Spatium's own code, so a Spatium
-# change alters both the training environment and the definition of
-# "correct" at once -- see rsc/README.md's Reproducibility section).
-find_package(Git QUIET)
-if(GIT_FOUND)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        OUTPUT_VARIABLE SPATIUM_GIT_SHA
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-endif()
-if(NOT SPATIUM_GIT_SHA)
-    set(SPATIUM_GIT_SHA "unknown")
-endif()
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/rsc/include/build_info.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.hpp
-    @ONLY
-)
-
-# ── RSC base weights: embedded into the binary, not loaded at runtime ──
-# Base is compiled in (this generated header), the per-deployment custom
-# layer (rsc/include/custom_layer.hpp) is a real, separate, mutable file
-# instead -- it has to update in the field without recompiling, the base
-# doesn't. Re-runs at every configure so the embedded weights always
-# match whatever's checked into rsc/checkpoints/.
-set(SPATIUM_RSC_BASE_CHECKPOINT
-    ${CMAKE_CURRENT_SOURCE_DIR}/rsc/checkpoints/base_v1.checkpoint
-    CACHE FILEPATH "Base checkpoint to embed into the binary at configure time")
-set(SPATIUM_EMBEDDED_BASE_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_base_data.hpp)
-if(EXISTS ${SPATIUM_RSC_BASE_CHECKPOINT})
-    find_package(Python3 COMPONENTS Interpreter QUIET)
-    if(Python3_FOUND)
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/rsc/tools/embed_checkpoint.py
-                ${SPATIUM_RSC_BASE_CHECKPOINT}
-                ${SPATIUM_EMBEDDED_BASE_HEADER}
-            RESULT_VARIABLE SPATIUM_EMBED_RESULT
-        )
-        if(NOT SPATIUM_EMBED_RESULT EQUAL 0)
-            message(WARNING "rsc: embed_checkpoint.py failed, embedded base will be unavailable")
-        endif()
-    else()
-        message(WARNING "rsc: python3 not found, cannot embed base checkpoint")
-    endif()
-else()
-    message(STATUS "rsc: no checkpoint at ${SPATIUM_RSC_BASE_CHECKPOINT} yet "
-                    "(run rsc/tools/train_base, then re-run cmake) -- embedded base unavailable")
-    file(WRITE ${SPATIUM_EMBEDDED_BASE_HEADER}
-        "#pragma once\n#define SPATIUM_HAS_EMBEDDED_BASE 0\n")
 endif()
 
 # ── C++23 modules infrastructure ───────────────────────────────
@@ -452,24 +395,6 @@ option(SPATIUM_BUILD_EXAMPLES "Build examples" ${SPATIUM_IS_TOP_LEVEL})
 if(SPATIUM_BUILD_EXAMPLES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SpatiumTarget.cmake)
     add_subdirectory(examples)
-endif()
-
-# ── RSC tools ──────────────────────────────────────────────────
-# OFF by default as a subproject (see SPATIUM_IS_TOP_LEVEL above): RSC's
-# training tools are specific to this repo, not something a downstream
-# consumer pulling in Spatium::sdk needs built.
-#
-# Also requires SPATIUM_BOOST: RSC's founding dispatch domain is
-# "f64 vs. Real50 on casus-irreducibilis cubics" (rsc/include/precision_ops.hpp
-# calls solve_cubic<Real50> directly), so without Boost.Multiprecision
-# there is no domain to train, not merely a compile error to patch around.
-option(SPATIUM_BUILD_RSC_TOOLS "Build RSC tools (train_base, ...)" ${SPATIUM_IS_TOP_LEVEL})
-if(SPATIUM_BUILD_RSC_TOOLS AND NOT SPATIUM_BOOST)
-    message(STATUS
-        "Spatium: RSC tools SKIPPED -- they need arbitrary precision "
-        "(rsc/include/precision_ops.hpp uses Real50). Re-run with -DSPATIUM_BOOST=ON.")
-elseif(SPATIUM_BUILD_RSC_TOOLS)
-    add_subdirectory(rsc/tools)
 endif()
 
 # ── CUDA geodesic kernel (optional) ───────────────────────────

@@ -13,19 +13,18 @@ ctest --test-dir build
 ```
 
 `-DSPATIUM_BOOST=ON` is what keeps the full test set in play: without it
-`test_precision.cpp` and every `test_rsc_*` are dropped (RSC's registry
-reaches `Real50` through `checkpoint.hpp`). Leave it off only to reproduce
-what someone with no system packages gets — `cmake --preset noboost`, the
-counterpart to `noeigen`, does exactly that and is the configuration a bare
-`cmake -B build` with no flags now produces.
+`test_precision.cpp` and the symmetry registry are dropped. Leave it off
+only to reproduce what someone with no system packages gets --
+`cmake --preset noboost`, the counterpart to `noeigen`, does exactly that
+and is the configuration a bare `cmake -B build` with no flags now
+produces.
 
 A second config, `build-release/` (`-DCMAKE_BUILD_TYPE=Release -DSPATIUM_EIGEN=ON`,
-modules off), exists alongside `build/` for RSC training-heavy work.
-Configure/build it the same way, pointed at `build-release` instead of `build`.
-Note: measured no real wall-clock difference vs. Debug on the actual project
-build for RSC's REINFORCE training loop (~22s either way) — a standalone
-`-O0` vs `-O2` comparison suggested a ~5.7x win that didn't reproduce here
-(cause not tracked down, possibly modules-related). Keep the config anyway;
+modules off), exists alongside `build/` for heavy runs. Configure/build it the
+same way, pointed at `build-release` instead of `build`. Measured no real
+wall-clock difference vs. Debug on the actual project build (a standalone
+`-O0` vs `-O2` comparison suggested a ~5.7x win that didn't reproduce here,
+cause not tracked down, possibly modules-related). Keep the config anyway;
 don't assume it's a speed fix without re-measuring.
 
 ## Architecture
@@ -119,6 +118,7 @@ A map, not a manual: one line per directory. What each header is for and what it
 - `tests/` — Catch2; `ctest -N` reports the count, which depends on which optional dependencies are enabled. `tests/connectivity/` is the connectivity matrix (scalars x spaces x generic algorithms, graded L0 compiles / L1 finite / L2 axiom or symmetry / L3 agrees across scalars; `expected.hpp` generated, held by `test_connectivity.cpp`)
 - `examples/` — see `examples/CMakeLists.txt` and each file's header; `donut_demo` is the DSL getting-started (`docs/getting-started-dsl.md`), `blackhole_live` the black-hole renderer (`--check`, `--bench`, `--live`, `--frame`, `--video`), `napkins` and `cloth_live` the cloth scenes, `cloth_sphere_probe` the cloth-on-sphere measurement (offline/Vulkan raytracers and diagrams: `spatium_add_example()` in `cmake/SpatiumTarget.cmake`)
 - `benchmarks/` — Google Benchmark (vec, intersection, mesh, bvh, orbital, raycast)
+- `rsc/` — being rebuilt as a synthesis engine (`rsc/core` generic, `rsc/spatium` the binding to this library); the 2026-09 prototype is at tag `rsc-prototype-final` (`docs/roadmap/2026-10-20-01-the-rsc-prototype-leaves-the-tree.md`)
 - `cmake/` — `SpatiumConfig.cmake.in`, `SpatiumModule.cmake` (C++23 modules helper), `SpatiumTarget.cmake` (`spatium_add_example()` helper)
 - `scripts/` — `gen_connectivity.py` (builds every connectivity cell alone, writes `docs/connectivity.md` and `tests/connectivity/expected.hpp`, `--check` in CI); `gen_capabilities.py` (writes `docs/capabilities/`, one page per domain, so changes in different domains never edit the same lines; `--check` in CI); `gen_consumers.py` (the consumer rule, counted: which declared names nothing else mentions, by identifier; `docs/consumers-baseline.json` holds today's unused names, `--check` in CI fails on one added); `gen_roadmap.py` (a roadmap history entry is one file `docs/roadmap/<date>-<nn>-<slug>.md` with a front matter -- date, title, optional stage, `closes` (findings rows deleted), `files` (must exist) -- not rendered into `docs/ROADMAP.md`, so two changes in flight never edit the same lines; an entry's `open:` list says what it did NOT do and a later entry's `resolves:` closes items, so `--open` prints what is still not done, computed; `--check` validates, no argument prints them as one page); the doc-freshness checks, which run in CI so docs cannot silently drift: `gen_dependency_graph.py --check` (real `#include` graph vs the committed `.dot`), `check_claude_md_layout.py` (every `include/spatium/` subdirectory mentioned above), `check_doc_file_refs.py` (every source file the docs name exists; names with no counterpart -- recorded deletions, proposals, generated files, other projects' -- are listed with a reason in the script's `NOT_IN_TREE`)
 
