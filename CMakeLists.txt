@@ -381,6 +381,9 @@ if(SPATIUM_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# ── RSC (the synthesis engine; rsc/core is generic, rsc/spatium binds it to this library) ──
+add_subdirectory(rsc)
+
 # ── Benchmarks ────────────────────────────────────────────────
 option(SPATIUM_BUILD_BENCHMARKS "Build benchmarks" OFF)
 if(SPATIUM_BUILD_BENCHMARKS)
