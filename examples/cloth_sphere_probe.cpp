@@ -5,7 +5,7 @@
 // structurally blocked: a 20-config compliance/substep sweep against a
 // stiff cloth with heavy overhanging corners (the diagonal corners of a
 // square grid hang past a sphere's circular silhouette) failed on all
-// 20 (see rsc/README.md's "Contact physics / soft bodies" entry). This
+// 20 (see rsc/README.md's "Contact physics / soft bodies" entry at tag rsc-prototype-final). This
 // probe replaces the explicit projection with one full implicit-Euler
 // Newton solve per substep of
 //

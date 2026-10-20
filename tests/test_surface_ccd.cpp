@@ -302,3 +302,54 @@ TEST_CASE("A point grazing a torus chart: never later than the quartic", "[physi
     CHECK(n > 100);
     CHECK(worst_early < 1e-3);
 }
+
+// ── A chooser picks the policy per query ───────────────────────
+// The library's choice point (Chooser, core/concepts.hpp): whatever picks
+// the policy -- a constant, a table, a tree a synthesis run produced --
+// changes what a query costs, never its answer. Held here with a
+// hand-written chooser that branches on the features it is given.
+
+namespace {
+
+struct BendTableChooser {
+    mutable int calls = 0;
+    mutable SurfaceCcdFeatures<double> seen{};
+    SurfaceCcdPolicy choose(const SurfaceCcdFeatures<double>& f) const {
+        ++calls;
+        seen = f;
+        SurfaceCcdPolicy p;
+        p.axes = f.bend_a <= 1.0 ? (SurfaceCcdPolicy::kNormals | SurfaceCcdPolicy::kCentres)
+                                 : (SurfaceCcdPolicy::kNormals | SurfaceCcdPolicy::kCentres |
+                                    SurfaceCcdPolicy::kTangentCross | SurfaceCcdPolicy::kWorld);
+        p.split_by_reach = f.speed > 0.05;
+        return p;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("A chooser's policy changes the cost of a query, never its answer", "[physics][ccd][surface]") {
+    static_assert(Chooser<BendTableChooser, SurfaceCcdFeatures<double>>);
+    constexpr std::size_t budget = std::size_t{1} << 22;
+    const auto a = moving(flat(0.0, 1.0), constant(V3{}));
+    const auto b = moving(flat(1.0, 1.0), constant(V3{0.0, 0.0, -2.0}));
+    const auto away = moving(flat(1.0, 1.0), constant(V3{0.0, 0.0, 2.0}));
+
+    const BendTableChooser chooser;
+    const auto dflt = first_contact(a, b, 1e-6, budget, SurfaceCcdPolicy{});
+    const auto chosen = first_contact(a, b, 1e-6, budget, chooser);
+    CHECK(chooser.calls == 1);
+    // The features the chooser is handed are the ones the charts compute.
+    const auto expect = surface_ccd_features(a, b);
+    CHECK(chooser.seen.dim_a == expect.dim_a);
+    CHECK(chooser.seen.speed == expect.speed);
+    REQUIRE(dflt.hit);
+    REQUIRE(chosen.hit);
+    CHECK(chosen.toi <= 0.5);
+    CHECK(chosen.toi > 0.5 - 1e-6);
+    CHECK(std::abs(chosen.toi - dflt.toi) < 1e-5);
+
+    // A miss is still a proved miss under the chosen policy.
+    CHECK_FALSE(first_contact(a, away, 1e-6, budget, chooser).hit);
+    CHECK(chooser.calls == 2);
+}

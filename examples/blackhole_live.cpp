@@ -241,7 +241,7 @@ rel::SpacetimeScene<double> make_scene(const Settings& st) {
         const double m1 = 1.0 / (1.0 + st.mass_ratio), m2 = 1.0 - m1;
         scene.binary(m1, m2, st.separation, st.inspiral, 6.0, st.spin * m1, st.spin * m2);
         // Each hole's term boosted by its velocity: the residual by the
-        // holes 2.4-5x lower (rsc/tools/metric_calibrate), the trace ~30%
+        // holes 2.4-5x lower (measured by the RSC prototype, tag rsc-prototype-final, rsc/tools/metric_calibrate.cpp), the trace ~30%
         // dearer (--check).
         scene.boost(1.0);
     } else {

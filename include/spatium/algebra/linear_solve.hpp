@@ -17,7 +17,7 @@
 //     budget. Cheap per iteration (O(N^2)), but only *guaranteed* to
 //     converge when the matrix is strictly diagonally dominant --
 //     diagonal_dominance_ratio() below is the real dispatch signal
-//     rsc/include/linear_task.hpp builds on.
+//     the RSC prototype (tag rsc-prototype-final, rsc/include/linear_task.hpp) built on.
 
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
