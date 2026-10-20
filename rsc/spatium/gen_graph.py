@@ -24,6 +24,21 @@ Edges
              numbers agree across scalars. An edge is as verified as the least verified probe
              that exercises it.
 
+Edges between types (what lets a route cross them; each is verified by compilation, in the translation
+unit of the type it is on, or by the finder that compiles and runs it):
+  scalar lift   `T` -> `T@Real50`, `T@Dual`: the same space over another scalar is a node of its own,
+                with its own satisfies and operation edges. An `entry` edge `lift:<scalar>` on T needs the
+                quantity on the lifted node ("compute on Real50 and convert"); it may close a route, never
+                be a step inside one. Real50 is left out for the spaces whose Real50 cells cost minutes
+                (gen_connectivity.HEAVY_SPACES), the erased surfaces (SLOW_REAL50) and the typed surfaces the
+                matrix holds against long double.
+  components    a ProductSpace from its factors: `components` edges for exp_map, log_map, metric and
+                distance need the factor's quantity on each factor node. The factor table is checked
+                against the type by a static_assert.
+  group         a LieGroupManifold from its group: `group` edges for exp_map and log_map need the group's
+                compose / inverse / lie_exp / lie_log, which are operations of the group node (member, detected).
+  The matrix has no cell for these edges, so they sit at level 0 until a finder run witnesses them.
+
 Run inside `nix develop` from the repository root:
     python3 rsc/spatium/gen_graph.py [-j 6] [--check] [--stats]
 --check regenerates into a temporary directory and fails if rsc/spatium/graph.json would change.
@@ -107,6 +122,23 @@ OTHER_TYPES = [
     ("LieGroupManifold<SE3>", "spatium::LieGroupManifold<spatium::algebra::SE3<>>", "spaces/lie_group.hpp"),
     ("FiniteSet<int>", "spatium::discrete::FiniteSet<int>", "discrete/finite_set.hpp"),
 ]
+
+# The factors of the products in the matrix (checked against the type by a static_assert), the group of
+# a Lie group manifold, and the scalars a space is lifted to. Lift names are the node suffixes.
+FACTORS = {
+    "S2xE1": ("Sphere<2>", "Euclidean<1>"), "S2xH2": ("Sphere<2>", "Hyperbolic<2>"),
+    "H2xE3": ("Hyperbolic<2>", "Euclidean<3>"), "S2xS2": ("Sphere<2>", "Sphere<2>"),
+    "SPDLogExS2": ("SPD<2>", "Sphere<2>"), "SPDAffxS2": ("SPDAffineInvariant<2>", "Sphere<2>"),
+    "CylxE3": ("CylinderADL", "Euclidean<3>"), "H2DerivedxS2": ("H2Derived", "Sphere<2>"),
+}
+GROUPS = {"LieGroupManifold<SO3>": "SO3", "LieGroupManifold<SE3>": "SE3"}
+LIFTS = [("Real50", "spatium::Real50", True, "Real50"), ("Dual", "spatium::Dual<double>", False, "Dual<double>")]   # suffix, C++, needs Boost, scalar node
+# the samplers of the types that are not cells of the matrix (tests/symmetry/rsc_pair_support.hpp)
+OTHER_CELLS = {"LieGroupManifold<SO3>": "rsc_pair::LieSO3", "LieGroupManifold<SE3>": "rsc_pair::LieSE3"}
+# the quantities a route can be emitted for, and so lifted; frechet_mean and verify_exp_log are algorithms over a set of points
+EMITTABLE = ["exp_map", "log_map", "metric", "project", "normal", "distance", "norm_at", "geodesic", "midpoint"]
+COMPONENT_OPS = {"exp_map": "Exponential", "log_map": "Logarithmic", "metric": "Metrized", "distance": "Distanced"}
+GROUP_OPS = ["compose", "inverse", "lie_exp", "lie_log"]   # operations of a group node, each the member of that name (exp, log for the Lie ones)
 
 # (id, the C++ type, the matrix's name for it, needs Boost)
 SCALARS = [
@@ -352,6 +384,12 @@ template<class S> using P = spatium::spaces::point_t<S>;
 template<class S> using V = spatium::spaces::tangent_t<S>;
 template<class S> using T = spatium::spaces::scalar_t<S>;
 
+template<class G> concept IsGroup = requires { typename G::ElementType; typename G::AlgebraType; };
+template<class G> concept GroupCompose = IsGroup<G> && requires(const G& g, const typename G::ElementType& a) { g.compose(a, a); };
+template<class G> concept GroupInverse = IsGroup<G> && requires(const G& g, const typename G::ElementType& a) { g.inverse(a); };
+template<class G> concept GroupExp = IsGroup<G> && requires(const G& g, const typename G::AlgebraType& v) { g.exp(v); };
+template<class G> concept GroupLog = IsGroup<G> && requires(const G& g, const typename G::ElementType& a) { g.log(a); };
+
 template<class S> concept MemExp = IsSpace<S> && requires(const S& s, const P<S>& p, const V<S>& v, T<S> t) { s.exp_map(p, v, t); };
 template<class S> concept AdlExp = IsSpace<S> && requires(const S& s, const P<S>& p, const V<S>& v, T<S> t) { exp_map(s, p, v, t); };
 template<class S> concept MemLog = IsSpace<S> && requires(const S& s, const P<S>& p, const P<S>& q) { s.log_map(p, q); };
@@ -386,10 +424,11 @@ def all_header_source(concepts, boost):
     return "\n".join(lines) + "\n"
 
 
-def tu_source(tid, cpp_expr, check_cpp, concepts):
+def tu_source(tid, cpp_expr, check_cpp, concepts, asserts=()):
     out = ['#include "rsc_all.hpp"', PROBE_PRELUDE, f"using Self = {cpp_expr};"]
     if check_cpp:
         out.append(f"static_assert(std::is_same_v<Self, {check_cpp}>, \"the type table disagrees with the matrix cell\");")
+    out += list(asserts)
     out.append("int main() {")
     out.append("    using namespace rsc_probe;")
     for c in concepts:
@@ -398,14 +437,16 @@ def tu_source(tid, cpp_expr, check_cpp, concepts):
     for q, (mem, adl) in MEMBER_ADL.items():
         out.append(f'    std::printf("has|{q}|member|%d\\n", int({mem}<Self>));')
         out.append(f'    std::printf("has|{q}|adl|%d\\n", int({adl}<Self>));')
+    for q, concept in (("compose", "GroupCompose"), ("inverse", "GroupInverse"), ("lie_exp", "GroupExp"), ("lie_log", "GroupLog")):
+        out.append(f'    std::printf("has|{q}|member|%d\\n", int({concept}<Self>));')
     out.append("}")
     return "\n".join(out) + "\n"
 
 
-def tu_run(work, tid, cpp_expr, check_cpp, concepts, boost):
+def tu_run(work, tid, cpp_expr, check_cpp, concepts, boost, asserts=()):
     stem = re.sub(r"\W", "_", tid)
     src, exe = work / f"{stem}.cpp", work / stem
-    src.write_text(tu_source(tid, cpp_expr, check_cpp, concepts))
+    src.write_text(tu_source(tid, cpp_expr, check_cpp, concepts, asserts))
     c = subprocess.run(["g++", *compile_flags(boost), str(src), "-o", str(exe)], capture_output=True, text=True,
                        cwd=work)
     if c.returncode != 0:
@@ -467,26 +508,73 @@ def levels_for(cells, matrix_name, quantity, variant, boost):
 
 # ── The graph ────────────────────────────────────────────────────
 
+# The erased surfaces' exp, log and distance integrate a geodesic flow: over Real50 one call took 0.24 s
+# (measured 2026-10-20, rsc_find on TorusChart distance), so a route times the inputs of a pair times the
+# operations is minutes per type. Their Real50 lifts are left out; Dual stays.
+SLOW_REAL50 = {"TorusChart", "SphereLevelSet"}
+
+
+def lifted(cell, scalar_suffix, boost):
+    """Is the space of this cell lifted to this scalar? Where the matrix ran it, and not where it costs minutes."""
+    if cell is None:
+        return False
+    if scalar_suffix == "Real50":
+        return boost and cell not in gc.HEAVY_SPACES | SLOW_REAL50 and "Real50" in (gc.SPACE_SCALARS.get(cell) or {"Real50"})
+    return "Dual" in (gc.SPACE_SCALARS.get(cell) or {"Dual"})
+
+
 def build(work, jobs, boost):
     concepts = parse_concepts()
     refines = concept_graph(concepts)
     precompile(work, concepts, boost)
     cells = matrix_cells()
+    cell_of = {tid: cell for tid, cell, _ in MATRIX_TYPES}
 
-    types = []   # (id, aliases, cpp for the TU, cpp to show, check, matrix name, kind)
+    # (id, aliases, cpp for the TU, cpp to show, check, matrix name, kind, attributes, asserts)
+    types = []
     for tid, cell, spelling in MATRIX_TYPES:
         shown = spelling or f"the matrix cell {cell}"
-        types.append((tid, [] if tid == cell else [cell], _m(cell), shown, spelling, cell, "type"))
+        attrs = {"cell": f"connectivity::{cell}"}
+        asserts = []
+        if cell in FACTORS:
+            attrs["factors"] = list(FACTORS[cell])
+            for k, f in enumerate(FACTORS[cell], 1):
+                asserts.append(f"static_assert(std::is_same_v<std::remove_cvref_t<decltype(std::declval<Self&>().space{k})>, "
+                               f"std::remove_cvref_t<decltype(connectivity::{cell_of[f]}::make<double>())>>, \"the factor table disagrees with the type\");")
+        types.append((tid, [] if tid == cell else [cell], _m(cell), shown, spelling, cell, "type", attrs, asserts))
     for tid, cpp, _ in OTHER_TYPES:
-        types.append((tid, [], cpp, cpp, None, None, "type"))
+        attrs = {}
+        asserts = []
+        if tid in OTHER_CELLS:
+            attrs["cell"] = OTHER_CELLS[tid]
+        if tid in GROUPS:
+            attrs["group"] = GROUPS[tid]
+            gcpp = {t[0]: t[1] for t in OTHER_TYPES}[GROUPS[tid]]
+            asserts.append(f"static_assert(std::is_same_v<std::remove_cvref_t<decltype(std::declval<Self&>().group)>, {gcpp}>, \"the group table disagrees with the type\");")
+        types.append((tid, [], cpp, cpp, None, None, "type", attrs, asserts))
     for tid, cpp, cell, needs_boost in SCALARS:
         if needs_boost and not boost:
             continue
-        types.append((tid, [], cpp, cpp, None, None, "scalar"))
+        types.append((tid, [], cpp, cpp, None, None, "scalar", {}, []))
+    base_count = len(types)
+    # the same spaces over another scalar
+    for tid, cell, spelling in MATRIX_TYPES:
+        for suffix, ctype, needs_boost, _ in LIFTS:
+            if not lifted(cell, suffix, boost):
+                continue
+            attrs = {"cell": f"connectivity::{cell}", "lift_of": tid, "scalar": suffix}
+            if cell in FACTORS:
+                attrs["factors"] = [f"{f}@{suffix}" for f in FACTORS[cell]]
+            asserts = []
+            types.append((f"{tid}@{suffix}", [], f"decltype(connectivity::{cell}::make<{ctype}>())",
+                          f"{spelling or 'the matrix cell ' + cell} over {ctype}", None, cell, "type", attrs, asserts))
+    # a product is lifted only with its factors lifted, or its components edges would name nodes that are not there
+    ids = {t[0] for t in types}
+    types = [t for t in types if "factors" not in t[7] or all(f in ids for f in t[7]["factors"])]
 
     with cf.ThreadPoolExecutor(jobs) as ex:
-        facts = {tid: (sat, has) for tid, sat, has in ex.map(
-            lambda t: tu_run(work, t[0], t[2], t[4], concepts, boost), types)}
+        facts = {t[0]: (sat, has) for t, (tid, sat, has) in zip(types, ex.map(
+            lambda t: tu_run(work, t[0], t[2], t[4], concepts, boost, t[8]), types))}
 
     nodes = []
     for c in sorted(concepts, key=lambda c: c["id"]):
@@ -494,15 +582,17 @@ def build(work, jobs, boost):
         if not c["unary"]:
             n["unary"] = False
         nodes.append(n)
-    for tid, aliases, _, shown, _, _, kind in types:
+    for tid, aliases, _, shown, _, _, kind, attrs, _ in types:
         n = {"id": tid, "kind": kind, "cpp": shown}
         if aliases:
             n["aliases"] = aliases
+        n.update(attrs)
         nodes.append(n)
 
     edges = [{"kind": "refines", "from": a, "to": b} for a, b in refines]
     unary = [c["id"] for c in sorted(concepts, key=lambda c: c["id"]) if c["unary"]]
-    for tid, _, _, _, _, cell, _ in types:
+    ops_of = {}   # type id -> {quantity: [edge]}, the operation edges that stay on the type
+    for tid, _, _, _, _, cell, kind, attrs, _ in types:
         sat, has = facts[tid]
         # the same fact two ways: the customization-point concepts of access.hpp against the member / ADL detection
         for q, concept in (("exp_map", "Exponential"), ("log_map", "Logarithmic"), ("metric", "Metrized")):
@@ -522,14 +612,55 @@ def build(work, jobs, boost):
         for q, variant, needs_concepts, needs in BUILT:
             if all(sat[c] for c in needs_concepts):
                 ops.append((q, variant, [tid] + needs_concepts, needs))
-        ops.sort(key=lambda o: (OP_ORDER.index(o[0]), VARIANT_ORDER.index(o[1])))
+        # a group's own operations (the members compose, inverse, exp, log)
+        if kind == "type" and tid in GROUPS.values():
+            for q in GROUP_OPS:
+                if has[(q, "member")]:
+                    ops.append((q, "member", [tid], []))
+        ops.sort(key=lambda o: (OP_ORDER.index(o[0]) if o[0] in OP_ORDER else len(OP_ORDER) + GROUP_OPS.index(o[0]),
+                                VARIANT_ORDER.index(o[1])))
+        lift = attrs.get("lift_of")
+        scalar_node = next((l[3] for l in LIFTS if l[0] == attrs.get("scalar")), None)
         for q, variant, inputs, needs in ops:
             level, per = levels_for(cells, cell, q, variant, boost)
+            if lift:   # the level the matrix reached on this scalar
+                level = per.get(scalar_node, 0)
+                per = {scalar_node: level} if scalar_node in per else {}
             e = {"kind": "operation", "op": q, "variant": variant, "output": q, "inputs": inputs, "needs": needs,
                  "level": level}
             if per:
                 e["levels"] = per
             edges.append(e)
+            ops_of.setdefault(tid, {}).setdefault(q, []).append(e)
+
+    # edges between types
+    for tid, _, _, _, _, cell, kind, attrs, _ in types:
+        sat, has = facts[tid]
+        # a space over another scalar: closes a route that is computed there and converted back
+        for suffix, _, _, _ in LIFTS:
+            lid = f"{tid}@{suffix}"
+            for q in EMITTABLE:
+                if lid in ops_of and q in ops_of[lid] and tid in ops_of and q in ops_of[tid]:
+                    edges.append({"kind": "operation", "op": q, "variant": f"lift:{suffix}", "output": q, "inputs": [tid],
+                                  "needs": [f"{lid}#{q}"], "level": max(e["level"] for e in ops_of[lid][q]), "entry": True})
+        # a product from its factors
+        if "factors" in attrs:
+            f1, f2 = attrs["factors"]
+            for q, concept in COMPONENT_OPS.items():
+                if sat[concept] and q in ops_of.get(f1, {}) and q in ops_of.get(f2, {}):
+                    needs = [f"{f1}#{q}"] + ([f"{f2}#{q}"] if f2 != f1 else [])
+                    edges.append({"kind": "operation", "op": q, "variant": "components", "output": q, "inputs": [tid],
+                                  "needs": needs, "level": 0})
+        # a Lie group manifold from its group
+        if "group" in attrs:
+            g = attrs["group"]
+            have = lambda *qs: all(q in ops_of.get(g, {}) for q in qs)
+            if have("compose", "lie_exp"):
+                edges.append({"kind": "operation", "op": "exp_map", "variant": "group", "output": "exp_map", "inputs": [tid],
+                              "needs": [f"{g}#compose", f"{g}#lie_exp"], "level": 0})
+            if have("compose", "inverse", "lie_log"):
+                edges.append({"kind": "operation", "op": "log_map", "variant": "group", "output": "log_map", "inputs": [tid],
+                              "needs": [f"{g}#compose", f"{g}#inverse", f"{g}#lie_log"], "level": 0})
     return {"version": 1, "generator": "rsc/spatium/gen_graph.py", "nodes": nodes, "edges": edges}
 
 

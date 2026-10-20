@@ -110,6 +110,18 @@ const rsc::Edge* edge_with(const rsc::Graph& g, const rsc::Route& r, std::string
     return nullptr;
 }
 
+// The routes that stay on one type: no factor, no other scalar, no group.
+std::vector<rsc::Route> on_one_type(const rsc::Graph& g, const std::vector<rsc::Route>& routes,
+                                    std::string_view type) {
+    std::vector<rsc::Route> out;
+    for (const rsc::Route& r : routes)
+        if (std::ranges::all_of(r, [&](std::size_t i) { return g.edges()[i].inputs[0] == g.find(type)->id; }))
+            out.push_back(r);
+    return out;
+}
+
+bool is_lift(const rsc::Edge& e) { return e.variant.starts_with("lift"); }
+
 }  // namespace
 
 TEST_CASE("rsc graph: the library's concepts, types and edges are in it", "[rsc]") {
@@ -162,7 +174,7 @@ TEST_CASE("rsc graph: a type satisfies everything its concepts refine", "[rsc]")
 
 TEST_CASE("rsc graph: distance on Sphere<2> has a closed form and a derived route, both verified", "[rsc]") {
     const rsc::Graph& g = graph();
-    const std::vector<rsc::Route> routes = g.routes("Sphere<2>", "distance", 6);
+    const std::vector<rsc::Route> routes = on_one_type(g, g.routes("Sphere<2>", "distance", 6), "Sphere<2>");
     REQUIRE(routes.size() >= 2);
 
     const rsc::Route* member = nullptr;
@@ -209,7 +221,7 @@ TEST_CASE("rsc graph: a space with no member distance gets only the derived rout
 
     // declared: the graph offers the derived route and nothing else
     const rsc::Graph& g = graph();
-    const std::vector<rsc::Route> routes = g.routes("S2Derived", "distance", 6);
+    const std::vector<rsc::Route> routes = on_one_type(g, g.routes("S2Derived", "distance", 6), "S2Derived");
     REQUIRE(routes.size() == 1);
     CHECK(edge_with(g, routes[0], "distance", "derived") != nullptr);
     CHECK(edge_with(g, routes[0], "distance", "member") == nullptr);
@@ -274,4 +286,93 @@ TEST_CASE("rsc graph: routes close over their needs and are found shortest first
     CHECK(g->route_level(routes[0]) + g->route_level(routes[1]) == 2 + 1);   // min of 3,2,3 and of 1,2,3
     CHECK(g->routes("T", "z", 2).empty());               // three edges do not fit in a depth of two
     CHECK(g->routes("T", "x", 1).size() == 2);
+}
+
+// ── Routes that cross types (phase 2b) ─────────────────────────
+
+TEST_CASE("rsc graph: a product's distance is also found from its factors", "[rsc]") {
+    const rsc::Graph& g = graph();
+    const std::vector<rsc::Route> routes = g.routes("S2xE1", "distance", 9);
+    const rsc::Route* through = nullptr;
+    for (const rsc::Route& r : routes)
+        if (edge_with(g, r, "distance", "components")) { through = &r; break; }
+    REQUIRE(through != nullptr);
+
+    // the factors' distances are steps of the route, each on its own type
+    std::set<std::string> subjects;
+    for (const std::size_t i : *through) subjects.insert(g.edges()[i].inputs[0]);
+    CHECK(subjects.contains("S2xE1"));
+    CHECK(subjects.contains("Sphere<2>"));
+    CHECK(subjects.contains("Euclidean<1>"));
+    CHECK(g.edges()[through->back()].variant == "components");   // the product's edge closes the route
+    CHECK(g.edges()[through->back()].inputs[0] == "S2xE1");
+}
+
+TEST_CASE("rsc graph: a space over another scalar is a route, and only ever the whole route", "[rsc]") {
+    const rsc::Graph& g = graph();
+    REQUIRE(g.find("Sphere<2>@Real50") != nullptr);
+    REQUIRE(g.find("Sphere<2>@Dual") != nullptr);
+    CHECK(g.satisfies("Sphere<2>@Real50", "Riemannian"));       // the same space, so the same concepts
+
+    const std::vector<rsc::Route> routes = g.routes("Sphere<2>", "distance", 9);
+    std::size_t lifted = 0;
+    for (const rsc::Route& r : routes) {
+        for (std::size_t k = 0; k < r.size(); ++k) {
+            const rsc::Edge& e = g.edges()[r[k]];
+            if (!is_lift(e)) continue;
+            ++lifted;
+            CHECK(k + 1 == r.size());                           // the conversion closes the route
+            CHECK(e.entry);
+            CHECK(e.inputs[0] == "Sphere<2>");
+            CHECK(e.wants.size() == 1);
+            CHECK(g.edges()[r[0]].inputs[0] != "Sphere<2>");    // what it converts is computed on the other scalar
+        }
+    }
+    CHECK(lifted >= 4);                                          // Real50 and Dual, over the closed form and the derivation
+
+    // a factor is never lifted inside a product's route: the lift converts a whole route, not a step
+    for (const rsc::Route& r : g.routes("S2xE1", "distance", 9))
+        for (std::size_t k = 0; k + 1 < r.size(); ++k) CHECK(!is_lift(g.edges()[r[k]]));
+}
+
+TEST_CASE("rsc graph: a Lie group manifold is also found from its group", "[rsc]") {
+    const rsc::Graph& g = graph();
+    const std::vector<rsc::Route> routes = g.routes("LieGroupManifold<SO3>", "exp_map", 6);
+    REQUIRE(routes.size() >= 2);
+    const rsc::Route* from_group = nullptr;
+    for (const rsc::Route& r : routes)
+        if (edge_with(g, r, "exp_map", "group")) from_group = &r;
+    REQUIRE(from_group != nullptr);
+    std::set<std::string> outputs;
+    for (const std::size_t i : *from_group)
+        if (g.edges()[i].inputs[0] == "SO3") outputs.insert(g.edges()[i].output);
+    CHECK(outputs == std::set<std::string>{"compose", "lie_exp"});
+}
+
+TEST_CASE("rsc graph: a need on another type must name one, and an entry edge is never a step", "[rsc]") {
+    const auto refused = [](std::string_view text) { return !rsc::Graph::parse(text).has_value(); };
+    const std::string head = R"({"version": 1, "nodes": [{"id": "T", "kind": "type"}, {"id": "U", "kind": "type"},
+        {"id": "C", "kind": "concept"}], "edges": [)";
+    CHECK(refused(head + R"({"kind": "operation", "op": "f", "variant": "v", "output": "x", "inputs": ["T"],
+                  "needs": ["Nowhere#y"], "level": 1}]})"));
+    CHECK(refused(head + R"({"kind": "operation", "op": "f", "variant": "v", "output": "x", "inputs": ["T"],
+                  "needs": ["C#y"], "level": 1}]})"));
+    CHECK(refused(head + R"({"kind": "operation", "op": "f", "variant": "v", "output": "x", "inputs": ["T"],
+                  "needs": ["T#x"], "level": 1}]})"));      // its own output, written out
+    CHECK(!refused(head + R"({"kind": "operation", "op": "f", "variant": "v", "output": "x", "inputs": ["T"],
+                  "needs": ["U#x"], "level": 1}]})"));       // the same name on another type is fine
+
+    // x on T is yielded by a closed form and by a conversion of U's x; y on T needs x on T
+    const auto g = rsc::Graph::parse(R"({"version": 1, "nodes": [{"id": "T", "kind": "type"}, {"id": "U", "kind": "type"}],
+        "edges": [
+          {"kind": "operation", "op": "x", "variant": "a", "output": "x", "inputs": ["T"], "needs": [], "level": 3},
+          {"kind": "operation", "op": "x", "variant": "lift", "output": "x", "inputs": ["T"], "needs": ["U#x"], "level": 2, "entry": true},
+          {"kind": "operation", "op": "x", "variant": "a", "output": "x", "inputs": ["U"], "needs": [], "level": 3},
+          {"kind": "operation", "op": "y", "variant": "a", "output": "y", "inputs": ["T"], "needs": ["x"], "level": 3}]})");
+    REQUIRE(g.has_value());
+    CHECK(g->routes("T", "x", 3).size() == 2);              // the closed form, and the conversion of U's
+    const auto y = g->routes("T", "y", 4);
+    REQUIRE(y.size() == 1);                                  // the conversion cannot be the step under y
+    CHECK(g->edges()[y[0][0]].variant == "a");
+    CHECK(g->routes("U", "x", 3).size() == 1);
 }

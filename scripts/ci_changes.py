@@ -9,8 +9,9 @@ of heavy jobs, whether they must run:
 
     code    every build and test job (anything that is not documentation)
     matrix  the connectivity matrix (only what its cells read)
-    rsc     the RSC checks: rsc/core stays free of the library, and rsc/spatium/graph.json
-            is what its generator makes of the headers and the matrix
+    rsc     the RSC checks: rsc/core stays free of the library, rsc/spatium/graph.json is what its
+            generator makes of the headers and the matrix, and the report and the witness pairs
+            are what rsc_find.py makes of the graph
 
 Used by the `changes` job of .github/workflows/ci.yml, which prints `code=`, `matrix=` and `rsc=`
 lines for $GITHUB_OUTPUT. Without a usable base (a first push, a scheduled or manual run)
@@ -51,11 +52,14 @@ MATRIX_INPUTS = [
 
 # What rsc/ reads or is: the graph of the library is generated from every concept under include/
 # and from the matrix's expected levels (and the generator imports gen_connectivity.py), so any
-# header change can change it. A Markdown file under rsc/ changes nothing.
+# header change can change it, and so can the sampler and the pair machinery the finder runs routes on
+# (rsc_find.py --check). A Markdown file under rsc/ changes nothing.
 RSC_INPUTS = [
     r"^rsc/(?!.*\.md$)",
     r"^include/spatium/",
     r"^tests/connectivity/",
+    r"^tests/symmetry/(pair|rsc_pair_support)\.hpp$",   # what the finder's runs and the witness pairs are built on
+    r"^tests/symmetry/pairs/rsc_",                       # the witness pairs it writes
     r"^scripts/gen_connectivity\.py$",
     r"^CMakeLists\.txt$",
     r"^cmake/",
@@ -101,6 +105,10 @@ def selftest():
         (["rsc/core/graph.hpp"], (True, False, True)),
         (["rsc/spatium/graph.json"], (True, False, True)),
         (["rsc/spatium/gen_graph.py", "rsc/README.md"], (True, False, True)),
+        (["rsc/spatium/rsc_find.py"], (True, False, True)),
+        (["tests/symmetry/rsc_pair_support.hpp"], (True, False, True)),
+        (["tests/symmetry/pairs/rsc_Sphere_2_distance.cpp"], (True, False, True)),
+        (["tests/symmetry/pairs/sphere_exp_log.cpp"], (True, False, False)),
         ([], (True, True, True)),
     ]
     bad = 0

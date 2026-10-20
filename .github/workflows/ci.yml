@@ -169,6 +169,29 @@ jobs:
       - name: Regenerate and compare
         run: nix develop --command bash -c 'python3 rsc/spatium/gen_graph.py --check -j 4'
 
+  # The finder: every route of the graph turned into C++, compiled, run against its reference, and the
+  # outcome recorded. Regenerates rsc/spatium/find-report.md and the witness pairs
+  # tests/symmetry/pairs/rsc_*.cpp in memory and compares; the pairs themselves run in the unit tests.
+  rsc-find:
+    name: rsc_find report and witness pairs are up to date
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    needs: changes
+    if: needs.changes.outputs.rsc == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: The rules of the finder (what a route becomes, the reference, independence)
+        run: python3 rsc/spatium/test_rsc_find.py
+
+      - name: Regenerate and compare
+        run: nix develop --command bash -c 'python3 rsc/spatium/rsc_find.py --all --check -j 4'
+
   dependency-graph:
     name: dependency graph is up to date
     runs-on: ubuntu-24.04
