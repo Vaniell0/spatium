@@ -20,7 +20,8 @@ concurrency:
 # run seen; `apt-get update` retries and times out on its own.
 jobs:
   # What a change needs (scripts/ci_changes.py): documentation alone skips every build, and
-  # the connectivity matrix runs only for what its cells read (core/, algebra/, spaces/).
+  # the connectivity matrix runs only for what its cells read (core/, algebra/, spaces/), and the RSC
+  # checks (rsc/core free of the library, the typed graph up to date) run for rsc/ and for any header.
   # A scheduled or manual run, or a diff that cannot be computed, runs everything.
   changes:
     name: what the change needs
@@ -29,6 +30,7 @@ jobs:
     outputs:
       code: ${{ steps.f.outputs.code }}
       matrix: ${{ steps.f.outputs.matrix }}
+      rsc: ${{ steps.f.outputs.rsc }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -128,6 +130,44 @@ jobs:
       # docs/connectivity.md or tests/connectivity/expected.hpp would change.
       - name: Regenerate and compare
         run: nix develop --command bash -c 'python3 scripts/gen_connectivity.py --check -j 4'
+
+  # The generic core of the RSC engine does not know the library it will be pointed at (rsc/core
+  # is the boundary of decision R3 in the engine's plan); the library does not depend on rsc/ either,
+  # which the build already shows. A grep, so it needs nothing installed.
+  rsc-core-isolation:
+    name: rsc/core includes nothing of the library
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: changes
+    if: needs.changes.outputs.rsc == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: No #include of spatium/ (the library, or rsc/spatium) under rsc/core
+        run: |
+          if grep -rnE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?spatium/' rsc/core; then
+            echo "::error::rsc/core must not include <spatium/...> (or rsc/spatium): it is the generic core"
+            exit 1
+          fi
+
+  # The typed graph of the library: concepts parsed from include/, which type satisfies which concept
+  # compiled (one translation unit per type), operations from core/access.hpp with the matrix's levels.
+  # Regenerated in a temporary directory and compared, like the connectivity matrix above.
+  rsc-graph:
+    name: rsc typed graph is up to date
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.rsc == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Regenerate and compare
+        run: nix develop --command bash -c 'python3 rsc/spatium/gen_graph.py --check -j 4'
 
   dependency-graph:
     name: dependency graph is up to date
