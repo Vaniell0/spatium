@@ -12,6 +12,12 @@
 //              own tests have verified it (0 declared, 1 runs and is finite, 2 an axiom or a
 //              symmetry holds, 3 its numbers agree across scalars).
 //
+// A need is a quantity on the edge's own type ("log_map") or on another type ("Sphere<2>#distance"):
+// that is how a route crosses types -- a product from its factors, a space from the same space over
+// another scalar, a space from its group. An edge marked `entry` only starts a route: it may yield
+// the goal of a query but never satisfies another edge's need (a conversion of a whole route, not a
+// step in one).
+//
 // A route to a quantity on a type is a set of operation edges that closes: every edge's needs are
 // yielded by another edge of the route, and the last yields the goal. Two routes to one quantity
 // (a closed form and a derivation from the basis) are two different sets.
@@ -217,12 +223,20 @@ struct Node {
     std::vector<std::string> aliases;      // other names a query may use
 };
 
+// A quantity on a type: what an edge needs, and what a query asks for.
+struct Need {
+    std::string type, quantity;
+    bool operator==(const Need&) const = default;
+};
+
 struct Edge {
     EdgeKind kind = EdgeKind::Satisfies;
     std::string from, to;                  // refines: `from` is built from `to`; satisfies: type, concept
     std::string op, variant, output;       // operation: what it is, which way, the quantity it yields
     std::vector<std::string> inputs;       // operation: the type, then the concepts that make the way available
-    std::vector<std::string> needs;        // operation: quantities the way is built from
+    std::vector<std::string> needs;        // operation: quantities the way is built from, as written ("q" or "Type#q")
+    std::vector<Need> wants;               // operation: the same, resolved to a type each
+    bool entry = false;                    // operation: may start a route, never a step inside one
     int level = 0;                         // operation: 0 declared .. 3 agrees across scalars (on double)
     std::map<std::string, int> levels;     // operation: the level per scalar the matrix ran
 };
@@ -279,16 +293,18 @@ public:
 
         struct State {
             Route chosen;
-            std::vector<std::string> open;
+            std::vector<Need> open;
         };
-        const auto yielded = [this](const Route& chosen, const std::string& q) {
-            return std::ranges::any_of(chosen, [&](std::size_t i) { return edges_[i].output == q; });
+        const auto yielded = [this](const Route& chosen, const Need& q) {
+            return std::ranges::any_of(chosen, [&](std::size_t i) {
+                return edges_[i].output == q.quantity && edges_[i].inputs[0] == q.type;
+            });
         };
 
         std::set<Route> seen;
         std::vector<Route> found;
         std::deque<State> queue;
-        queue.push_back({{}, {std::string(goal)}});
+        queue.push_back({{}, {Need{start->id, std::string(goal)}}});
         while (!queue.empty()) {
             State s = std::move(queue.front());
             queue.pop_front();
@@ -300,16 +316,18 @@ public:
                     if (auto ordered = in_order(s.chosen)) found.push_back(std::move(*ordered));
                 continue;
             }
-            const std::string next = s.open.back();
+            const Need next = s.open.back();
+            const bool asked = s.chosen.empty();   // the goal of the query itself, not a need of an edge
             s.open.pop_back();
             if (s.chosen.size() >= max_depth) continue;
-            const auto by = by_subject_.find(start->id);
+            const auto by = by_subject_.find(next.type);
             if (by == by_subject_.end()) continue;
             for (const std::size_t e : by->second) {
-                if (edges_[e].output != next) continue;
+                if (edges_[e].output != next.quantity) continue;
+                if (edges_[e].entry && !asked) continue;
                 State t = s;
                 t.chosen.push_back(e);
-                for (auto need = edges_[e].needs.rbegin(); need != edges_[e].needs.rend(); ++need) t.open.push_back(*need);   // the first need is expanded first
+                for (auto w = edges_[e].wants.rbegin(); w != edges_[e].wants.rend(); ++w) t.open.push_back(*w);   // the first need is expanded first
                 queue.push_back(std::move(t));
             }
         }
@@ -342,8 +360,10 @@ private:
             bool moved = false;
             for (std::size_t k = 0; k < chosen.size(); ++k) {
                 if (placed[k]) continue;
-                const bool ready = std::ranges::all_of(edges_[chosen[k]].needs, [&](const std::string& q) {
-                    return std::ranges::any_of(out, [&](std::size_t i) { return edges_[i].output == q; });
+                const bool ready = std::ranges::all_of(edges_[chosen[k]].wants, [&](const Need& q) {
+                    return std::ranges::any_of(out, [&](std::size_t i) {
+                        return edges_[i].output == q.quantity && edges_[i].inputs[0] == q.type;
+                    });
                 });
                 if (!ready) continue;
                 out.push_back(chosen[k]);
@@ -450,8 +470,21 @@ private:
                 for (std::size_t k = 1; k < edge.inputs.size(); ++k)
                     if (node_of(edge.inputs[k])->kind != NodeKind::Concept)
                         return std::unexpected("graph: operation " + edge.op + " lists " + edge.inputs[k] + " after the type");
-                if (std::ranges::count(edge.needs, edge.output))
-                    return std::unexpected("graph: operation " + edge.op + " needs its own output");
+                for (const std::string& w : edge.needs) {
+                    const std::size_t hash = w.find('#');
+                    Need want{subject->id, w};
+                    if (hash != std::string::npos) {
+                        const Node* n = node_of(w.substr(0, hash));
+                        if (!n || n->kind == NodeKind::Concept)
+                            return std::unexpected("graph: operation " + edge.op + " needs " + w + ", which names no type");
+                        want = {n->id, w.substr(hash + 1)};
+                    }
+                    if (want.type == subject->id && want.quantity == edge.output)
+                        return std::unexpected("graph: operation " + edge.op + " needs its own output");
+                    edge.wants.push_back(std::move(want));
+                }
+                if (const json::Value* en = e.get("entry"); en && std::holds_alternative<bool>(en->v))
+                    edge.entry = std::get<bool>(en->v);
                 const json::Value* lv = e.get("level");
                 if (!lv || !lv->is_number() || lv->number() < 0 || lv->number() > 3)
                     return std::unexpected("graph: operation " + edge.op + " has no level 0..3");
