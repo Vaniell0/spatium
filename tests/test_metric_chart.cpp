@@ -165,6 +165,32 @@ TEST_CASE("exp of log is the identity on a derived space, and the library's own 
     CHECK(report.passed);
 }
 
+TEST_CASE("The derived sphere exp keeps the accuracy it promises, eps^(2/3)", "[metric_chart]") {
+    // The default accuracy is 4e-11 for double. A flow integrated at that bare
+    // tolerance missed it on about one input in nine, which
+    // the 1e-8 above cannot see; the closed form is the reference.
+    const auto chart = spaces::metric_chart<double, 2>(SphereMetric{});
+    const Sphere<2> sphere;
+    auto halton = [](int i, int base) {
+        double f = 1, r = 0;
+        while (i > 0) { f /= base; r += f * (i % base); i /= base; }
+        return r;
+    };
+    int above = 0;
+    for (int k = 1; k <= 200; ++k) {
+        const Vec<double, 2> p{1.1 + (3.141592653589793 - 2.2) * halton(k, 2), 6.283185307179586 * halton(k, 3)};
+        Vec<double, 2> v{2 * halton(k, 5) - 1, 2 * halton(k, 7) - 1};
+        const double len = std::sqrt(v[0] * v[0] + std::sin(p[0]) * std::sin(p[0]) * v[1] * v[1]);
+        const double t = 0.25 + 0.75 * halton(k, 11);
+        const double L = (0.1 + 0.9 * halton(k, 13)) / t;
+        v = Vec<double, 2>{v[0] / len * L, v[1] / len * L};
+        const Vec<double, 2> reached = chart.exp_map(p, v, t);
+        const Vec<double, 3> closed = sphere.exp_map(embed(p[0], p[1]), embed_tangent(p[0], p[1], v[0], v[1]), t);
+        if (!((embed(reached[0], reached[1]) - closed).norm() <= 4e-11)) ++above;
+    }
+    CHECK(above == 0);
+}
+
 TEST_CASE("The derivative of a derived exp in t is the velocity, through the flow", "[metric_chart]") {
     // The scalar is a Dual, so the whole machinery -- Christoffel by nested
     // Dual, the extrapolation, the adaptive step -- is differentiated, and
