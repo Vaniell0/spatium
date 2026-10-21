@@ -55,7 +55,7 @@ VoronoiDiagram<S> geodesic_voronoi(
         if (d > vd.distances[u]) continue;
 
         for (auto v : topo.neighbors(u)) {
-            T w = space.distance(mesh.vertices[u], mesh.vertices[v]);
+            T w = spaces::distance(space, mesh.vertices[u], mesh.vertices[v]);
             T new_dist = d + w;
             if (new_dist < vd.distances[v]) {
                 vd.distances[v] = new_dist;

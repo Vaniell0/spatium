@@ -598,7 +598,8 @@ def build(work, jobs, boost):
         for q, concept in (("exp_map", "Exponential"), ("log_map", "Logarithmic"), ("metric", "Metrized")):
             if sat[concept] != (has[(q, "member")] or has[(q, "adl")]):
                 raise SystemExit(f"gen_graph: {tid}: {concept} says {sat[concept]} but member/ADL detection of {q} disagrees")
-        derived_ok = sat["Logarithmic"] and sat["Metrized"]
+        # core/access.hpp withholds the derived distance from a space with an interval and proper time
+        derived_ok = sat["Logarithmic"] and sat["Metrized"] and not sat.get("HasInterval", False)
         if sat["Distanced"] != (has[("distance", "member")] or has[("distance", "adl")] or derived_ok):
             raise SystemExit(f"gen_graph: {tid}: Distanced disagrees with member/ADL/derived detection of distance")
         for cid in unary:
@@ -610,6 +611,8 @@ def build(work, jobs, boost):
                 if has[(q, variant)]:
                     ops.append((q, variant, [tid], []))
         for q, variant, needs_concepts, needs in BUILT:
+            if q == "distance" and variant == "derived" and sat.get("HasInterval", False):
+                continue   # withheld from a space with an interval and proper time (core/access.hpp)
             if all(sat[c] for c in needs_concepts):
                 ops.append((q, variant, [tid] + needs_concepts, needs))
         # a group's own operations (the members compose, inverse, exp, log)

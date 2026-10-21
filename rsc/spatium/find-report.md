@@ -17,27 +17,23 @@ scalar of a lift ignored; arithmetic, sqrt, exp, acos and cos are the trusted ba
 | | |
 |---|---|
 | (type, operation) pairs with at least two routes | 266 |
-| routes found in them | 1187 |
-| routes run against a reference | 1187 |
+| routes found in them | 1183 |
+| routes run against a reference | 1183 |
 | agree (including the references' own chains at another scalar) | 916 |
 | witnesses added (pairs in `tests/symmetry/pairs/`) | 61 in 53 files |
 | agree and cheaper than the reference | 0 |
-| disagreements (findings) | 5 |
+| disagreements (findings) | 1 |
 | red cells (do not compile or run) | 0 |
-| unmatched measure | 1182 pairs with no failure: below 3/300 = 0.010 each (95 %); 5 with failures |
+| unmatched measure | 1182 pairs with no failure: below 3/300 = 0.010 each (95 %); 1 with failures |
 | not run: operations with no emitter (`frechet_mean`, `verify_exp_log`: algorithms over a set of points) | 20 pairs |
 | not run: no sampler for the type | 0 pairs |
-| operations with one route (nothing to compare) | 11 |
+| operations with one route (nothing to compare) | 10 |
 
 ## Disagreements
 
 | type | operation | route | worst error | bound | ratio | inputs failed | worst input |
 |---|---|---|---|---|---|---|---|
 | TorusChart | exp_map | exp_map[member] on TorusChart@Dual > exp_map[lift:Dual] | 9.09e-11 | 1.02e-12 | 89 | 3 of 300 | input 247: `p=[1.1640200878426052 0.50181075035394918 0.13565183804828732] q=[1.2897193707074115 0.10949788604821992 0.057901967276069922] u=[0.028134218379067759 -0.065261247045597021 -0] v=[-0.011328615843802703 0.026278305915800264 0]` |
-| TorusChart | distance | log_map[member] > metric[member] > distance[derived] | 0.0164 | 4.39e-06 | 3.7e+03 | 295 of 300 | input 245: `p=[1.2990356770493825 0.044010961610848436 0.011460821002487848] q=[1.1405568163094322 0.59428065896584947 0.090276644688918634] u=[-0.0022659452604823628 0.066882059102339173 0] v=[-0.0031193055086366226 0.092069997905631501 0]` |
-| TorusChart | distance | log_map[member] on TorusChart@Dual > metric[member] on TorusChart@Dual > distance[derived] on TorusChart@Dual > distance[lift:Dual] | 0.0164 | 4.39e-06 | 3.7e+03 | 295 of 300 | input 245: `p=[1.2990356770493825 0.044010961610848436 0.011460821002487848] q=[1.1405568163094322 0.59428065896584947 0.090276644688918634] u=[-0.0022659452604823628 0.066882059102339173 0] v=[-0.0031193055086366226 0.092069997905631501 0]` |
-| SphereLevelSet | distance | log_map[member] > metric[member] > distance[derived] | 0.567 | 3.29e-06 | 1.7e+05 | 300 of 300 | input 298: `p=[0.52861880757423951 0.67398984519962768 0.51604248356755589] q=[-0.27757065810864134 -0.63013649646523295 0.72517758209948646] u=[0.28953516431617365 0.023552718710329434 -0.32735294462847819] v=[-0.085751478633372541 -0.063916733621038863 0.17132130899497425]` |
-| SphereLevelSet | distance | log_map[member] on SphereLevelSet@Dual > metric[member] on SphereLevelSet@Dual > distance[derived] on SphereLevelSet@Dual > distance[lift:Dual] | 0.567 | 3.29e-06 | 1.7e+05 | 300 of 300 | input 298: `p=[0.52861880757423951 0.67398984519962768 0.51604248356755589] q=[-0.27757065810864134 -0.63013649646523295 0.72517758209948646] u=[0.28953516431617365 0.023552718710329434 -0.32735294462847819] v=[-0.085751478633372541 -0.063916733621038863 0.17132130899497425]` |
 
 ## Red cells
 
@@ -619,14 +615,12 @@ None.
 | 1 | metric[member] | L1 | 1 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
 | 2 | metric[member] on TorusChart@Dual > metric[lift:Dual] | L1 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
-#### distance  (reference: route 1, member closed form, L3)
+#### distance  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | distance[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | distance[member] on TorusChart@Dual > distance[lift:Dual] | L3 | 1 | 6.6e-12 | agrees; the chain of the reference at another scalar |
-| 3 | log_map[member] > metric[member] > distance[derived] | L1 | 3 | 3.7e+03 | DISAGREES on 295 of 300 inputs |
-| 4 | log_map[member] on TorusChart@Dual > metric[member] on TorusChart@Dual > distance[derived] on TorusChart@Dual > distance[lift:Dual] | L1 | 3 | 3.7e+03 | DISAGREES on 295 of 300 inputs |
+| 1 | log_map[member] > metric[member] > distance[derived] | L1 | 3 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
+| 2 | log_map[member] on TorusChart@Dual > metric[member] on TorusChart@Dual > distance[derived] on TorusChart@Dual > distance[lift:Dual] | L1 | 3 | 6.6e-12 | agrees; the chain of the reference at another scalar |
 
 #### norm_at  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
@@ -686,14 +680,12 @@ None.
 | 1 | metric[member] | L1 | 1 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
 | 2 | metric[member] on SphereLevelSet@Dual > metric[lift:Dual] | L1 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
-#### distance  (reference: route 1, member closed form, L3)
+#### distance  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | distance[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | distance[member] on SphereLevelSet@Dual > distance[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-| 3 | log_map[member] > metric[member] > distance[derived] | L1 | 3 | 1.7e+05 | DISAGREES on 300 of 300 inputs |
-| 4 | log_map[member] on SphereLevelSet@Dual > metric[member] on SphereLevelSet@Dual > distance[derived] on SphereLevelSet@Dual > distance[lift:Dual] | L1 | 3 | 1.7e+05 | DISAGREES on 300 of 300 inputs |
+| 1 | log_map[member] > metric[member] > distance[derived] | L1 | 3 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
+| 2 | log_map[member] on SphereLevelSet@Dual > metric[member] on SphereLevelSet@Dual > distance[derived] on SphereLevelSet@Dual > distance[lift:Dual] | L1 | 3 | 0 | agrees; the chain of the reference at another scalar |
 
 #### norm_at  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 

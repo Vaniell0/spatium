@@ -212,7 +212,7 @@
     X(spatium::Dual<double>, "Dual", SPDLogExS2, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", SPDLogExS2, VerifyExpLog, 3) \
     X(spatium::Dual<double>, "Dual", SphereLevelSet, Derivative, 3) \
-    X(spatium::Dual<double>, "Dual", SphereLevelSet, DerivedDistance, 1) \
+    X(spatium::Dual<double>, "Dual", SphereLevelSet, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", SphereLevelSet, ExpLog, 1) \
     X(spatium::Dual<double>, "Dual", SphereLevelSet, FrechetMean, 3) \
     X(spatium::Dual<double>, "Dual", SphereLevelSet, Infinity, 3) \
@@ -228,11 +228,11 @@
     X(spatium::Dual<double>, "Dual", SphereLevelSetTyped, Midpoint, 3) \
     X(spatium::Dual<double>, "Dual", SphereLevelSetTyped, VerifyExpLog, 3) \
     X(spatium::Dual<double>, "Dual", TorusChart, Derivative, 3) \
-    X(spatium::Dual<double>, "Dual", TorusChart, DerivedDistance, 1) \
+    X(spatium::Dual<double>, "Dual", TorusChart, DerivedDistance, 3) \
     X(spatium::Dual<double>, "Dual", TorusChart, ExpLog, 1) \
     X(spatium::Dual<double>, "Dual", TorusChart, FrechetMean, 1) \
     X(spatium::Dual<double>, "Dual", TorusChart, Infinity, 3) \
-    X(spatium::Dual<double>, "Dual", TorusChart, MetricAxioms, 3) \
+    X(spatium::Dual<double>, "Dual", TorusChart, MetricAxioms, 1) \
     X(spatium::Dual<double>, "Dual", TorusChart, Midpoint, 1) \
     X(spatium::Dual<double>, "Dual", TorusChart, VerifyExpLog, 1) \
     X(spatium::Dual<double>, "Dual", TorusTyped, Derivative, 3) \
@@ -372,7 +372,7 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, Midpoint, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SPDLogExS2, VerifyExpLog, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, Derivative, 3) \
-    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, DerivedDistance, 1) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, ExpLog, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, FrechetMean, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, Infinity, 3) \
@@ -380,11 +380,11 @@
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, Midpoint, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", SphereLevelSet, VerifyExpLog, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, Derivative, 3) \
-    X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, DerivedDistance, 1) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, DerivedDistance, 3) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, ExpLog, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, FrechetMean, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, Infinity, 3) \
-    X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, MetricAxioms, 3) \
+    X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, MetricAxioms, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, Midpoint, 1) \
     X(spatium::Dual<spatium::Dual<double>>, "Dual2", TorusChart, VerifyExpLog, 1) \
     X(double, "double", CylinderADL, Derivative, 3) \
@@ -596,7 +596,7 @@
     X(double, "double", SPDLogExS2, Midpoint, 3) \
     X(double, "double", SPDLogExS2, VerifyExpLog, 3) \
     X(double, "double", SphereLevelSet, Derivative, 3) \
-    X(double, "double", SphereLevelSet, DerivedDistance, 1) \
+    X(double, "double", SphereLevelSet, DerivedDistance, 3) \
     X(double, "double", SphereLevelSet, ExpLog, 1) \
     X(double, "double", SphereLevelSet, FrechetMean, 3) \
     X(double, "double", SphereLevelSet, Infinity, 3) \
@@ -612,11 +612,11 @@
     X(double, "double", SphereLevelSetTyped, Midpoint, 3) \
     X(double, "double", SphereLevelSetTyped, VerifyExpLog, 3) \
     X(double, "double", TorusChart, Derivative, 3) \
-    X(double, "double", TorusChart, DerivedDistance, 1) \
+    X(double, "double", TorusChart, DerivedDistance, 3) \
     X(double, "double", TorusChart, ExpLog, 1) \
     X(double, "double", TorusChart, FrechetMean, 1) \
     X(double, "double", TorusChart, Infinity, 3) \
-    X(double, "double", TorusChart, MetricAxioms, 3) \
+    X(double, "double", TorusChart, MetricAxioms, 1) \
     X(double, "double", TorusChart, Midpoint, 1) \
     X(double, "double", TorusChart, VerifyExpLog, 1) \
     X(double, "double", TorusTyped, Derivative, 3) \
@@ -756,7 +756,7 @@
     X(float, "float", SPDLogExS2, Midpoint, 3) \
     X(float, "float", SPDLogExS2, VerifyExpLog, 3) \
     X(float, "float", SphereLevelSet, Derivative, 3) \
-    X(float, "float", SphereLevelSet, DerivedDistance, 1) \
+    X(float, "float", SphereLevelSet, DerivedDistance, 3) \
     X(float, "float", SphereLevelSet, ExpLog, 1) \
     X(float, "float", SphereLevelSet, FrechetMean, 3) \
     X(float, "float", SphereLevelSet, Infinity, 3) \
@@ -916,11 +916,11 @@
     X(long double, "long double", SPDLogExS2, Midpoint, 3) \
     X(long double, "long double", SPDLogExS2, VerifyExpLog, 3) \
     X(long double, "long double", SphereLevelSet, Derivative, 3) \
-    X(long double, "long double", SphereLevelSet, DerivedDistance, 1) \
+    X(long double, "long double", SphereLevelSet, DerivedDistance, 3) \
     X(long double, "long double", SphereLevelSet, ExpLog, 1) \
     X(long double, "long double", SphereLevelSet, FrechetMean, 3) \
     X(long double, "long double", SphereLevelSet, Infinity, 3) \
-    X(long double, "long double", SphereLevelSet, MetricAxioms, 3) \
+    X(long double, "long double", SphereLevelSet, MetricAxioms, 1) \
     X(long double, "long double", SphereLevelSet, Midpoint, 1) \
     X(long double, "long double", SphereLevelSet, VerifyExpLog, 1) \
     X(long double, "long double", SphereLevelSetTyped, Derivative, 3) \
@@ -932,11 +932,11 @@
     X(long double, "long double", SphereLevelSetTyped, Midpoint, 3) \
     X(long double, "long double", SphereLevelSetTyped, VerifyExpLog, 3) \
     X(long double, "long double", TorusChart, Derivative, 3) \
-    X(long double, "long double", TorusChart, DerivedDistance, 1) \
+    X(long double, "long double", TorusChart, DerivedDistance, 3) \
     X(long double, "long double", TorusChart, ExpLog, 1) \
     X(long double, "long double", TorusChart, FrechetMean, 1) \
     X(long double, "long double", TorusChart, Infinity, 3) \
-    X(long double, "long double", TorusChart, MetricAxioms, 3) \
+    X(long double, "long double", TorusChart, MetricAxioms, 1) \
     X(long double, "long double", TorusChart, Midpoint, 1) \
     X(long double, "long double", TorusChart, VerifyExpLog, 1) \
     X(long double, "long double", TorusTyped, Derivative, 3) \
@@ -1136,7 +1136,7 @@
     X(spatium::Real50, "Real50", SPDLogExS2, Midpoint, 3) \
     X(spatium::Real50, "Real50", SPDLogExS2, VerifyExpLog, 3) \
     X(spatium::Real50, "Real50", SphereLevelSet, Derivative, 3) \
-    X(spatium::Real50, "Real50", SphereLevelSet, DerivedDistance, 1) \
+    X(spatium::Real50, "Real50", SphereLevelSet, DerivedDistance, 3) \
     X(spatium::Real50, "Real50", SphereLevelSet, ExpLog, 1) \
     X(spatium::Real50, "Real50", SphereLevelSet, FrechetMean, 3) \
     X(spatium::Real50, "Real50", SphereLevelSet, Infinity, 3) \
@@ -1144,11 +1144,11 @@
     X(spatium::Real50, "Real50", SphereLevelSet, Midpoint, 1) \
     X(spatium::Real50, "Real50", SphereLevelSet, VerifyExpLog, 1) \
     X(spatium::Real50, "Real50", TorusChart, Derivative, 3) \
-    X(spatium::Real50, "Real50", TorusChart, DerivedDistance, 1) \
+    X(spatium::Real50, "Real50", TorusChart, DerivedDistance, 3) \
     X(spatium::Real50, "Real50", TorusChart, ExpLog, 1) \
     X(spatium::Real50, "Real50", TorusChart, FrechetMean, 1) \
     X(spatium::Real50, "Real50", TorusChart, Infinity, 3) \
-    X(spatium::Real50, "Real50", TorusChart, MetricAxioms, 3) \
+    X(spatium::Real50, "Real50", TorusChart, MetricAxioms, 1) \
     X(spatium::Real50, "Real50", TorusChart, Midpoint, 1) \
     X(spatium::Real50, "Real50", TorusChart, VerifyExpLog, 1) \
 

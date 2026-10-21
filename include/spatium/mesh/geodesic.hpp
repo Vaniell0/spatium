@@ -57,7 +57,7 @@ DistanceField<S> geodesic_distances(
         if (d > field.distances[u]) continue;  // stale entry
 
         for (auto v : topo.neighbors(u)) {
-            T w = space.distance(mesh.vertices[u], mesh.vertices[v]);
+            T w = spaces::distance(space, mesh.vertices[u], mesh.vertices[v]);
             T new_dist = d + w;
             if (new_dist < field.distances[v]) {
                 field.distances[v] = new_dist;

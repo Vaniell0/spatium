@@ -79,15 +79,8 @@ public:
         return abs(fn_(p[0], p[1], p[2])) < epsilon<T>() * T{100};
     }
 
-    // Euclidean distance in ambient R³ — a valid metric but NOT the geodesic
-    // (intrinsic) distance along the surface. Acts as a lower bound for geodesic distance.
-    // Only for the erased form: a surface that has its geodesics has no member
-    // `distance`, so core/access.hpp derives |log|_g, the intrinsic one.
-    T distance(const PointType& a, const PointType& b) const requires (!exact) {
-        return (a - b).norm();
-    }
-
-    // The chord, for any surface, under its own name.
+    // The chord in the ambient space: a lower bound of the geodesic distance, not
+    // that distance, so it is not called `distance` (core/access.hpp's contract).
     T chord_distance(const PointType& a, const PointType& b) const {
         return (a - b).norm();
     }

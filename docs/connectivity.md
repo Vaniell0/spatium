@@ -18,7 +18,7 @@ scalar, in its own translation unit, and graded:
 Probes are in `tests/connectivity/probes.hpp`; `tests/test_connectivity.cpp`
 holds every cell to the level recorded here.
 
-**1119 of 1168 cells at L2 or above.**
+**1124 of 1168 cells at L2 or above.**
 
 | space | probe | double | float | long double | Real50 | Dual | Dual2 |
 |---|---|---|---|---|---|---|---|
@@ -70,16 +70,16 @@ holds every cell to the level recorded here.
 | SPDAff | VerifyExpLog | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAff | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | SPDAff | Infinity | L3 | L3 | L3 | L3 | L3 | L3 |
-| TorusChart | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
-| TorusChart | DerivedDistance | L1 | L3 | L1 | L1 | L1 | L1 |
+| TorusChart | MetricAxioms | L1 | L3 | L1 | L1 | L1 | L1 |
+| TorusChart | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
 | TorusChart | ExpLog | L1 | L3 | L1 | L1 | L1 | L1 |
 | TorusChart | Midpoint | L1 | L3 | L1 | L1 | L1 | L1 |
 | TorusChart | FrechetMean | L1 | L3 | L1 | L1 | L1 | L1 |
 | TorusChart | VerifyExpLog | L1 | L2 | L1 | L1 | L1 | L1 |
 | TorusChart | Derivative | L3 | L3 | L3 | L3 | L3 | L3 |
 | TorusChart | Infinity | L3 | L3 | L3 | L3 | L3 | L3 |
-| SphereLevelSet | MetricAxioms | L3 | L3 | L3 | L3 | L3 | L3 |
-| SphereLevelSet | DerivedDistance | L1 | L1 | L1 | L1 | L1 | L1 |
+| SphereLevelSet | MetricAxioms | L3 | L3 | L1 | L3 | L3 | L3 |
+| SphereLevelSet | DerivedDistance | L3 | L3 | L3 | L3 | L3 | L3 |
 | SphereLevelSet | ExpLog | L1 | L1 | L1 | L1 | L1 | L1 |
 | SphereLevelSet | Midpoint | L1 | L1 | L1 | L1 | L1 | L1 |
 | SphereLevelSet | FrechetMean | L3 | L3 | L3 | L3 | L3 | L3 |
