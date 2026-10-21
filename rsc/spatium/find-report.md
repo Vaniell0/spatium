@@ -2496,7 +2496,7 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on TorusTyped@Dual > log_map[lift:Dual] | L3 | 1 | 2e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on TorusTyped@Dual > log_map[lift:Dual] | L3 | 1 | 4.3e-10 | agrees; the chain of the reference at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
 
@@ -2510,7 +2510,7 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | log_map[member] on TorusTyped@Dual > metric[member] on TorusTyped@Dual > distance[derived] on TorusTyped@Dual > distance[lift:Dual] | L3 | 3 | 1.8e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on TorusTyped@Dual > metric[member] on TorusTyped@Dual > distance[derived] on TorusTyped@Dual > distance[lift:Dual] | L3 | 3 | 5.3e-10 | agrees; the chain of the reference at another scalar |
 
 #### norm_at  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
@@ -2538,14 +2538,14 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | exp_map[member] on TorusTyped@Dual > log_map[member] on TorusTyped@Dual > geodesic[generic] on TorusTyped@Dual > geodesic[lift:Dual] | L3 | 3 | 7e-11 | agrees; the chain of the reference at another scalar |
+| 2 | exp_map[member] on TorusTyped@Dual > log_map[member] on TorusTyped@Dual > geodesic[generic] on TorusTyped@Dual > geodesic[lift:Dual] | L3 | 3 | 1e-10 | agrees; the chain of the reference at another scalar |
 
 #### midpoint  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | exp_map[member] on TorusTyped@Dual > log_map[member] on TorusTyped@Dual > geodesic[generic] on TorusTyped@Dual > midpoint[generic] on TorusTyped@Dual > midpoint[lift:Dual] | L3 | 4 | 1.9e-10 | agrees; the chain of the reference at another scalar |
+| 2 | exp_map[member] on TorusTyped@Dual > log_map[member] on TorusTyped@Dual > geodesic[generic] on TorusTyped@Dual > midpoint[generic] on TorusTyped@Dual > midpoint[lift:Dual] | L3 | 4 | 3.5e-10 | agrees; the chain of the reference at another scalar |
 
 ### SphereLevelSetTyped
 

@@ -186,10 +186,11 @@ public:
     static constexpr std::size_t dimension = N;
     static constexpr bool is_complete = false;
 
-    // `accuracy` is the integrator's tolerance and the shooting's, absolute
-    // for coordinates of order one; 0 takes eps^(2/3) of the scalar -- 4e-11
-    // for double, 2e-33 for Real50 -- far below the sqrt(eps) an acos-based
-    // closed form keeps, so a derived and a closed form compare at theirs.
+    // `accuracy` is the shooting's tolerance, absolute for coordinates of order
+    // one; the integrator runs at a hundredth of it, since a flow at the bare tolerance
+    // missed it on 0-15% of inputs (measured 2026-10-20). 0 takes eps^(2/3) of the
+    // scalar -- 4e-11 for double, 2e-33 for Real50 -- far below the sqrt(eps) an
+    // acos-based closed form keeps, so a derived and a closed form compare at theirs.
     explicit MetricChart(Metric metric, double accuracy = 0)
         : metric_(std::move(metric)),
           tol_(accuracy > 0 ? accuracy : std::pow(machine_epsilon<T>(), 2.0 / 3.0)) {}
@@ -312,7 +313,7 @@ private:
         Vec<T, 2 * N> y0;
         for (std::size_t i = 0; i < N; ++i) { y0[i] = p[i]; y0[N + i] = v[i]; }
         auto f = [this](T lam, const Vec<T, 2 * N>& y) { return geodesic_rhs(metric_, lam, y); };
-        const auto y = integrate_extrapolated(f, T{0}, y0, t, tol_);
+        const auto y = integrate_extrapolated(f, T{0}, y0, t, tol_ / 100);
         if (!y) return std::unexpected(y.error());
         PointType out;
         for (std::size_t i = 0; i < N; ++i) out[i] = (*y)[i];
