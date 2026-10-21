@@ -167,7 +167,7 @@ TEST_CASE("exp of log is the identity on a derived space, and the library's own 
 
 TEST_CASE("The derived sphere exp keeps the accuracy it promises, eps^(2/3)", "[metric_chart]") {
     // The default accuracy is 4e-11 for double. A flow integrated at that bare
-    // tolerance missed it on about one input in nine (T6, 2026-10-20), which
+    // tolerance missed it on about one input in nine, which
     // the 1e-8 above cannot see; the closed form is the reference.
     const auto chart = spaces::metric_chart<double, 2>(SphereMetric{});
     const Sphere<2> sphere;

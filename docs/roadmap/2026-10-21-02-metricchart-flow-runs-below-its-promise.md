@@ -3,7 +3,8 @@ date: 2026-10-21
 title: MetricChart's flow runs at a hundredth of the accuracy it promises
 files: [include/spatium/spaces/metric_chart.hpp, tests/test_metric_chart.cpp]
 open:
-  - the cost rises by about a third (T6 measured 102 -> 137 metric evaluations per exp on the sphere at 4e-13); a cheaper route needs a change in geodesic_rhs (several Dual seeds at once, diagonal or conformal metrics), not in the tolerance
+  - the cost rises by about a third (measured: 102 -> 137 metric evaluations per exp on the sphere at 4e-13); a cheaper route needs a change in geodesic_rhs (several Dual seeds at once, diagonal or conformal metrics), not in the tolerance
+  - Real50 keeps the bare tolerance: with the margin the Frechet-mean cell on Real50 passes the matrix's 600 s limit; whether Real50 misses its promise like double did is not measured
   - the check covers the sphere against its closed form only; hyperbolic, torus and the skewed metric were checked against Real50 in a scratch program, not in the test suite
   - the five disagreements of rsc/spatium/find-report.md are unchanged by this. The TorusChart exp one is not a flow tolerance (a tol/100 flow in implicit.hpp left the report identical): TorusChart is the erased ParametricSurface, whose exp_map is the retraction project(p + v t), and project runs find_params, a Gauss-Newton with finite-difference partials, so double and Dual take different iteration paths and differ by ~1e-10 on 3 of 300 inputs; not fixed here
 ---
