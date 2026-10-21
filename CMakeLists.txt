@@ -239,39 +239,6 @@ else()
     target_compile_definitions(spatium_sdk INTERFACE SPATIUM_HAS_BOOST_MULTIPRECISION=0)
 endif()
 
-# ── ipc-toolkit (optional) ────────────────────────────────────
-# Implicit contact backend for contact physics/soft bodies (Newton +
-# log-barrier + line-search filter, Li-Kaufman 2020 §5) -- replaces
-# explicit XPBD position-based contact, which can't hold stiff structural
-# constraints against contact under a heavy overhang (20/20 swept configs
-# failed, see contact.hpp).
-# When SPATIUM_EIGEN is also ON, ipc-toolkit reuses Spatium's
-# Eigen3::Eigen target instead of fetching its own (its eigen.cmake
-# recipe checks `if(TARGET Eigen3::Eigen) return()` first).
-#
-# NOT linked into spatium_sdk: unlike Eigen3::Eigen (an IMPORTED target
-# from find_package, safe to expose from an EXPORT-installed interface
-# target), ipc::toolkit is built locally via FetchContent and isn't part
-# of any install export set -- installing spatium_sdk INTERFACE-linked to
-# it breaks `install(EXPORT SpatiumTargets ...)`. Same reasoning as
-# Vulkan/GLFW living on spatium_viewer instead of spatium_sdk. Consumers
-# (tests, the future contact-physics demo) link ipc::toolkit directly.
-option(SPATIUM_IPC_TOOLKIT "Enable ipc-toolkit for implicit contact physics" OFF)
-if(SPATIUM_IPC_TOOLKIT)
-    include(FetchContent)
-    FetchContent_Declare(
-        ipc_toolkit
-        GIT_REPOSITORY https://github.com/ipc-sim/ipc-toolkit.git
-        GIT_TAG v1.6.0
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(ipc_toolkit)
-    target_compile_definitions(spatium_sdk INTERFACE SPATIUM_HAS_IPC_TOOLKIT=1)
-    message(STATUS "Spatium: ipc-toolkit ENABLED (v1.6.0)")
-else()
-    target_compile_definitions(spatium_sdk INTERFACE SPATIUM_HAS_IPC_TOOLKIT=0)
-endif()
-
 # ── Core library (SHARED) ──────────────────────────────────────
 add_library(spatium_core SHARED
     src/physics/elements.cpp

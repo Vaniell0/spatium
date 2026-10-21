@@ -18,11 +18,10 @@
 // search filter (Li et al. §5), the discrete trajectory stays
 // intersection-free for all time.
 //
-// This header ships the energy and its derivatives as pure math; the full
-// IPC toolkit (collision detection, line-search filter, friction)
-// integrates later via the external `ipc-toolkit` dependency
-// (https://github.com/ipc-sim/ipc-toolkit). For now we expose
-// only the kernel so it can be combined with the variational framework
+// This header ships the energy and its derivatives as pure math. Spatium
+// does not depend on ipc-toolkit (https://github.com/ipc-sim/ipc-toolkit);
+// the comparison against it lives out of tree in
+// scripts/external/ipc_compare/. We expose only the kernel so it can be combined with the variational framework
 // (`mechanics/variational.hpp`) and the analytical-distance narrow-phase
 // queries from `geometry/ray_*.hpp`.
 

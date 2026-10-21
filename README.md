@@ -22,7 +22,7 @@ operations still give correct answers on any space; they just walk
 everything. A ball tree over geodesic balls is the fix and is an open item
 in the [roadmap](docs/ROADMAP.md), not an oversight.
 
-C++23, in large part header-only — three deliberate exceptions exist where real complexity made that the wrong tradeoff, not an oversight: the Vulkan viewer needs genuine C linkage, the periodic-table data backs a single compiled translation unit, and the `physics/mechanics` research track plus optional CUDA/ipc-toolkit integrations sit outside the header-only spine on purpose. See [Architecture](docs/architecture.md#header-only-spine-and-three-principled-exceptions) for the honest breakdown, not a marketing gloss.
+C++23, in large part header-only — three deliberate exceptions exist where real complexity made that the wrong tradeoff, not an oversight: the Vulkan viewer needs genuine C linkage, the periodic-table data backs a single compiled translation unit, and the `physics/mechanics` research track plus the optional CUDA integration sit outside the header-only spine on purpose. See [Architecture](docs/architecture.md#header-only-spine-and-three-principled-exceptions) for the honest breakdown, not a marketing gloss.
 
 ## Gallery
 
@@ -181,7 +181,6 @@ ninja -C build
 | `SPATIUM_EIGEN`              | `OFF`   | Required by the heat-method geodesic solver and the cotangent-Laplacian DEC operators. |
 | `SPATIUM_NATIVE_ARCH`        | `OFF`   | Adds `-march=native`. Resulting binaries are not portable across CPUs — use only for local performance work. |
 | `SPATIUM_USE_MODULES`        | `OFF`   | C++23 named-modules build. Currently behind the header tree (see the option's own comment in `CMakeLists.txt`) — not a compiler-bug wait, real catch-up work. |
-| `SPATIUM_IPC_TOOLKIT`        | `OFF`   | Implicit contact physics via [ipc-toolkit](https://github.com/ipc-sim/ipc-toolkit) (Newton + log-barrier + CCD). `FetchContent`-based, pulls its own dependency tree. |
 | `SPATIUM_CUDA`                | `OFF`   | CUDA GPU kernels (`gpu/`) for GR ray tracing. Requires nvcc; not part of a default build. |
 | `SPATIUM_BUILD_RSC_TOOLS`     | `ON`*   | RSC training tools (`rsc/tools/train_base`, ...). |
 | `IMGUI_DIR` (env or `-D`)    | unset   | Source path of Dear ImGui; enables the in-viewer panel when set. |

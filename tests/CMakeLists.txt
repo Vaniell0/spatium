@@ -87,7 +87,6 @@ add_executable(spatium_tests
     test_geometric_mechanics.cpp
     test_contact_force.cpp
     test_contact_xpbd.cpp
-    test_ipc_toolkit.cpp
     test_narrow_phase.cpp
     test_rigid_contact.cpp
     test_relativity.cpp
@@ -125,10 +124,6 @@ target_link_libraries(spatium_tests PRIVATE
     spatium_core
     Catch2::Catch2WithMain
 )
-
-if(SPATIUM_IPC_TOOLKIT)
-    target_link_libraries(spatium_tests PRIVATE ipc::toolkit)
-endif()
 
 # Sources that need Boost.Multiprecision, added conditionally rather than
 # left in the list above wrapped in whole-file #ifs.
