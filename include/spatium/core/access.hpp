@@ -167,22 +167,22 @@ struct norm_at_fn {
     }
 };
 
-// A space with an interval and proper time is Lorentzian: |log|_g is not a
-// distance there (it is zero on light-like separations and imaginary on
-// time-like ones), so the derived form is withheld. A member or ADL
-// `distance` still answers.
+// Two kinds of space have no distance derived as |log|_g. A space with an
+// interval and proper time is Lorentzian: |log|_g is zero on light-like and
+// imaginary on time-like separations. An erased surface (`exact == false`)
+// has a retraction for log, the chord projected on the tangent plane, which is
+// neither symmetric nor subadditive. A member or ADL `distance` still answers.
 template<class S, class P>
-inline constexpr bool has_interval_form = requires(const S& s, const P& p, const P& q) {
-    s.interval(p, q);
-    s.proper_time(p, q);
-};
+inline constexpr bool withholds_derived_distance =
+    requires(const S& s, const P& p, const P& q) { s.interval(p, q); s.proper_time(p, q); }
+    || requires { requires !S::exact; };
 
 struct distance_fn {
     template<class S, class P>
     constexpr auto operator()(const S& s, const P& p, const P& q) const
         requires requires { s.distance(p, q); }
               || requires { distance(s, p, q); }
-              || (!has_interval_form<S, P>
+              || (!withholds_derived_distance<S, P>
                   && requires { spaces::metric(s, p, spaces::log_map(s, p, q), spaces::log_map(s, p, q)); })
     {
         if constexpr (requires { s.distance(p, q); })   return s.distance(p, q);

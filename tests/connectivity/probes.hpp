@@ -485,6 +485,15 @@ template<class S> using P = spaces::point_t<S>;
 template<class S> using V = spaces::tangent_t<S>;
 template<class S> using T_ = spaces::scalar_t<S>;
 
+// The distance a cell measures with. An erased surface has no geodesic
+// distance (its log is a retraction), so it is held to its chord, a metric of
+// the ambient space; every other space answers spaces::distance.
+template<class S, class Pt>
+auto dist(const S& s, const Pt& a, const Pt& b) {
+    if constexpr (requires { spaces::distance(s, a, b); }) return spaces::distance(s, a, b);
+    else return s.chord_distance(a, b);
+}
+
 struct MetricAxioms {
     static constexpr const char* name = "metric-axioms";
     template<class S>
@@ -501,7 +510,7 @@ struct MetricAxioms {
         std::vector<T> d(n * n);
         for (std::size_t i = 0; i < n; ++i)
             for (std::size_t j = 0; j < n; ++j) {
-                d[i * n + j] = T(spaces::distance(s, p[i], p[j]));
+                d[i * n + j] = T(dist(s, p[i], p[j]));
                 if (!std::isfinite(to_double(d[i * n + j]))) return 0;
             }
         bool ok = true;
@@ -529,7 +538,7 @@ struct DerivedDistance {
             for (std::size_t j = i + 1; j < p.size(); ++j) {
                 const auto v = V<S>{spaces::log_map(s, p[i], p[j])};
                 const double derived = to_double(spaces::norm_at(s, p[i], v));
-                const double closed = to_double(spaces::distance(s, p[i], p[j]));
+                const double closed = to_double(dist(s, p[i], p[j]));
                 if (!std::isfinite(derived) || !std::isfinite(closed)) return 0;
                 sig.push_back(derived);
                 ok = ok && std::abs(derived - closed) <= tolerance<T>(closed);
@@ -549,9 +558,9 @@ struct ExpLog {
                 if (i == j) continue;
                 const auto v = V<S>{spaces::log_map(s, p[i], p[j])};
                 const auto q = P<S>{spaces::exp_map(s, p[i], v, from_double<T>(1))};
-                const double err = to_double(spaces::distance(s, q, p[j]));
+                const double err = to_double(dist(s, q, p[j]));
                 if (!std::isfinite(err)) return 0;
-                sig.push_back(to_double(spaces::distance(s, p[i], q)));
+                sig.push_back(to_double(dist(s, p[i], q)));
                 ok = ok && err <= tolerance<T>();
             }
         return ok ? 2 : 1;
@@ -566,8 +575,8 @@ struct Midpoint {
         bool ok = true;
         for (std::size_t i = 0; i + 1 < p.size(); ++i) {
             const auto m = spaces::midpoint(s, p[i], p[i + 1]);
-            const double a = to_double(spaces::distance(s, p[i], m)), b = to_double(spaces::distance(s, m, p[i + 1]));
-            const double d = to_double(spaces::distance(s, p[i], p[i + 1]));
+            const double a = to_double(dist(s, p[i], m)), b = to_double(dist(s, m, p[i + 1]));
+            const double d = to_double(dist(s, p[i], p[i + 1]));
             if (!std::isfinite(a) || !std::isfinite(b)) return 0;
             sig.push_back(a);
             ok = ok && std::abs(a - b) <= tolerance<T>(d) && std::abs(a - d / 2) <= tolerance<T>(d);
@@ -582,6 +591,9 @@ struct FrechetMean {
     template<class S>
     static int run(const S& s, const std::vector<P<S>>& p, const std::vector<V<S>>&, std::vector<double>& sig) {
         using T = T_<S>;
+        // the mean minimises the squared distance; an erased surface has none
+        if constexpr (!requires { spaces::distance(s, p[0], p[0]); }) return 1;
+        else {
         const auto& c = p[0];
         // Tangents at c, whatever the space: log from c to other samples.
         std::vector<P<S>> pts;
@@ -594,10 +606,11 @@ struct FrechetMean {
             pts.push_back(P<S>{spaces::exp_map(s, c, w, from_double<T>(-0.5))});
         }
         const auto m = algebra::frechet_mean(s, pts, pts.front(), from_double<T>(tolerance<T>() * 1e-3), 200);
-        const double err = to_double(spaces::distance(s, m, c));
+        const double err = to_double(dist(s, m, c));
         if (!std::isfinite(err)) return 0;
         sig.push_back(err);
         return err <= tolerance<T>() * 10 ? 2 : 1;
+        }
     }
 };
 
@@ -622,7 +635,7 @@ struct Derivative {
     static int run(const S& s, const std::vector<P<S>>& p, const std::vector<V<S>>& v, std::vector<double>& sig) {
         using T = T_<S>;
         const auto dist_at = [&](const T& t, std::size_t i) {
-            return spaces::distance(s, p[0], P<S>{spaces::exp_map(s, p[i], v[i], t)});
+            return dist(s, p[0], P<S>{spaces::exp_map(s, p[i], v[i], t)});
         };
         bool ok = true;
         for (std::size_t i = 1; i < p.size(); ++i) {
@@ -673,7 +686,7 @@ struct Infinity {
         const auto classify = [&](const P<S>& from, const auto& go) {
             try {
                 const P<S> q{go()};
-                const double d = to_double(spaces::distance(s, from, q));
+                const double d = to_double(dist(s, from, q));
                 return std::isnan(d) ? 0 : std::isinf(d) ? 1 : 2;
             } catch (...) {
                 return 1;
@@ -689,7 +702,7 @@ struct Infinity {
 
             // A zero step stays put.
             double stay = 0;
-            try { stay = to_double(spaces::distance(s, p[i], P<S>{at(p[i], v[i], from_double<T>(0))})); }
+            try { stay = to_double(dist(s, p[i], P<S>{at(p[i], v[i], from_double<T>(0))})); }
             catch (...) { stay = std::numeric_limits<double>::infinity(); }
             if (!std::isfinite(stay)) return 0;
             sig.push_back(stay);

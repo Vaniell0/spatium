@@ -16,15 +16,15 @@ scalar of a lift ignored; arithmetic, sqrt, exp, acos and cos are the trusted ba
 
 | | |
 |---|---|
-| (type, operation) pairs with at least two routes | 266 |
-| routes found in them | 1183 |
-| routes run against a reference | 1183 |
-| agree (including the references' own chains at another scalar) | 916 |
+| (type, operation) pairs with at least two routes | 264 |
+| routes found in them | 1179 |
+| routes run against a reference | 1179 |
+| agree (including the references' own chains at another scalar) | 914 |
 | witnesses added (pairs in `tests/symmetry/pairs/`) | 61 in 53 files |
 | agree and cheaper than the reference | 0 |
 | disagreements (findings) | 1 |
 | red cells (do not compile or run) | 0 |
-| unmatched measure | 1182 pairs with no failure: below 3/300 = 0.010 each (95 %); 1 with failures |
+| unmatched measure | 1178 pairs with no failure: below 3/300 = 0.010 each (95 %); 1 with failures |
 | not run: operations with no emitter (`frechet_mean`, `verify_exp_log`: algorithms over a set of points) | 20 pairs |
 | not run: no sampler for the type | 0 pairs |
 | operations with one route (nothing to compare) | 10 |
@@ -608,26 +608,19 @@ None.
 | 1 | log_map[member] | L1 | 1 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
 | 2 | log_map[member] on TorusChart@Dual > log_map[lift:Dual] | L1 | 1 | 6.6e-12 | agrees; the chain of the reference at another scalar |
 
-#### metric  (reference: route 1, member closed form, L3)
+#### metric  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | metric[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | metric[member] on TorusChart@Dual > metric[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-
-#### distance  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
-
-| # | route | level | calls | worst ratio | outcome |
-|---|---|---|---|---|---|
-| 1 | log_map[member] > metric[member] > distance[derived] | L1 | 3 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | log_map[member] on TorusChart@Dual > metric[member] on TorusChart@Dual > distance[derived] on TorusChart@Dual > distance[lift:Dual] | L1 | 3 | 6.6e-12 | agrees; the chain of the reference at another scalar |
+| 1 | metric[member] | L1 | 1 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
+| 2 | metric[member] on TorusChart@Dual > metric[lift:Dual] | L1 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
 #### norm_at  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | metric[member] > norm_at[derived] | L3 | 2 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | metric[member] on TorusChart@Dual > norm_at[derived] on TorusChart@Dual > norm_at[lift:Dual] | L3 | 2 | 0 | agrees; the chain of the reference at another scalar |
+| 1 | metric[member] > norm_at[derived] | L1 | 2 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
+| 2 | metric[member] on TorusChart@Dual > norm_at[derived] on TorusChart@Dual > norm_at[lift:Dual] | L1 | 2 | 0 | agrees; the chain of the reference at another scalar |
 
 #### project  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
@@ -673,26 +666,19 @@ None.
 | 1 | log_map[member] | L1 | 1 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
 | 2 | log_map[member] on SphereLevelSet@Dual > log_map[lift:Dual] | L1 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
-#### metric  (reference: route 1, member closed form, L3)
+#### metric  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | metric[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | metric[member] on SphereLevelSet@Dual > metric[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-
-#### distance  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
-
-| # | route | level | calls | worst ratio | outcome |
-|---|---|---|---|---|---|
-| 1 | log_map[member] > metric[member] > distance[derived] | L1 | 3 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | log_map[member] on SphereLevelSet@Dual > metric[member] on SphereLevelSet@Dual > distance[derived] on SphereLevelSet@Dual > distance[lift:Dual] | L1 | 3 | 0 | agrees; the chain of the reference at another scalar |
+| 1 | metric[member] | L1 | 1 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
+| 2 | metric[member] on SphereLevelSet@Dual > metric[lift:Dual] | L1 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
 #### norm_at  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | metric[member] > norm_at[derived] | L3 | 2 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
-| 2 | metric[member] on SphereLevelSet@Dual > norm_at[derived] on SphereLevelSet@Dual > norm_at[lift:Dual] | L3 | 2 | 0 | agrees; the chain of the reference at another scalar |
+| 1 | metric[member] > norm_at[derived] | L1 | 2 | 0 | reference: shortest of the most verified (no L3 closed form, no Real50 lift) |
+| 2 | metric[member] on SphereLevelSet@Dual > norm_at[derived] on SphereLevelSet@Dual > norm_at[lift:Dual] | L1 | 2 | 0 | agrees; the chain of the reference at another scalar |
 
 #### project  (reference: route 1, shortest of the most verified (no L3 closed form, no Real50 lift))
 
