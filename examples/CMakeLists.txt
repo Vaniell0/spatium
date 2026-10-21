@@ -96,18 +96,8 @@ spatium_add_example(NAME sound_synthesis_demo OPTIONS -O3 -march=native)
 spatium_add_example(NAME ball_pit_demo OPTIONS -O3 -march=native)
 
 # Visual cloth demos (cloth_on_sphere/_torus, cloth_visual) stay removed
-# pending a real viewer-facing implicit-contact pipeline — explicit
-# position-based contact couldn't keep a stiff cloth with heavy
-# overhanging corners on an analytical obstacle; tunnelling and
-# stretching both surface as failure modes. Sources are in git history
-# (commit 1b3ce2c62). cloth_sphere_probe.cpp — the headless diagnostic --
-# is back, rebuilt on ipc-toolkit's Newton + log-barrier + CCD-filtered
-# line search instead of XPBD; gated on SPATIUM_IPC_TOOLKIT since it
-# links ipc::toolkit directly (not through spatium_sdk — see
-# CMakeLists.txt's ipc-toolkit section for why).
-if(SPATIUM_IPC_TOOLKIT)
-    spatium_add_example(NAME cloth_sphere_probe LIBS spatium_core ipc::toolkit)
-endif()
+# (commit 1b3ce2c62). The ipc-toolkit cloth_sphere_probe moved out of
+# tree: scripts/external/ipc_compare/.
 
 if(SPATIUM_HAS_VIEWER)
     spatium_add_example(NAME atom_demo LIBS spatium_viewer)

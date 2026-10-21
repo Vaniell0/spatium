@@ -78,6 +78,7 @@ NOT_IN_TREE = {
     "table.cpp": "never existed; ROADMAP's corrected table-renderer entry names the old wrong path",
     # -- removed with the RSC prototype 2026-10-20 (tag rsc-prototype-final); the docs that
     # -- record its numbers still name its files
+    "test_ipc_toolkit.cpp": "removed 2026-10-21 with the ipc-toolkit dependency, tag ipc-toolkit-final",
     "build_info.hpp": "removed 2026-10-20, tag rsc-prototype-final",
     "embedded_base_data.hpp": "removed 2026-10-20, tag rsc-prototype-final",
     "ccd_chooser_tree.hpp": "removed 2026-10-20, tag rsc-prototype-final",
