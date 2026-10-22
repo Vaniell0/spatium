@@ -3,13 +3,17 @@
 //
 // Each step is what an editor does when a "count" slider moves: the Trace
 // is built again (building is nothing -- the work is in the next stages),
-// cooked, and laid out. The stage that grows with the number of copies and
-// has no memory is the instance tree; `render::lay_out(previous, ...)`
-// keeps the copies that did not change and removes or inserts the rest.
+// cooked, and laid out. Both stages that grow with the number of copies are
+// told what changed instead of finding out: `cook(..., &previous)` takes the
+// copies of a scatter whose generator (surface, shape, seed, motion) is
+// unchanged from the previous cook and places only the new ones, and
+// `render::lay_out(previous, ...)` keeps the instances of an unchanged
+// generator and adds or removes the tail.
 //
-// Every step is also laid out from scratch, for two reasons: the time of
-// that is what the update is compared to, and the two scenes must give the
-// same hit on every ray, which is checked and reported.
+// Every step is also cooked and laid out from scratch, for two reasons: the
+// time of that is what the update is compared to, and the two scenes must be
+// the same -- the same objects, and the same hit on every ray -- which is
+// checked and reported.
 //
 //   scatter_regen [--count N] [--steps +1,+10,-3,...] [--seed S] [--rays R]
 //
@@ -88,13 +92,15 @@ int main(int argc, char** argv) {
     render::StaticCache<double> cache;   // the torus is the same at every step
     const auto probe = rays(n_rays);
 
-    std::println("{:>8} {:>8} {:>7} {:>9} {:>9} {:>9} {:>9}  {}", "count", "step", "kept", "removed+new",
-                 "cook ms", "update ms", "fresh ms", "rays");
+    std::println("{:>8} {:>8} {:>7} {:>11} {:>9} {:>9} {:>9} {:>9}  {}", "count", "step", "kept", "removed+new",
+                 "cook ms", "cold cook", "update ms", "fresh ms", "rays");
 
     render::CookedScene<double> scene;
+    bd::Cooked<double> last;   // the cook the scene was laid out from
     {
         Scene s(count, seed);
-        scene = render::lay_out(bd::cook(s.trace, s.root, 0.0), {}, nullptr, &cache);
+        last = bd::cook(s.trace, s.root, 0.0);
+        scene = render::lay_out(last, {}, nullptr, &cache);
     }
 
     std::istringstream in(steps);
@@ -105,8 +111,17 @@ int main(int argc, char** argv) {
         else count = static_cast<std::size_t>(static_cast<long long>(count) + std::atoll(step.c_str()));
 
         Scene s(count, seed);   // the control moved: build the Trace again
-        bd::Cooked<double> cooked;
-        const double cook_ms = ms([&] { cooked = bd::cook(s.trace, s.root, 0.0); });
+        bd::Cooked<double> cooked, cold;
+        const double cook_ms = ms([&] { cooked = bd::cook(s.trace, s.root, 0.0, &last); });
+        const double cold_ms = ms([&] { cold = bd::cook(s.trace, s.root, 0.0); });
+        bool same_cook = cooked.object_count() == cold.object_count();
+        for (std::size_t i = 0; same_cook && i < cold.object_count(); ++i) {
+            const auto &a = cooked.objects()[i], &b = cold.objects()[i];
+            same_cook = a.shape == b.shape && a.site == b.site && a.scale == b.scale &&
+                        std::memcmp(&a.translation, &b.translation, sizeof a.translation) == 0 &&
+                        std::memcmp(&a.rotation_q, &b.rotation_q, sizeof a.rotation_q) == 0 &&
+                        std::memcmp(&a.material, &b.material, sizeof a.material) == 0;
+        }
 
         render::InstanceUpdate u;
         render::CookedScene<double> next;
@@ -126,11 +141,13 @@ int main(int argc, char** argv) {
             const auto &ia = next.instances.shapes()[a->index], &ib = fresh.instances.shapes()[b->index];
             if (a->t != b->t || std::memcmp(&ia.translation, &ib.translation, sizeof(ia.translation)) != 0) ++bad;
         }
-        failures += bad > 0;
-        std::println("{:>8} {:>8} {:>7} {:>5}+{:<5} {:>9.1f} {:>9.1f} {:>9.1f}  {}/{} hit, {}", count, step,
-                     u.kept, u.removed, u.inserted, cook_ms, update_ms, fresh_ms, hits, probe.size(),
-                     bad ? "DISAGREE" : (u.rebuilt ? "agree (rebuilt)" : "agree"));
+        failures += bad > 0 || !same_cook;
+        std::println("{:>8} {:>8} {:>7} {:>5}+{:<5} {:>9.1f} {:>9.1f} {:>9.1f} {:>9.1f}  {}/{} hit, {}", count,
+                     step, u.kept, u.removed, u.inserted, cook_ms, cold_ms, update_ms, fresh_ms, hits,
+                     probe.size(),
+                     bad || !same_cook ? "DISAGREE" : (u.rebuilt ? "agree (rebuilt)" : "agree"));
         scene = std::move(next);
+        last = std::move(cooked);
     }
     return failures ? 1 : 0;
 }

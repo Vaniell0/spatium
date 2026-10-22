@@ -1236,6 +1236,57 @@ FieldStats field_report(const Trace<T>& trace) {
 // objects are in this scene", and a `Scatter` is N of them. Two
 // questions, two answers, neither pretending to be the other.
 
+// The sampler's state before every `every`-th site of a scatter. A cook that
+// wants sites [m, count) of a scatter whose first m are already known
+// resumes from the nearest state at or below m and draws at most
+// `every - 1` sites it does not keep, instead of all m.
+template<Scalar T>
+struct SiteCheckpoints {
+    static constexpr std::size_t every = 1024;
+    std::vector<typename SurfaceSampler<T>::State> at;   // at[j]: before site j * every
+};
+
+// ── What version a node is ──────────────────────────────────────
+//
+// `content_key` says what SHAPE a node is. A version says what the node
+// PRODUCES at a time `t`: the shape and, on top of it, everything that
+// reaches the objects it makes -- its motion, its colour and emission
+// fields, its material.
+//
+// For a Scatter the version is split in two, because the two halves change
+// for different reasons and mean different things:
+//
+//   generator   its item, target, seed, seat, motion, colour, emission,
+//               material and `t`. Two scatters with one generator place
+//               the same copy at the same site, so the first
+//               min(count, count') objects of each are identical -- the
+//               sampling is prefix-stable: a bigger count appends sites to
+//               the ones there, and only a new seed moves them all.
+//   count       how many.
+//
+// So `generator` equal means "a prefix is already known", and `id` equal
+// (generator and count) means "all of it is".
+//
+// `id` and `generator` are hashes, built from the Merkle ids of the fields
+// (`Field::content_id`); they pick candidates. `key` is the generator's
+// description in full, with the fields spelled out by `canonical_key`, and
+// two versions are the same only if their keys are equal: a collision is
+// "different", never "same". `t` is part of the version even for a motion
+// that does not read it -- the cost of that is a recomputation at a new
+// time, where leaving it out would be a wrong picture for a motion that
+// does.
+struct NodeVersion {
+    std::uint64_t id = 0;
+    std::uint64_t generator = 0;
+    std::vector<std::uint64_t> key;   // the generator's, without the count
+    std::size_t count = 0;            // a Scatter's; 1 for any other node
+
+    // The same generator and the same count.
+    bool same_as(const NodeVersion& o) const { return id == o.id && count == o.count && key == o.key; }
+    // The same generator (the count may differ).
+    bool same_generator(const NodeVersion& o) const { return generator == o.generator && key == o.key; }
+};
+
 // One instance in a cooked scene: which shape, where, and what it looks
 // like. The shape is an index into the shape table, so N instances of one
 // speck cost N transforms and one geometry.
@@ -1278,6 +1329,15 @@ struct Object {
     Quaternion<T> rotation_q{};
 
     bool instanceable = true;     // false when the motion deforms per vertex
+
+    // Which copy of its source this is, for the instances of a Scatter: the
+    // index into the scatter's sites, so (`source_node`, `site`) names an
+    // object across two cooks. `no_site` for an object that is not one of
+    // many -- a node that is its own object, or the merged mesh of a
+    // Scatter whose motion deforms.
+    static constexpr std::uint32_t no_site = ~std::uint32_t{0};
+    std::uint32_t site = no_site;
+
     Material<T> material{};
 };
 
@@ -1309,6 +1369,24 @@ public:
     const std::vector<Object<T>>& objects() const { return objects_; }
     const std::vector<Shape<T>>& shapes() const { return shapes_; }
     const FieldStats& fields() const { return fields_; }
+
+    // One entry per Scatter that cooked to instances (a placement, not a
+    // deformation) and has a version: its objects are the contiguous run
+    // `objects()[first_object, first_object + count)`, in site order, all
+    // pointing at `shape`. What a later cook or lay-out compares to find
+    // out what changed without looking at the objects.
+    //
+    // `checkpoints` and `draws` are what a later cook needs to continue the
+    // scatter's sampling instead of starting it again: see `SiteCheckpoints`.
+    struct Generator {
+        std::size_t node = 0;
+        NodeVersion version;
+        std::size_t first_object = 0, count = 0, shape = 0;
+        SiteCheckpoints<T> checkpoints;
+        std::size_t draws = 0;   // an upper bound on the draws that produced the sites
+        std::size_t reused = 0;  // the leading objects taken from the previous cook
+    };
+    const std::vector<Generator>& generators() const { return generators_; }
 
     std::size_t object_count() const { return objects_.size(); }
     std::size_t shape_count() const { return shapes_.size(); }
@@ -1346,13 +1424,39 @@ public:
     }
 
 private:
-    template<Scalar U> friend Cooked<U> cook(const Trace<U>&, std::size_t, U);
+    template<Scalar U> friend Cooked<U> cook(const Trace<U>&, std::size_t, U, const Cooked<U>*);
     std::vector<Object<T>> objects_;
     std::vector<Shape<T>> shapes_;
+    std::vector<Generator> generators_;
     FieldStats fields_{};
     std::size_t shared_ = 0, refused_ = 0;
     std::vector<std::size_t> refused_nodes_;
 };
+
+// What a Scatter's sites and their frames are a function of, apart from how
+// many there are: its item, its target, the seed, the axis the item is
+// seated along and how deep. The sampling is prefix-stable (see
+// `scatter_spots`), so two scatters with equal words here agree on their
+// first min(count, count') sites. False when the item or the target has no
+// key.
+template<Scalar T>
+std::optional<std::vector<std::uint64_t>> content_key(const Trace<T>& trace, std::size_t idx);
+
+template<Scalar T>
+bool scatter_generator_words(const Trace<T>& trace, const TraceNode<T>& n, std::vector<std::uint64_t>& k) {
+    for (auto part : {n.item, n.target}) {
+        const auto sub = content_key(trace, part);
+        if (!sub) return false;
+        k.push_back(sub->size());
+        k.insert(k.end(), sub->begin(), sub->end());
+    }
+    k.push_back(n.seed);
+    k.push_back(static_cast<std::uint64_t>(n.seat_axis));
+    const auto seat = exact_bits(n.seat);
+    if (!seat) return false;
+    k.push_back(*seat);
+    return true;
+}
 
 // The key two nodes must share to be the same shape. Node identity is not
 // enough: the donut's dust is 19 800 separate Literal nodes all holding
@@ -1435,16 +1539,59 @@ std::optional<std::vector<std::uint64_t>> content_key(const Trace<T>& trace, std
         return k;
     }
     case Kind::Scatter:
-        if (!append(content_key(trace, n.item)) || !append(content_key(trace, n.target)))
-            return std::nullopt;
+        if (!scatter_generator_words(trace, n, k)) return std::nullopt;
         k.push_back(n.count);
-        k.push_back(n.seed);
-        k.push_back(static_cast<std::uint64_t>(n.seat_axis));
-        if (!push_scalar(n.seat)) return std::nullopt;
         return k;
     default:
         return std::nullopt;
     }
+}
+
+// The version of a node at time `t`; nothing for a Compose (a group is its
+// children, each of which has its own) and for a node whose shape or
+// fields have no exact description (a chart handed to `space()`, a field
+// holding a callable the library cannot tell from another, a scalar with
+// no bit pattern). No version means the node is compared the slow way.
+template<Scalar T>
+std::optional<NodeVersion> node_version(const Trace<T>& trace, std::size_t idx, T t) {
+    const auto& n = trace.node(idx);
+    if (n.kind == Kind::Compose) return std::nullopt;
+
+    NodeVersion v;
+    auto& k = v.key;
+    k.push_back(static_cast<std::uint64_t>(n.kind));
+    if (n.kind == Kind::Scatter) {
+        if (!scatter_generator_words(trace, n, k)) return std::nullopt;
+        v.count = n.count;
+    } else {
+        const auto shape = content_key(trace, idx);
+        if (!shape) return std::nullopt;
+        k.push_back(shape->size());
+        k.insert(k.end(), shape->begin(), shape->end());
+        v.count = 1;
+    }
+
+    auto scalar = [&k](T x) {
+        const auto b = exact_bits(x);
+        if (b) k.push_back(*b);
+        return b.has_value();
+    };
+    if (!scalar(t)) return std::nullopt;
+    for (std::size_t i = 0; i < 3; ++i)
+        if (!scalar(n.material.base_color[i]) || !scalar(n.material.emissive[i])) return std::nullopt;
+    if (!scalar(n.material.roughness) || !scalar(n.material.opacity)) return std::nullopt;
+
+    // The hash so far is over the words above; the fields enter it through
+    // their ids, and the key through their descriptions.
+    std::uint64_t h = 0x3c6ef372fe94f82bull;
+    for (auto w : k) h = detail::id_mix(h, w);
+    for (const PointField<T>* f : {&n.transform, &n.color_fn, &n.emissive_fn}) {
+        if (!f->canonical_key(k)) return std::nullopt;
+        h = detail::id_mix(h, f->content_id());
+    }
+    v.generator = detail::id_finish(h);
+    v.id = n.kind == Kind::Scatter ? detail::id_finish(detail::id_mix(v.generator, v.count)) : v.generator;
+    return v;
 }
 
 // Where a Scatter's instances sit before its motion moves them: the seat
@@ -1458,23 +1605,78 @@ struct ScatterSpot {
     Matrix<T, 3, 3> frame = Matrix<T, 3, 3>::identity();
 };
 
+// The sites of a scatter from the `first`-th on, with the sampler's states
+// for a later call. `known`, when given, are the states left by a call for
+// the same generator (same target, seed, item and seat), which lets this one
+// skip the sites before `first` without computing them.
 template<Scalar T>
-std::vector<ScatterSpot<T>> scatter_spots(const Trace<T>& trace, std::size_t idx, T t) {
+struct ScatterSites {
+    std::vector<ScatterSpot<T>> spots;     // sites [first, first + spots.size())
+    SiteCheckpoints<T> checkpoints;
+    std::size_t draws = 0;                 // of this call; 0 when it drew nothing
+};
+
+template<Scalar T>
+ScatterSites<T> scatter_spots_from(const Trace<T>& trace, std::size_t idx, T t, std::size_t first,
+                                   const SiteCheckpoints<T>* known = nullptr) {
+    using Checkpoints = SiteCheckpoints<T>;
     const auto& n = trace.node(idx);
-    auto target = resolve_surface(trace, n.target);
-    auto sites = sample_surface_uniform(target, n.count, n.seed);
+    const auto target = resolve_surface(trace, n.target);
     const T lift =
         scatter_lift<T>(materialize_mesh(trace, n.item, t, /*placed=*/false), n.seat_axis) * n.seat;
-    std::vector<ScatterSpot<T>> out;
-    out.reserve(sites.size());
-    for (std::size_t i = 0; i < sites.size(); ++i)
-        out.push_back(ScatterSpot<T>{Vec<T, 3>{sites[i].position + sites[i].normal * lift},
-                                     scatter_frame<T>(sites[i].normal, n.seed, i, n.seat_axis)});
+
+    ScatterSites<T> out;
+    // Nothing after `first` is wanted: the states already known are the
+    // answer, cut to the sites that exist.
+    if (known && first >= n.count) {
+        const std::size_t keep = std::min((n.count + Checkpoints::every - 1) / Checkpoints::every, known->at.size());
+        out.checkpoints.at.assign(known->at.begin(), known->at.begin() + static_cast<std::ptrdiff_t>(keep));
+        return out;
+    }
+    // Resume at the last state that is not past `first`.
+    std::size_t at = 0;   // the site the sampler is about to draw
+    std::optional<SurfaceSampler<T>> sampler;
+    if (known && !known->at.empty() && first > 0) {
+        const std::size_t j = std::min(first / Checkpoints::every, known->at.size() - 1);
+        out.checkpoints.at.assign(known->at.begin(), known->at.begin() + static_cast<std::ptrdiff_t>(j) + 1);
+        sampler.emplace(target, n.seed, known->at[j]);
+        at = j * Checkpoints::every;
+    } else {
+        sampler.emplace(target, n.seed);
+    }
+
+    const std::size_t limit = sample_draw_limit(n.count);
+    out.spots.reserve(n.count > first ? n.count - first : 0);
+    for (; at < n.count; ++at) {
+        if (at % Checkpoints::every == 0 && out.checkpoints.at.size() == at / Checkpoints::every)
+            out.checkpoints.at.push_back(sampler->state());
+        const auto uv = sampler->next_uv(limit);
+        if (!uv) break;
+        if (at < first) continue;   // drawn to get the sampler here; not wanted
+        const auto site = sampler->at(uv->first, uv->second);
+        out.spots.push_back(ScatterSpot<T>{Vec<T, 3>{site.position + site.normal * lift},
+                                           scatter_frame<T>(site.normal, n.seed, at, n.seat_axis)});
+    }
+    out.draws = sampler->draws();
+    // A state is only worth keeping for a site that exists.
+    const std::size_t keep = (at + Checkpoints::every - 1) / Checkpoints::every;
+    if (out.checkpoints.at.size() > keep) out.checkpoints.at.resize(keep);
     return out;
 }
 
+template<Scalar T>
+std::vector<ScatterSpot<T>> scatter_spots(const Trace<T>& trace, std::size_t idx, T t) {
+    return scatter_spots_from(trace, idx, t, 0).spots;
+}
+
+// `previous`, when given, is a cook of an earlier version of the scene at
+// the same `t`: a scatter whose generator is unchanged (see `NodeVersion`)
+// takes its first min(old, new) objects from it and computes only the rest,
+// including the sampler's draws up to them, which is most of what a scatter
+// costs. The result is the same Cooked a cook without it makes, object for
+// object; `previous` is only read.
 template<Scalar T = double>
-Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
+Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}, const Cooked<T>* previous = nullptr) {
     Cooked<T> out;
     std::map<std::vector<std::uint64_t>, std::size_t> shape_of_key;
 
@@ -1502,16 +1704,16 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
             return;
         }
 
-        // How many instances this operation is -- see Spot above.
+        // How many instances this operation is -- see Spot above. For a
+        // scatter that continues a previous cook, only the sites after the
+        // `reused` ones taken from it.
         std::vector<Spot> placements;
         std::size_t geometry_node = idx;
-
-        if (n.kind == Kind::Scatter) {
-            placements = scatter_spots(trace, idx, t);
-            geometry_node = n.item;
-        } else {
-            placements.push_back(Spot{});
-        }
+        std::size_t reused = 0;
+        SiteCheckpoints<T> checkpoints;
+        std::size_t draws = 0;
+        std::optional<NodeVersion> version;
+        const typename Cooked<T>::Generator* known = nullptr;
 
         // A renderer can instance this object -- draw one geometry many
         // times, each with its own transform -- exactly when the node's
@@ -1526,6 +1728,32 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         // a term that ignores the point is evaluated once per object, a
         // term that reads it once per vertex.
         const bool placeable = n.transform.is_placement();
+
+        if (n.kind == Kind::Scatter) {
+            geometry_node = n.item;
+            if (placeable) {
+                version = node_version(trace, idx, t);
+                // Objects copied from the previous cook were placed from
+                // `carried` there; it is the origin unless a group above
+                // moves them.
+                const bool at_origin = carried[0] == T{0} && carried[1] == T{0} && carried[2] == T{0};
+                if (version && previous && at_origin)
+                    for (const auto& g : previous->generators_)
+                        // The sites are the same only if the previous run
+                        // reached them within the draws this count allows.
+                        if (g.version.same_generator(*version) && g.draws <= sample_draw_limit(n.count)) {
+                            known = &g;
+                            break;
+                        }
+            }
+            reused = known ? std::min(known->count, n.count) : 0;
+            auto sites = scatter_spots_from(trace, idx, t, reused, known ? &known->checkpoints : nullptr);
+            placements = std::move(sites.spots);
+            checkpoints = std::move(sites.checkpoints);
+            draws = sites.draws ? sites.draws : (known ? known->draws : 0);
+        } else {
+            placements.push_back(Spot{});
+        }
 
         // ── The refused path, which used to hand back unusable geometry ──
         //
@@ -1594,8 +1822,25 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
         // items at the wrong distance -- invisible until now only because
         // nothing consumed the cooked scene and every scattering scene so
         // far had scale 1.
-        for (std::size_t site = 0; site < placements.size(); ++site) {
-            const auto& p = placements[site];
+        if (version)
+            out.generators_.push_back({idx, *version, out.objects_.size(), reused + placements.size(), shape_index,
+                                       std::move(checkpoints), draws, reused});
+
+        // The sites the previous cook already placed: the same objects, now
+        // pointing at this cook's shape and node.
+        if (known) {
+            out.objects_.reserve(out.objects_.size() + reused + placements.size());
+            for (std::size_t site = 0; site < reused; ++site) {
+                out.objects_.push_back(previous->objects_[known->first_object + site]);
+                out.objects_.back().shape = shape_index;
+                out.objects_.back().source_node = idx;
+            }
+            out.shapes_[shape_index].instances += reused;
+        }
+
+        for (std::size_t k = 0; k < placements.size(); ++k) {
+            const auto& p = placements[k];
+            const auto site = reused + k;
             const auto id = static_cast<std::uint32_t>(site);
             // Resolved per instance, with that instance's seat as its
             // origin -- which is what lets one motion field send every
@@ -1611,6 +1856,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}) {
                         .scale = pl.scale,
                         .rotation_q = {},
                         .instanceable = true,
+                        .site = n.kind == Kind::Scatter ? id : Object<T>::no_site,
                         .material = {}};
             // Composed as a matrix -- the site frame and the placement
             // rotation are both matrices, so there is nowhere earlier to

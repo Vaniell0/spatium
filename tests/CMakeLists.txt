@@ -44,6 +44,7 @@ add_executable(spatium_tests
     test_bvh.cpp
     test_bvh_update.cpp
     test_cooked_update.cpp
+    test_content_identity.cpp
     test_topology.cpp
     test_geodesic.cpp
     test_transport.cpp

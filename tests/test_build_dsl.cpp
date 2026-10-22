@@ -91,6 +91,36 @@ TEST_CASE("sample_surface_uniform returns the requested count, on-surface", "[sa
     }
 }
 
+TEST_CASE("a resumed sampler continues the sequence it was copied from", "[sample]") {
+    auto dough = make_torus<double>(2.0, 1.0);
+    const auto all = sample_surface_uniform(dough, 3000, 11);
+    REQUIRE(all.size() == 3000);
+
+    // Asking for fewer gives a prefix of asking for more.
+    const auto fewer = sample_surface_uniform(dough, 1200, 11);
+    REQUIRE(fewer.size() == 1200);
+    for (std::size_t i = 0; i < fewer.size(); ++i) {
+        CHECK(fewer[i].u == all[i].u);
+        CHECK(fewer[i].position[0] == all[i].position[0]);
+    }
+
+    // Stop after 1000, copy the state, and carry on from the copy.
+    SurfaceSampler<double> first(dough, 11);
+    for (int i = 0; i < 1000; ++i) REQUIRE(first.next(sample_draw_limit(3000)));
+    SurfaceSampler<double> resumed(dough, 11, first.state());
+    for (std::size_t i = 1000; i < all.size(); ++i) {
+        const auto s = resumed.next(sample_draw_limit(3000));
+        REQUIRE(s);
+        REQUIRE(s->u == all[i].u);
+        REQUIRE(s->v == all[i].v);
+        REQUIRE(s->position[2] == all[i].position[2]);
+        REQUIRE(s->normal[0] == all[i].normal[0]);
+    }
+
+    // A different seed is a different sequence.
+    CHECK(sample_surface_uniform(dough, 5, 12)[0].u != all[0].u);
+}
+
 TEST_CASE("sample_surface_uniform is deterministic per seed", "[sample]") {
     auto dough = make_torus<double>(2.0, 1.0);
     auto a = sample_surface_uniform(dough, 20, 5);
