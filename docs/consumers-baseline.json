@@ -61,7 +61,6 @@
 "io/build.hpp: resolve_material",
 "io/build.hpp: scatter_frame",
 "io/build.hpp: scatter_lift",
-"io/field.hpp: FieldOp",
 "io/field.hpp: accumulate_leaves",
 "io/field.hpp: is_binary",
 "io/field.hpp: is_unary",
