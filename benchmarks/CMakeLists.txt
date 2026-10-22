@@ -5,6 +5,7 @@ add_executable(spatium_bench
     bench_intersection.cpp
     bench_mesh.cpp
     bench_bvh.cpp
+    bench_instance_update.cpp
     bench_orbital.cpp
     bench_raycast.cpp
     bench_narrow_phase.cpp

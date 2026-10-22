@@ -46,6 +46,11 @@ spatium_add_example(NAME scene_demo OPTIONS -O3 -march=native)
 # per-pixel-cost reasoning as the raytracers above).
 spatium_add_example(NAME donut_demo OPTIONS -O3 -march=native)
 
+# A scatter's count changed step by step, laid out by updating the previous
+# scene's instance tree; checked against a fresh lay-out on random rays.
+# CPU only.
+spatium_add_example(NAME scatter_regen OPTIONS -O3 -march=native)
+
 # Napkins falling onto a sphere and onto each other: cloth against cloth
 # through surface_ccd.hpp's vertex-face and edge-edge queries, measured
 # with the continuous pass on and off by an independent piercing count.

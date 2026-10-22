@@ -42,6 +42,8 @@ add_executable(spatium_tests
     test_clip.cpp
     test_boolean.cpp
     test_bvh.cpp
+    test_bvh_update.cpp
+    test_cooked_update.cpp
     test_topology.cpp
     test_geodesic.cpp
     test_transport.cpp

@@ -21,6 +21,7 @@
 #  include <spatium/mesh/mesh.hpp>
 #  include <spatium/spaces/euclidean.hpp>
 #  include <spatium/spatial/bvh.hpp>
+#  include <algorithm>
 #  include <any>
 #  include <array>
 #  include <cstddef>
@@ -239,13 +240,164 @@ template<Scalar T = double>
 CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
                        const std::vector<io::build::Placed<T>>& extra = {},
                        const std::vector<char>* skip_nodes = nullptr,
-                       StaticCache<T>* cache = nullptr) {
+                       StaticCache<T>* cache = nullptr);
+
+// What an update of the instance tree did, for a caller that wants to
+// report it (the example's HUD, the benchmark).
+struct InstanceUpdate {
+    bool reused = false;         // the previous tree was the starting point
+    std::size_t kept = 0;        // instances found unchanged in it
+    std::size_t removed = 0;
+    std::size_t inserted = 0;
+    bool rebuilt = false;        // too much changed (or no previous): built from scratch
+};
+
+// Above this fraction of the instances changed, the tree is built again
+// rather than updated: see the figures in docs/ROADMAP.md.
+inline constexpr double instance_update_max_fraction = 0.25;
+
+namespace detail {
+
+template<Scalar T>
+bool same_bits(T a, T b) { return std::memcmp(&a, &b, sizeof(T)) == 0; }
+
+template<Scalar T>
+bool same_bits(const Vec<T, 3>& a, const Vec<T, 3>& b) {
+    return same_bits(a[0], b[0]) && same_bits(a[1], b[1]) && same_bits(a[2], b[2]);
+}
+
+// Two instances are the same when everything that reaches a pixel is the
+// same to the bit: the shape, the placement, and what it looks like.
+template<Scalar T>
+bool same_instance(const geometry::Instanced<geometry::BoundedQuadric<T>>& a, const InstanceLook<T>& la,
+                   const geometry::Instanced<geometry::BoundedQuadric<T>>& b, const InstanceLook<T>& lb) {
+    if (a.shape != b.shape || !same_bits(a.translation, b.translation) || !same_bits(a.scale, b.scale))
+        return false;
+    for (std::size_t r = 0; r < 3; ++r)
+        for (std::size_t c = 0; c < 3; ++c)
+            if (!same_bits(a.rotation(r, c), b.rotation(r, c))) return false;
+    return same_bits(la.color, lb.color) && same_bits(la.roughness, lb.roughness) &&
+           same_bits(la.emissive, lb.emissive) && same_bits(la.opacity, lb.opacity);
+}
+
+template<Scalar T>
+std::uint64_t instance_hash(const geometry::Instanced<geometry::BoundedQuadric<T>>& a, const InstanceLook<T>& l) {
+    std::uint64_t h = 0x9e3779b97f4a7c15ull ^ reinterpret_cast<std::uintptr_t>(a.shape);
+    auto mix = [&h](T v) {
+        std::uint64_t w = 0;
+        std::memcpy(&w, &v, std::min(sizeof(T), sizeof(w)));
+        h = (h ^ w) * 0xff51afd7ed558ccdull;
+        h ^= h >> 32;
+    };
+    for (std::size_t i = 0; i < 3; ++i) mix(a.translation[i]);
+    mix(a.scale);
+    for (std::size_t r = 0; r < 3; ++r)
+        for (std::size_t c = 0; c < 3; ++c) mix(a.rotation(r, c));
+    for (std::size_t i = 0; i < 3; ++i) mix(l.color[i]);
+    mix(l.roughness);
+    for (std::size_t i = 0; i < 3; ++i) mix(l.emissive[i]);
+    mix(l.opacity);
+    return h;
+}
+
+template<Scalar T>
+bool same_quadrics(const std::vector<geometry::BoundedQuadric<T>>& a,
+                   const std::vector<geometry::BoundedQuadric<T>>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i].closed != b[i].closed) return false;
+        for (std::size_t r = 0; r < 4; ++r)
+            for (std::size_t c = 0; c < 4; ++c)
+                if (!same_bits(a[i].surface.Q(r, c), b[i].surface.Q(r, c))) return false;
+        if (!same_bits(a[i].clip.min_corner, b[i].clip.min_corner) ||
+            !same_bits(a[i].clip.max_corner, b[i].clip.max_corner))
+            return false;
+    }
+    return true;
+}
+
+// Bring `tree` (with `looks` parallel to its shapes) to hold `insts` with
+// `new_looks`: the instances present in both stay where they are, the
+// others are removed and inserted, and when more than `max_fraction` of
+// them differ the tree is built again instead. Either way the tree answers
+// as a build over `insts` would; only the order of its shapes differs.
+template<Scalar T>
+InstanceUpdate update_instance_tree(spatial::BVH<geometry::Instanced<geometry::BoundedQuadric<T>>>& tree,
+                                    std::vector<InstanceLook<T>>& looks,
+                                    std::vector<geometry::Instanced<geometry::BoundedQuadric<T>>>&& insts,
+                                    std::vector<InstanceLook<T>>&& new_looks, double max_fraction) {
+    InstanceUpdate u;
+    u.reused = true;
+    const auto& old = tree.shapes();
+    const std::size_t n_old = old.size(), n_new = insts.size();
+
+    // The old instances in an open-addressing table keyed by hash; each new
+    // instance probes for an old one equal to it bit for bit, so a hash
+    // collision is two unmatched instances and never a wrong match.
+    struct Slot { std::uint64_t hash; std::uint32_t index; };
+    constexpr std::uint32_t none = ~std::uint32_t{0};
+    std::size_t cap = 16;
+    while (cap < 2 * n_old) cap <<= 1;
+    const std::size_t mask = cap - 1;
+    std::vector<Slot> table(cap, Slot{0, none});
+    for (std::size_t i = 0; i < n_old; ++i) {
+        const std::uint64_t h = instance_hash(old[i], looks[i]);
+        std::size_t p = h & mask;
+        while (table[p].index != none) p = (p + 1) & mask;
+        table[p] = {h, std::uint32_t(i)};
+    }
+
+    std::vector<char> old_kept(n_old, 0), new_kept(n_new, 0);
+    for (std::size_t n = 0; n < n_new; ++n) {
+        const std::uint64_t h = instance_hash(insts[n], new_looks[n]);
+        for (std::size_t p = h & mask; table[p].index != none; p = (p + 1) & mask) {
+            const auto o = table[p].index;
+            if (table[p].hash != h || old_kept[o] || !same_instance(old[o], looks[o], insts[n], new_looks[n]))
+                continue;
+            old_kept[o] = 1;
+            new_kept[n] = 1;
+            ++u.kept;
+            break;
+        }
+    }
+    u.removed = n_old - u.kept;
+    u.inserted = n_new - u.kept;
+
+    if (double(u.removed + u.inserted) > max_fraction * double(std::max(n_old, n_new))) {
+        tree = spatial::BVH<geometry::Instanced<geometry::BoundedQuadric<T>>>::build(std::move(insts));
+        looks = std::move(new_looks);
+        u.rebuilt = true;
+        return u;
+    }
+
+    // Highest index first: the shape that moves into a freed slot comes
+    // from the end, and every unmatched index still to come is below it.
+    for (std::size_t k = n_old; k-- > 0;) {
+        if (old_kept[k]) continue;
+        tree.remove(k);
+        looks[k] = looks.back();
+        looks.pop_back();
+    }
+    for (std::size_t k = 0; k < n_new; ++k) {
+        if (new_kept[k]) continue;
+        tree.insert(insts[k]);
+        looks.push_back(new_looks[k]);
+    }
+    return u;
+}
+
+template<Scalar T>
+CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
+                            const io::build::Cooked<T>& cooked,
+                            const std::vector<io::build::Placed<T>>& extra,
+                            const std::vector<char>* skip_nodes, StaticCache<T>* cache) {
     using Tri = geometry::Triangle<3, T>;
     using Quadric = geometry::BoundedQuadric<T>;
 
     CookedScene<T> out;
     std::vector<Tri> tris;
     std::vector<geometry::Instanced<Quadric>> insts;
+    std::vector<InstanceLook<T>> looks;
 
     // One quadric per distinct *shape*, not per object -- which is the
     // whole point of reading a cooked scene rather than a list of
@@ -261,6 +413,12 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
             has_quadric[i] = 1;
         }
     }
+
+    // The previous scene's instance tree points into its quadric table. If
+    // the table is the same, this scene points into that same buffer, so
+    // the tree stays valid and can be updated instead of built.
+    const bool reuse = previous && detail::same_quadrics(previous->quadrics, out.quadrics);
+    if (reuse) out.quadrics = std::move(previous->quadrics);
 
     // A shape's geometry is its *rest* form when the object placing it is
     // instanceable, and its *placed* form when the object deforms -- in
@@ -316,7 +474,7 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
         // are.
         if (obj.instanceable && has_quadric[obj.shape]) {
             insts.push_back({&out.quadrics[obj.shape], obj.translation, obj.scale, R});
-            out.looks.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
+            looks.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
             continue;
         }
 
@@ -347,8 +505,48 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
     // for the rest of the frame -- 112 bytes per instance, which is 214 MB
     // at two million and was simply being spent.
     out.triangles = cache ? cache->tree(std::move(tris)) : spatial::BVH<Tri>::build(std::move(tris));
-    out.instances = spatial::BVH<geometry::Instanced<Quadric>>::build(std::move(insts));
+    if (reuse) {
+        out.instances = std::move(previous->instances);
+        out.looks = std::move(previous->looks);
+        const auto u = update_instance_tree(out.instances, out.looks, std::move(insts), std::move(looks),
+                                            instance_update_max_fraction);
+        if (report) *report = u;
+    } else {
+        out.instances = spatial::BVH<geometry::Instanced<Quadric>>::build(std::move(insts));
+        out.looks = std::move(looks);
+        if (report) {
+            *report = {};
+            report->rebuilt = true;
+            report->inserted = out.instances.size();
+        }
+    }
     return out;
+}
+
+}  // namespace detail
+
+template<Scalar T>
+CookedScene<T> lay_out(const io::build::Cooked<T>& cooked, const std::vector<io::build::Placed<T>>& extra,
+                       const std::vector<char>* skip_nodes, StaticCache<T>* cache) {
+    return detail::lay_out_impl<T>(nullptr, nullptr, cooked, extra, skip_nodes, cache);
+}
+
+// The same scene as `lay_out` makes, starting from the scene laid out
+// before it: when the instance set changed by a few, the instance tree is
+// updated (see BVH::insert / remove) instead of built, which is the part of
+// laying out that grows with the number of instances. `previous` is
+// consumed; it is the caller's last scene, replaced by this one.
+//
+// The result gives the same ray hits as a fresh `lay_out`. The instances
+// are in a different order (removal moves the last one into the freed
+// slot), with `looks` following; nothing else about the scene differs.
+// `report`, when given, says what was done.
+template<Scalar T>
+CookedScene<T> lay_out(CookedScene<T>&& previous, const io::build::Cooked<T>& cooked,
+                       const std::vector<io::build::Placed<T>>& extra = {},
+                       const std::vector<char>* skip_nodes = nullptr, StaticCache<T>* cache = nullptr,
+                       InstanceUpdate* report = nullptr) {
+    return detail::lay_out_impl<T>(&previous, report, cooked, extra, skip_nodes, cache);
 }
 
 }  // namespace spatium::render
