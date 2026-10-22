@@ -871,7 +871,17 @@ points, difference exactly zero, rather than argued.
   | 1e4 | 12.2 ms | 3.0 ms | 19.1-20.4 ms | 17.8-18.6 ms | 34-38 ms |
   | 1e5 | 103 ms | 7.7-8.2 ms | 66.9-68.3 ms | 24.5-25.0 ms | 161-177 ms |
 
-  A step of the slider at 1e5 is then 8 + 25 ms where it was 103 + 67 ms (a fresh cook and lay-out is 280 ms). The remaining 17 ms in the update is not the instances: it is the 57 600 triangles of the torus, laid out again from the cooked objects to be looked up in the `StaticCache`, and is the same at N = 1e3. Not done: the generator's time is part of its identity, so a scene regenerated at a new `t` is all new even where the motion ignores time; the cooked sites of a scatter whose objects include a zero scale are compared by hash, not by generator; and `donut_live` still cannot use any of it, its scatters being moved on the device.
+  A step of the slider at 1e5 is then 8 + 25 ms where it was 103 + 67 ms (a fresh cook and lay-out is 280 ms). The remaining 17 ms in the update was not the instances: it was the 57 600 triangles of the torus, emitted again from the cooked objects only to be looked up in the `StaticCache`, and it was the same at N = 1e3.
+
+  **The static part is found before it is made, and a time that nothing reads replaces nothing. Settled 2026-10-22.** Two things closed the rest. (1) `lay_out` describes the static part before emitting a triangle: the words are, for each object that becomes triangles, its shape's `content_key` (kept on `Shape::key`), its placement and its material, as bits. `StaticCache::find(words)` answers from them, a hit being confirmed by comparing the words in full (a hash collision is a miss); on a hit the triangle emit, the corner normals and the BVH build are skipped and the tree and shaded triangles are copied out of the cache. A static object whose shape has no key (a placed mesh, a chart handed to `space()`) makes the whole part keyless, and then the triangles are made and compared as before, so a false miss costs time and a wrong hit cannot happen. (2) `Field::reads_time()` and `VecField::reads_time()` walk the ops the root reaches and answer whether the first input (the scene time) can matter: `U`, a metric's time coordinate and any callable leaf do (a callable cannot be asked), a constant, the point itself or an expression of those do not. `node_version` adds `t` to a node's version only if its motion, colour or emission reads it, so a scatter whose fields ignore time keeps its generator across times, and `cook(..., &previous)` reuses its placements at a new `t`; a scatter that reads time replaces its own instances and no one else's. For a move from `t` = 0 to `t` = 2.5 the cook and lay-out equal a fresh cook and lay-out on every instance and on random rays for a time-independent scatter (2000 of 2000 reused), a time-dependent one (0 reused) and a scene with one of each (only the time-independent 2000 reused). Update step of `examples/scatter_regen.cpp` (240x120 torus, E-cores, medians of 20 steps over 5 runs, -O3): 
+
+  | N | before | after |
+  |---|---|---|
+  | 1e3 | 23.4 ms | 8.1 ms |
+  | 1e4 | 24.6 ms | 9.2 ms |
+  | 1e5 | 26.3 ms | 7.1 ms |
+
+  What is left of the update is the copy of the cached tree and shaded triangles (a few megabytes) and, for growth steps, the inserts. Not done: the cooked sites of a scatter whose objects include a zero scale are compared by hash, not by generator; and `donut_live` still cannot use any of it, its scatters being moved on the device.
 
   **`cook()` and `Cooked<T>`, settled 2026-09-15.** The phase boundary the
   DSL already had in practice and never expressed: a `Trace` is mutated

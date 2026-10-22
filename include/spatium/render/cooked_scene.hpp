@@ -194,22 +194,51 @@ public:
     std::size_t size() const { return entries_.size(); }
     void clear() { entries_.clear(); }
 
+    // What a lay-out of a static part keeps: the tree and the shaded
+    // triangles in the order they were emitted.
+    struct Laid {
+        Tree tree;
+        std::vector<ShadedTriangle<T>> prims;
+    };
+
+    // The static part for a description known before any triangle is made:
+    // the words of `static_part_key` (the shapes' contents and every
+    // static object's placement and material). A hit is confirmed by
+    // comparing the words in full, so a hash collision is a miss; two
+    // scenes with equal words have equal triangles, which is what the
+    // words are made of. Null on a miss -- the caller emits, then hands
+    // the words to `tree` so the next call finds them.
+    const Laid* find(const std::vector<std::uint64_t>& words) {
+        const std::uint64_t h = hash_words(words);
+        for (const auto& e : entries_)
+            if (e.has_laid && e.word_hash == h && e.words == words) {
+                ++hits_;
+                return &e.laid;
+            }
+        return nullptr;
+    }
+
     // The tree over `tris`, built on a miss and copied out of the cache on
     // a hit. Takes the triangles by value for the same reason `build` does.
-    Tree tree(std::vector<Tri> tris) {
+    // `words` and `prims`, when given, are kept with the entry so `find`
+    // can answer for those words later.
+    Tree tree(std::vector<Tri> tris, const std::vector<std::uint64_t>* words = nullptr,
+              const std::vector<ShadedTriangle<T>>* prims = nullptr) {
         static_assert(std::is_trivially_copyable_v<Tri> && sizeof(Tri) == 9 * sizeof(T),
                       "hashing the bytes of a triangle needs it to have no padding");
         const std::uint64_t key = hash(tris);
-        for (const auto& e : entries_)
-            if (e.key == key && same(e.tree.shapes(), tris)) {
+        for (auto& e : entries_)
+            if (e.key == key && same(e.laid.tree.shapes(), tris)) {
                 ++hits_;
-                return e.tree;
+                if (words && prims && !e.has_laid) attach(e, *words, *prims);
+                return e.laid.tree;
             }
         ++misses_;
         Tree built = Tree::build(std::move(tris));
         if (capacity_ > 0) {
             if (entries_.size() >= capacity_) entries_.erase(entries_.begin());
-            entries_.push_back({key, built});
+            entries_.push_back({key, 0, {}, false, {built, {}}});
+            if (words && prims) attach(entries_.back(), *words, *prims);
         }
         return built;
     }
@@ -217,8 +246,27 @@ public:
 private:
     struct Entry {
         std::uint64_t key;
-        Tree tree;
+        std::uint64_t word_hash;
+        std::vector<std::uint64_t> words;
+        bool has_laid;
+        Laid laid;
     };
+
+    void attach(Entry& e, const std::vector<std::uint64_t>& words, const std::vector<ShadedTriangle<T>>& prims) {
+        e.words = words;
+        e.word_hash = hash_words(words);
+        e.laid.prims = prims;
+        e.has_laid = true;
+    }
+
+    static std::uint64_t hash_words(const std::vector<std::uint64_t>& w) {
+        std::uint64_t h = 0x9e3779b97f4a7c15ull ^ w.size();
+        for (auto x : w) {
+            h = (h ^ x) * 0xff51afd7ed558ccdull;
+            h ^= h >> 32;
+        }
+        return h;
+    }
 
     // A word at a time, multiply-xorshift: a byte at a time would cost
     // as much as the thing being skipped is worth on a small tree.
@@ -508,6 +556,51 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
         out.generators.push_back({g.version.generator, g.version.key, g.shape, g.count});
     }
 
+    // The static part of the scene -- every object that becomes triangles --
+    // described before any triangle is made: for each, its shape's
+    // content key, placement and material, as the bits the triangles are
+    // computed from. Equal words are equal triangles and equal shading, so
+    // the cache can answer without emitting (see StaticCache::find). Not
+    // available for a scalar with no bit pattern, or when a static object's
+    // shape has no key; then the triangles are made and the cache keyed by
+    // them, as before.
+    std::vector<std::uint64_t> static_words;
+    bool have_words = false;
+    const typename StaticCache<T>::Laid* hit = nullptr;
+    if (cache && extra.empty() && std::is_trivially_copyable_v<T> && sizeof(T) <= 8) {
+        auto push = [&](T v) {
+            std::uint64_t w = 0;
+            std::memcpy(&w, &v, sizeof(T));
+            static_words.push_back(w);
+        };
+        have_words = true;
+        std::size_t g = 0;
+        for (std::size_t o = 0; o < objs.size() && have_words; ++o) {
+            const auto& obj = objs[o];
+            while (g < gens.size() && gens[g].first_object + gens[g].count <= o) ++g;
+            if (g < gens.size() && o >= gens[g].first_object && reuse && laid_index[g] != no_gen) {
+                o = gens[g].first_object + gens[g].count - 1;
+                continue;
+            }
+            if (skipped(obj.source_node) || obj.scale == T{0}) continue;
+            if (obj.instanceable && has_quadric[obj.shape]) continue;
+            const auto& key = cooked.shapes()[obj.shape].key;
+            if (key.empty()) { have_words = false; break; }
+            static_words.push_back(key.size());
+            static_words.insert(static_words.end(), key.begin(), key.end());
+            for (std::size_t i = 0; i < 3; ++i) push(obj.translation[i]);
+            push(obj.scale);
+            push(obj.rotation_q.w); push(obj.rotation_q.x); push(obj.rotation_q.y); push(obj.rotation_q.z);
+            for (std::size_t i = 0; i < 3; ++i) push(obj.material.base_color[i]);
+            push(obj.material.roughness);
+            for (std::size_t i = 0; i < 3; ++i) push(obj.material.emissive[i]);
+        }
+        if (have_words && (hit = cache->find(static_words))) {
+            out.triangles = hit->tree;
+            out.prims = hit->prims;
+        }
+    }
+
     // A shape's geometry is its *rest* form when the object placing it is
     // instanceable, and its *placed* form when the object deforms -- in
     // which case cook() hands back an identity transform. So one formula
@@ -590,6 +683,7 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
         // thousand instances of one sprinkle used to recompute the same
         // normals a thousand times, through a merged mesh that had to be
         // built first.
+        if (hit) continue;   // laid out before: tree and shading come from the cache
         auto& vn = shape_normals[obj.shape];
         if (vn.empty()) vn = corner_normals(cooked.shapes()[obj.shape].geometry);
         emit_triangles(cooked.shapes()[obj.shape].geometry, vn, obj, R, mat);
@@ -612,7 +706,10 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
     // them, so handing it an lvalue leaves two copies of the array alive
     // for the rest of the frame -- 112 bytes per instance, which is 214 MB
     // at two million and was simply being spent.
-    out.triangles = cache ? cache->tree(std::move(tris)) : spatial::BVH<Tri>::build(std::move(tris));
+    if (!hit)
+        out.triangles = cache ? cache->tree(std::move(tris), have_words ? &static_words : nullptr,
+                                            have_words ? &out.prims : nullptr)
+                              : spatial::BVH<Tri>::build(std::move(tris));
     if (!reuse) {
         out.instances = InstanceTree<T>::build(std::move(insts));
         out.looks = std::move(looks);

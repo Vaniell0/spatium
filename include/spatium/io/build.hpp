@@ -1257,7 +1257,7 @@ struct SiteCheckpoints {
 // for different reasons and mean different things:
 //
 //   generator   its item, target, seed, seat, motion, colour, emission,
-//               material and `t`. Two scatters with one generator place
+//               material and, when they read it, `t`. Two scatters with one generator place
 //               the same copy at the same site, so the first
 //               min(count, count') objects of each are identical -- the
 //               sampling is prefix-stable: a bigger count appends sites to
@@ -1271,10 +1271,11 @@ struct SiteCheckpoints {
 // (`Field::content_id`); they pick candidates. `key` is the generator's
 // description in full, with the fields spelled out by `canonical_key`, and
 // two versions are the same only if their keys are equal: a collision is
-// "different", never "same". `t` is part of the version even for a motion
-// that does not read it -- the cost of that is a recomputation at a new
-// time, where leaving it out would be a wrong picture for a motion that
-// does.
+// "different", never "same". `t` is part of the version only when the
+// node's motion, colour or emission field reads it (`reads_time`, derived
+// from the ops; a callable counts as reading it): such a node is changed by
+// a new time and is replaced, while a node whose fields do not read it keeps
+// its identity across times.
 struct NodeVersion {
     std::uint64_t id = 0;
     std::uint64_t generator = 0;
@@ -1361,6 +1362,12 @@ struct Shape {
     // two objects sharing a shape share its exact form too, by the same
     // argument that lets them share the mesh.
     std::any exact;
+
+    // The description the shape was deduplicated by (`content_key`): equal
+    // keys mean equal geometry, so a layer above can recognise a shape it
+    // has laid out before without looking at the mesh. Empty when the shape
+    // has none (a placed mesh, a chart handed to `space()`).
+    std::vector<std::uint64_t> key;
 };
 
 template<Scalar T = double>
@@ -1576,7 +1583,15 @@ std::optional<NodeVersion> node_version(const Trace<T>& trace, std::size_t idx, 
         if (b) k.push_back(*b);
         return b.has_value();
     };
-    if (!scalar(t)) return std::nullopt;
+    // The time enters the version only through the fields that read it
+    // (`reads_time`, derived from their ops): a node whose motion, colour
+    // and emission do not read it produces the same objects at every time,
+    // and a scatter of it keeps its identity, and so its placements, when
+    // the scene is regenerated at a new `t`. A flag word first, so a node
+    // that reads time at t = 0 is not the same as one that does not read it.
+    const bool timed = n.transform.reads_time() || n.color_fn.reads_time() || n.emissive_fn.reads_time();
+    k.push_back(timed);
+    if (timed ? !scalar(t) : false) return std::nullopt;
     for (std::size_t i = 0; i < 3; ++i)
         if (!scalar(n.material.base_color[i]) || !scalar(n.material.emissive[i])) return std::nullopt;
     if (!scalar(n.material.roughness) || !scalar(n.material.opacity)) return std::nullopt;
@@ -1669,8 +1684,8 @@ std::vector<ScatterSpot<T>> scatter_spots(const Trace<T>& trace, std::size_t idx
     return scatter_spots_from(trace, idx, t, 0).spots;
 }
 
-// `previous`, when given, is a cook of an earlier version of the scene at
-// the same `t`: a scatter whose generator is unchanged (see `NodeVersion`)
+// `previous`, when given, is a cook of an earlier version of the scene, at
+// the same `t` or another: a scatter whose generator is unchanged (see `NodeVersion`)
 // takes its first min(old, new) objects from it and computes only the rest,
 // including the sampler's draws up to them, which is most of what a scatter
 // costs. The result is the same Cooked a cook without it makes, object for
@@ -1780,7 +1795,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}, const Cooked
             const std::size_t shape_index = out.shapes_.size();
             auto placed_mesh = materialize_mesh(trace, idx, t, /*placed=*/true);
             auto at = placed_mesh.centroid();
-            out.shapes_.push_back(Shape<T>{std::move(placed_mesh), 1, std::any{}});
+            out.shapes_.push_back(Shape<T>{std::move(placed_mesh), 1, std::any{}, {}});
             out.objects_.push_back(Object<T>{.shape = shape_index,
                                              .source_node = idx,
                                              .translation = carried,
@@ -1803,7 +1818,7 @@ Cooked<T> cook(const Trace<T>& trace, std::size_t root, T t = T{0}, const Cooked
             // that have not yet been put anywhere.
             out.shapes_.push_back(
                 Shape<T>{materialize_mesh(trace, geometry_node, t, /*placed=*/false), 0,
-                         trace.node(geometry_node).exact});
+                         trace.node(geometry_node).exact, key ? *key : std::vector<std::uint64_t>{}});
             if (key) shape_of_key.emplace(*key, shape_index);
         } else {
             shape_index = it->second;
