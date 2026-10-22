@@ -25,6 +25,8 @@
 #  include <array>
 #  include <cstddef>
 #  include <cstdint>
+#  include <cstring>
+#  include <type_traits>
 #  include <utility>
 #  include <vector>
 #endif
@@ -136,6 +138,92 @@ struct CookedScene {
     CookedScene& operator=(const CookedScene&) = delete;
 };
 
+// The triangle tree of everything that is not an instance, kept between
+// lay-outs. That tree costs about 35 ms (-O3) for a 240x120 torus and depends on
+// nothing but the triangles that go into it: the number of scattered
+// copies, their seed and their placement only change the instance tree.
+// So a scene regenerated with the same static part can reuse it.
+//
+// The key is the triangles themselves, not a description of how they were
+// made. A recipe, its steps, a transform and a placement all end up in
+// the vertex bytes, so one hash of those bytes covers every input that
+// can change the tree, including ones added later -- and it costs about a
+// hundredth of the build it replaces. The hash only picks the entry; a
+// hit is confirmed by comparing the bytes, so a collision is a miss, never
+// a wrong tree. (-0.0 and 0.0 differ in bytes: that is a miss, not an
+// error.)
+//
+// The caller owns it and decides how long it lives; nothing is global.
+// It keeps at most `capacity` trees, dropping the oldest, and each holds
+// a copy of its triangles.
+template<Scalar T = double>
+class StaticCache {
+public:
+    using Tri = geometry::Triangle<3, T>;
+    using Tree = spatial::BVH<Tri>;
+
+    explicit StaticCache(std::size_t capacity = 4) : capacity_(capacity) {}
+
+    std::size_t hits() const { return hits_; }
+    std::size_t misses() const { return misses_; }
+    std::size_t size() const { return entries_.size(); }
+    void clear() { entries_.clear(); }
+
+    // The tree over `tris`, built on a miss and copied out of the cache on
+    // a hit. Takes the triangles by value for the same reason `build` does.
+    Tree tree(std::vector<Tri> tris) {
+        static_assert(std::is_trivially_copyable_v<Tri> && sizeof(Tri) == 9 * sizeof(T),
+                      "hashing the bytes of a triangle needs it to have no padding");
+        const std::uint64_t key = hash(tris);
+        for (const auto& e : entries_)
+            if (e.key == key && same(e.tree.shapes(), tris)) {
+                ++hits_;
+                return e.tree;
+            }
+        ++misses_;
+        Tree built = Tree::build(std::move(tris));
+        if (capacity_ > 0) {
+            if (entries_.size() >= capacity_) entries_.erase(entries_.begin());
+            entries_.push_back({key, built});
+        }
+        return built;
+    }
+
+private:
+    struct Entry {
+        std::uint64_t key;
+        Tree tree;
+    };
+
+    // A word at a time, multiply-xorshift: a byte at a time would cost
+    // as much as the thing being skipped is worth on a small tree.
+    static std::uint64_t hash(const std::vector<Tri>& tris) {
+        const auto* p = reinterpret_cast<const unsigned char*>(tris.data());
+        const std::size_t n = tris.size() * sizeof(Tri);
+        std::uint64_t h = 0x9e3779b97f4a7c15ull ^ n;
+        std::size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            std::uint64_t w;
+            std::memcpy(&w, p + i, 8);
+            h = (h ^ w) * 0xff51afd7ed558ccdull;
+            h ^= h >> 32;
+        }
+        std::uint64_t w = 0;
+        if (i < n) std::memcpy(&w, p + i, n - i);
+        h = (h ^ w) * 0xff51afd7ed558ccdull;
+        return h ^ (h >> 32);
+    }
+
+    static bool same(const std::vector<Tri>& a, const std::vector<Tri>& b) {
+        return a.size() == b.size() &&
+               (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(Tri)) == 0);
+    }
+
+    std::size_t capacity_;
+    std::size_t hits_ = 0, misses_ = 0;
+    std::vector<Entry> entries_;
+};
+
 // Lay a cooked scene out for tracing. `extra` is geometry that is drawn
 // but is not in the scene -- the build-up frames' gizmos are the editor,
 // not the subject, and arrive as Placed views onto their own Trace.
@@ -143,10 +231,15 @@ struct CookedScene {
 // `skip_nodes`, when given, is indexed by trace node: objects from a node
 // marked in it are left out -- the instances a device kernel moves itself,
 // which would otherwise be laid out twice.
+//
+// `cache`, when given, supplies the triangle tree if the same triangles
+// were laid out before (see StaticCache); the result is the same scene
+// either way, and without it nothing is kept.
 template<Scalar T = double>
 CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
                        const std::vector<io::build::Placed<T>>& extra = {},
-                       const std::vector<char>* skip_nodes = nullptr) {
+                       const std::vector<char>* skip_nodes = nullptr,
+                       StaticCache<T>* cache = nullptr) {
     using Tri = geometry::Triangle<3, T>;
     using Quadric = geometry::BoundedQuadric<T>;
 
@@ -253,7 +346,7 @@ CookedScene<T> lay_out(const io::build::Cooked<T>& cooked,
     // them, so handing it an lvalue leaves two copies of the array alive
     // for the rest of the frame -- 112 bytes per instance, which is 214 MB
     // at two million and was simply being spent.
-    out.triangles = spatial::BVH<Tri>::build(std::move(tris));
+    out.triangles = cache ? cache->tree(std::move(tris)) : spatial::BVH<Tri>::build(std::move(tris));
     out.instances = spatial::BVH<geometry::Instanced<Quadric>>::build(std::move(insts));
     return out;
 }
