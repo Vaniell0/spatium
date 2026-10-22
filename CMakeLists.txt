@@ -79,6 +79,7 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/error.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/epsilon.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/up_to.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/reactive.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/precision.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/core/verify.cppm
         DEPS spatium_sdk)

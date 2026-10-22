@@ -8,5 +8,6 @@ export import :access;
 export import :error;
 export import :epsilon;
 export import :up_to;
+export import :reactive;
 export import :precision;
 export import :verify;

@@ -40,6 +40,7 @@ add_executable(spatium_tests
     test_algebra.cpp
     test_surface_adapter.cpp
     test_clip.cpp
+    test_reactive.cpp
     test_boolean.cpp
     test_bvh.cpp
     test_topology.cpp
