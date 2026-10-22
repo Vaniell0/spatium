@@ -139,7 +139,7 @@ struct CookedScene {
 };
 
 // The triangle tree of everything that is not an instance, kept between
-// lay-outs. That tree costs ~85 ms for a 240x120 torus and depends on
+// lay-outs. That tree costs about 35 ms (-O3) for a 240x120 torus and depends on
 // nothing but the triangles that go into it: the number of scattered
 // copies, their seed and their placement only change the instance tree.
 // So a scene regenerated with the same static part can reuse it.
