@@ -14,14 +14,28 @@
 //               N-sized lists that differ in k places, flipping between
 //               them.
 //
+// Then the whole regeneration of a scene, one step of a count slider: a
+// scatter of N copies becomes one of N + k (the DSL scene of
+// examples/scatter_regen.cpp).
+//
+//   RegenCookCold   -- cook() of the new scene from scratch.
+//   RegenCookResume -- cook() given the previous cook: the copies of an
+//                      unchanged scatter are taken, only the new ones placed.
+//   RegenUpdate     -- lay_out(previous scene, new cook): the instance tree
+//                      updated, with the instances found by hashing every one
+//                      (the first measurement of this file) or by comparing
+//                      the scatter's generator (now).
+//   RegenFresh      -- lay_out(new cook) from scratch.
+//
 // Run on the efficiency cores with medians of five:
-//   taskset -c 4-11 spatium_bench --benchmark_filter=Instance --benchmark_repetitions=5
+//   taskset -c 4-11 spatium_bench --benchmark_filter='Instance|Regen' --benchmark_repetitions=5
 //   (add --benchmark_report_aggregates_only=true for the medians alone)
 
 #include <benchmark/benchmark.h>
 #include <spatium/io/build.hpp>
 #include <spatium/render/cooked_scene.hpp>
 #include <map>
+#include <optional>
 #include <random>
 
 using namespace spatium;
@@ -120,3 +134,98 @@ static void BM_InstanceDiff(benchmark::State& state) {
 BENCHMARK(BM_InstanceRebuild)->Arg(1000)->Arg(10000)->Arg(100000)->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_InstanceEdit) SPATIUM_INSTANCE_ARGS;
 BENCHMARK(BM_InstanceDiff) SPATIUM_INSTANCE_ARGS;
+
+// ── Regenerating a whole scene ───────────────────────────────────────────
+
+namespace {
+
+struct Regen {
+    bd::Trace<double> trace;
+    std::size_t root = 0;
+    Regen(std::size_t count, std::uint32_t seed = 42) {
+        auto torus = trace.torus(2.0, 1.0, 240, 120);
+        auto item = trace.cylinder(0.011, 0.062, 8, 2);
+        auto sc = trace.scatter(item, torus, count, seed, 0.45, bd::SeatAxis::X);
+        root = trace.compose({torus, sc}).index;
+    }
+};
+
+// The step: N copies to N + k.
+struct Step {
+    bd::Cooked<double> a, b;
+    explicit Step(std::size_t n, std::size_t k) {
+        Regen ra(n), rb(n + k);
+        a = bd::cook(ra.trace, ra.root, 0.0);
+        b = bd::cook(rb.trace, rb.root, 0.0);
+    }
+};
+
+}  // namespace
+
+static void BM_RegenCookCold(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0)), k = static_cast<std::size_t>(state.range(1));
+    Regen r(n + k);
+    for (auto _ : state) {
+        std::optional<bd::Cooked<double>> c;
+        c.emplace(bd::cook(r.trace, r.root, 0.0));
+        benchmark::DoNotOptimize(c);
+        state.PauseTiming();
+        c.reset();
+        state.ResumeTiming();
+    }
+}
+
+#ifndef SPATIUM_BENCH_WITHOUT_COOK_RESUME
+static void BM_RegenCookResume(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0)), k = static_cast<std::size_t>(state.range(1));
+    Regen ra(n), rb(n + k);
+    const auto before = bd::cook(ra.trace, ra.root, 0.0);
+    for (auto _ : state) {
+        std::optional<bd::Cooked<double>> c;
+        c.emplace(bd::cook(rb.trace, rb.root, 0.0, &before));
+        benchmark::DoNotOptimize(c);
+        state.PauseTiming();
+        c.reset();
+        state.ResumeTiming();
+    }
+}
+#endif
+
+static void BM_RegenUpdate(benchmark::State& state) {
+    const Step s(static_cast<std::size_t>(state.range(0)), static_cast<std::size_t>(state.range(1)));
+    render::StaticCache<double> cache;
+    for (auto _ : state) {
+        state.PauseTiming();
+        std::optional<render::CookedScene<double>> prev, next;
+        prev.emplace(render::lay_out(s.a, {}, nullptr, &cache));
+        state.ResumeTiming();
+        next.emplace(render::lay_out(std::move(*prev), s.b, {}, nullptr, &cache));
+        benchmark::DoNotOptimize(next);
+        state.PauseTiming();
+        next.reset();
+        prev.reset();
+        state.ResumeTiming();
+    }
+}
+
+static void BM_RegenFresh(benchmark::State& state) {
+    const Step s(static_cast<std::size_t>(state.range(0)), static_cast<std::size_t>(state.range(1)));
+    render::StaticCache<double> cache;
+    for (auto _ : state) {
+        std::optional<render::CookedScene<double>> next;
+        next.emplace(render::lay_out(s.b, {}, nullptr, &cache));
+        benchmark::DoNotOptimize(next);
+        state.PauseTiming();
+        next.reset();
+        state.ResumeTiming();
+    }
+}
+
+#define SPATIUM_REGEN_ARGS SPATIUM_INSTANCE_ARGS->Iterations(5)
+
+BENCHMARK(BM_RegenCookCold) SPATIUM_REGEN_ARGS;
+#ifndef SPATIUM_BENCH_WITHOUT_COOK_RESUME
+BENCHMARK(BM_RegenCookResume) SPATIUM_REGEN_ARGS;
+#endif
+BENCHMARK(BM_RegenUpdate) SPATIUM_REGEN_ARGS;
+BENCHMARK(BM_RegenFresh) SPATIUM_REGEN_ARGS;

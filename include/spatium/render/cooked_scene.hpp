@@ -28,6 +28,7 @@
 #  include <cstdint>
 #  include <cstring>
 #  include <type_traits>
+#  include <unordered_map>
 #  include <utility>
 #  include <vector>
 #endif
@@ -108,6 +109,27 @@ struct InstanceLook {
     T opacity;
 };
 
+// Where an instance came from, when it is known: the generator that made it
+// (an index into `CookedScene::generators`) and its site within it. An
+// instance that is one object of its own, or whose source has no version,
+// has no origin, and is compared to the next scene's instances one by one.
+struct InstanceOrigin {
+    static constexpr std::uint32_t none = ~std::uint32_t{0};
+    std::uint32_t generator = none;
+    std::uint32_t site = 0;
+};
+
+// A scatter's instances as laid out, kept so the next scene can be compared
+// to this one by what generated them instead of by the instances: the
+// generator's identity (see `io::build::NodeVersion`), the shape every one
+// of its instances points at, and how many there are.
+struct LaidGenerator {
+    std::uint64_t id = 0;
+    std::vector<std::uint64_t> key;
+    std::size_t shape = 0;
+    std::size_t count = 0;
+};
+
 // Two trees, because the scene has two kinds of object in it.
 //
 // Most of it is ordinary geometry, each piece different, and a triangle
@@ -129,6 +151,8 @@ struct CookedScene {
     std::vector<ShadedTriangle<T>> prims;          // parallel to the triangle tree's input
     std::vector<geometry::BoundedQuadric<T>> quadrics;  // one slot per shape, never grown
     std::vector<InstanceLook<T>> looks;            // parallel to the instance tree's input
+    std::vector<InstanceOrigin> origins;           // parallel to the instance tree's input
+    std::vector<LaidGenerator> generators;         // what `origins` refer to
     spatial::BVH<geometry::Triangle<3, T>> triangles;
     spatial::BVH<geometry::Instanced<geometry::BoundedQuadric<T>>> instances;
 
@@ -250,6 +274,12 @@ struct InstanceUpdate {
     std::size_t removed = 0;
     std::size_t inserted = 0;
     bool rebuilt = false;        // too much changed (or no previous): built from scratch
+
+    // How the change was found. Instances of a generator that was in the
+    // previous scene are decided by comparing the generators; the rest are
+    // hashed and compared one by one.
+    std::size_t generators_matched = 0;
+    std::size_t hashed = 0;      // instances that went through the per-instance comparison
 };
 
 // Above this fraction of the instances changed, the tree is built again
@@ -316,39 +346,35 @@ bool same_quadrics(const std::vector<geometry::BoundedQuadric<T>>& a,
     return true;
 }
 
-// Bring `tree` (with `looks` parallel to its shapes) to hold `insts` with
-// `new_looks`: the instances present in both stay where they are, the
-// others are removed and inserted, and when more than `max_fraction` of
-// them differ the tree is built again instead. Either way the tree answers
-// as a build over `insts` would; only the order of its shapes differs.
+// Which of the old instances equal one of the new ones, bit for bit. The
+// old instances are the tree's shapes at `old_slots` (all of them when it
+// is null), the new ones are `insts`; sets `old_kept` / `new_kept` for each
+// pair found and returns how many. The old ones go into an open-addressing
+// table keyed by hash and each new one probes for an old one equal to it,
+// so a hash collision is two unmatched instances and never a wrong match.
 template<Scalar T>
-InstanceUpdate update_instance_tree(spatial::BVH<geometry::Instanced<geometry::BoundedQuadric<T>>>& tree,
-                                    std::vector<InstanceLook<T>>& looks,
-                                    std::vector<geometry::Instanced<geometry::BoundedQuadric<T>>>&& insts,
-                                    std::vector<InstanceLook<T>>&& new_looks, double max_fraction) {
-    InstanceUpdate u;
-    u.reused = true;
-    const auto& old = tree.shapes();
-    const std::size_t n_old = old.size(), n_new = insts.size();
-
-    // The old instances in an open-addressing table keyed by hash; each new
-    // instance probes for an old one equal to it bit for bit, so a hash
-    // collision is two unmatched instances and never a wrong match.
+std::size_t match_instances(const std::vector<geometry::Instanced<geometry::BoundedQuadric<T>>>& old,
+                            const std::vector<InstanceLook<T>>& looks, const std::vector<std::uint32_t>* old_slots,
+                            const std::vector<geometry::Instanced<geometry::BoundedQuadric<T>>>& insts,
+                            const std::vector<InstanceLook<T>>& new_looks, std::vector<char>& old_kept,
+                            std::vector<char>& new_kept) {
     struct Slot { std::uint64_t hash; std::uint32_t index; };
     constexpr std::uint32_t none = ~std::uint32_t{0};
+    const std::size_t n_old = old_slots ? old_slots->size() : old.size();
     std::size_t cap = 16;
     while (cap < 2 * n_old) cap <<= 1;
     const std::size_t mask = cap - 1;
     std::vector<Slot> table(cap, Slot{0, none});
     for (std::size_t i = 0; i < n_old; ++i) {
-        const std::uint64_t h = instance_hash(old[i], looks[i]);
+        const std::uint32_t o = old_slots ? (*old_slots)[i] : std::uint32_t(i);
+        const std::uint64_t h = instance_hash(old[o], looks[o]);
         std::size_t p = h & mask;
         while (table[p].index != none) p = (p + 1) & mask;
-        table[p] = {h, std::uint32_t(i)};
+        table[p] = {h, o};
     }
 
-    std::vector<char> old_kept(n_old, 0), new_kept(n_new, 0);
-    for (std::size_t n = 0; n < n_new; ++n) {
+    std::size_t kept = 0;
+    for (std::size_t n = 0; n < insts.size(); ++n) {
         const std::uint64_t h = instance_hash(insts[n], new_looks[n]);
         for (std::size_t p = h & mask; table[p].index != none; p = (p + 1) & mask) {
             const auto o = table[p].index;
@@ -356,28 +382,65 @@ InstanceUpdate update_instance_tree(spatial::BVH<geometry::Instanced<geometry::B
                 continue;
             old_kept[o] = 1;
             new_kept[n] = 1;
-            ++u.kept;
+            ++kept;
             break;
         }
     }
-    u.removed = n_old - u.kept;
-    u.inserted = n_new - u.kept;
+    return kept;
+}
 
-    if (double(u.removed + u.inserted) > max_fraction * double(std::max(n_old, n_new))) {
-        tree = spatial::BVH<geometry::Instanced<geometry::BoundedQuadric<T>>>::build(std::move(insts));
-        looks = std::move(new_looks);
-        u.rebuilt = true;
-        return u;
-    }
+template<Scalar T>
+using InstanceTree = spatial::BVH<geometry::Instanced<geometry::BoundedQuadric<T>>>;
 
-    // Highest index first: the shape that moves into a freed slot comes
-    // from the end, and every unmatched index still to come is below it.
-    for (std::size_t k = n_old; k-- > 0;) {
+// Take out the old instances not marked kept and put in the new ones not
+// marked kept, mirroring every removal on `looks` and `origins`: the tree
+// moves its last shape into a freed slot, and the data parallel to it must
+// do the same. Highest index first: the shape that moves into a freed slot
+// comes from the end, and every unmatched index still to come is below it.
+template<Scalar T>
+void edit_instance_tree(InstanceTree<T>& tree, std::vector<InstanceLook<T>>& looks,
+                        std::vector<InstanceOrigin>& origins, const std::vector<char>& old_kept) {
+    for (std::size_t k = old_kept.size(); k-- > 0;) {
         if (old_kept[k]) continue;
         tree.remove(k);
         looks[k] = looks.back();
         looks.pop_back();
+        origins[k] = origins.back();
+        origins.pop_back();
     }
+}
+
+// Bring `tree` (with `looks` parallel to its shapes) to hold `insts` with
+// `new_looks`, finding what changed by hashing every instance on both sides:
+// the instances present in both stay where they are, the others are removed
+// and inserted, and when more than `max_fraction` of them differ the tree is
+// built again instead. Either way the tree answers as a build over `insts`
+// would; only the order of its shapes differs.
+//
+// This is the way to update a set of instances nothing is known about, and
+// the one `lay_out` falls back on for instances without an origin; with an
+// origin the generators are compared instead (`update_laid_instances`).
+template<Scalar T>
+InstanceUpdate update_instance_tree(InstanceTree<T>& tree, std::vector<InstanceLook<T>>& looks,
+                                    std::vector<geometry::Instanced<geometry::BoundedQuadric<T>>>&& insts,
+                                    std::vector<InstanceLook<T>>&& new_looks, double max_fraction) {
+    InstanceUpdate u;
+    u.reused = true;
+    const std::size_t n_old = tree.size(), n_new = insts.size();
+    std::vector<char> old_kept(n_old, 0), new_kept(n_new, 0);
+    u.kept = match_instances<T>(tree.shapes(), looks, nullptr, insts, new_looks, old_kept, new_kept);
+    u.removed = n_old - u.kept;
+    u.inserted = n_new - u.kept;
+    u.hashed = n_old + n_new;
+
+    if (double(u.removed + u.inserted) > max_fraction * double(std::max(n_old, n_new))) {
+        tree = InstanceTree<T>::build(std::move(insts));
+        looks = std::move(new_looks);
+        u.rebuilt = true;
+        return u;
+    }
+    std::vector<InstanceOrigin> none(n_old);
+    edit_instance_tree<T>(tree, looks, none, old_kept);
     for (std::size_t k = 0; k < n_new; ++k) {
         if (new_kept[k]) continue;
         tree.insert(insts[k]);
@@ -393,11 +456,13 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
                             const std::vector<char>* skip_nodes, StaticCache<T>* cache) {
     using Tri = geometry::Triangle<3, T>;
     using Quadric = geometry::BoundedQuadric<T>;
+    using Inst = geometry::Instanced<Quadric>;
 
     CookedScene<T> out;
     std::vector<Tri> tris;
-    std::vector<geometry::Instanced<Quadric>> insts;
+    std::vector<Inst> insts;
     std::vector<InstanceLook<T>> looks;
+    std::vector<InstanceOrigin> origins;
 
     // One quadric per distinct *shape*, not per object -- which is the
     // whole point of reading a cooked scene rather than a list of
@@ -419,6 +484,29 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
     // the tree stays valid and can be updated instead of built.
     const bool reuse = previous && detail::same_quadrics(previous->quadrics, out.quadrics);
     if (reuse) out.quadrics = std::move(previous->quadrics);
+
+    const auto& objs = cooked.objects();
+    auto skipped = [&](std::size_t node) { return skip_nodes && node < skip_nodes->size() && (*skip_nodes)[node]; };
+
+    // The generators whose instances can be known by their generator: a
+    // scatter with a version, all of whose objects are laid out as
+    // instances. An object is not laid out when its scale is zero, and then
+    // the instances would no longer be "the first count sites", so such a
+    // generator is treated like the objects of a node with no version.
+    const auto& gens = cooked.generators();
+    constexpr std::uint32_t no_gen = InstanceOrigin::none;
+    std::vector<std::uint32_t> laid_index(gens.size(), no_gen);   // gens[i] -> out.generators
+    for (std::size_t i = 0; i < gens.size(); ++i) {
+        const auto& g = gens[i];
+        if (skipped(g.node)) continue;
+        if (g.count > 0 && !(objs[g.first_object].instanceable && has_quadric[g.shape])) continue;
+        bool laid = true;
+        for (std::size_t o = g.first_object; o < g.first_object + g.count && laid; ++o)
+            laid = objs[o].scale != T{0};
+        if (!laid) continue;
+        laid_index[i] = static_cast<std::uint32_t>(out.generators.size());
+        out.generators.push_back({g.version.generator, g.version.key, g.shape, g.count});
+    }
 
     // A shape's geometry is its *rest* form when the object placing it is
     // instanceable, and its *placed* form when the object deforms -- in
@@ -452,13 +540,30 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
         }
     };
 
-    for (const auto& obj : cooked.objects()) {
-        if (skip_nodes && obj.source_node < skip_nodes->size() && (*skip_nodes)[obj.source_node])
-            continue;
+    // Once per object. Everything below uses this, including the
+    // instance, whose rotation stays a matrix precisely so the
+    // traversal never has to unpack anything.
+    auto instance_of = [&](const io::build::Object<T>& obj) {
         const auto& mat = obj.material;
-        // Once per object. Everything below uses this, including the
-        // instance, whose rotation stays a matrix precisely so the
-        // traversal never has to unpack anything.
+        return std::pair<Inst, InstanceLook<T>>{
+            Inst{&out.quadrics[obj.shape], obj.translation, obj.scale, obj.rotation_q.to_matrix()},
+            InstanceLook<T>{mat.base_color, mat.roughness, mat.emissive, mat.opacity}};
+    };
+
+    // When the previous scene can be updated, the instances of a laid
+    // generator are decided below without visiting them here.
+    std::size_t gi = 0;
+    for (std::size_t o = 0; o < objs.size(); ++o) {
+        const auto& obj = objs[o];
+        while (gi < gens.size() && gens[gi].first_object + gens[gi].count <= o) ++gi;
+        const bool in_gen = gi < gens.size() && o >= gens[gi].first_object;
+        if (in_gen && reuse && laid_index[gi] != no_gen) {
+            o = gens[gi].first_object + gens[gi].count - 1;
+            continue;
+        }
+
+        if (skipped(obj.source_node)) continue;
+        const auto& mat = obj.material;
         const Matrix<T, 3, 3> R = obj.rotation_q.to_matrix();
 
         // Scaled to nothing is not there. The donut's dust dissolves by
@@ -475,6 +580,9 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
         if (obj.instanceable && has_quadric[obj.shape]) {
             insts.push_back({&out.quadrics[obj.shape], obj.translation, obj.scale, R});
             looks.push_back({mat.base_color, mat.roughness, mat.emissive, mat.opacity});
+            origins.push_back(in_gen && laid_index[gi] != no_gen
+                                  ? InstanceOrigin{laid_index[gi], obj.site}
+                                  : InstanceOrigin{});
             continue;
         }
 
@@ -505,21 +613,123 @@ CookedScene<T> lay_out_impl(CookedScene<T>* previous, InstanceUpdate* report,
     // for the rest of the frame -- 112 bytes per instance, which is 214 MB
     // at two million and was simply being spent.
     out.triangles = cache ? cache->tree(std::move(tris)) : spatial::BVH<Tri>::build(std::move(tris));
-    if (reuse) {
-        out.instances = std::move(previous->instances);
-        out.looks = std::move(previous->looks);
-        const auto u = update_instance_tree(out.instances, out.looks, std::move(insts), std::move(looks),
-                                            instance_update_max_fraction);
-        if (report) *report = u;
-    } else {
-        out.instances = spatial::BVH<geometry::Instanced<Quadric>>::build(std::move(insts));
+    if (!reuse) {
+        out.instances = InstanceTree<T>::build(std::move(insts));
         out.looks = std::move(looks);
+        out.origins = std::move(origins);
         if (report) {
             *report = {};
             report->rebuilt = true;
             report->inserted = out.instances.size();
+            report->hashed = 0;
+        }
+        return out;
+    }
+
+    // ── Updating the previous scene's instance tree ──────────────────
+    //
+    // `insts` holds only the instances with no generator to compare. For a
+    // laid generator the previous scene may hold one with the same
+    // identity; if so its first min(old, new) instances are the new ones,
+    // by construction, and only the rest is removed or added. A generator
+    // with no counterpart replaces its old instances whole.
+    InstanceUpdate u;
+    u.reused = true;
+    out.instances = std::move(previous->instances);
+    out.looks = std::move(previous->looks);
+    out.origins = std::move(previous->origins);
+    const auto& old_gens = previous->generators;
+
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> old_by_id;
+    for (std::size_t i = 0; i < old_gens.size(); ++i)
+        old_by_id[old_gens[i].id].push_back(static_cast<std::uint32_t>(i));
+    std::vector<std::uint32_t> old_to_new(old_gens.size(), no_gen);
+    std::vector<std::size_t> new_prefix(out.generators.size(), 0);   // known sites of each new generator
+    std::vector<char> claimed(old_gens.size(), 0);
+    std::vector<std::size_t> keep_below(old_gens.size(), 0);         // old sites to keep, per old generator
+    for (std::size_t j = 0; j < out.generators.size(); ++j) {
+        const auto& ng = out.generators[j];
+        const auto it = old_by_id.find(ng.id);
+        if (it == old_by_id.end()) continue;
+        for (auto i : it->second) {
+            // The key decides, not the id: equal ids are a candidate.
+            if (claimed[i] || old_gens[i].shape != ng.shape || old_gens[i].key != ng.key) continue;
+            claimed[i] = 1;
+            old_to_new[i] = static_cast<std::uint32_t>(j);
+            new_prefix[j] = std::min(old_gens[i].count, ng.count);
+            keep_below[i] = new_prefix[j];
+            ++u.generators_matched;
+            break;
         }
     }
+
+    const std::size_t n_old = out.instances.size();
+    std::vector<char> old_kept(n_old, 0);
+    std::vector<std::uint32_t> old_plain;
+    for (std::size_t s = 0; s < n_old; ++s) {
+        auto& og = out.origins[s];
+        if (og.generator == no_gen) { old_plain.push_back(static_cast<std::uint32_t>(s)); continue; }
+        if (og.site < keep_below[og.generator]) {
+            old_kept[s] = 1;
+            og.generator = old_to_new[og.generator];
+        }
+    }
+
+    std::vector<char> new_kept(insts.size(), 0);
+    std::size_t plain_kept = 0;
+    if (!old_plain.empty() && !insts.empty())
+        plain_kept = match_instances<T>(out.instances.shapes(), out.looks, &old_plain, insts, looks, old_kept, new_kept);
+    u.hashed = old_plain.size() + insts.size();
+
+    std::size_t tails = 0, new_total = insts.size();
+    for (std::size_t j = 0; j < out.generators.size(); ++j) {
+        tails += out.generators[j].count - new_prefix[j];
+        new_total += out.generators[j].count;
+    }
+    std::size_t kept_old = 0;
+    for (char c : old_kept) kept_old += c;
+    u.kept = kept_old;
+    u.removed = n_old - kept_old;
+    u.inserted = (insts.size() - plain_kept) + tails;
+
+    if (double(u.removed + u.inserted) > instance_update_max_fraction * double(std::max(n_old, new_total))) {
+        // Built again, from every instance of the new scene.
+        for (std::size_t i = 0; i < gens.size(); ++i) {
+            if (laid_index[i] == no_gen) continue;
+            const auto& g = gens[i];
+            for (std::size_t site = 0; site < g.count; ++site) {
+                auto [inst, look] = instance_of(objs[g.first_object + site]);
+                insts.push_back(inst);
+                looks.push_back(look);
+                origins.push_back({laid_index[i], static_cast<std::uint32_t>(site)});
+            }
+        }
+        out.instances = InstanceTree<T>::build(std::move(insts));
+        out.looks = std::move(looks);
+        out.origins = std::move(origins);
+        u.rebuilt = true;
+        if (report) *report = u;
+        return out;
+    }
+
+    edit_instance_tree<T>(out.instances, out.looks, out.origins, old_kept);
+    for (std::size_t k = 0; k < insts.size(); ++k) {
+        if (new_kept[k]) continue;
+        out.instances.insert(insts[k]);
+        out.looks.push_back(looks[k]);
+        out.origins.push_back(origins[k]);
+    }
+    for (std::size_t i = 0; i < gens.size(); ++i) {
+        if (laid_index[i] == no_gen) continue;
+        const auto& g = gens[i];
+        for (std::size_t site = new_prefix[laid_index[i]]; site < g.count; ++site) {
+            auto [inst, look] = instance_of(objs[g.first_object + site]);
+            out.instances.insert(inst);
+            out.looks.push_back(look);
+            out.origins.push_back({laid_index[i], static_cast<std::uint32_t>(site)});
+        }
+    }
+    if (report) *report = u;
     return out;
 }
 

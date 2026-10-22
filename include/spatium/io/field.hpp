@@ -11,15 +11,19 @@
 #  include <bit>
 #  include <cassert>
 #  include <algorithm>
+#  include <atomic>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
 #  include <cstring>
 #  include <functional>
+#  include <map>
 #  include <memory>
+#  include <mutex>
 #  include <string>
 #  include <type_traits>
 #  include <typeindex>
+#  include <unordered_map>
 #  include <utility>
 #  include <vector>
 #endif
@@ -130,6 +134,40 @@
 // leave one, but a pool assembled elsewhere can, and lowering calls it so
 // that a dead op never reaches a device.
 //
+// ── Content identity ─────────────────────────────────────────────
+//
+// `content_id(i)` names what op `i` COMPUTES, Merkle style: a hash of its
+// code, its immediates and the ids of its children, never of where it sits
+// in the pool. Two fields built separately, or built in a different order,
+// or with dead ops left in, give the same id to the same expression, and
+// changing one leaf changes the id of that leaf and of every op above it
+// and of nothing else. `content_id()` is the root's. Ids are cached per
+// Field in a flat vector brought up to date by scanning only the ops it
+// has not seen (the lookup index above works the same way), and dropped
+// wherever ops are edited in place (`index_reset()`).
+//
+// A hash match is only a CANDIDATE. `same_value(a, b)` answers "equal"
+// only after comparing the two fields' canonical descriptions word for
+// word: a collision can therefore make two different fields look the same
+// to the hash and never to `same_value`. The other direction is allowed to
+// err: a field that cannot be described exactly (an `Opaque` leaf the
+// library cannot tell from another, a scalar type with no portable bit
+// pattern) is reported as different from everything, including itself
+// rebuilt, because a false "changed" costs a recomputation and a false
+// "unchanged" is a wrong picture.
+//
+// What an `Opaque` leaf is identified by:
+//   - a capturing callable gets a serial number at construction, carried
+//     by every copy of the field, so a copy is equal to the original and a
+//     freshly written callable is different from both;
+//   - a stateless one (an empty closure type) is identified by its type,
+//     since two instances of one empty type cannot differ.
+// `Noise` is identified by its whole 512-byte table and `Gather` by every
+// point of its table, never by an address.
+//
+// Not thread-safe to call concurrently on ONE field (the cache is filled
+// in lazily); evaluation, which never touches it, stays so.
+//
 // **RTTI is required**, and not newly so: `Trace` already stores the
 // exact analytic form in a `std::any`, which cannot exist without it.
 // `typeid(F)` on an opaque leaf adds no requirement that the DSL did not
@@ -137,6 +175,55 @@
 // pretend to.
 
 SPATIUM_EXPORT namespace spatium::io::build {
+
+namespace detail {
+
+// The one mixing step identities are built from.
+inline std::uint64_t id_mix(std::uint64_t h, std::uint64_t x) {
+    h = (h ^ x) * 0x9e3779b97f4a7c15ull;
+    return h ^ (h >> 32);
+}
+
+// Ids are masked on the way out. All ones, so a no-op, except in a test
+// that wants every id to collide and checks that equality is still decided
+// by comparing descriptions (tests/test_content_identity.cpp). Set it
+// before building the fields it should apply to: ids cached earlier keep
+// the mask they were made under.
+inline std::atomic<std::uint64_t> id_mask{~std::uint64_t{0}};
+inline std::uint64_t id_finish(std::uint64_t h) { return h & id_mask.load(std::memory_order_relaxed); }
+
+// A callable that has to be told apart from every other. Below 2^63.
+inline std::uint64_t fresh_serial() {
+    static std::atomic<std::uint64_t> next{0};
+    return ++next;
+}
+
+// A closure type, as a small integer that is exact (no hash to collide):
+// the same type always gets the same number. Tagged with the top bit so it
+// is never a `fresh_serial`.
+inline std::uint64_t type_serial(const std::type_index& t) {
+    static std::mutex m;
+    static std::unordered_map<std::type_index, std::uint64_t> seen;
+    const std::lock_guard lock(m);
+    return seen.try_emplace(t, seen.size() + 1).first->second | (std::uint64_t{1} << 63);
+}
+
+// What an opaque leaf is identified by; see "Content identity".
+inline std::uint64_t opaque_identity(const std::type_index& t, bool stateless) {
+    return stateless ? type_serial(t) : fresh_serial();
+}
+
+template<class T>
+inline constexpr bool bit_comparable = std::is_same_v<T, float> || std::is_same_v<T, double>;
+
+template<class T>
+std::uint64_t scalar_bits(const T& x) {
+    if constexpr (std::is_same_v<T, float>) return std::bit_cast<std::uint32_t>(x);
+    else if constexpr (std::is_same_v<T, double>) return std::bit_cast<std::uint64_t>(x);
+    else return 0;
+}
+
+}  // namespace detail
 
 enum class Op : std::uint8_t {
     Const,   // a literal; `value`
@@ -320,6 +407,11 @@ struct FieldOp {
     // what makes deduplication by type alone sound for them and unsound
     // for capturing ones. Decided here, not asked of the user.
     bool stateless = false;
+
+    // What tells this leaf from every other (see "Content identity"); 0 for
+    // an op that is not an opaque leaf. Copied with the op, so every copy
+    // of a field keeps the identity of its leaves.
+    std::uint64_t serial = 0;
 };
 
 // What a field can read. A surface field reads (u, v) and nothing else;
@@ -391,7 +483,7 @@ public:
                 default: break;
             }
         }
-        f.index_reset();   // ops changed code in place
+        f.index_reset();   // ops changed code in place (and so did their ids)
         return f;
     }
 
@@ -424,6 +516,7 @@ public:
         n.type      = std::type_index(typeid(F));
         n.payload   = sizeof(F);
         n.stateless = std::is_empty_v<F>;
+        n.serial    = detail::opaque_identity(n.type, n.stateless);
         n.fn        = std::move(fn);
         f.ops_.push_back(std::move(n));
         f.structural_ = false;
@@ -613,6 +706,82 @@ public:
         }
         return true;
     }
+    // ── Content identity; see the section of that name above ─────
+
+    // The id of op `i`: what it computes, independent of its position.
+    std::uint64_t content_id(std::size_t i) const {
+        ids_sync();
+        return ids_[i];
+    }
+    // The root's, which names the whole field.
+    std::uint64_t content_id() const { return content_id(ops_.size() - 1); }
+
+    // The exact description of what the root computes, appended to `out`:
+    // the distinct ops it reads in a fixed order (children first, a, b, c)
+    // with children renumbered, so it depends neither on the pool's layout
+    // nor on whether equal ops were merged, and preceded by its own length
+    // so it can sit inside a longer key. Two fields have equal descriptions
+    // exactly when they are the same expression. Returns false, leaving
+    // `out` as it was, when no exact description exists.
+    bool canonical_key(std::vector<std::uint64_t>& out) const {
+        if constexpr (!detail::bit_comparable<T>) {
+            return false;
+        } else {
+            constexpr std::uint32_t none = ~std::uint32_t{0};
+            std::vector<std::uint64_t> words;
+            std::vector<std::uint32_t> num(ops_.size(), none);
+            std::map<std::vector<std::uint64_t>, std::uint32_t> seen;   // record -> number
+            std::vector<std::pair<std::uint32_t, std::uint8_t>> stack;
+            stack.emplace_back(static_cast<std::uint32_t>(ops_.size() - 1), 0);
+            while (!stack.empty()) {
+                const auto [i, stage] = stack.back();
+                if (num[i] != none) { stack.pop_back(); continue; }
+                const FieldOp<T>& n = ops_[i];
+                const auto k = arity(n.op);
+                if (stage < k) {
+                    ++stack.back().second;
+                    const std::uint32_t child = stage == 0 ? n.a : stage == 1 ? n.b : n.c;
+                    if (num[child] == none) stack.emplace_back(child, 0);
+                    continue;
+                }
+                std::vector<std::uint64_t> rec{static_cast<std::uint64_t>(n.op), n.k};
+                if (k > 0) rec.push_back(num[n.a]);
+                if (k > 1) rec.push_back(num[n.b]);
+                if (k > 2) rec.push_back(num[n.c]);
+                switch (n.op) {
+                    case Op::Const:
+                        rec.push_back(bits_of(n.value));
+                        break;
+                    case Op::Noise:
+                        if (!n.noise) return false;
+                        for (auto byte : n.noise->permutation()) rec.push_back(byte);
+                        break;
+                    case Op::Gather:
+                        if (!n.table) return false;
+                        rec.push_back(n.table->size());
+                        for (const auto& p : *n.table)
+                            for (std::size_t j = 0; j < 3; ++j) rec.push_back(bits_of(p[j]));
+                        break;
+                    case Op::Opaque:
+                        if (n.serial == 0) return false;
+                        rec.push_back(n.serial);
+                        break;
+                    default: break;
+                }
+                // An op equal to one already numbered is that one, so the
+                // description does not depend on whether equal ops were
+                // merged when the field was built.
+                const auto [it, fresh] = seen.try_emplace(std::move(rec), static_cast<std::uint32_t>(seen.size()));
+                if (fresh) words.insert(words.end(), it->first.begin(), it->first.end());
+                num[i] = it->second;
+                stack.pop_back();
+            }
+            out.push_back(words.size());
+            out.insert(out.end(), words.begin(), words.end());
+            return true;
+        }
+    }
+
 private:
     std::vector<FieldOp<T>> ops_;
     bool structural_ = true;
@@ -625,7 +794,52 @@ private:
     std::vector<std::uint32_t> index_;
     std::size_t indexed_ = 0, index_used_ = 0;
 
-    void index_reset() { index_.clear(); indexed_ = 0; index_used_ = 0; }
+    // `content_id` of ops_[0, ids_.size()), filled in on demand. Ops are
+    // only ever appended, and an op's id reads only its children's, so
+    // catching up is a scan of the tail.
+    mutable std::vector<std::uint64_t> ids_;
+
+    void ids_sync() const {
+        ids_.reserve(ops_.size());
+        for (std::size_t i = ids_.size(); i < ops_.size(); ++i) ids_.push_back(id_of(ops_[i]));
+    }
+
+    std::uint64_t id_of(const FieldOp<T>& n) const {
+        const auto k = arity(n.op);
+        std::uint64_t h = detail::id_mix(0x6a09e667f3bcc908ull, static_cast<std::uint64_t>(n.op));
+        if (k > 0) h = detail::id_mix(h, ids_[n.a]);
+        if (k > 1) h = detail::id_mix(h, ids_[n.b]);
+        if (k > 2) h = detail::id_mix(h, ids_[n.c]);
+        h = detail::id_mix(h, n.k);
+        switch (n.op) {
+            case Op::Const:
+                h = detail::id_mix(h, bits_of(n.value));
+                break;
+            case Op::Noise:
+                if (n.noise)
+                    for (auto byte : n.noise->permutation()) h = detail::id_mix(h, byte);
+                break;
+            case Op::Gather:
+                if (n.table) {
+                    h = detail::id_mix(h, n.table->size());
+                    for (const auto& p : *n.table)
+                        for (std::size_t j = 0; j < 3; ++j) h = detail::id_mix(h, bits_of(p[j]));
+                }
+                break;
+            case Op::Opaque:
+                h = detail::id_mix(h, n.serial);
+                break;
+            default: break;
+        }
+        return detail::id_finish(h);
+    }
+
+    void index_reset() {
+        index_.clear();
+        indexed_ = 0;
+        index_used_ = 0;
+        ids_.clear();
+    }
 
     // An op with the children it will have once appended; `src` supplies
     // everything else.
@@ -923,6 +1137,17 @@ private:
 
 };
 
+// Whether two fields are the same function. Candidates are the fields with
+// one `content_id`; the answer is yes only when their descriptions agree
+// word for word, so an id collision is a "no", never a wrong "yes". A field
+// with no exact description (see `canonical_key`) is equal to nothing.
+template<Scalar T>
+bool same_value(const Field<T>& a, const Field<T>& b) {
+    if (a.content_id() != b.content_id()) return false;
+    std::vector<std::uint64_t> ka, kb;
+    return a.canonical_key(ka) && b.canonical_key(kb) && ka == kb;
+}
+
 // ── What a field report has to say ───────────────────────────────
 //
 // Three rules, each of which exists because of a specific way this went
@@ -1196,6 +1421,11 @@ struct VecFieldOp {
     std::type_index type = std::type_index(typeid(void));
     std::size_t payload = 0;
     bool stateless = false;
+
+    // Tells a closure from every other one, as `FieldOp::serial` does for a
+    // scalar leaf: set on an Opaque leaf and on a Scale or Rotate that
+    // holds a callable instead of an expression, 0 otherwise.
+    std::uint64_t serial = 0;
 };
 
 template<Scalar T = double>
@@ -1269,6 +1499,7 @@ public:
         n.type        = std::type_index(typeid(F));
         n.payload     = sizeof(F);
         n.stateless   = std::is_empty_v<F>;
+        n.serial      = detail::opaque_identity(n.type, n.stateless);
         n.reads_point = false;
         n.fn = [fn = std::move(fn)](const MotionEnv<T>& e) { return fn(e.origin, e.t); };
         f.ops_.push_back(std::move(n));
@@ -1290,6 +1521,7 @@ public:
         n.type        = std::type_index(typeid(F));
         n.payload     = sizeof(F);
         n.stateless   = std::is_empty_v<F>;
+        n.serial      = detail::opaque_identity(n.type, n.stateless);
         n.reads_point = false;
         n.fn = [fn = std::move(fn)](const MotionEnv<T>& e) { return fn(e.t); };
         f.ops_.push_back(std::move(n));
@@ -1316,6 +1548,7 @@ public:
         n.type      = std::type_index(typeid(F));
         n.payload   = sizeof(F);
         n.stateless = std::is_empty_v<F>;
+        n.serial    = detail::opaque_identity(n.type, n.stateless);
     }
 
     // `field * s(t)`. The factor reads time, never the point: a factor
@@ -1658,9 +1891,111 @@ public:
         return true;
     }
 
+    // ── Content identity, as for Field ───────────────────────────
+    //
+    // An id names what the root computes: its op, its children, and for a
+    // Scale, a Rotate or a Make the ids of the scalar fields it is made of.
+    // A callable in place of an expression is identified as an opaque leaf
+    // of a `Field` is (a serial, or its type when it is stateless).
+    std::uint64_t content_id(std::size_t i) const {
+        ids_sync();
+        return ids_[i];
+    }
+    std::uint64_t content_id() const { return content_id(ops_.size() - 1); }
+
+    // The exact description of the motion, appended to `out`; see
+    // `Field::canonical_key`. False when some part has none.
+    bool canonical_key(std::vector<std::uint64_t>& out) const {
+        if constexpr (!detail::bit_comparable<T>) {
+            return false;
+        } else {
+            constexpr std::uint32_t none = ~std::uint32_t{0};
+            std::vector<std::uint64_t> words;
+            std::vector<std::uint32_t> num(ops_.size(), none);
+            std::map<std::vector<std::uint64_t>, std::uint32_t> seen;   // record -> number
+            std::vector<std::pair<std::uint32_t, std::uint8_t>> stack;
+            stack.emplace_back(static_cast<std::uint32_t>(ops_.size() - 1), 0);
+            while (!stack.empty()) {
+                const auto [i, stage] = stack.back();
+                if (num[i] != none) { stack.pop_back(); continue; }
+                const VecFieldOp<T>& n = ops_[i];
+                const std::uint8_t kids = is_binary(n.op) ? 2 : is_unary(n.op) ? 1 : 0;
+                if (stage < kids) {
+                    ++stack.back().second;
+                    const std::uint32_t child = stage == 0 ? n.a : n.b;
+                    if (num[child] == none) stack.emplace_back(child, 0);
+                    continue;
+                }
+                std::vector<std::uint64_t> rec{static_cast<std::uint64_t>(n.op)};
+                if (kids > 0) rec.push_back(num[n.a]);
+                if (kids > 1) rec.push_back(num[n.b]);
+                switch (n.op) {
+                    case VecOp::Const:
+                        for (std::size_t j = 0; j < 3; ++j) rec.push_back(detail::scalar_bits(n.value[j]));
+                        break;
+                    case VecOp::Opaque:
+                        if (n.serial == 0) return false;
+                        rec.push_back(n.serial);
+                        rec.push_back(n.reads_point);
+                        break;
+                    case VecOp::Scale:
+                    case VecOp::Rotate:
+                    case VecOp::Make:
+                        rec.push_back(n.factor_fields.size());
+                        if (n.factor_fields.empty()) {
+                            if (n.serial == 0) return false;
+                            rec.push_back(n.serial);
+                        }
+                        for (const auto& g : n.factor_fields)
+                            if (!g.canonical_key(rec)) return false;
+                        break;
+                    default: break;
+                }
+                const auto [it, fresh] = seen.try_emplace(std::move(rec), static_cast<std::uint32_t>(seen.size()));
+                if (fresh) words.insert(words.end(), it->first.begin(), it->first.end());
+                num[i] = it->second;
+                stack.pop_back();
+            }
+            out.push_back(words.size());
+            out.insert(out.end(), words.begin(), words.end());
+            return true;
+        }
+    }
+
 private:
     std::vector<VecFieldOp<T>> ops_;
     bool structural_ = true;
+
+    // `content_id` of ops_[0, ids_.size()); see Field.
+    mutable std::vector<std::uint64_t> ids_;
+
+    void ids_sync() const {
+        ids_.reserve(ops_.size());
+        for (std::size_t i = ids_.size(); i < ops_.size(); ++i) ids_.push_back(id_of(ops_[i]));
+    }
+
+    std::uint64_t id_of(const VecFieldOp<T>& n) const {
+        std::uint64_t h = detail::id_mix(0xbb67ae8584caa73bull, static_cast<std::uint64_t>(n.op));
+        if (is_binary(n.op) || is_unary(n.op)) h = detail::id_mix(h, ids_[n.a]);
+        if (is_binary(n.op)) h = detail::id_mix(h, ids_[n.b]);
+        switch (n.op) {
+            case VecOp::Const:
+                for (std::size_t j = 0; j < 3; ++j) h = detail::id_mix(h, detail::scalar_bits(n.value[j]));
+                break;
+            case VecOp::Opaque:
+                h = detail::id_mix(detail::id_mix(h, n.serial), n.reads_point);
+                break;
+            case VecOp::Scale:
+            case VecOp::Rotate:
+            case VecOp::Make:
+                h = detail::id_mix(h, n.factor_fields.size());
+                if (n.factor_fields.empty()) h = detail::id_mix(h, n.serial);
+                for (const auto& g : n.factor_fields) h = detail::id_mix(h, g.content_id());
+                break;
+            default: break;
+        }
+        return detail::id_finish(h);
+    }
 
     // Affine in the point: the Point is reached along exactly one branch,
     // through Add/Sub/Scale only. An Opaque that reads the point fails
@@ -1748,6 +2083,7 @@ private:
         n.type = type;
         n.payload = payload;
         n.stateless = stateless;
+        n.serial = detail::opaque_identity(type, stateless);
         n.fn = std::move(fn);
         f.ops_.push_back(std::move(n));
         f.structural_ = false;
@@ -1821,6 +2157,15 @@ private:
 // "unknown = 0" while every motion in the scene sat in a slot it could
 // not see. An honest zero and an invisible population are exactly the two
 // states a single number cannot distinguish.
+// The motion counterpart of `same_value(Field, Field)`: equal ids, then
+// equal descriptions.
+template<Scalar T>
+bool same_value(const VecField<T>& a, const VecField<T>& b) {
+    if (a.content_id() != b.content_id()) return false;
+    std::vector<std::uint64_t> ka, kb;
+    return a.canonical_key(ka) && b.canonical_key(kb) && ka == kb;
+}
+
 template<Scalar T>
 void accumulate(FieldStats& stats, const VecField<T>& f,
                 std::vector<std::type_index>& seen) {
