@@ -23,10 +23,12 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/io/field_pod.hpp>
+#  include <bit>
 #  include <cmath>
 #  include <cstdint>
 #  include <format>
 #  include <string>
+#  include <type_traits>
 #  include <unordered_map>
 #  include <vector>
 #endif
@@ -174,8 +176,15 @@ inline GlslBases append_data(GlslModule& m, const std::vector<std::uint8_t>& tab
         if (needle.empty()) return 0;
         for (std::size_t at = 0; at + needle.size() <= hay.size(); at += stride) {
             bool same = true;
-            for (std::size_t k = 0; k < needle.size() && same; ++k)
-                same = hay[at + k] == needle[k];
+            for (std::size_t k = 0; k < needle.size() && same; ++k) {
+                // Floats by bit pattern: 0.0 and -0.0 are equal and not the
+                // same table entry.
+                if constexpr (std::is_same_v<std::remove_cvref_t<decltype(needle[k])>, float>)
+                    same = std::bit_cast<std::uint32_t>(hay[at + k]) ==
+                           std::bit_cast<std::uint32_t>(needle[k]);
+                else
+                    same = hay[at + k] == needle[k];
+            }
             if (same) return static_cast<std::ptrdiff_t>(at);
         }
         return -1;

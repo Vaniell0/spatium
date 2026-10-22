@@ -8,11 +8,13 @@
 #  include <spatium/algebra/matrix.hpp>
 #  include <spatium/algebra/groups/so3.hpp>
 #  include <spatium/algebra/noise.hpp>
+#  include <bit>
 #  include <cassert>
 #  include <algorithm>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
+#  include <cstring>
 #  include <functional>
 #  include <memory>
 #  include <string>
@@ -38,9 +40,9 @@
 // A Field is logically a tree. It is represented as a vector of tagged
 // ops with children stored before their parents, the root last.
 //
-// The cheap structural hash and the cheap deduplication are consequences,
-// not the reason. The reason is that a topologically ordered array
-// evaluates in ONE LINEAR PASS: a loop over indices where each op reads
+// Merging equal ops on append (see "Merging equal ops" below) is a
+// consequence of the layout, not the reason for it. The reason is that a
+// topologically ordered array evaluates in ONE LINEAR PASS: a loop over indices where each op reads
 // children already computed. No recursion, no explicit stack, no
 // branching on depth. That is the shape a GPU can run, and the shape a
 // linked tree cannot provide without first being flattened -- so building
@@ -90,6 +92,43 @@
 // many times that is free; for a live-reloaded scene it grows without
 // bound, and this pool is the first thing that would have to change.
 // Named here so it is not rediscovered as a bug.
+//
+// ── Merging equal ops ────────────────────────────────────────────
+//
+// Appending an op first looks for one with the same code, the same
+// children and the same immediates, and names that one instead of adding
+// a copy. A field built as `(u * 3 + a) * sin(v) + (u * 5 + b) * sin(v)`
+// holds `u`, `v` and `sin(v)` once. Order and append-only are unchanged:
+// a merged op is an *earlier* index, so a child still precedes its parent
+// and nothing is inserted anywhere.
+//
+// What is compared is the op's whole meaning, or the op is not merged:
+//   - a `Const` by bit pattern, so `-0.0` and `0.0` stay two ops and so do
+//     two NaNs with different payloads; for a scalar other than float and
+//     double (no portable bit pattern) a `Const` is never merged;
+//   - a `Noise` by its 512-byte table and a `Gather` by every point of its
+//     table, never by the address of the shared_ptr alone;
+//   - an `Opaque` leaf is NEVER merged. A callable cannot be compared, and
+//     two closures of one type may capture different state. A parent of two
+//     different leaves differs in its children, so it is not merged either.
+// The root stays the last op: the parent that an append or a unary
+// builder adds is always pushed, never looked up.
+//
+// Appending another field (`+=`, the binary operators, `noise`) renumbers
+// its ops through a table, since a merged op lands at an index that is not
+// "old index plus the old size".
+//
+// The lookup is a flat open-addressing table of op indices inside the
+// Field. It is built lazily, on the first append that needs it, and
+// brought up to date by scanning only the ops it has not seen, so a
+// Field that is only evaluated or copied pays one `std::vector<uint32_t>`
+// copy for it (a fraction of the ops it indexes) and a Field built by
+// `+=` pays O(1) per op. A node-based map would cost an allocation per op
+// on every copy.
+//
+// `reachable_from_root()` drops ops nothing reads. The builders cannot
+// leave one, but a pool assembled elsewhere can, and lowering calls it so
+// that a dead op never reaches a device.
 //
 // **RTTI is required**, and not newly so: `Trace` already stores the
 // exact analytic form in a `std::any`, which cannot exist without it.
@@ -297,8 +336,15 @@ struct FieldInputs {
     Vec<T, 4> x{};   // a point of spacetime, for a metric; see Op::Coord
 };
 
+// Reaches into a Field's pool so a test can assemble one the public
+// builders cannot: with an op nothing reads, or with equal ops left in.
+// Declared here, defined only where it is used.
+template<Scalar T>
+struct FieldPoolAccess;
+
 template<Scalar T = double>
 class Field {
+    friend struct FieldPoolAccess<T>;
 public:
     Field() { push_const(T{0}); }
     Field(T constant) { push_const(constant); }   // NOLINT: implicit on purpose
@@ -345,6 +391,7 @@ public:
                 default: break;
             }
         }
+        f.index_reset();   // ops changed code in place
         return f;
     }
 
@@ -423,6 +470,51 @@ public:
     std::size_t size() const { return ops_.size(); }
     const FieldOp<T>& op(std::size_t i) const { return ops_[i]; }
     const std::vector<FieldOp<T>>& ops() const { return ops_; }
+
+    // The same field with only the ops the root reads, in the same order,
+    // children renumbered. It evaluates to the same bits; what it drops is
+    // work nothing asked for. `lower()` calls it, so a dead op is never
+    // emitted to a device. The result's `is_structural()` and
+    // `reads_point()` are those of the ops kept.
+    Field reachable_from_root() const {
+        const std::size_t n = ops_.size();
+        std::vector<char> live(n, 0);
+        live[n - 1] = 1;
+        for (std::size_t i = n; i-- > 0;) {
+            if (!live[i]) continue;
+            const auto k = arity(ops_[i].op);
+            if (k > 0) live[ops_[i].a] = 1;
+            if (k > 1) live[ops_[i].b] = 1;
+            if (k > 2) live[ops_[i].c] = 1;
+        }
+        std::vector<std::uint32_t> at(n, 0);
+        Field out;
+        out.ops_.clear();
+        out.consing_ = consing_;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!live[i]) continue;
+            FieldOp<T> c = ops_[i];
+            const auto k = arity(c.op);
+            if (k > 0) c.a = at[c.a];
+            if (k > 1) c.b = at[c.b];
+            if (k > 2) c.c = at[c.c];
+            at[i] = static_cast<std::uint32_t>(out.ops_.size());
+            out.structural_ = out.structural_ && c.op != Op::Opaque;
+            out.reads_point_ = out.reads_point_ || c.op == Op::Point;
+            out.ops_.push_back(std::move(c));
+        }
+        return out;
+    }
+
+    // A copy that appends without looking for equal ops, so a test can
+    // build the same expression both ways and compare the results. Fields
+    // composed from it stay unmerged (the left operand decides); it is the
+    // reference the merging is checked against, not something a scene needs.
+    Field without_consing() const {
+        Field f = *this;
+        f.consing_ = false;
+        return f;
+    }
 
     // ── Composition: append, never mutate ────────────────────────
 
@@ -525,6 +617,152 @@ private:
     std::vector<FieldOp<T>> ops_;
     bool structural_ = true;
     bool reads_point_ = false;
+    bool consing_ = true;
+
+    // The lookup behind "Merging equal ops": open addressing over op
+    // indices (stored +1, 0 is empty), covering ops_[0, indexed_). Ops are
+    // only ever appended, so catching up is a scan of the tail.
+    std::vector<std::uint32_t> index_;
+    std::size_t indexed_ = 0, index_used_ = 0;
+
+    void index_reset() { index_.clear(); indexed_ = 0; index_used_ = 0; }
+
+    // An op with the children it will have once appended; `src` supplies
+    // everything else.
+    struct Key {
+        const FieldOp<T>* src;
+        std::uint32_t a, b, c;
+    };
+
+    static constexpr bool kBitComparable =
+        std::is_same_v<T, float> || std::is_same_v<T, double>;
+
+    static std::uint64_t bits_of(const T& x) {
+        if constexpr (std::is_same_v<T, float>) return std::bit_cast<std::uint32_t>(x);
+        else if constexpr (std::is_same_v<T, double>) return std::bit_cast<std::uint64_t>(x);
+        else return 0;
+    }
+
+    static bool same_number(const T& x, const T& y) {
+        if constexpr (kBitComparable) return bits_of(x) == bits_of(y);
+        else return x == y;
+    }
+
+    static bool indexable(const FieldOp<T>& n) {
+        switch (n.op) {
+            case Op::Opaque: return false;
+            case Op::Const:  return kBitComparable;
+            case Op::Noise:  return n.noise != nullptr;
+            case Op::Gather: return n.table != nullptr;
+            default:         return true;
+        }
+    }
+
+    static std::uint64_t mix(std::uint64_t h, std::uint64_t x) {
+        h = (h ^ x) * 0x9e3779b97f4a7c15ull;
+        return h ^ (h >> 32);
+    }
+
+    static std::uint64_t hash_of(const Key& key) {
+        const FieldOp<T>& n = *key.src;
+        const auto k = arity(n.op);
+        std::uint64_t h = mix(0x51ed270b0b0b0b0bull, static_cast<std::uint64_t>(n.op));
+        if (k > 0) h = mix(h, key.a);
+        if (k > 1) h = mix(h, key.b);
+        if (k > 2) h = mix(h, key.c);
+        h = mix(h, n.k);
+        if (n.op == Op::Const) h = mix(h, bits_of(n.value));
+        if (n.op == Op::Noise) {
+            std::uint64_t w[4];
+            std::memcpy(w, n.noise->permutation().data(), sizeof w);
+            for (auto x : w) h = mix(h, x);
+        }
+        if (n.op == Op::Gather) {
+            h = mix(h, n.table->size());
+            if (!n.table->empty())
+                for (std::size_t j = 0; j < 3; ++j) h = mix(h, bits_of((*n.table)[0][j]));
+        }
+        return h;
+    }
+
+    static bool equal_to(const Key& key, const FieldOp<T>& e) {
+        const FieldOp<T>& n = *key.src;
+        if (n.op != e.op || n.k != e.k) return false;
+        const auto k = arity(n.op);
+        if ((k > 0 && key.a != e.a) || (k > 1 && key.b != e.b) || (k > 2 && key.c != e.c))
+            return false;
+        switch (n.op) {
+            case Op::Const:
+                return same_number(n.value, e.value);
+            case Op::Noise:
+                return n.noise == e.noise || n.noise->permutation() == e.noise->permutation();
+            case Op::Gather: {
+                if (n.table == e.table) return true;
+                if (n.table->size() != e.table->size()) return false;
+                for (std::size_t i = 0; i < n.table->size(); ++i)
+                    for (std::size_t j = 0; j < 3; ++j)
+                        if (!same_number((*n.table)[i][j], (*e.table)[i][j])) return false;
+                return true;
+            }
+            default:
+                return true;
+        }
+    }
+
+    static Key key_of(const FieldOp<T>& n) { return Key{&n, n.a, n.b, n.c}; }
+
+    void index_place(std::uint64_t h, std::size_t i) {
+        const std::size_t mask = index_.size() - 1;
+        std::size_t pos = h & mask;
+        while (index_[pos] != 0) pos = (pos + 1) & mask;
+        index_[pos] = static_cast<std::uint32_t>(i + 1);
+        ++index_used_;
+    }
+
+    void index_grow() {
+        index_.assign(std::max<std::size_t>(16, index_.size() * 2), 0);
+        index_used_ = 0;
+        for (std::size_t j = 0; j < indexed_; ++j)
+            if (indexable(ops_[j])) index_place(hash_of(key_of(ops_[j])), j);
+    }
+
+    void index_sync() {
+        for (; indexed_ < ops_.size(); ++indexed_) {
+            if (!indexable(ops_[indexed_])) continue;
+            if ((index_used_ + 1) * 2 > index_.size()) index_grow();
+            index_place(hash_of(key_of(ops_[indexed_])), indexed_);
+        }
+    }
+
+    // The index of an op equal to `key`'s, appending a copy if there is
+    // none. Opaque (and anything else not `indexable`) is always appended.
+    std::uint32_t intern(const Key& key) {
+        if (indexable(*key.src)) {
+            index_sync();
+            if (!index_.empty()) {
+                const std::size_t mask = index_.size() - 1;
+                for (std::size_t pos = hash_of(key) & mask; index_[pos] != 0; pos = (pos + 1) & mask)
+                    if (equal_to(key, ops_[index_[pos] - 1])) return index_[pos] - 1;
+            }
+        }
+        FieldOp<T> c = *key.src;
+        c.a = key.a;
+        c.b = key.b;
+        c.c = key.c;
+        ops_.push_back(std::move(c));
+        return static_cast<std::uint32_t>(ops_.size() - 1);
+    }
+
+    // A pool assembled by hand, for FieldPoolAccess.
+    static Field adopt(std::vector<FieldOp<T>> ops) {
+        Field f;
+        f.ops_ = std::move(ops);
+        for (const auto& n : f.ops_) {
+            f.structural_ = f.structural_ && n.op != Op::Opaque;
+            f.reads_point_ = f.reads_point_ || n.op == Op::Point;
+        }
+        return f;
+    }
 
     static Field input(Op o, std::uint32_t k) {
         Field f;
@@ -632,7 +870,11 @@ private:
     // `append` that does not know how many operands the parent will have,
     // split out so a three-child op appends two of them the same way.
     std::uint32_t append_operand(const Field& y) {
-        const auto shift = static_cast<std::uint32_t>(ops_.size());
+        // `x += x`: the loop below appends to the pool it reads from.
+        if (&y == this) {
+            const Field copy = y;
+            return append_operand(copy);
+        }
 
         // Reserve only past the current capacity, and then geometrically.
         // A bare `reserve(size() + k)` on every append reallocates every
@@ -644,6 +886,24 @@ private:
         if (need > ops_.capacity())
             ops_.reserve(std::max(need, ops_.capacity() * 2));
 
+        if (consing_) {
+            // `at[j]` is where y's op j landed: a new index, or the index of
+            // an equal op already here.
+            std::vector<std::uint32_t> at(y.ops_.size());
+            for (std::size_t j = 0; j < y.ops_.size(); ++j) {
+                const auto& n = y.ops_[j];
+                const auto k = arity(n.op);
+                at[j] = intern(Key{&n, k > 0 ? at[n.a] : n.a, k > 1 ? at[n.b] : n.b,
+                                   k > 2 ? at[n.c] : n.c});
+                assert((k < 1 || at[n.a] < at[j]) && (k < 2 || at[n.b] < at[j]) &&
+                       (k < 3 || at[n.c] < at[j]) && "Field: a child must precede its parent");
+            }
+            structural_ = structural_ && y.structural_;
+            reads_point_ = reads_point_ || y.reads_point_;
+            return at.back();
+        }
+
+        const auto shift = static_cast<std::uint32_t>(ops_.size());
         for (const auto& n : y.ops_) {
             FieldOp<T> c = n;
             const auto k = arity(c.op);

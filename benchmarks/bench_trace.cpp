@@ -235,3 +235,58 @@ BENCHMARK(BM_Vertices_Cheap_Direct)->Arg(237600);
 BENCHMARK(BM_Vertices_Cheap_StdFunction)->Arg(237600);
 BENCHMARK(BM_Vertices_Swirl_Direct)->Arg(237600);
 BENCHMARK(BM_Vertices_Swirl_StdFunction)->Arg(237600);
+
+// ── Building a field term by term ─────────────────────────────────
+//
+// The accumulating form `acc += term` over the donut's 19 800 dust
+// particles. A term shares `u`, `v` and `sin(v)` with every other term and
+// carries one constant of its own, so a pool that merges equal ops ends
+// near 4 ops a term where an append-only one has 8; the case is what keeps
+// the lookup that merging needs from making this linear build quadratic.
+
+namespace {
+
+io::build::ScalarField<double> field_term(std::size_t i) {
+    using F = io::build::ScalarField<double>;
+    return (F::u() * F{static_cast<double>(i)} + F::hash(static_cast<std::uint32_t>(i % 64))) *
+           sin(F::v());
+}
+
+} // namespace
+
+static void BM_Field_AccumulateTerms(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    std::size_t ops = 0;
+    for (auto _ : state) {
+        io::build::ScalarField<double> acc{0.0};
+        for (std::size_t i = 0; i < n; ++i) acc += field_term(i);
+        ops = acc.size();
+        benchmark::DoNotOptimize(acc);
+    }
+    state.counters["ops"] = static_cast<double>(ops);
+}
+BENCHMARK(BM_Field_AccumulateTerms)->Arg(2000)->Arg(19800)->Unit(benchmark::kMillisecond);
+
+// `acc = acc + term` copies the accumulator each time, so it is quadratic
+// in the field length by what the operator means; kept to show that the
+// merge table does not make that worse.
+static void BM_Field_AccumulateByCopy(benchmark::State& state) {
+    const auto n = static_cast<std::size_t>(state.range(0));
+    for (auto _ : state) {
+        io::build::ScalarField<double> acc{0.0};
+        for (std::size_t i = 0; i < n; ++i) acc = acc + field_term(i);
+        benchmark::DoNotOptimize(acc);
+    }
+}
+BENCHMARK(BM_Field_AccumulateByCopy)->Arg(1000)->Unit(benchmark::kMillisecond);
+
+static void BM_Field_CopyBig(benchmark::State& state) {
+    io::build::ScalarField<double> acc{0.0};
+    for (std::size_t i = 0; i < 19800; ++i) acc += field_term(i);
+    for (auto _ : state) {
+        auto copy = acc;
+        benchmark::DoNotOptimize(copy);
+    }
+    state.counters["ops"] = static_cast<double>(acc.size());
+}
+BENCHMARK(BM_Field_CopyBig)->Unit(benchmark::kMillisecond);

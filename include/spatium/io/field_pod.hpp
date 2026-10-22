@@ -6,6 +6,7 @@
 #  include <spatium/io/field.hpp>
 #  include <spatium/algebra/noise.hpp>
 #  include <spatium/algebra/groups/so3.hpp>
+#  include <bit>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
@@ -130,6 +131,19 @@ inline std::uint32_t intern_table(std::vector<std::uint8_t>& tables,
     return static_cast<std::uint32_t>(count);
 }
 
+// Equal as numbers would join 0.0 with -0.0, and a table that differs from
+// another only in the sign of a zero is a different table (1/x tells them
+// apart), so floating-point tables are compared by bit pattern.
+template<Scalar T>
+bool same_number(const T& x, const T& y) {
+    if constexpr (std::is_same_v<T, float>)
+        return std::bit_cast<std::uint32_t>(x) == std::bit_cast<std::uint32_t>(y);
+    else if constexpr (std::is_same_v<T, double>)
+        return std::bit_cast<std::uint64_t>(x) == std::bit_cast<std::uint64_t>(y);
+    else
+        return x == y;
+}
+
 template<Scalar T>
 std::uint32_t intern_points(std::vector<T>& points, const std::vector<Vec<T, 3>>& table,
                             std::uint32_t& start) {
@@ -141,7 +155,7 @@ std::uint32_t intern_points(std::vector<T>& points, const std::vector<Vec<T, 3>>
         bool same = true;
         for (std::size_t i = 0; i < n && same; ++i)
             for (std::size_t k = 0; k < 3 && same; ++k)
-                same = points[(s0 + i) * 3 + k] == table[i][k];
+                same = same_number(points[(s0 + i) * 3 + k], table[i][k]);
         if (same) { start = static_cast<std::uint32_t>(s0); return static_cast<std::uint32_t>(n); }
     }
     start = static_cast<std::uint32_t>(have);
@@ -154,7 +168,12 @@ std::uint32_t intern_points(std::vector<T>& points, const std::vector<Vec<T, 3>>
 // the field in the error, so a failure deep inside a VecField's factor
 // still says which one.
 template<Scalar T>
-Result<PodRange> lower_into(PodField<T>& out, const Field<T>& f, const std::string& where) {
+Result<PodRange> lower_into(PodField<T>& out, const Field<T>& whole, const std::string& where) {
+    // Only what the root reads: an op nothing reads would be emitted, sent
+    // to a device and evaluated for nothing. (The builders never leave
+    // one; a pool assembled elsewhere can.) Op numbers in an error below
+    // are positions in this culled field.
+    const Field<T> f = whole.reachable_from_root();
     PodRange r{static_cast<std::uint32_t>(out.ops.size()),
                static_cast<std::uint32_t>(f.size())};
     for (std::size_t i = 0; i < f.size(); ++i) {
