@@ -486,3 +486,93 @@ TEST_CASE("a scatter's generator words are what its version is made of", "[build
     REQUIRE(version.key.size() > words.size());
     CHECK(std::equal(words.begin(), words.end(), version.key.begin() + 1));
 }
+
+// ── A new time replaces only what reads the time ─────────────────────
+
+namespace {
+
+// Two scatters over one torus: `first` moves by a constant, `second` by an
+// amount that grows with the time. Either can be left out.
+bd::Cooked<double> timed_scene(double t, bool fixed, bool timed, const bd::Cooked<double>* previous = nullptr) {
+    using F = bd::Field<double>;
+    using V = bd::VecField<double>;
+    bd::Trace<double> tr;
+    auto torus = tr.torus(2.0, 1.0, 48, 24);
+    auto item = tr.cylinder(0.011, 0.062, 8, 2);
+    std::vector<bd::Handle<double>> parts{torus};
+    if (fixed) {
+        auto a = tr.scatter(item, torus, 2000, 42, 0.45, bd::SeatAxis::X);
+        a.moving(V::translation({0.0, 0.0, 0.05}));
+        parts.push_back(a);
+    }
+    if (timed) {
+        auto b = tr.scatter(item, torus, 1500, 7, 0.45, bd::SeatAxis::X);
+        b.moving(V::point() + V::make(F{0.0}, F{0.0}, F::t() * F{0.1}));
+        parts.push_back(b);
+    }
+    const auto root = tr.compose(parts).index;
+    return previous ? bd::cook(tr, root, t, previous) : bd::cook(tr, root, t);
+}
+
+}  // namespace
+
+TEST_CASE("a new time replaces the scatters that read it and no others", "[render][update]") {
+    struct Case { const char* name; bool fixed, timed; std::size_t reused; };
+    const Case cases[] = {
+        {"a scatter that does not read the time", true, false, 2000},
+        {"a scatter that reads the time", false, true, 0},
+        {"one of each", true, true, 2000},
+    };
+    for (const auto& c : cases) {
+        DYNAMIC_SECTION(c.name) {
+            render::StaticCache<double> cache;
+            const auto before = timed_scene(0.0, c.fixed, c.timed);
+            const auto fresh = timed_scene(2.5, c.fixed, c.timed);
+            const auto resumed = timed_scene(2.5, c.fixed, c.timed, &before);
+
+            REQUIRE(resumed.object_count() == fresh.object_count());
+            for (std::size_t i = 0; i < fresh.object_count(); ++i)
+                REQUIRE(same_object(resumed.objects()[i], fresh.objects()[i]));
+            std::size_t reused = 0;
+            for (const auto& g : resumed.generators()) reused += g.reused;
+            CHECK(reused == c.reused);
+
+            auto scene = render::lay_out(before, {}, nullptr, &cache);
+            render::InstanceUpdate u;
+            scene = render::lay_out(std::move(scene), resumed, {}, nullptr, &cache, &u);
+            const auto expected = render::lay_out(fresh, {}, nullptr, &cache);
+            CHECK(instance_list(scene) == instance_list(expected));
+            CHECK(scene.prims.size() == expected.prims.size());
+            CHECK(same_hits(scene, expected) > 20);
+            if (c.reused) CHECK(u.reused);
+        }
+    }
+}
+
+TEST_CASE("a static part laid out before is found by its description, not made again", "[render][update]") {
+    render::StaticCache<double> cache;
+    Params a;
+    const auto first = render::lay_out(scene_of(a), {}, nullptr, &cache);
+    CHECK(cache.misses() == 1);
+
+    // Same static part, a different scatter on top: found without emitting.
+    Params more = a;
+    more.count += 50;
+    const auto second = render::lay_out(scene_of(more), {}, nullptr, &cache);
+    CHECK(cache.hits() == 1);
+    CHECK(cache.misses() == 1);
+    REQUIRE(second.prims.size() == first.prims.size());
+    for (std::size_t i = 0; i < first.prims.size(); i += 37) {
+        REQUIRE(second.prims[i].vertex_normals[0][0] == first.prims[i].vertex_normals[0][0]);
+        REQUIRE(second.prims[i].tri.vertices[0][1] == first.prims[i].tri.vertices[0][1]);
+    }
+    const auto fresh = render::lay_out(scene_of(more));   // no cache: the baseline
+    CHECK(same_hits(second, fresh) > 50);
+
+    // A changed static part is a miss, and its triangles are its own.
+    Params wider = a;
+    wider.major_r = 2.5;
+    const auto third = render::lay_out(scene_of(wider), {}, nullptr, &cache);
+    CHECK(cache.misses() == 2);
+    CHECK(same_hits(third, render::lay_out(scene_of(wider))) > 50);
+}

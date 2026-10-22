@@ -274,8 +274,32 @@ TEST_CASE("a trace node's version separates the generator from the count", "[bui
             CHECK_FALSE(v0.same_generator(v));
             CHECK(v0.generator != v.generator);
         }
-        // A motion changes it, and so does the time it is asked at.
-        CHECK(version(*base, base->scatter, 0.5)->generator != v0.generator);
+        // A motion changes it. The time changes it only for a motion that reads it.
+        CHECK(version(*base, base->scatter, 0.5)->generator == v0.generator);
+    }
+    SECTION("the time is part of it only where a field reads it") {
+        auto at = [](auto&& motion, double t) {
+            bd::Trace<double> tr;
+            auto torus = tr.torus(2.0, 1.0, 48, 24);
+            auto item = tr.cylinder(0.011, 0.062, 8, 2);
+            auto sc = tr.scatter(item, torus, 100, 42, 0.45, bd::SeatAxis::X);
+            sc.moving(motion());
+            return *bd::node_version(tr, sc.index, t);
+        };
+        auto fixed = [] { return V::translation({0, 0, 0.1}); };
+        auto timed = [] { return V::point() + V::make(F{0.0}, F{0.0}, F::t() * F{0.1}); };
+        auto called = [] { return V::opaque_of_time([](double t) { return Vec<double, 3>{0, 0, t}; }); };
+        CHECK(at(fixed, 0.0).same_generator(at(fixed, 3.0)));
+        CHECK_FALSE(at(timed, 0.0).same_generator(at(timed, 3.0)));
+        CHECK(at(timed, 3.0).same_generator(at(timed, 3.0)));
+        CHECK_FALSE(at(called, 0.0).same_generator(at(called, 3.0)));   // a callable may read it
+        CHECK_FALSE(at(fixed, 0.0).same_generator(at(timed, 0.0)));
+        CHECK(F::u().reads_time());
+        CHECK(F::coord(0).reads_time());
+        CHECK_FALSE((F::v() * F{2.0}).reads_time());
+        CHECK_FALSE(V::translation({1, 2, 3}).reads_time());
+        CHECK(timed().reads_time());
+        CHECK(called().reads_time());
     }
     SECTION("a node with nothing to compare it by has no version") {
         CHECK(version(*base, base->chart) == std::nullopt);   // a chart handed to space()

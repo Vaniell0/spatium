@@ -553,6 +553,28 @@ public:
     // motion scaled by such a factor is a deformation however it is spelled.
     bool reads_point() const { return reads_point_; }
 
+    // Whether the value the root computes can depend on the first input --
+    // the scene time, for a motion or a colour field, which are handed `t`
+    // as `u`. Derived from the ops the root reaches, never declared: `U`
+    // reads it, and so does an opaque leaf, which is handed both inputs and
+    // cannot be asked what it does with them. `Coord` is counted too (a
+    // metric's time is its coordinate 0). A field for which this is false
+    // computes one value at every time.
+    bool reads_time() const {
+        std::vector<char> live(ops_.size(), 0);
+        live[ops_.size() - 1] = 1;
+        for (std::size_t i = ops_.size(); i-- > 0;) {
+            if (!live[i]) continue;
+            const auto& n = ops_[i];
+            if (n.op == Op::U || n.op == Op::Opaque || n.op == Op::Coord) return true;
+            const auto k = arity(n.op);
+            if (k > 0) live[n.a] = 1;
+            if (k > 1) live[n.b] = 1;
+            if (k > 2) live[n.c] = 1;
+        }
+        return false;
+    }
+
     // Derived by construction, never declared: a field is structural iff
     // no op in it is opaque. Cached rather than walked, because this is a
     // method someone will call inside a loop over vertices, where an O(ops)
@@ -1803,6 +1825,35 @@ public:
             case VecOp::Sub:    return reads_point(n.a) || reads_point(n.b);
         }
         return true;
+    }
+
+    // Whether this op's value can depend on the scene time, derived by
+    // walking like `reads_point`. A leaf that is a callable is handed `t`
+    // and cannot be asked what it does with it, so it counts as reading
+    // it; so does a Scale or Rotate whose factor is a callable
+    // (`factor_fields` empty) -- only a factor written as fields can be
+    // seen not to read time.
+    bool reads_time(std::size_t i) const {
+        const auto& n = ops_[i];
+        switch (n.op) {
+            case VecOp::Point:  return false;
+            case VecOp::Const:  return false;
+            case VecOp::Opaque: return true;
+            case VecOp::Make:   return factor_reads_time(n);
+            case VecOp::Scale:
+            case VecOp::Rotate: return reads_time(n.a) || factor_reads_time(n);
+            case VecOp::Add:
+            case VecOp::Sub:    return reads_time(n.a) || reads_time(n.b);
+        }
+        return true;
+    }
+    bool reads_time() const { return reads_time(ops_.size() - 1); }
+
+    static bool factor_reads_time(const VecFieldOp<T>& n) {
+        if (n.factor_fields.empty()) return true;
+        for (const auto& g : n.factor_fields)
+            if (g.reads_time()) return true;
+        return false;
     }
 
     // A factor written as an expression can now read the point, and one
