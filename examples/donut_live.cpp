@@ -128,10 +128,11 @@ struct StaticPart {
 };
 
 StaticPart static_part(vc::Context& ctx, const bd::Cooked<double>& cooked,
-                       const std::vector<char>& moved, double& ms) {
+                       const std::vector<char>& moved, render::StaticCache<double>& cache,
+                       double& ms) {
     const auto t0 = std::chrono::steady_clock::now();
     StaticPart s;
-    s.packed = gpu::pack(render::lay_out(cooked, {}, &moved));
+    s.packed = gpu::pack(render::lay_out(cooked, {}, &moved, &cache));
     s.tri_nodes = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const gpu::Node>(s.packed.tri_nodes)));
     s.tris = std::make_unique<vc::Buffer>(vc::Buffer::from(ctx, std::span<const gpu::Triangle>(s.packed.triangles)));
     ms = ms_since(t0);
@@ -223,7 +224,8 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
         }
 
         double recook_ms = 0;
-        auto part = static_part(ctx, first, moved, recook_ms);
+        render::StaticCache<double> static_cache;   // a re-cook at a t already seen keeps its tree
+        auto part = static_part(ctx, first, moved, static_cache, recook_ms);
         // Quadrics are one per shape and do not change with time.
         auto quads = vc::Buffer::from(ctx, std::span<const gpu::Quadric>(part.packed.quadrics));
 
@@ -355,7 +357,7 @@ int run_live(const bd::Trace<double>& scene, std::size_t root, double t, int max
                 vkDeviceWaitIdle(ctx.device());
                 const auto c0 = std::chrono::steady_clock::now();
                 const auto cooked = bd::cook(scene, root, static_cast<double>(t_ui));
-                part = static_part(ctx, cooked, moved, recook_ms);
+                part = static_part(ctx, cooked, moved, static_cache, recook_ms);
                 recook_ms += ms_since(c0) - recook_ms;   // the cook and the lay-out together
                 if (part.packed.instances.size() != static_count) {
                     // A different number of static instances would shift every
