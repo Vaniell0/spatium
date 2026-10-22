@@ -55,7 +55,14 @@ VoronoiDiagram<S> geodesic_voronoi(
         if (d > vd.distances[u]) continue;
 
         for (auto v : topo.neighbors(u)) {
-            T w = space.distance(mesh.vertices[u], mesh.vertices[v]);
+            // an edge is short: the geodesic distance where the space has one, else the
+            // chord (an erased surface has no geodesic distance)
+            const auto& a = mesh.vertices[u];
+            const auto& b = mesh.vertices[v];
+            T w = [&] {
+                if constexpr (requires { spaces::distance(space, a, b); }) return spaces::distance(space, a, b);
+                else return space.chord_distance(a, b);
+            }();
             T new_dist = d + w;
             if (new_dist < vd.distances[v]) {
                 vd.distances[v] = new_dist;

@@ -156,7 +156,7 @@ TEST_CASE("A typed implicit surface is erased at the boundary, and NaN stays NaN
     const auto level = implicit_sphere();
     const ImplicitSurface<double> erased = level.erased();
     CHECK_THAT(erased(0.6, 0.0, 0.8), WithinAbs(0.0, 1e-15));
-    CHECK_THAT(erased.distance(Vec<double, 3>{1, 0, 0}, Vec<double, 3>{0, 1, 0}), WithinAbs(std::sqrt(2.0), 1e-15));   // the chord
+    CHECK_THAT(erased.chord_distance(Vec<double, 3>{1, 0, 0}, Vec<double, 3>{0, 1, 0}), WithinAbs(std::sqrt(2.0), 1e-15));   // the chord
     CHECK(spaces::distance(level, Vec<double, 3>{1, 0, 0}, Vec<double, 3>{0, 1, 0}) > std::sqrt(2.0));          // |log|
     const double nan = std::numeric_limits<double>::quiet_NaN();
     CHECK_FALSE(std::isfinite(level.exp_map(Vec<double, 3>{nan, 0, 1}, Vec<double, 3>{1, 0, 0}, 1.0)[0]));

@@ -141,10 +141,10 @@ TEST_CASE("A typed surface enters the DSL through its erased form, and the erase
     CHECK((erased.evaluate(0.6, 1.1) - typed.evaluate(0.6, 1.1)).norm() < 1e-15);
     static_assert(Chart<decltype(typed)>);
     static_assert(Chart<ParametricSurface<double>>);
-    // the erased distance is the chord; the typed has no member distance, so it is |log|
+    // the erased form has the chord under its own name; distance is the geodesic one, |log|
     const auto a = typed.evaluate(0.2, 0.3), b = typed.evaluate(0.9, 1.0);
-    CHECK_THAT(erased.distance(a, b), WithinAbs(typed.chord_distance(a, b), 1e-15));
-    CHECK(spaces::distance(typed, a, b) > erased.distance(a, b));
+    CHECK_THAT(erased.chord_distance(a, b), WithinAbs(typed.chord_distance(a, b), 1e-15));
+    CHECK(spaces::distance(typed, a, b) > erased.chord_distance(a, b));
 }
 
 TEST_CASE("Where the chart degenerates the answer is NaN, not a wrong number", "[parametric][typed][infinity]") {

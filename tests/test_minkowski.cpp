@@ -215,3 +215,12 @@ TEST_CASE("the Newtonian limit and its post-Newtonian corrections, read from a S
     const double e_double = kinetic_energy(m, v, 1e8);
     CHECK(std::abs(e_double - 0.5 * m * v * v) > 0.1 * 0.5 * m * v * v);
 }
+
+TEST_CASE("Minkowski has no distance: |log|_g is not one on an indefinite metric", "[minkowski]") {
+    // core/access.hpp withholds the derived distance from a space with an
+    // interval and proper time; the interval is what Minkowski offers instead.
+    using M = Minkowski<4>;
+    using P = M::PointType;
+    static_assert(!spaces::Distanced<M>);
+    static_assert(requires(const M& m, const P& p) { m.interval(p, p); });
+}
