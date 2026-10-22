@@ -323,9 +323,20 @@ Implemented on main since: `Bound` concept, `BVH<Shape, Bound>`,
 `GeodesicBall` with closed-form ray intervals on E/S/H, SAH by the boundary
 measure (Crofton: 2π sin r / 2π sinh r in 2D, 4π sin² r / 4π sinh² r in
 3D -- not the enclosed volume), `geometry_bounds`, `GeodesicBallTree`.
-Still open: chunked mode for integrated geodesics -- a tree lower bound on
-distance truncated at depth k is still a valid lower bound, so sphere
-tracing and BVH fuse into one marcher; `ManifoldCamera` as a frame from
+Measured 2026-10-22, chunked mode for integrated geodesics: a tree lower bound on
+distance truncated at depth k is still a valid lower bound, and with a rigorous
+bound on the ray's coordinate speed (Schwarzschild null ray:
+|dx/dlambda|^2 = 1 + 2ML^2/r^3, falling with r) it never skipped a sphere
+(0 violations in 235 868 free steps). It does not pay on a thin disk of
+spheres traced by RK4 chords: the safe step can only shorten the accuracy
+step, 95% of steps are limited by accuracy and not by emptiness, the step
+count stays ~59 per ray, bound evaluations are 26-97x those of an AABB BVH and
+the frame is 5-25x slower (256x256 rays, 1e3-1e5 spheres; the AABB BVH equals
+brute force exactly and needs ~150-170 node visits per ray whatever N is). A
+ball bound on a flat disk also degenerates to one node under SAH. Still open:
+whether balls pay where boxes and chords do not apply (higher dimensions,
+non-smooth sets).
+Still open: `ManifoldCamera` as a frame from
 `metric_at` or an isometry; light via `log_map`, shadow rays with `t_max`;
 recentering in H (the Minkowski form loses all digits near d ≈ 20). The
 injectivity/convexity radius matters for building and merging balls and
