@@ -25,6 +25,8 @@
 #include <spatium/physics/mechanics/force.hpp>
 #include <spatium/physics/mechanics/units.hpp>
 #include <spatium/physics/mechanics/integrator.hpp>
+#include <spatium/physics/mechanics/gravity_field.hpp>
+#include <spatium/physics/mechanics/gravity_tree.hpp>
 #include <spatium/physics/mechanics/symplectic.hpp>
 #include <spatium/physics/mechanics/lie_integrator.hpp>
 #include <spatium/physics/mechanics/lgvi.hpp>
