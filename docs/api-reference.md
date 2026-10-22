@@ -819,6 +819,19 @@ void yoshida4_step     (body, force, dt, t=0);           // O(dt⁴) composition
 void rk4_step          (body, force, dt, t=0);           // O(dt⁴), not symplectic
 ```
 
+### Many-source gravity (`gravity_field.hpp`, `gravity_tree.hpp`)
+
+```cpp
+GravityLaw<N,T>{exponent, G, softening, max_acceleration};   // acceleration ~ 1/r^exponent; N-1 is Newton's
+GravityField<N,T> free(law);                                  // free space
+GravityField<N,T> torus(law, box, EwaldOptions{});            // periodic, uniform neutralizing background, Ewald
+field.set_sources({{position, mass}, ...});                   // mass = gravitational charge
+Vec<T,N> a = field.acceleration(x, skip);                     // direct sum, O(sources)
+GravityTree<N,T> tree(field, theta); tree.rebuild();          // after the sources change
+Vec<T,N> a = tree.acceleration(x, skip);                      // Barnes-Hut on spatial::BVH
+GravityPull<GravityField<N,T>>{&field, coupling}              // a force for verlet_step / composite_force
+```
+
 ### Symplectic manifolds (`symplectic.hpp`)
 
 ```cpp

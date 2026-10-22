@@ -100,6 +100,10 @@ spatium_add_example(NAME sound_synthesis_demo OPTIONS -O3 -march=native)
 # multiplied by a shadow ray and a bounded-wall test per primary hit.
 spatium_add_example(NAME ball_pit_demo OPTIONS -O3 -march=native)
 
+# N bodies on a torus: Ewald-summed gravity, Barnes-Hut tree on the BVH,
+# leapfrog; headless, SVG of the final positions. -O3 for the pair loops.
+spatium_add_example(NAME nbody_demo OPTIONS -O3 -march=native)
+
 # Visual cloth demos (cloth_on_sphere/_torus, cloth_visual) stay removed
 # (commit 1b3ce2c62). The ipc-toolkit cloth_sphere_probe moved out of
 # tree: scripts/external/ipc_compare/.
