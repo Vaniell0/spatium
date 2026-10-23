@@ -81,6 +81,8 @@ add_executable(spatium_tests
     test_atom_upgrade.cpp
     test_mechanics.cpp
     test_gravity.cpp
+    test_sphere_gravity.cpp
+    test_sphere_charts.cpp
     test_wave_string.cpp
     test_wave_membrane.cpp
     test_dec.cpp

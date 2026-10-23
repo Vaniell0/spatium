@@ -832,6 +832,17 @@ Vec<T,N> a = tree.acceleration(x, skip);                      // Barnes-Hut on s
 GravityPull<GravityField<N,T>>{&field, coupling}              // a force for verlet_step / composite_force
 ```
 
+### Gravity and flight on the 3-sphere (`sphere_gravity.hpp`, `manifold_body.hpp`, `spaces/sphere_charts.hpp`)
+
+```cpp
+SphereGravity<T> g(SphereGravityLaw<T>{G, softening, radius, max_acceleration});
+g.set_sources({{unit_vector_in_R4, mass}, ...});              // potential: G(psi) = -(pi - psi) cot(psi) / (4 pi^2)
+Vec<T,4> a = g.acceleration(x, skip, coupling);               // tangent at x, towards the sources, zero at the antipode
+void flight_step(body, Sphere<N,T>{R}, dt, accel);           // kick - great circle - kick; with no accel: geodesic_step
+sphere_nbody_step(bodies, g, S, dt);                          // all bodies, energy and SO(4) angular momentum
+SphereCharts<N,T>{kappa}.to_north(y) / from_south(x) / transition(x) / push_north(y, w);   // the two stereographic charts
+```
+
 ### Symplectic manifolds (`symplectic.hpp`)
 
 ```cpp

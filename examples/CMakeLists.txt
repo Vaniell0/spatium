@@ -104,6 +104,10 @@ spatium_add_example(NAME ball_pit_demo OPTIONS -O3 -march=native)
 # leapfrog; headless, SVG of the final positions. -O3 for the pair loops.
 spatium_add_example(NAME nbody_demo OPTIONS -O3 -march=native)
 
+# N bodies on the closed 3-sphere (Green's function gravity), antipodal
+# focusing, and the two stereographic charts as an SVG; headless.
+spatium_add_example(NAME sphere_nbody_demo OPTIONS -O3 -march=native)
+
 # Visual cloth demos (cloth_on_sphere/_torus, cloth_visual) stay removed
 # (commit 1b3ce2c62). The ipc-toolkit cloth_sphere_probe moved out of
 # tree: scripts/external/ipc_compare/.
