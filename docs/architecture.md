@@ -334,6 +334,7 @@ physics/mechanics/                      — classical/geometric mechanics; see d
   integrator.hpp                        euler_step, semi_implicit_euler_step, verlet_step, rk4_step
   gravity_field.hpp                     GravityField<N,T>: many softened sources, any integer law exponent, per-body coupling, optional clamp, a torus summed by Ewald; GravityPull for the single-body integrators
   gravity_tree.hpp                      GravityTree<N,T>: Barnes-Hut on spatial::BVH, monopoles in a side array, free or periodic
+  sphere_gravity.hpp                    SphereGravity<T>: many softened sources on S^3 (Green's function with a neutralizing background), sphere_nbody_step, SO(4) angular momentum
   symplectic.hpp                        SymplecticManifold concept, CotangentBundle<M>, verify_symplecticity_drift, Yoshida4
   lie_integrator.hpp                    lie_euler_step, lie_midpoint_step, lie_rkmk4_cf_step — commutator-free RKMK on Lie groups
   lgvi.hpp                              Lie-group variational integrator on SO(3) via Cayley 1-cut

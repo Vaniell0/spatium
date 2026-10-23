@@ -10,7 +10,8 @@
 //
 // What's currently implemented: analytical `geodesic_step` for
 // `Sphere<N>` only — closed-form great-circle motion with the
-// velocity rotated in the (position, velocity) plane. Hyperbolic,
+// velocity rotated in the (position, velocity) plane — and `flight_step`,
+// the same under a force. Hyperbolic,
 // ParametricSurface, and arbitrary `Surface`-only manifolds need
 // the generic `parallel_transport`-on-`exp_map` path
 // (`mesh/transport.hpp` Schild's ladder is the candidate); that
@@ -92,6 +93,52 @@ T manifold_constraint_residual(const PointOnManifold<spatium::Sphere<N, T>>& bod
     T pos_err   = abs(pos_norm - S.radius);
     T tan_err   = abs(body.position.dot(body.velocity)) / (S.radius * S.radius);
     return (pos_err > tan_err) ? pos_err : tan_err;
+}
+
+// ── Flight under a force on Sphere<N> ─────────────────────────
+//
+// `kick` changes the velocity by h times an acceleration, projected to the
+// tangent space at the body (the radial part of a force is the constraint's
+// to take, not the body's). `flight_step` is the Strang composition
+//   kick(dt/2)  geodesic_step(dt)  kick(dt/2)
+// of two exact flows -- the free flight above, and the shear of the tangent
+// bundle that adds a velocity -- so it is second order, symplectic for a
+// force that is the gradient of a potential, and symmetric: it is its own
+// inverse when the velocity is flipped. With no force it is `geodesic_step`
+// itself, to the bit; with a force the point is renormalised to the sphere
+// and the velocity projected back, so the constraint residual stays at
+// rounding however long the run.
+//
+// `accel(position)` returns the acceleration at a point of the sphere.
+template<std::size_t N, Scalar T>
+void kick(PointOnManifold<spatium::Sphere<N, T>>& body, const spatium::Sphere<N, T>& S,
+          const Vec<T, N + 1>& accel, T h) {
+    const Vec<T, N + 1> n{body.position / S.radius};
+    const Vec<T, N + 1> a{accel - n * n.dot(accel)};
+    body.velocity = Vec<T, N + 1>{body.velocity + a * h};
+}
+
+// Put a body back on the sphere and its velocity in the tangent space.
+template<std::size_t N, Scalar T>
+void renormalise(PointOnManifold<spatium::Sphere<N, T>>& body, const spatium::Sphere<N, T>& S) {
+    body.position = S.project(body.position);
+    body.velocity = S.project_tangent(body.position, body.velocity);
+}
+
+template<std::size_t N, Scalar T, typename Accel>
+void flight_step(PointOnManifold<spatium::Sphere<N, T>>& body,
+                 const spatium::Sphere<N, T>& S, T dt, Accel&& accel) {
+    kick(body, S, Vec<T, N + 1>{accel(body.position)}, T{0.5} * dt);
+    geodesic_step(body, S, dt);
+    renormalise(body, S);
+    kick(body, S, Vec<T, N + 1>{accel(body.position)}, T{0.5} * dt);
+}
+
+// No force: the exact great circle.
+template<std::size_t N, Scalar T>
+void flight_step(PointOnManifold<spatium::Sphere<N, T>>& body,
+                 const spatium::Sphere<N, T>& S, T dt) {
+    geodesic_step(body, S, dt);
 }
 
 } // namespace spatium::physics::mechanics

@@ -15,6 +15,7 @@ import spatium.mesh;
 #include <spatium/spaces/sphere.hpp>
 #include <spatium/spaces/hyperbolic.hpp>
 #include <spatium/spaces/constant_curvature.hpp>
+#include <spatium/spaces/sphere_charts.hpp>
 #include <spatium/spaces/minkowski.hpp>
 #include <spatium/spaces/l2.hpp>
 #include <spatium/spaces/lie_group.hpp>
