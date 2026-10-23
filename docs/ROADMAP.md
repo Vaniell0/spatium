@@ -447,6 +447,8 @@ Newton's cradle belongs in the middle rather than beside it. It is the canonical
 
   `build_laplacian()` and `build_mass_matrix()` in `mesh/differential.hpp` return `Eigen::SparseMatrix` and need no conversion; what they need is a fresh factorisation of `K − σM` at a small negative shift, since `K` is exactly singular.
 
+- **[want]** Modes of a solid body, for engineering as much as for sound. A surface's Laplace-Beltrami modes are the sound of a membrane stretched over it, and its bending modes are a thin shell's; neither is how a solid part rings. That is linear elasticity on a volume: `K u = ω² M u` with `K` from a tetrahedral discretisation of the strain energy `physics/mechanics/continuum.hpp` already states (Saint-Venant-Kirchhoff, linearised) and `M` the lumped or consistent mass. The same sparse generalised eigensolver the surface modes need serves it, at three unknowns per vertex. The consumer is not a game: natural frequencies and mode shapes of a part are a standard CAD/CAE result, and a stiffness check by modal analysis is the first thing an engineering user would ask of a geometry library that already does meshes and physics. Parked behind the surface path because it needs what does not exist yet: a tetrahedral mesher, and assembled elasticity matrices (`continuum.hpp` is types and energies, no FEM).
+
 ## Tessellation density, and the rule that is not the obvious one
 
 Measured 2026-09-22, `rsc/tools/tessellation_error.cpp`. The second
