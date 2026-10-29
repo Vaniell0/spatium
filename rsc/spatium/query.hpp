@@ -1,0 +1,84 @@
+#pragma once
+
+// A question with a free symbol, answered by synthesis instead of by rewriting.
+//
+// The question is written as a field of the scene IR in two symbols: U is the unknown (or the
+// variable of integration) and V the parameter the answer is a function of. What the question
+// means is computed by the library -- a root on a bracket for `solve`, the integration door for
+// `integrate` -- and that number, for each value of the parameter, is the reference. The answer
+// is a field of the parameter synthesised by synthesis.hpp on the parameter's interval, in pieces
+// where one expression does not reach the tolerance, with the error of every piece measured
+// against the reference. No expression is ever transformed: where the operations hold a closed
+// form it is found, where they do not the pieces say so.
+//
+// The answer's field reads the parameter as U, its own variable.
+
+#include <rsc/spatium/synthesis.hpp>
+#include <spatium/algebra/quadrature.hpp>
+
+#include <cmath>
+#include <limits>
+#include <string>
+
+namespace rsc {
+
+enum class Ask { Solve, Integrate };
+
+struct Query {
+    Ask ask = Ask::Solve;
+    Expr f;                // f(U = x, V = p)
+    double x_lo = 0, x_hi = 1; // the bracket of the root, or the limits of the integral
+    double p_lo = 0, p_hi = 1; // where the answer is wanted
+    double tolerance = 1e-8;
+    bool relative = true;
+    std::vector<Unary> unary{Unary::Sqrt};
+    std::size_t max_terms = 4;
+    double min_width = 1e-6;   // of a piece, in the parameter
+};
+
+struct Answer {
+    std::vector<Solution> pieces;
+    bool answered = false;   // every piece accepted
+    std::string refused;     // why there is no answer at all, when there is none
+};
+
+// The meaning of the question at one value of the parameter, or NaN where it has none (a
+// bracket with no change of sign; an integral the door does not trust).
+inline double reference(const Query& q, double p) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    if (q.ask == Ask::Solve) {
+        double a = q.x_lo, b = q.x_hi, fa = q.f(a, p), fb = q.f(b, p);
+        if (fa == 0) return a;
+        if (fb == 0) return b;
+        if (!(fa * fb < 0)) return nan;
+        for (int i = 0; i < 200 && b - a > 4 * std::numeric_limits<double>::epsilon() * std::abs(a + b); ++i) {
+            const double m = 0.5 * (a + b), fm = q.f(m, p);
+            if (fm == 0) return m;
+            if ((fm < 0) == (fa < 0)) a = m, fa = fm;
+            else b = m;
+        }
+        return 0.5 * (a + b);
+    }
+    const auto r = spatium::integrate([&](double x) { return q.f(x, p); },
+                                      spatium::Finite<double>{q.x_lo, q.x_hi});
+    return r.trusted() ? r.value : nan;
+}
+
+inline Answer answer(const Query& q) {
+    Answer out;
+    // a question that has no meaning somewhere on the parameter's interval is refused, not fitted
+    for (int i = 0; i <= 16; ++i) {
+        const double p = q.p_lo + (q.p_hi - q.p_lo) * i / 16.0;
+        if (!std::isfinite(reference(q, p))) {
+            out.refused = "the question has no value at parameter " + std::to_string(p);
+            return out;
+        }
+    }
+    SynthesisSpec spec{.lo = q.p_lo, .hi = q.p_hi, .tolerance = q.tolerance, .relative = q.relative,
+                       .max_terms = q.max_terms, .unary = q.unary};
+    out.pieces = synthesize_piecewise([&](double p) { return reference(q, p); }, spec, q.min_width);
+    out.answered = std::ranges::all_of(out.pieces, [](const Solution& s) { return s.accepted; });
+    return out;
+}
+
+} // namespace rsc
