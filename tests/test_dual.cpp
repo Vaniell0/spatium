@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
 #include <spatium/algebra/dual.hpp>
 #include <spatium/algebra/vector.hpp>
 
@@ -98,4 +99,23 @@ TEST_CASE("A Dual of a lower depth is a legal operand on either side of a deeper
     CHECK_THAT((x / c).value.value.value, WithinAbs(1.5, 1e-15));
     // the derivative of the lowest level rides through: d(x - c) = dx - dc
     CHECK_THAT(minus_right.value.value.deriv, WithinAbs(1.0 - 0.5, 1e-15));
+}
+
+TEST_CASE("tanh of a Dual: the derivative is 1 - tanh^2, exact where cosh overflows", "[dual]") {
+    for (double x : {-3.0, -0.5, 0.0, 0.25, 1.0, 4.0}) {
+        const Dual64 t = tanh(Dual64::variable(x));
+        CHECK_THAT(t.value, WithinAbs(std::tanh(x), 1e-15));
+        CHECK_THAT(t.deriv, WithinAbs(1.0 / (std::cosh(x) * std::cosh(x)), 1e-14));
+        // the same through sinh / cosh, a second route where both are finite
+        const Dual64 q = sinh(Dual64::variable(x)) / cosh(Dual64::variable(x));
+        CHECK_THAT(q.deriv, WithinAbs(t.deriv, 1e-14));
+    }
+    // at 800 tanh is 1 and flat; sinh / cosh is inf / inf there, the case the dedicated rule avoids
+    const Dual64 far = tanh(Dual64::variable(800.0));
+    CHECK(far.value == 1.0);
+    CHECK(far.deriv == 0.0);
+    const Dual64 ratio = sinh(Dual64::variable(800.0)) / cosh(Dual64::variable(800.0));
+    CHECK(std::isnan(ratio.value));
+    // atanh undoes it, derivative included
+    CHECK_THAT(derivative([](Dual64 x) { return atanh(tanh(x)); }, 0.7), WithinAbs(1.0, 1e-12));
 }

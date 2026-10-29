@@ -108,6 +108,7 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_hyperoctahedral.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_action.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/models_softmax.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/models_network.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/analysis_optimize.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/dual.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/ode.cppm
@@ -167,6 +168,11 @@ if(SPATIUM_USE_MODULES)
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
              spatium_geometry_module)
     add_library(Spatium::discrete_module ALIAS spatium_discrete_module)
+
+    spatium_module(NAME spatium_statistics_module
+        PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/statistics.cppm
+        DEPS spatium_sdk)
+    add_library(Spatium::statistics_module ALIAS spatium_statistics_module)
 
     spatium_module(NAME spatium_io_module
         PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/io.cppm

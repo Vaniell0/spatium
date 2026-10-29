@@ -179,6 +179,15 @@ Dual<T> cosh(const Dual<T>& x) {
     return {cosh(x.value), x.deriv * sinh(x.value)};
 }
 
+// tanh' = 1 - tanh^2, written through the value so it stays exact where cosh would
+// overflow: tanh(800) is 1 with derivative 0, and sinh(x)/cosh(x) there is inf/inf.
+template<Scalar T>
+Dual<T> tanh(const Dual<T>& x) {
+    using std::tanh;
+    const T t = tanh(x.value);
+    return {t, x.deriv * (T{1} - t * t)};
+}
+
 template<Scalar T>
 Dual<T> asinh(const Dual<T>& x) {
     using std::asinh, std::sqrt;

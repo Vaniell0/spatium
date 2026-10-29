@@ -263,7 +263,8 @@ algebra/                                — linear algebra, complex, polynomials
   groups/hyperoctahedral.hpp             HyperoctahedralGroup<N> — signed permutations; actions on vectors and cube cells
   groups/action.hpp                      GroupAction, FiniteGroup, orbit, stabilizer, orbits, verify_action
   models/softmax.hpp                     LinearSoftmax<K, T> — softmax over a linear score, gradient, no allocation
-  analysis/optimize.hpp                  AdaGrad<N, T> — a step rule given a gradient
+  models/network.hpp                     TanhNet<F, H, T> — one hidden tanh layer, squared loss, backward pass
+  analysis/optimize.hpp                  AdaGrad<N, T>, Adam<N, T> — step rules given a gradient
 
 spaces/                                 — concrete mathematical spaces
   euclidean.hpp          94 lines        Euclidean<N,T> — flat space, satisfies all concepts
@@ -318,6 +319,9 @@ spatial/                                — acceleration structures
 
 render/                                 — CPU-raytracer utilities
   supersample.hpp                       supersample_pixel() — NxN jittered-grid antialiasing for any per-pixel raytracer
+
+statistics/                             — fitting parameters to a sample
+  fit.hpp                                fit_pass — one pass, the loss and gradient from the caller, the step from a rule
 
 discrete/                               — finite sets and the rules of chess
   finite_set.hpp        172 lines        FiniteSet<T> — ∪ ∩ ∖ △ ⊆, power_set, cartesian

@@ -6,6 +6,7 @@
 #  include <array>
 #  include <cmath>
 #  include <cstddef>
+#  include <cstdint>
 #endif
 
 SPATIUM_EXPORT namespace spatium::inline algebra {
@@ -30,6 +31,29 @@ template <std::size_t N, Scalar T = double> struct AdaGrad {
             squared[j] = squared[j] + gradient[j] * gradient[j];
             if (squared[j] > T{0})
                 params[j] = params[j] - rate * gradient[j] / sqrt(squared[j]);
+        }
+    }
+};
+
+// Adam (Kingma and Ba 2015): a running mean m of the gradient and v of its square, each
+// corrected for starting at zero, and a step of rate * m / (sqrt(v) + epsilon). The first step
+// is rate * g / (|g| + epsilon): the rate, signed, for any gradient well above epsilon; scaling
+// every gradient by c changes the steps only through epsilon.
+template <std::size_t N, Scalar T = double> struct Adam {
+    T beta1{0.9}, beta2{0.999}, epsilon{1e-8};
+    std::array<T, N> mean{}, square{};
+    std::uint64_t steps = 0;
+
+    void step(std::array<T, N>& params, const std::array<T, N>& gradient, T rate) {
+        using std::pow;
+        using std::sqrt;
+        ++steps;
+        const T k = T(static_cast<double>(steps));
+        const T c1 = T{1} - pow(beta1, k), c2 = T{1} - pow(beta2, k);
+        for (std::size_t j = 0; j < N; ++j) {
+            mean[j] = beta1 * mean[j] + (T{1} - beta1) * gradient[j];
+            square[j] = beta2 * square[j] + (T{1} - beta2) * gradient[j] * gradient[j];
+            params[j] = params[j] - rate * (mean[j] / c1) / (sqrt(square[j] / c2) + epsilon);
         }
     }
 };
