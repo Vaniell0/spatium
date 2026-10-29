@@ -1,7 +1,7 @@
 // chess_agent -- an agent that knows how each piece moves and nothing else, learning to choose
 // among the legal moves it is handed.
 //
-//   chess_agent [--observe G] [--play G] [--reinforce G] [--seed S]
+//   chess_agent [--observe G] [--play G] [--distill G] [--reinforce G] [--seed S]
 //
 // The agent is `LinearSoftmax` (algebra/models/softmax.hpp), trained by `AdaGrad`
 // (algebra/analysis/optimize.hpp), over rows of numbers (discrete/move_features.hpp). A row has two
@@ -21,6 +21,10 @@
 //                 teacher, where the teacher has something to prefer.
 //   --play G      the untrained agent, the agent trained by `--observe`, and the teacher, each
 //                 against a random player for G games.
+//   --distill G   the agent trained by `--observe`, distilled into trees of depth 1 to 8 grown on
+//                 the moves of G random games and measured on G others: the divergence of the
+//                 tree's distribution from the agent's, how often their best moves agree, and the
+//                 tree's description length in bits, beside the agent's own.
 //   --reinforce G the agent plays a random player and, after each game, every move it chose is
 //                 made likelier if the game was won and less likely if it was lost. No teacher.
 //
@@ -30,7 +34,10 @@
 
 #include <spatium/algebra/analysis/optimize.hpp>
 #include <spatium/algebra/models/softmax.hpp>
+#include <spatium/algebra/models/tree.hpp>
 #include <spatium/discrete/move_features.hpp>
+#include <spatium/statistics/information.hpp>
+#include <spatium/statistics/tree_fit.hpp>
 #include <spatium/discrete/position.hpp>
 
 #include <algorithm>
@@ -247,6 +254,74 @@ int observe(int games, std::uint64_t seed, double rate, Agent& agent) {
     return failures;
 }
 
+// The positions of `games` games of random play, each as the rows of its legal moves and the
+// index of the teacher's choice there.
+struct Seen {
+    std::vector<Row> rows;
+    std::size_t teacher;
+};
+std::vector<Seen> positions(int games, std::uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    std::vector<Seen> out;
+    for (int g = 0; g < games; ++g) {
+        Position p = Position::initial();
+        for (int ply = 0; ply < ply_limit; ++ply) {
+            const MoveList moves = legal_moves(p);
+            if (!moves.size)
+                break;
+            out.push_back({rows_of(p, moves), teacher_choice(p, moves, rng)});
+            p = p.made(moves.moves[rng() % static_cast<std::size_t>(moves.size)]);
+        }
+    }
+    return out;
+}
+
+// The agent distilled into trees of growing depth, each grown on the agent's scores of the moves
+// of one set of positions and measured on another: the mean KL(agent | tree) of the two
+// distributions over the legal moves, how often the tree's best move is the agent's and the
+// teacher's, and the tree's description length. The agent's own line is first: its weights as
+// the description, nothing lost.
+void distill(const Agent& agent, int games, std::uint64_t seed) {
+    using Tree = spatium::ScoreTree<columns>;
+    const auto train = positions(games, seed), held = positions(games, seed + 777);
+    std::vector<Row> rows;
+    std::vector<double> scores;
+    for (const Seen& s : train)
+        for (const Row& r : s.rows)
+            rows.push_back(r), scores.push_back(agent.score(r));
+    std::println("\ndistilling the agent into trees: {} moves of {} positions to grow on, {} positions to measure on",
+                 rows.size(), train.size(), held.size());
+    std::println("model            bits    KL(agent | model)   agrees with agent   with teacher");
+    auto measure = [&](auto&& score_of) {
+        double kl = 0;
+        int with_agent = 0, with_teacher = 0;
+        for (const Seen& s : held) {
+            std::vector<double> mine(s.rows.size()), p(s.rows.size()), q(s.rows.size());
+            for (std::size_t i = 0; i < s.rows.size(); ++i)
+                mine[i] = score_of(s.rows[i]);
+            agent.distribution(s.rows, p);
+            spatium::softmax(std::span<const double>(mine), std::span<double>(q));
+            kl += spatium::statistics::kl_divergence(std::span<const double>(p), std::span<const double>(q));
+            const auto best = static_cast<std::size_t>(std::ranges::max_element(mine) - mine.begin());
+            with_agent += best == agent.choose(s.rows);
+            with_teacher += best == s.teacher;
+        }
+        const double n = double(held.size());
+        return std::array{kl / n, with_agent / n, with_teacher / n};
+    };
+    const auto own = measure([&](const Row& r) { return agent.score(r); });
+    std::println("{:<14} {:6}    {:17.4f}   {:16.1f}%   {:11.1f}%", "linear agent", columns * 32, own[0],
+                 100 * own[1], 100 * own[2]);
+    for (std::size_t depth : {1u, 2u, 4u, 6u, 8u}) {
+        const Tree tree = spatium::statistics::fit_tree<columns>(std::span<const Row>(rows),
+                                                                  std::span<const double>(scores),
+                                                                  spatium::statistics::TreeOptions{.depth = depth, .min_leaf = 8});
+        const auto m = measure([&](const Row& r) { return tree.score(r); });
+        std::println("tree, depth {:<2} {:6.0f}    {:17.4f}   {:16.1f}%   {:11.1f}%", depth, tree.bits(), m[0],
+                     100 * m[1], 100 * m[2]);
+    }
+}
+
 void reinforce(int games, std::uint64_t seed) {
     constexpr double rate = 0.05;
     std::println("\nreinforcing from nothing, against a random player (no teacher)");
@@ -286,7 +361,7 @@ void reinforce(int games, std::uint64_t seed) {
 } // namespace
 
 int main(int argc, char** argv) {
-    int observe_games = 0, play_games = 0, reinforce_games = 0;
+    int observe_games = 0, play_games = 0, reinforce_games = 0, distill_games = 0;
     std::uint64_t seed = 1;
     double rate = 10;
     for (int i = 1; i < argc; ++i) {
@@ -296,6 +371,8 @@ int main(int argc, char** argv) {
             observe_games = std::atoi(next().c_str());
         else if (a == "--play")
             play_games = std::atoi(next().c_str());
+        else if (a == "--distill")
+            distill_games = std::atoi(next().c_str());
         else if (a == "--reinforce")
             reinforce_games = std::atoi(next().c_str());
         else if (a == "--rate")
@@ -307,7 +384,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
-    if (!observe_games && !play_games && !reinforce_games)
+    if (!observe_games && !play_games && !reinforce_games && !distill_games)
         observe_games = 256, play_games = 200, reinforce_games = 2000;
 
     int failures = 0;
@@ -326,6 +403,8 @@ int main(int argc, char** argv) {
             "the teacher", versus_random(Player::Teacher, Agent{}, 0.2, play_games, seed + 1)
         );
     }
+    if (distill_games)
+        distill(trained, distill_games, seed + 31);
     if (reinforce_games)
         reinforce(reinforce_games, seed);
     std::println("{}", failures ? "FAILED" : "checks passed");

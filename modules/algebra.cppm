@@ -22,6 +22,7 @@ export import :groups_hyperoctahedral;
 export import :groups_action;
 export import :models_softmax;
 export import :models_network;
+export import :models_tree;
 export import :analysis_optimize;
 export import :dual;
 export import :ode;
