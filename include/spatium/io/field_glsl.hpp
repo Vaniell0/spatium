@@ -272,6 +272,8 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
             case Op::Point:  e = std::format("{}[{}]", in.point, n.k); break;
             case Op::Hash:   e = std::format("field_instance_unit({}.id, {}u)", in.rec, n.k); break;
             case Op::Sqrt:   e = std::format("sqrt({})", A); break;
+            case Op::Log:    e = std::format("log({})", A); break;
+            case Op::Exp:    e = std::format("exp({})", A); break;
             case Op::Gather:
                 e = std::format("field_gather({}u, {}u, {}, {}u)", b.points + n.table, n.extent, A, n.k);
                 break;
