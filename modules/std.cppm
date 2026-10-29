@@ -657,6 +657,9 @@ export namespace std
   using std::bit_ceil;
   using std::bit_floor;
   using std::bit_width;
+#if __cpp_lib_byteswap
+  using std::byteswap;
+#endif
   using std::countl_one;
   using std::countl_zero;
   using std::countr_one;

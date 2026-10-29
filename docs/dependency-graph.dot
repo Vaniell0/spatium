@@ -13,6 +13,7 @@ digraph spatium_dependencies {
     "geometry" -> "spatium";
     "io" -> "algebra";
     "io" -> "core";
+    "io" -> "discrete";
     "io" -> "geometry";
     "io" -> "mesh";
     "io" -> "render";

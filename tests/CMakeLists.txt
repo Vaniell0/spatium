@@ -13,6 +13,11 @@ add_executable(spatium_tests
     test_polygon.cpp
     test_spherical_polygon.cpp
     test_combinatorics.cpp
+    test_group_action.cpp
+    test_bitboard.cpp
+    test_position.cpp
+    test_lattice.cpp
+    test_return_time.cpp
     test_intersection.cpp
     test_sphere.cpp
     test_hyperbolic.cpp

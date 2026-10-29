@@ -116,6 +116,8 @@ Used as constraints in generic functions (`algebra/functions.hpp`):
 
 Concrete implementations: `SO3` (`algebra/groups/so3.hpp`), `SE3` (`algebra/groups/se3.hpp`).
 
+A finite group that lists its elements is a `FiniteGroup`; a group acting on a set is a `GroupAction<A, G, X>` (`act(g, x)`, with `orbit`, `stabilizer`, `orbits` and `verify_action` in `algebra/groups/action.hpp`). `HyperoctahedralGroup<N>` (`algebra/groups/hyperoctahedral.hpp`), the signed permutations of N axes, acts on integer vectors and on the cells of a cube; the pieces of `discrete/lattice.hpp` are its orbits.
+
 ### Physics Concepts (`physics/mechanics/*.hpp`)
 
 ```
@@ -258,6 +260,8 @@ algebra/                                — linear algebra, complex, polynomials
   verify.hpp             53 lines        verify_matrix_group()
   groups/so3.hpp        119 lines        SO3 — rotation group, Rodrigues formula
   groups/se3.hpp        144 lines        SE3 — rigid body motions
+  groups/hyperoctahedral.hpp             HyperoctahedralGroup<N> — signed permutations; actions on vectors and cube cells
+  groups/action.hpp                      GroupAction, FiniteGroup, orbit, stabilizer, orbits, verify_action
 
 spaces/                                 — concrete mathematical spaces
   euclidean.hpp          94 lines        Euclidean<N,T> — flat space, satisfies all concepts
@@ -313,8 +317,12 @@ spatial/                                — acceleration structures
 render/                                 — CPU-raytracer utilities
   supersample.hpp                       supersample_pixel() — NxN jittered-grid antialiasing for any per-pixel raytracer
 
-discrete/                               — finite set theory
+discrete/                               — finite sets and the rules of chess
   finite_set.hpp        172 lines        FiniteSet<T> — ∪ ∩ ∖ △ ⊆, power_set, cartesian
+  bitboard.hpp                           Square, Bitboard (the 8x8 board in one word), the board's D4
+  attacks.hpp                            the squares a piece reaches: leapers by table, sliders by ray and blocker
+  position.hpp                           PositionSetup, Position::from_setup, legal_moves, perft, outcome
+  lattice.hpp                            a box of any number of axes; a piece as an orbit of the cube's symmetries
 
 physics/                                — atomic physics + classical mechanics
   elements.hpp                          Element DB (118/118) — backed by src/physics/elements.cpp, the one compiled (non-header-only) translation unit in the library, see "Header-only spine" below
@@ -350,6 +358,7 @@ io/                                     — import/export
   svg.hpp               215 lines        SVG 2D writer — wireframe, filled, colored
   obj.hpp                89 lines        OBJ load/save
   stl.hpp               124 lines        STL load/save (binary + ASCII)
+  chess.hpp                              FEN, SAN, `e2e4`; a FEN is read into a PositionSetup
 
 viewer/                                 — Vulkan 1.3 real-time viewer
   app.hpp               221 lines        Multi-mesh, point clouds, ImGui, screenshots
