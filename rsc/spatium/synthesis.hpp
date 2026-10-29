@@ -246,15 +246,31 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
     for (double v : y)
         floor += v * v;
     floor *= 1e-26;
-    if (terms.size() * terms.size() <= spec.exhaustive_pairs * 2) {
+    // all of them when there are few enough, else all among the first ones, which are the
+    // smallest: the terms come in order of size, so the short forms are always tried
+    const std::size_t pool = std::min(terms.size(),
+                                      static_cast<std::size_t>(std::sqrt(2.0 * double(spec.exhaustive_pairs))));
+    {
         double top = 1e300;
-        for (std::size_t a = 0; a < terms.size(); ++a)
-            for (std::size_t b = a; b < terms.size(); ++b) {
+        for (std::size_t a = 0; a < pool; ++a)
+            for (std::size_t b = a; b < pool; ++b) {
                 std::vector<std::size_t> set = a == b ? std::vector<std::size_t>{a} : std::vector<std::size_t>{a, b};
                 if (set.size() > spec.max_terms)
                     continue;
                 const double e = std::max(sample_error(set), floor);
-                if (e < top * (1 - 1e-12) || (e <= top && set.size() < seed.size()))
+                // at equal error the smaller set wins, then the one of fewer IR nodes: the
+                // interval's variable t is (x - centre) * scale, five nodes against x's one, so a
+                // form in x itself is kept where it does as well
+                const auto nodes_of = [&](const std::vector<std::size_t>& t) {
+                    std::size_t n = 0;
+                    for (std::size_t i : t)
+                        n += terms[i].expr.size();
+                    return n;
+                };
+                const bool better = e < top * (1 - 1e-12) ||
+                                    (e <= top && (set.size() < seed.size() ||
+                                                  (set.size() == seed.size() && nodes_of(set) < nodes_of(seed))));
+                if (better)
                     top = e, seed = std::move(set);
             }
     }
@@ -283,8 +299,10 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
         }
         // the greedy pick cannot take a term back: swap each chosen one for any candidate while
         // that lowers the error at the samples
-        double current = sample_error(chosen);
-        for (bool improved = true; improved;) {
+        // below rounding there is nothing to improve, and a swap that only moves the noise would
+        // trade a short form for a long one
+        double current = std::max(sample_error(chosen), floor);
+        for (bool improved = current > floor; improved;) {
             improved = false;
             for (std::size_t j = 0; j < chosen.size(); ++j)
                 for (std::size_t t = 0; t < terms.size(); ++t) {
@@ -292,7 +310,7 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
                         continue;
                     auto trial = chosen;
                     trial[j] = t;
-                    const double e = sample_error(trial);
+                    const double e = std::max(sample_error(trial), floor);
                     if (e < current * (1 - 1e-12)) {
                         chosen = std::move(trial), current = e, improved = true;
                     }

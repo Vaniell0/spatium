@@ -11,6 +11,7 @@
 #include <rsc/spatium/synthesis.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/io/field_pod.hpp>
+#include <spatium/io/field_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -187,4 +188,20 @@ TEST_CASE("synthesis: the deflection of light at 1e-4 and 1e-6", "[.deep][rsc][s
     const auto fine = rsc::synthesize_piecewise(alpha, {.lo = lo, .hi = hi, .tolerance = 1e-6, .max_terms = 4}, 1e-5);
     CHECK(!fine.back().accepted);
     CHECK(fine.size() > mid.size());
+}
+
+TEST_CASE("synthesis: an answer that x itself writes is written in x, and reads as text", "[rsc][synthesis]") {
+    // On [0, 10] the interval's variable t = (x - 5) * 0.2 fits a line as well as x does; at equal
+    // error the form of fewer IR nodes is kept, so the answer reads in x.
+    const auto s = rsc::synthesize([](double x) { return 1 + x / 6; }, {.lo = 0, .hi = 10, .tolerance = 1e-12, .relative = false});
+    REQUIRE(s.accepted);
+    const auto text = spatium::io::build::to_text(s.expr, "p");
+    REQUIRE(text.has_value());
+    INFO(*text);
+    CHECK(text->find("p") != std::string::npos);
+    CHECK(text->find("- 5") == std::string::npos); // no t in it
+    // the text of a known field, and a field that has no text
+    using F = spatium::io::build::Field<double>;
+    CHECK(*spatium::io::build::to_text(sqrt(F::u()) + F(2.0) * log(F::v()), "x", "y") == "(sqrt(x) + 2 * log(y))");
+    CHECK_FALSE(spatium::io::build::to_text(F([](double, double) { return 0.0; })).has_value());
 }
