@@ -240,6 +240,12 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
     // Sets of one and two terms are tried in full (they are cheap and a greedy pick misses the
     // pair whose members each explain little alone); larger sets grow greedily from the best pair.
     std::vector<std::size_t> seed;
+    // errors below rounding are all the same error: among those the smaller set wins, which is
+    // the description-length rule (a second term that only refits the noise is not kept)
+    double floor = 0;
+    for (double v : y)
+        floor += v * v;
+    floor *= 1e-26;
     if (terms.size() * terms.size() <= spec.exhaustive_pairs * 2) {
         double top = 1e300;
         for (std::size_t a = 0; a < terms.size(); ++a)
@@ -247,7 +253,7 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
                 std::vector<std::size_t> set = a == b ? std::vector<std::size_t>{a} : std::vector<std::size_t>{a, b};
                 if (set.size() > spec.max_terms)
                     continue;
-                const double e = sample_error(set);
+                const double e = std::max(sample_error(set), floor);
                 if (e < top * (1 - 1e-12) || (e <= top && set.size() < seed.size()))
                     top = e, seed = std::move(set);
             }
