@@ -322,6 +322,7 @@ render/                                 — CPU-raytracer utilities
 
 statistics/                             — fitting parameters to a sample
   fit.hpp                                fit_pass — one pass, the loss and gradient from the caller, the step from a rule
+  information.hpp                        entropy, cross_entropy, kl_divergence, in_bits
 
 discrete/                               — finite sets and the rules of chess
   finite_set.hpp        172 lines        FiniteSet<T> — ∪ ∩ ∖ △ ⊆, power_set, cartesian
