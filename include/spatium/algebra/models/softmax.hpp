@@ -72,9 +72,12 @@ template <std::size_t K, Scalar T = double> class LinearSoftmax {
         return best;
     }
 
-    // -sum_i target[i] log p[i]: how surprised the model is by the target distribution.
-    T cross_entropy(std::span<const Row> list, std::span<const T> target) const {
-        const Normaliser n = normaliser(list, T{1});
+    // -sum_i target[i] log p[i]: how surprised the model is by the target distribution. At a
+    // temperature, p is the distribution at that temperature: distilling a teacher is this with
+    // the teacher's distribution at the same temperature as the target, and T^2 times it is the
+    // usual scale (the gradient below is then T times the difference of the two distributions).
+    T cross_entropy(std::span<const Row> list, std::span<const T> target, T temperature = T{1}) const {
+        const Normaliser n = normaliser(list, temperature);
         T loss{0};
         for (std::size_t i = 0; i < list.size(); ++i)
             if (target[i] != T{0})
@@ -86,12 +89,13 @@ template <std::size_t K, Scalar T = double> class LinearSoftmax {
         return -normaliser(list, T{1}).log_chance(score(list[chosen]));
     }
 
-    // The gradient of the cross-entropy in the weights: sum_i (p[i] - target[i]) row[i].
-    Weights gradient(std::span<const Row> list, std::span<const T> target) const {
-        const Normaliser n = normaliser(list, T{1});
+    // The gradient of the cross-entropy in the weights: sum_i (p[i] - target[i]) row[i] /
+    // temperature.
+    Weights gradient(std::span<const Row> list, std::span<const T> target, T temperature = T{1}) const {
+        const Normaliser n = normaliser(list, temperature);
         Weights g{};
         for (std::size_t i = 0; i < list.size(); ++i) {
-            const T pull = n.chance(score(list[i])) - target[i];
+            const T pull = (n.chance(score(list[i])) - target[i]) / temperature;
             for (std::size_t j = 0; j < K; ++j)
                 g[j] = g[j] + pull * list[i][j];
         }
