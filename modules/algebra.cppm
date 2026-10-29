@@ -18,6 +18,8 @@ export import :monte_carlo;
 export import :verify;
 export import :groups_so3;
 export import :groups_se3;
+export import :groups_hyperoctahedral;
+export import :groups_action;
 export import :dual;
 export import :ode;
 export import :linear_solve;

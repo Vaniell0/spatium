@@ -105,6 +105,8 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/verify.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_so3.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_se3.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_hyperoctahedral.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_action.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/dual.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/ode.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/linear_solve.cppm
@@ -167,7 +169,7 @@ if(SPATIUM_USE_MODULES)
     spatium_module(NAME spatium_io_module
         PARTITIONS ${CMAKE_CURRENT_SOURCE_DIR}/modules/io.cppm
         DEPS spatium_sdk spatium_core_module spatium_algebra_module
-             spatium_spaces_module spatium_mesh_module)
+             spatium_spaces_module spatium_mesh_module spatium_discrete_module)
     add_library(Spatium::io_module ALIAS spatium_io_module)
 
     # ── spatium.physics (Phase 6): interface + impl unit
