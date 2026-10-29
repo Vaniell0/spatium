@@ -264,6 +264,7 @@ algebra/                                — linear algebra, complex, polynomials
   groups/action.hpp                      GroupAction, FiniteGroup, orbit, stabilizer, orbits, verify_action
   models/softmax.hpp                     LinearSoftmax<K, T> — softmax over a linear score, gradient, no allocation
   models/network.hpp                     TanhNet<F, H, T> — one hidden tanh layer, squared loss, backward pass
+  models/tree.hpp                        ScoreTree<K, T> — column thresholds scoring a row, bits; softmax of scores
   analysis/optimize.hpp                  AdaGrad<N, T>, Adam<N, T> — step rules given a gradient
 
 spaces/                                 — concrete mathematical spaces
@@ -323,6 +324,7 @@ render/                                 — CPU-raytracer utilities
 statistics/                             — fitting parameters to a sample
   fit.hpp                                fit_pass — one pass, the loss and gradient from the caller, the step from a rule
   information.hpp                        entropy, cross_entropy, kl_divergence, in_bits
+  tree_fit.hpp                           fit_tree — a regression tree by CART
 
 discrete/                               — finite sets and the rules of chess
   finite_set.hpp        172 lines        FiniteSet<T> — ∪ ∩ ∖ △ ⊆, power_set, cartesian

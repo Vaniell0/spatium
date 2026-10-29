@@ -58,6 +58,7 @@ digraph spatium_dependencies {
     "spatium" -> "physics";
     "spatium" -> "spaces";
     "spatium" -> "spatial";
+    "statistics" -> "algebra";
     "statistics" -> "spatium";
     "viewer" -> "algebra";
     "viewer" -> "core";
