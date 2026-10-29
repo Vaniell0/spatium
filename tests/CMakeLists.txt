@@ -20,6 +20,8 @@ add_executable(spatium_tests
     test_lattice.cpp
     test_move_features.cpp
     test_softmax.cpp
+    test_network.cpp
+    test_tree_search.cpp
     test_return_time.cpp
     test_return_probability.cpp
     test_intersection.cpp

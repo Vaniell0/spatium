@@ -67,6 +67,12 @@ if(SPATIUM_BUILD_TESTS)
     add_test(NAME chess_agent_observes COMMAND chess_agent --observe 64 --seed 1)
 endif()
 
+# The tree search of rsc/core learning chess from nothing by playing itself:
+# PUCT over a linear softmax prior and a tanh net value, fitted by AdaGrad and
+# Adam through statistics::fit_pass, games in threads, the player measured
+# against a random one, a greedy one and a two-ply material search. CPU only.
+spatium_add_example(NAME chess_zero OPTIONS -O3 -march=native INCLUDE_DIRS ${PROJECT_SOURCE_DIR})
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel
