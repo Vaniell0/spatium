@@ -1,0 +1,167 @@
+// Synthesis of particular analytic solutions on a region, and piecewise ones.
+//
+// Each claim is held against a second route: a found expression against the function it was
+// asked for, at points it was not fitted on; the field the synthesis writes against the same
+// field lowered to plain data (io/field_pod.hpp), so what is found is an IR artifact and not a
+// closure; the deflection of a light ray by a Schwarzschild hole, the reference, by quadrature
+// against its closed form in elliptic integrals. Each check gets a case it must fail: near the
+// critical impact parameter the deflection diverges like a logarithm, which the operations of
+// the IR do not hold, and the pieces there stop at the narrowest width allowed.
+
+#include <rsc/spatium/synthesis.hpp>
+#include <spatium/algebra/quadrature.hpp>
+#include <spatium/io/field_pod.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
+#include <numbers>
+#include <random>
+
+using Catch::Matchers::WithinAbs;
+
+namespace {
+
+// The deflection of a null ray of impact parameter b by a hole of mass 1 (b_c = 3 sqrt 3).
+double closest_approach(double b) {
+    double r = b;
+    for (int i = 0; i < 100; ++i) { // the largest root of r^3 - b^2 (r - 2)
+        const double step = (r * r * r - b * b * (r - 2)) / (3 * r * r - b * b);
+        r -= step;
+        if (std::abs(step) < 1e-15 * r)
+            break;
+    }
+    return r;
+}
+
+// Darwin's closed form, through the elliptic integrals of <cmath>.
+double deflection(double b) {
+    const double r0 = closest_approach(b), q = std::sqrt((r0 - 2) * (r0 + 6));
+    const double k = std::sqrt((q - r0 + 6) / (2 * q));
+    const double psi = std::asin(std::sqrt((q - r0 + 2) / (q - r0 + 6)));
+    return -std::numbers::pi + 4 * std::sqrt(r0 / q) * (std::comp_ellint_1(k) - std::ellint_1(k, psi));
+}
+
+// 2 int_0^u0 du / sqrt(1/b^2 - u^2 + 2 u^3) - pi, with u = u0 - s^2 taking the root at the end
+// away, and the radicand written as a product so that nothing cancels.
+double deflection_by_quadrature(double b) {
+    const double u0 = 1 / closest_approach(b);
+    const auto f = [&](double s) {
+        const double u = u0 - s * s;
+        return 2 / std::sqrt((u0 + u) - 2 * (u0 * u0 + u0 * u + u * u));
+    };
+    return 2 * spatium::integrate(f, spatium::Finite<double>{0, std::sqrt(u0)}).value - std::numbers::pi;
+}
+
+const double critical = 3 * std::sqrt(3.0);
+
+std::size_t accepted(const std::vector<rsc::Solution>& pieces) {
+    std::size_t n = 0;
+    for (const auto& p : pieces)
+        n += p.accepted;
+    return n;
+}
+
+} // namespace
+
+TEST_CASE("synthesis: an expression the operations can write is found exactly", "[rsc][synthesis]") {
+    const rsc::SynthesisSpec spec{.lo = 0.1, .hi = 1, .tolerance = 1e-10,
+                                  .unary = {rsc::Unary::Sqrt, rsc::Unary::Sin}};
+    const auto f = [](double x) { return 3 * x * x + 2 * std::sin(x); };
+    const auto s = rsc::synthesize(f, spec);
+    REQUIRE(s.accepted);
+    CHECK(s.terms == 2);
+    std::mt19937 rng(1);
+    std::uniform_real_distribution<double> u(0.1, 1);
+    const auto pod = spatium::io::build::lower(s.expr);
+    REQUIRE(pod.has_value());
+    for (int i = 0; i < 200; ++i) {
+        const double x = u(rng);
+        CHECK_THAT(s.expr(x, 0.0), WithinAbs(f(x), 1e-10 * f(x)));
+        CHECK(spatium::io::build::interpret(*pod, x, 0.0) == s.expr(x, 0.0)); // the lowered form
+    }
+}
+
+TEST_CASE("synthesis: a function the operations cannot write takes more pieces the tighter it is asked", "[rsc][synthesis]") {
+    // log(1 + x) with no logarithm among the operations
+    const auto f = [](double x) { return std::log1p(x); };
+    std::size_t last = 0;
+    for (double tol : {1e-3, 1e-5, 1e-7}) {
+        INFO("tolerance " << tol);
+        const rsc::SynthesisSpec spec{.lo = 0, .hi = 1, .tolerance = tol, .relative = false, .max_terms = 3};
+        const auto pieces = rsc::synthesize_piecewise(f, spec, 1e-3);
+        CHECK(accepted(pieces) == pieces.size());
+        CHECK(pieces.size() >= last);
+        last = pieces.size();
+        // the pieces cover [0, 1] in order and each holds at points it was not certified on
+        CHECK(pieces.front().lo == 0.0);
+        CHECK(pieces.back().hi == 1.0);
+        std::mt19937 rng(7);
+        for (std::size_t i = 0; i < pieces.size(); ++i) {
+            if (i > 0)
+                CHECK(pieces[i].lo == pieces[i - 1].hi);
+            std::uniform_real_distribution<double> u(pieces[i].lo, pieces[i].hi);
+            for (int k = 0; k < 20; ++k) {
+                const double x = u(rng);
+                CHECK(std::abs(pieces[i].expr(x, 0.0) - f(x)) <= 2 * tol);
+            }
+        }
+    }
+    CHECK(last > 4); // measured: 1, 4 and 16 pieces
+}
+
+TEST_CASE("synthesis: the deflection of light, its reference held two ways", "[rsc][synthesis][relativity]") {
+    for (double b : {critical * (1 + 1e-4), critical * 1.1, 7.0, 30.0, 1000.0})
+        CHECK_THAT(deflection_by_quadrature(b), WithinAbs(deflection(b), 1e-12 * deflection(b) + 1e-14));
+    // the weak field: 4 / b + 15 pi / (4 b^2) + 128 / (3 b^3) + O(b^-4); at b = 1e4 the closed
+    // form subtracts two elliptic integrals that agree to four digits, so it holds about 1e-13
+    CHECK_THAT(deflection(1e4), WithinAbs(4e-4 + 15 * std::numbers::pi / 4e8 + 128 / 3e12, 1e-12));
+}
+
+TEST_CASE("synthesis: the deflection of light in pieces of x = 1/b", "[rsc][synthesis][relativity]") {
+    const auto alpha = [](double x) { return deflection(1 / x); };
+    const rsc::SynthesisSpec spec{.lo = 1e-4, .hi = (1 / critical) * (1 - 1e-4), .tolerance = 1e-2, .max_terms = 4};
+    const auto pieces = rsc::synthesize_piecewise(alpha, spec, 1e-5);
+    INFO(pieces.size() << " pieces");
+    CHECK(accepted(pieces) == pieces.size());
+    // the pieces crowd towards the critical parameter, where the deflection diverges: more than
+    // half of them lie within b < 6 (measured: 11 pieces, the first from b = 20.8 to 10^4)
+    std::size_t near = 0;
+    for (const auto& p : pieces)
+        near += 1 / p.lo < 6;
+    CHECK(2 * near > pieces.size());
+    CHECK(1 / pieces.front().hi < 21);
+}
+
+TEST_CASE("synthesis: next to the critical parameter the operations run out", "[rsc][synthesis][relativity]") {
+    // The deflection diverges like -log(b / b_c - 1) there and the logarithm is not among the
+    // operations: each decade nearer b_c costs more pieces at the same tolerance, and an end
+    // nearer than the narrowest piece allowed is not reached at all.
+    const auto alpha = [](double x) { return deflection(1 / x); };
+    const double xc = 1 / critical;
+    std::size_t last = 0;
+    for (double gap : {1e-2, 1e-3, 1e-4}) {
+        INFO("gap " << gap);
+        const auto pieces = rsc::synthesize_piecewise(
+            alpha, {.lo = xc * (1 - 3e-2), .hi = xc * (1 - gap), .tolerance = 1e-4, .max_terms = 4}, 1e-9);
+        CHECK(accepted(pieces) == pieces.size());
+        CHECK(pieces.size() > last);
+        last = pieces.size();
+    }
+    // 2e-8 in x from the divergence, with no piece narrower than 1e-5: the last one fails
+    const auto out = rsc::synthesize_piecewise(
+        alpha, {.lo = xc * (1 - 3e-2), .hi = xc * (1 - 1e-7), .tolerance = 1e-4, .max_terms = 4}, 1e-5);
+    CHECK(!out.back().accepted);
+    CHECK(out.back().hi == xc * (1 - 1e-7));
+}
+
+TEST_CASE("synthesis: the deflection of light at 1e-4 and 1e-6", "[.deep][rsc][synthesis][relativity]") {
+    // measured: 19 pieces, all accepted, at 1e-4; 59 pieces, the last one not, at 1e-6
+    const auto alpha = [](double x) { return deflection(1 / x); };
+    const double lo = 1e-4, hi = (1 / critical) * (1 - 1e-4);
+    const auto mid = rsc::synthesize_piecewise(alpha, {.lo = lo, .hi = hi, .tolerance = 1e-4, .max_terms = 4}, 1e-5);
+    CHECK(accepted(mid) == mid.size());
+    const auto fine = rsc::synthesize_piecewise(alpha, {.lo = lo, .hi = hi, .tolerance = 1e-6, .max_terms = 4}, 1e-5);
+    CHECK(!fine.back().accepted);
+    CHECK(fine.size() > mid.size());
+}

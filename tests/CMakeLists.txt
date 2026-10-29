@@ -124,6 +124,7 @@ add_executable(spatium_tests
     test_spacetime_scene.cpp
     test_chart.cpp
     test_rsc_graph.cpp
+    test_rsc_synthesis.cpp
 )
 
 target_include_directories(spatium_tests PRIVATE
