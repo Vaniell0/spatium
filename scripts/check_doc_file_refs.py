@@ -83,6 +83,7 @@ NOT_IN_TREE = {
     "base_task.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
     "custom_layer.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
     "describe.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
+    "toy_search.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
     "embedded_base.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
     "task.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
     "tier1_ops.hpp": "removed 2026-10-20 with the RSC prototype, tag rsc-prototype-final; rsc/README.md describes it",
