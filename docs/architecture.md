@@ -262,6 +262,8 @@ algebra/                                — linear algebra, complex, polynomials
   groups/se3.hpp        144 lines        SE3 — rigid body motions
   groups/hyperoctahedral.hpp             HyperoctahedralGroup<N> — signed permutations; actions on vectors and cube cells
   groups/action.hpp                      GroupAction, FiniteGroup, orbit, stabilizer, orbits, verify_action
+  models/softmax.hpp                     LinearSoftmax<K, T> — softmax over a linear score, gradient, no allocation
+  analysis/optimize.hpp                  AdaGrad<N, T> — a step rule given a gradient
 
 spaces/                                 — concrete mathematical spaces
   euclidean.hpp          94 lines        Euclidean<N,T> — flat space, satisfies all concepts
@@ -323,6 +325,7 @@ discrete/                               — finite sets and the rules of chess
   attacks.hpp                            the squares a piece reaches: leapers by table, sliders by ray and blocker
   position.hpp                           PositionSetup, Position::from_setup, legal_moves, perft, outcome
   lattice.hpp                            a box of any number of axes; a piece as an orbit of the cube's symmetries
+  move_features.hpp                      a move as a row of numbers: its geometry from the piece's vectors
 
 physics/                                — atomic physics + classical mechanics
   elements.hpp                          Element DB (118/118) — backed by src/physics/elements.cpp, the one compiled (non-header-only) translation unit in the library, see "Header-only spine" below

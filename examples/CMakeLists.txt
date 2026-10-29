@@ -56,6 +56,17 @@ spatium_add_example(NAME scatter_regen OPTIONS -O3 -march=native)
 # with the continuous pass on and off by an independent piercing count.
 spatium_add_example(NAME napkins OPTIONS -O3 -march=native)
 
+# An agent that knows only how each piece moves, choosing among the legal moves:
+# a linear softmax over rows of numbers (the move's geometry from the piece's
+# vectors, plus what the game says it is worth), trained by AdaGrad from the
+# choices of a player it watches, or from won and lost games against a random
+# one. CPU only. Its short run is a test: it fails unless the agent agrees with
+# the player it watched in nine positions of ten where that player had a reason.
+spatium_add_example(NAME chess_agent OPTIONS -O3 -march=native)
+if(SPATIUM_BUILD_TESTS)
+    add_test(NAME chess_agent_observes COMMAND chess_agent --observe 64 --seed 1)
+endif()
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel

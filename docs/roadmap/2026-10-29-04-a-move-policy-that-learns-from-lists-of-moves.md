@@ -1,0 +1,15 @@
+---
+date: 2026-10-29
+title: a move as a row of numbers, a linear softmax that learns to choose among the legal moves, and the agent that plays with it
+files: [include/spatium/discrete/move_features.hpp, include/spatium/algebra/models/softmax.hpp, include/spatium/algebra/analysis/optimize.hpp, tests/test_move_features.cpp, tests/test_softmax.cpp, tests/test_allocations.cpp, examples/chess_agent.cpp, examples/chess_rows.hpp, examples/CMakeLists.txt, modules/algebra/models_softmax.cppm, modules/algebra/analysis_optimize.cppm]
+open:
+  - the agent's rows are linear in the weights; the value net, its tanh in Dual and the Adam rule come with the tree search, their caller
+  - the step rule is one per parameter vector of fixed size; a model whose parameters are not one std::array has no rule here yet
+  - nothing here plays a real opponent: the agent is measured against a random player and the hand-written one it watched, not against an engine
+---
+
+`discrete/move_features.hpp` turns a move into a row of numbers from nothing but the piece's vectors and the two cells: how far along each axis it went (largest first, so a move and its image under any symmetry of the box give the same row, held on two, three and four axes), how many steps of the piece's vector that took, whether it slid, and how far it ended from the centre. A game adds its own block with `join`.
+
+`algebra/models/softmax.hpp` is a softmax over a linear score of such rows, templated on the scalar. It allocates nothing: the distribution goes into the caller's buffer, and sampling, the cross-entropy and its gradient walk the list twice (the largest score and the sum, then each chance) with no buffer at all, which `test_allocations.cpp` holds at zero. The gradient is held against `Dual` carried through the cross-entropy, weight by weight, to 1e-12, and against a finite difference. `algebra/analysis/optimize.hpp` has the AdaGrad rule: its first step moves every parameter by exactly the rate, and scaling every gradient by a thousand changes no step, where plain gradient descent's steps scale. Trained by it on lists from a model whose weights are known, the softmax agrees with that model on more than 95% of lists it never saw; with rate zero it stays below 30%, chance being 10%.
+
+`examples/chess_agent` plays chess with it. A game ends where `discrete::outcome` ends it -- mate, stalemate, fifty moves, a dead position, a third repetition -- and is otherwise cut at 200 plies and decided by three points of material. Watching a hand-written player (material won, a piece left hanging counted against it, a mate above all) for 256 games, it agrees with that player in 99.0% of the 2967 positions where the player had a reason to prefer a move; against a random player it then scores 0.925 to the hand-written player's 0.948 and the untrained agent's 0.458 (200 games each). Reinforced from nothing by its own won and lost games against a random player, it reaches 0.910 in 2000 games. The whole default run is 7.3 s at -O3. `chess_agent --observe 64` is the ctest `chess_agent_observes`: it fails unless the agreement passes 90% (it is 97.4%, in 0.5 s).
