@@ -18,6 +18,8 @@ add_executable(spatium_tests
     test_bitboard.cpp
     test_position.cpp
     test_lattice.cpp
+    test_move_features.cpp
+    test_softmax.cpp
     test_return_time.cpp
     test_return_probability.cpp
     test_intersection.cpp

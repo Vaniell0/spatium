@@ -11,4 +11,5 @@ import spatium.geometry;
 #include <spatium/discrete/bitboard.hpp>
 #include <spatium/discrete/attacks.hpp>
 #include <spatium/discrete/lattice.hpp>
+#include <spatium/discrete/move_features.hpp>
 #include <spatium/discrete/position.hpp>

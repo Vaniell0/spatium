@@ -13,8 +13,10 @@
 #include <spatium/algebra/dual.hpp>
 #include <spatium/algebra/groups/action.hpp>
 #include <spatium/algebra/groups/hyperoctahedral.hpp>
+#include <spatium/algebra/analysis/optimize.hpp>
 #include <spatium/algebra/linear_solve.hpp>
 #include <spatium/algebra/matrix.hpp>
+#include <spatium/algebra/models/softmax.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/discrete/lattice.hpp>
 #include <spatium/discrete/position.hpp>
@@ -134,4 +136,26 @@ TEST_CASE("an orbit and a piece's reach are one reserved vector each", "[allocat
                                                          [](const discrete::Cell<2>&) { return false; })
                                            .size());
               }) <= 1.0);
+}
+
+TEST_CASE("the linear softmax and its step rule allocate nothing", "[allocations][algebra]") {
+    using Model = LinearSoftmax<4>;
+    const Model model(Model::Weights{1, -0.5, 2, 0.25});
+    std::array<Model::Row, 5> list{};
+    for (std::size_t i = 0; i < list.size(); ++i)
+        list[i] = {double(i), 1.0 / double(i + 1), 0.5, -double(i)};
+    std::array<double, 5> p{};
+    CHECK(allocations_per_call([&] {
+              model.distribution(list, p);
+              sink = sink + p[0];
+          }) == 0.0);
+    CHECK(allocations_per_call([&] { sink = sink + double(model.sample(list, 0.4)); }) == 0.0);
+    CHECK(allocations_per_call([&] { sink = sink + double(model.choose(list)); }) == 0.0);
+    CHECK(allocations_per_call([&] { sink = sink + model.cross_entropy(list, std::size_t{2}); }) == 0.0);
+    AdaGrad<4> rule;
+    Model learner;
+    CHECK(allocations_per_call([&] {
+              rule.step(learner.weights(), learner.gradient(list, std::size_t{2}), 0.1);
+              sink = sink + learner.weights()[0];
+          }) == 0.0);
 }

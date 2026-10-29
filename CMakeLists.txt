@@ -107,6 +107,8 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_se3.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_hyperoctahedral.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/groups_action.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/models_softmax.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/analysis_optimize.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/dual.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/ode.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/linear_solve.cppm

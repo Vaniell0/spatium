@@ -20,6 +20,8 @@ export import :groups_so3;
 export import :groups_se3;
 export import :groups_hyperoctahedral;
 export import :groups_action;
+export import :models_softmax;
+export import :analysis_optimize;
 export import :dual;
 export import :ode;
 export import :linear_solve;
