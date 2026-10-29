@@ -155,6 +155,29 @@ TEST_CASE("synthesis: next to the critical parameter the operations run out", "[
     CHECK(out.back().hi == xc * (1 - 1e-7));
 }
 
+TEST_CASE("synthesis: with the logarithm among the operations the critical neighbourhood is one piece", "[rsc][synthesis][relativity]") {
+    // The job's own variable there is y = b / b_c - 1 (b_c is a constant of the job, not a hint),
+    // and the deflection is -log(y) and a constant to leading order. Measured from y = 1e-6 to
+    // 1e-2: at 1e-4 one piece of 14 nodes against eight of 120; at 1e-6 four of 75 against 24 of
+    // 537; at 1e-8 six of 161 against 62 of 1555.
+    const auto alpha = [](double y) { return deflection(critical * (1 + y)); };
+    const rsc::SynthesisSpec without{.lo = 1e-6, .hi = 1e-2, .tolerance = 1e-4, .max_terms = 4};
+    rsc::SynthesisSpec with = without;
+    with.unary = {rsc::Unary::Sqrt, rsc::Unary::Log};
+    const auto a = rsc::synthesize_piecewise(alpha, without, 1e-9);
+    const auto b = rsc::synthesize_piecewise(alpha, with, 1e-9);
+    CHECK(accepted(a) == a.size());
+    CHECK(accepted(b) == b.size());
+    CHECK(b.size() == 1);
+    CHECK(a.size() >= 8);
+    std::size_t na = 0, nb = 0;
+    for (const auto& p : a)
+        na += p.nodes;
+    for (const auto& p : b)
+        nb += p.nodes;
+    CHECK(na > 5 * nb);
+}
+
 TEST_CASE("synthesis: the deflection of light at 1e-4 and 1e-6", "[.deep][rsc][synthesis][relativity]") {
     // measured: 19 pieces, all accepted, at 1e-4; 59 pieces, the last one not, at 1e-6
     const auto alpha = [](double x) { return deflection(1 / x); };

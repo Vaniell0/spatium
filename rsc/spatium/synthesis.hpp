@@ -37,7 +37,7 @@ namespace rsc {
 
 using Expr = spatium::io::build::Field<double>;
 
-enum class Unary { Sqrt, Sin, Cos };
+enum class Unary { Sqrt, Sin, Cos, Log, Exp };
 
 struct SynthesisSpec {
     double lo = 0, hi = 1;
@@ -168,7 +168,12 @@ inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<
     for (std::size_t s = 2; s <= spec.max_size; ++s) {
         for (const Term& t : std::vector<Term>(by_size[s - 1]))
             for (Unary op : spec.unary)
-                offer(op == Unary::Sqrt ? sqrt(t.expr) : op == Unary::Sin ? sin(t.expr) : cos(t.expr), s);
+                offer(op == Unary::Sqrt  ? sqrt(t.expr)
+                      : op == Unary::Sin ? sin(t.expr)
+                      : op == Unary::Cos ? cos(t.expr)
+                      : op == Unary::Log ? log(t.expr)
+                                         : exp(t.expr),
+                      s);
         for (std::size_t a = 1; a + 1 < s; ++a) {
             const std::size_t b = s - 1 - a;
             const auto left = by_size[a], right = by_size[b];

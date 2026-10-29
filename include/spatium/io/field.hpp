@@ -302,6 +302,12 @@ enum class Op : std::uint8_t {
     // rather than beside the other inputs, because an op's number is its
     // code in lowered data and inserting would renumber what is saved.
     Coord,
+
+    // One child each, appended for the same reason. The natural logarithm, because a deflection
+    // of light diverges like -log(b / b_c - 1) at the critical impact parameter and a synthesis
+    // over + - * / sqrt can only chase it with ever narrower pieces; the exponential, because a
+    // tanh is 1 - 2 / (exp(2 x) + 1) and a net of tanh units is otherwise not a field.
+    Log, Exp,
 };
 
 // The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
@@ -344,6 +350,8 @@ inline const char* op_name(Op o) {
         case Op::Gather: return "Gather";
         case Op::Opaque: return "Opaque";
         case Op::Coord:  return "Coord";
+        case Op::Log:    return "Log";
+        case Op::Exp:    return "Exp";
     }
     return "?";
 }
@@ -357,7 +365,7 @@ inline bool is_binary(Op o) {
 // shift indices, check order and lower -- each of which would otherwise
 // have to learn separately that Sin has one child and Noise three.
 inline std::uint32_t arity(Op o) {
-    if (o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Gather) return 1;
+    if (o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Gather || o == Op::Log || o == Op::Exp) return 1;
     if (o == Op::Noise)               return 3;
     return is_binary(o) ? 2 : 0;
 }
@@ -678,6 +686,8 @@ public:
     friend Field less(Field x, const Field& y) { x.append(Op::Less, y); return x; }
 
     friend Field sqrt(Field x) { x.push_unary(Op::Sqrt); return x; }
+    friend Field log(Field x) { x.push_unary(Op::Log); return x; }
+    friend Field exp(Field x) { x.push_unary(Op::Exp); return x; }
 
     // Component `k` of `table[floor(index)]`. The table is shared, not
     // copied into every field that gathers from it.
@@ -1046,6 +1056,8 @@ private:
                 case Op::Hash:   s[i] = instance_unit<T>(in.id, n.k); break;
                 case Op::Sqrt:   { using std::sqrt; s[i] = sqrt(s[n.a]); break; }
                 case Op::Gather: s[i] = gather_at(*n.table, s[n.a], n.k); break;
+                case Op::Log:    { using std::log; s[i] = log(s[n.a]); break; }
+                case Op::Exp:    { using std::exp; s[i] = exp(s[n.a]); break; }
                 case Op::Opaque: s[i] = n.fn(in.u, in.v); break;
                 case Op::Coord:  s[i] = in.x[n.k]; break;
             }
