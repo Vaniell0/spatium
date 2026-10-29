@@ -247,6 +247,10 @@ std::vector<Cell<N>> attacks(
     const Piece<N>& piece, const Shape<N>& shape, const Cell<N>& from, Occupied&& occupied
 ) {
     std::vector<Cell<N>> out;
+    std::size_t bound = 0; // a leap reaches one cell, a slide no more than the longest axis
+    for (const Step<N>& step : piece.steps())
+        bound += step.reach == Reach::Leap ? 1 : static_cast<std::size_t>(*std::ranges::max_element(shape.extent));
+    out.reserve(bound);
     for_each_attack(piece, shape, from, occupied, [&](const Cell<N>& c) { out.push_back(c); });
     std::ranges::sort(out);
     out.erase(std::ranges::unique(out).begin(), out.end());

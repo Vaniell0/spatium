@@ -13,6 +13,7 @@ add_executable(spatium_tests
     test_polygon.cpp
     test_spherical_polygon.cpp
     test_combinatorics.cpp
+    test_allocations.cpp
     test_group_action.cpp
     test_bitboard.cpp
     test_position.cpp

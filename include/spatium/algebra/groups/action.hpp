@@ -46,6 +46,7 @@ concept FiniteGroup = Group<G>
 template <FiniteGroup G, std::totally_ordered X, GroupAction<G, X> A>
 std::vector<X> orbit(const G& group, const A& action, const X& x) {
     std::vector<X> out;
+    out.reserve(static_cast<std::size_t>(std::ranges::distance(group.elements())));
     for (const auto& g : group.elements())
         out.push_back(action.act(g, x));
     std::ranges::sort(out);
