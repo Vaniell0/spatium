@@ -60,6 +60,22 @@ struct Term {
     std::vector<double> at; // values at the sample points
 };
 
+// What an accepted answer's certificate is worth, said with it. The error is measured, not
+// bounded: the largest at the points of a Chebyshev grid, in double, on the machine and libm that
+// ran the synthesis; between the points it is not proved. A page shows these with the answer so
+// that "certified" is never read as more than this.
+struct Certificate {
+    const char* strength = "sampled";   // measured on a grid; an interval bound would be "bounded"
+    bool relative = true;               // |value - reference| / |reference|, else absolute
+    std::size_t points = 0;             // of the check grid
+    const char* scalar = "double";
+#if defined(__EMSCRIPTEN__)
+    const char* computed = "wasm";
+#else
+    const char* computed = "host";
+#endif
+};
+
 struct Solution {
     double lo = 0, hi = 0;
     Expr expr;
@@ -67,6 +83,7 @@ struct Solution {
     std::size_t terms = 0, nodes = 0;
     double error = 0;     // the largest error on the check grid, in the spec's sense
     bool accepted = false;
+    Certificate certificate{};
 };
 
 namespace synthesis_detail {
@@ -246,7 +263,7 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
         return worst;
     };
 
-    Solution best{spec.lo, spec.hi, Expr(0.0), {}, 0, 1, 1e300, false};
+    Solution best{spec.lo, spec.hi, Expr(0.0), {}, 0, 1, 1e300, false, {.relative = spec.relative, .points = spec.checks}};
     std::vector<std::size_t> best_terms;
     // the squared error at the sample points of the fit on `set`, or infinity
     auto sample_error = [&](const std::vector<std::size_t>& set) {
@@ -400,7 +417,8 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
         }
         const double err = error_of(e);
         if (err < best.error) {
-            best = {spec.lo, spec.hi, e, *c, chosen.size(), nodes, err, err <= spec.tolerance};
+            best = {spec.lo, spec.hi, e, *c, chosen.size(), nodes, err, err <= spec.tolerance,
+                    {.relative = spec.relative, .points = spec.checks}};
             best_terms = chosen;
         }
         if (best.accepted)
