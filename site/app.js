@@ -444,8 +444,8 @@ function renderGallery(id) {
   detail.hidden = !card;
   if (card) {
     detail.replaceChildren(
-      el("a", { class: "back", href: "#gallery", text: "Gallery" }),
-      el("p", { class: "mono state", text: card.question }),
+      el("a", { class: "back", href: "#gallery", text: "All cards" }),
+      el("p", { class: card.typed === false ? "asked said" : "asked mono", text: card.question }),
       sheet(card, null),
     );
     return;

@@ -247,6 +247,7 @@ summary { cursor: pointer; font-size: var(--fs-label); color: var(--muted); }
 .card[data-kind="certified"] .kind::before, .card[data-kind="checked"] .kind::before { background: var(--accent); }
 .back { display: inline-flex; align-items: center; height: var(--control); color: var(--muted); text-decoration: none; margin-bottom: calc(var(--step) * 2); }
 .back:hover { color: var(--text); }
+.asked { color: var(--muted); margin-bottom: calc(var(--step) * 2); overflow-wrap: anywhere; }
 
 /* ── reference ───────────────────────────────────────── */
 
