@@ -116,6 +116,7 @@ add_executable(spatium_tests
     test_field_pod.cpp
     test_field_consing.cpp
     test_field_symbols.cpp
+    test_scene_symbols.cpp
     test_static_cache.cpp
     test_lbvh.cpp
     test_ccd_certified.cpp

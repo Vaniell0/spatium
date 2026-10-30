@@ -536,6 +536,7 @@ public:
     // declared, like `is_structural()`; empty means the field is one field, not a family.
     std::vector<std::string> free_symbols() const {
         std::vector<std::string> names;
+        if (std::ranges::none_of(ops_, [](const FieldOp<T>& n) { return n.op == Op::Symbol; })) return names;
         for (const auto& n : reachable_from_root().ops_)
             if (n.op == Op::Symbol) names.push_back(n.name);
         std::ranges::sort(names);
@@ -1949,6 +1950,45 @@ public:
         return true;
     }
     bool reads_time() const { return reads_time(ops_.size() - 1); }
+
+    // ── Named symbols in a motion's factors; see Op::Symbol ──────
+    //
+    // A motion reads a symbol only through a factor written as a field, so these are the factors'
+    // symbols: named, sorted, each once; and bound, each factor rebound and the closure that
+    // evaluates it rebuilt from the bound field, so the evaluation path and the factor a reader
+    // sees stay one. Taken by rvalue: a VecField is move-only.
+    std::vector<std::string> free_symbols() const {
+        std::vector<std::string> names;
+        for (const auto& n : ops_)
+            for (const auto& g : n.factor_fields)
+                for (auto& name : g.free_symbols()) names.push_back(std::move(name));
+        std::ranges::sort(names);
+        names.erase(std::unique(names.begin(), names.end()), names.end());
+        return names;
+    }
+
+    VecField bind(const std::string& name, const Field<T>& value) && {
+        for (auto& n : ops_) {
+            bool touched = false;
+            for (auto& g : n.factor_fields) {
+                const auto open = g.free_symbols();
+                if (std::ranges::find(open, name) == open.end()) continue;
+                g = g.bind(name, value);
+                touched = true;
+            }
+            if (!touched) continue;
+            if (n.op == VecOp::Scale && n.factor_fields.size() == 1)
+                n.scale_fn = [s = n.factor_fields[0]](const MotionEnv<T>& e) { return s(inputs_of(e)); };
+            if (n.op == VecOp::Rotate && n.factor_fields.size() == 3)
+                n.rot_fn = [ax = n.factor_fields[0], ay = n.factor_fields[1], az = n.factor_fields[2]](
+                               const MotionEnv<T>& e) {
+                    const auto in = inputs_of(e);
+                    return algebra::SO3<T>{}.exp(Vec<T, 3>{ax(in), ay(in), az(in)});
+                };
+            structural_ = structural_ && value.is_structural();
+        }
+        return std::move(*this);
+    }
 
     static bool factor_reads_time(const VecFieldOp<T>& n) {
         if (n.factor_fields.empty()) return true;

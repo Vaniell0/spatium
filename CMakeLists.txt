@@ -96,6 +96,7 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/literals.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/complex.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/polynomial.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/roots.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/functions.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/quaternion.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/octonion.cppm

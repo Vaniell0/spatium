@@ -9,6 +9,7 @@ export import :format;
 export import :literals;
 export import :complex;
 export import :polynomial;
+export import :roots;
 export import :functions;
 export import :quaternion;
 export import :octonion;
