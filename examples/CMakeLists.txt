@@ -73,6 +73,14 @@ endif()
 # against a random one, a greedy one and a two-ply material search. CPU only.
 spatium_add_example(NAME chess_zero OPTIONS -O3 -march=native INCLUDE_DIRS ${PROJECT_SOURCE_DIR})
 
+# The gallery of solved questions the page reads, site/gallery/gallery.json: equations solved in
+# closed form with their steps, questions with a parameter answered by synthesis, a scene in LaTeX.
+# No -march=native: the file must come out the same on every machine. Its --check is a test.
+spatium_add_example(NAME gallery INCLUDE_DIRS ${PROJECT_SOURCE_DIR})
+if(SPATIUM_BUILD_TESTS)
+    add_test(NAME gallery_up_to_date COMMAND gallery --check ${PROJECT_SOURCE_DIR}/site/gallery/gallery.json)
+endif()
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel

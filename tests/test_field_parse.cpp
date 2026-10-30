@@ -106,6 +106,11 @@ TEST_CASE("field parse: a text written by hand is the field built in code", "[fi
     CHECK(key(read("sqrt(p) + 2 * log(x)")) == key(sqrt(p) + F(2.0) * log(x)));
     CHECK(key(read("min(u, max(v, 0.5)) * less(u, 1e-5)")) == key(min(u, max(v, F(0.5))) * less(u, F(1e-5))));
     CHECK(key(read("exp(p * log(x))")) == key(exp(p * log(x))));
+    // a product after a number or a closing parenthesis may leave out its '*'
+    CHECK(key(read("2x^2 - 3x")) == key(F(2.0) * (x * x) - F(3.0) * x));
+    CHECK(key(read("(x - 1)(x + 2)")) == key((x - F(1.0)) * (x + F(2.0))));
+    CHECK(key(read("2 (u + v)")) == key(F(2.0) * (u + v)));
+    CHECK(key(read("sqrt(x)x")) == key(sqrt(x) * x));
     // the inputs under the names the caller gives; any other name is a symbol
     CHECK(key(read("x * y", "x", "y")) == key(u * v));
     CHECK(key(read("u * w")) == key(u * F::symbol("w")));
@@ -166,7 +171,6 @@ TEST_CASE("field parse: what to_text writes reads back to the same field", "[fie
 TEST_CASE("field parse: a text that is not a field is refused where it stops being one", "[field][parse]") {
     CHECK(refusal("u +") == "parse: at column 4, expected a number, a name, a function or '(', found the end");
     CHECK(refusal("u v") == "parse: at column 3, expected an operator or the end, found 'v'");
-    CHECK(refusal("2u").find("column 2") != std::string::npos);
     CHECK(refusal("(u + v") == "parse: at column 7, expected ')', found the end");
     CHECK(refusal("sin u").find("'sin' is a function: write sin(...)") != std::string::npos);
     CHECK(refusal("tan(u)") == "parse: at column 1, expected sin, cos, log, exp, sqrt, min, max or less "
