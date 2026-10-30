@@ -6,7 +6,9 @@
 #  include <algorithm>
 #  include <array>
 #  include <cmath>
+#  include <cstdint>
 #  include <format>
+#  include <limits>
 #  include <string>
 #  include <string_view>
 #  include <vector>
@@ -25,22 +27,27 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // its parentheses and u + v * 2 has none; the text is read back by `parse` (field_parse.hpp)
 // left to right, so in it u + (v + 1) keeps them too, while LaTeX, read as mathematics, drops them. The text is the field as built, not simplified, with
 // one exception that changes no value: a factor of exactly 1 is left out, since x * 1 is x to the
-// last bit for every x. A field with an opaque leaf has no text and says why.
+// last bit for every x. A product of an op with itself is written as a power (x^2, x^3: the same op read
+// again, which `parse` reads back into the same products). A field with an opaque leaf has no text and says why.
 
 namespace detail {
 
 enum class TextStyle { Plain, Latex };
 
-// How tightly an expression binds, for deciding parentheses: a sum, a product, then an atom
-// (a name, a number, a call). A negative number binds like a sum, so x * (-2) keeps its
+// How tightly an expression binds, for deciding parentheses: a sum, a product, a power, then an
+// atom (a name, a number, a call). A negative number binds like a sum, so x * (-2) keeps its
 // parentheses.
-enum class Binding { Sum = 1, Product = 2, Atom = 3 };
+enum class Binding { Sum = 1, Product = 2, Power = 3, Atom = 4 };
 
 struct Spelled {
     std::string text;
     Binding binds = Binding::Atom;
     bool one = false;        // the constant 1 exactly, which a product leaves out
     bool negative = false;   // a negative constant, which a sum writes as a subtraction
+    bool fraction = false;   // a LaTeX \frac, which a power's base puts in parentheses
+    // a product of one op with itself, k times, multiplied left to right: written base^k
+    std::uint32_t base = std::numeric_limits<std::uint32_t>::max();
+    int power = 1;
 };
 
 inline std::string grouped(const Spelled& e, Binding need, TextStyle style) {
@@ -93,7 +100,7 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
     // The text is read back by `parse`, left to right, so a + (b + c) keeps its parentheses there:
     // floating-point addition does not reassociate. A page reads LaTeX as mathematics, where it does.
     const Binding right_of_sum = tex ? Binding::Sum : Binding::Product;
-    const Binding right_of_product = tex ? Binding::Product : Binding::Atom;
+    const Binding right_of_product = tex ? Binding::Product : Binding::Power;
     const auto arg = [&](std::uint32_t i) -> const Spelled& { return at[i]; };
     const auto call = [&](std::string_view plain, std::string_view latex, const std::string& inside) {
         return tex ? std::format("{}\\left({}\\right)", latex, inside) : std::format("{}({})", plain, inside);
@@ -114,15 +121,36 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         }
         case Op::Sub:
             return {arg(n.a).text + " - " + grouped(arg(n.b), Binding::Product, style), Binding::Sum};
-        case Op::Mul:
+        case Op::Mul: {
             if (arg(n.a).one) return arg(n.b);
             if (arg(n.b).one) return arg(n.a);
+            // x * x is one op read twice in the pool, and x * x * x the same op once more on the
+            // right: written x^2 and x^3, which parse reads back into the same products. A square
+            // of a square stays (x^2)^2, since x^4 would be read as x * x * x * x, another order.
+            const std::uint32_t base = n.a == n.b ? n.a : (arg(n.a).base == n.b ? n.b : arg(n.a).base);
+            if (n.a == n.b || arg(n.a).base == n.b) {
+                const int k = n.a == n.b ? 2 : arg(n.a).power + 1;
+                const Spelled& b = arg(base);
+                // a fraction, or a base that has a superscript of its own (x^{1}, a coordinate), is put in
+                // parentheses in LaTeX, where x^{1}^{2} is not a formula
+                const bool raised = tex && (b.fraction || b.text.find('^') != std::string::npos);
+                const std::string under = raised ? "\\left(" + b.text + "\\right)" : grouped(b, Binding::Atom, style);
+                Spelled out{tex ? std::format("{}^{{{}}}", under, k) : std::format("{}^{}", under, k), Binding::Power};
+                out.base = base;
+                out.power = k;
+                return out;
+            }
             return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") +
                         grouped(arg(n.b), right_of_product, style),
                     Binding::Product};
+        }
         case Op::Div:
-            if (tex) return {std::format("\\frac{{{}}}{{{}}}", arg(n.a).text, arg(n.b).text)};
-            return {grouped(arg(n.a), Binding::Product, style) + " / " + grouped(arg(n.b), Binding::Atom, style),
+            if (tex) {
+                Spelled out{std::format("\\frac{{{}}}{{{}}}", arg(n.a).text, arg(n.b).text)};
+                out.fraction = true;
+                return out;
+            }
+            return {grouped(arg(n.a), Binding::Product, style) + " / " + grouped(arg(n.b), Binding::Power, style),
                     Binding::Product};
         case Op::Min:  return {call("min", "\\min", arg(n.a).text + ", " + arg(n.b).text)};
         case Op::Max:  return {call("max", "\\max", arg(n.a).text + ", " + arg(n.b).text)};

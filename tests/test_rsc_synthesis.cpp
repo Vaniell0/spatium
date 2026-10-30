@@ -243,7 +243,7 @@ TEST_CASE("synthesis: a size begun is searched whole, and a term that only refit
     const auto s = rsc::synthesize(reference, spec);
     REQUIRE(s.accepted);
     CHECK(s.terms == 1);
-    CHECK(*spatium::io::build::to_text(s.expr, "n") == "2 * (n / (log(n) * log(n)))");
+    CHECK(*spatium::io::build::to_text(s.expr, "n") == "2 * (n / log(n)^2)");
 
     // every expression of the sizes held is there, whatever the budget once the size is begun
     const auto x = rsc::synthesis_detail::grid(spec.lo, spec.hi, spec.samples);

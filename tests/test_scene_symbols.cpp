@@ -124,7 +124,7 @@ TEST_CASE("scene symbols: the scene as LaTeX says what was asked and what it cam
         "\\begin{{aligned}}\n"
         "R &= 2 \\\\\n"
         "r &= 0.5 \\\\\n"
-        "& \\left(r + h\\right) \\cdot \\left(r + h\\right) - 2 \\cdot r \\cdot r = 0,\\quad h \\in \\left[0, 1\\right] "
+        "& \\left(r + h\\right)^{{2}} - 2 \\cdot r \\cdot r = 0,\\quad h \\in \\left[0, 1\\right] "
         "\\;\\Rightarrow\\; h = {} \\\\\n"
         "S_{{0}} &= \\operatorname{{torus}}\\left(2, 0.5\\right) \\\\\n"
         "S_{{1}} &= \\operatorname{{offset}}\\left(S_{{0}}, h\\right)\n"
