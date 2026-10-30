@@ -7,3 +7,4 @@ site/wasm/build.sh
 out="${TMPDIR:-/tmp}/spatium_core_host"
 c++ -std=c++23 -O2 -I include -I . site/wasm/core.cpp -o "$out"
 node site/wasm/check.mjs "$out"
+node site/wasm/plot_check.mjs

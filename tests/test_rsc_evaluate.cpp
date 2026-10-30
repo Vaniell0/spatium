@@ -218,3 +218,38 @@ TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", 
     CHECK(contains(rsc::evaluate_request(R"({"document": "p in [0, 1]", "name": "p", "chosen": {"p": "a"}})").string_or("refused", ""),
                    "not a number"));
 }
+
+TEST_CASE("plot: a value is drawn along one parameter, the others its shader's slots", "[rsc][plot]") {
+    const std::string text = "a in [0.5, 2]\nr = 0.1\nx in [-4, 4]\nf = a * sin(x) + r * x^2";
+    const auto request = [&](std::string extra) {
+        return rsc::plot_request(R"({"document": ")" + std::string("a in [0.5, 2]\\nr = 0.1\\nx in [-4, 4]\\nf = a * sin(x) + r * x^2") +
+                                 R"(", "name": "f", "along": "x")" + extra + "}");
+    };
+    const auto p = request("");
+    REQUIRE_FALSE(p.find("refused"));
+    const auto& symbols = p.find("symbols")->as_array();
+    REQUIRE(symbols.size() == 1);   // r is a value, put in; a is a parameter, left a slot
+    CHECK(symbols[0].string_or("name", "") == "a");
+    CHECK(symbols[0].find("interval")->as_array()[1].as_number() == 2);
+    CHECK(p.find("interval")->as_array()[0].as_number() == -4);
+    const std::string fragment = p.string_or("fragment", "");
+    CHECK(fragment.starts_with("#version 300 es"));
+    CHECK(contains(fragment, "uniform float field_symbols[1];"));
+    CHECK(contains(fragment, "fwidth(F)"));
+    // with a grid, F at each pixel's centre as the fp32 twin computes it: f(x) - y
+    const auto g = request(R"(, "grid": {"width": 4, "height": 2, "view": [-4, -2, 4, 2], "slots": [1.5]})");
+    const auto& values = g.find("values")->as_array();
+    REQUIRE(values.size() == 8);
+    for (int py = 0; py < 2; ++py)
+        for (int px = 0; px < 4; ++px) {
+            const double x = -4 + 8 * (px + 0.5) / 4, y = -2 + 4 * (py + 0.5) / 2;
+            CHECK(close(values[static_cast<std::size_t>(py * 4 + px)].as_number(), 1.5 * std::sin(x) + 0.1 * x * x - y, 1e-5));
+        }
+    // the cases it must fail: a root is not drawn here, nor a parameter the value does not read
+    CHECK(contains(rsc::plot_request(R"({"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "along": "p"})")
+                       .string_or("refused", ""), "a graph is drawn of a value"));
+    CHECK(contains(request("").string_or("refused", "none"), "none"));
+    CHECK(contains(rsc::plot_request(R"({"document": "x in [0, 1]\nq in [0, 1]\nf = x", "name": "f", "along": "q"})")
+                       .string_or("refused", ""), "does not read the parameter 'q'"));
+    (void)text;
+}

@@ -26,3 +26,6 @@ evaluate {"document": {"statements": [{"name": "y", "kind": "root", "lhs": "y^3 
 evaluate {"document": "I = integral exp(-t^2) dt on [0, 1]", "name": "I"}
 evaluate {"document": "p in [1, 2]\na = 2 * p", "name": "a"}
 evaluate {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "chosen": {"p": 5}}
+plot {"document": "a in [0.5, 2]\nx in [-4, 4]\nf = a * sin(x) + x^2 / 10", "name": "f", "along": "x"}
+plot {"document": "p in [0.1, 4]\nx in [-3, 3]\ng = exp(-p * x^2)", "name": "g", "along": "x", "grid": {"width": 8, "height": 4, "view": [-3, -0.5, 3, 1.5], "slots": [1.5]}}
+plot {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "along": "p"}

@@ -28,6 +28,7 @@
 #  include <cstdint>
 #  include <format>
 #  include <string>
+#  include <algorithm>
 #  include <type_traits>
 #  include <unordered_map>
 #  include <vector>
@@ -39,10 +40,18 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // noise tables (one uint per permutation byte, so a lookup is one load)
 // and the gather tables, x y z per point. The kernel binds these two
 // buffers; each emitted program knows its own offsets into them.
+//
+// A named symbol is read from a slot, `field_symbols[k]`, whose name is
+// `symbols[k]`: a number the caller sets, not one written into the code.
+// A module reads slots only when it is made for a target that declares
+// them (`glsl_es`, for WebGL2); a Vulkan kernel binds no slot yet, so
+// there a symbol is refused by name.
 struct GlslModule {
     std::string code;
     std::vector<std::uint32_t> perm;
     std::vector<float> points;
+    std::vector<std::string> symbols;
+    bool slots = false;
 };
 
 // The helpers every emitted program calls, and the input record. Binding
@@ -161,14 +170,21 @@ inline std::string glsl_float(double v) {
 }
 
 // The offsets a program's own table and point indices shift by once its
-// data is appended to the module.
+// data is appended to the module, and the module's slot for each of its
+// own.
 struct GlslBases {
     std::uint32_t perm = 0;
     std::uint32_t points = 0;   // in points, not floats
+    std::vector<std::uint32_t> symbols;
 };
 
-inline GlslBases append_data(GlslModule& m, const std::vector<std::uint8_t>& tables,
-                             const std::vector<double>& points) {
+inline Result<GlslBases> append_data(GlslModule& m, const PodField<double>& data) {
+    const auto& tables = data.tables;
+    const auto& points = data.points;
+    if (!data.symbols.empty() && !m.slots)
+        return std::unexpected(Error(ErrorCode::InvalidArgument,
+            std::format("emit: the field reads the symbol '{}', and this target binds no slot to read it "
+                        "from; bind it to a number first", data.symbols.front())));
     // A block already in the module is reused whole, so two programs that
     // gather from one table name the same offsets -- and a gather in a
     // motion and the same gather in its colour become one value in a scope.
@@ -199,6 +215,11 @@ inline GlslBases append_data(GlslModule& m, const std::vector<std::uint8_t>& tab
     if (qa < 0) { qa = static_cast<std::ptrdiff_t>(m.points.size()); m.points.insert(m.points.end(), pts.begin(), pts.end()); }
     b.perm = static_cast<std::uint32_t>(pa);
     b.points = static_cast<std::uint32_t>(qa / 3);
+    for (const auto& name : data.symbols) {
+        const auto at = std::ranges::find(m.symbols, name);
+        b.symbols.push_back(static_cast<std::uint32_t>(at - m.symbols.begin()));
+        if (at == m.symbols.end()) m.symbols.push_back(name);
+    }
     return b;
 }
 
@@ -240,7 +261,7 @@ struct GlslInputs {
 
 // One scalar program into `sc`; returns the name of its value.
 inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std::uint32_t count,
-                                    detail::GlslBases b, const GlslInputs& in) {
+                                    const detail::GlslBases& b, const GlslInputs& in) {
     std::vector<std::string> v(count);
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto& n = ops[i];
@@ -279,7 +300,7 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
                 break;
             case Op::Opaque: v[i] = "0.0"; continue;   // unreachable: lower() refuses it
             case Op::Coord:  e = std::format("{}.x[{}]", in.rec, n.k); break;
-            case Op::Symbol: v[i] = "0.0"; continue;   // unreachable: lower() refuses it
+            case Op::Symbol: e = std::format("field_symbols[{}]", b.symbols[n.k]); break;
         }
         v[i] = sc.value("float", e);
     }
@@ -289,7 +310,7 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
 // One lowered point field into `sc`; returns the name of its value.
 // `point_expr` is what the Point op reads -- the input point, or `vec3(0.0)`
 // for a placement's translation.
-inline std::string emit_vector_into(GlslScope& sc, const PodVecField<double>& pod, detail::GlslBases b,
+inline std::string emit_vector_into(GlslScope& sc, const PodVecField<double>& pod, const detail::GlslBases& b,
                                     const GlslInputs& in, const std::string& point_expr) {
     auto factor = [&](const PodRange& r) {
         return emit_scalar_into(sc, pod.scalars.ops.data() + r.begin, r.count, b, in);
@@ -342,7 +363,9 @@ inline Result<GlslPlacement> emit_placement_into(GlslScope& sc, GlslModule& m,
             "emit_placement: the motion is a deformation, and a deformation has no placement"));
     auto pod = lower(f);
     if (!pod) return std::unexpected(std::move(pod.error()));
-    const auto b = detail::append_data(m, pod->scalars.tables, pod->scalars.points);
+    const auto bases = detail::append_data(m, pod->scalars);
+    if (!bases) return std::unexpected(bases.error());
+    const auto& b = *bases;
 
     GlslPlacement out;
     out.translation = emit_vector_into(sc, *pod, b, in, "vec3(0.0)");
@@ -392,9 +415,10 @@ inline Result<GlslPlacement> emit_placement_into(GlslScope& sc, GlslModule& m,
 inline Result<void> emit_scalar(GlslModule& m, const Field<double>& f, const std::string& name) {
     auto pod = lower(f);
     if (!pod) return std::unexpected(std::move(pod.error()));
-    const auto b = detail::append_data(m, pod->tables, pod->points);
+    const auto b = detail::append_data(m, *pod);
+    if (!b) return std::unexpected(b.error());
     GlslScope sc;
-    const auto r = emit_scalar_into(sc, pod->ops.data(), static_cast<std::uint32_t>(pod->ops.size()), b, {});
+    const auto r = emit_scalar_into(sc, pod->ops.data(), static_cast<std::uint32_t>(pod->ops.size()), *b, {});
     m.code += std::format("float {}(FieldIn in_) {{\n{}    return {};\n}}\n", name, sc.body, r);
     return {};
 }
@@ -404,9 +428,10 @@ inline Result<void> emit_scalar(GlslModule& m, const Field<double>& f, const std
 inline Result<void> emit_vector(GlslModule& m, const VecField<double>& f, const std::string& name) {
     auto pod = lower(f);
     if (!pod) return std::unexpected(std::move(pod.error()));
-    const auto b = detail::append_data(m, pod->scalars.tables, pod->scalars.points);
+    const auto b = detail::append_data(m, pod->scalars);
+    if (!b) return std::unexpected(b.error());
     GlslScope sc;
-    const auto r = emit_vector_into(sc, *pod, b, {}, "in_.p");
+    const auto r = emit_vector_into(sc, *pod, *b, {}, "in_.p");
     m.code += std::format("vec3 {}(FieldIn in_) {{\n{}    return {};\n}}\n", name, sc.body, r);
     return {};
 }
@@ -421,6 +446,44 @@ inline Result<void> emit_placement(GlslModule& m, const VecField<double>& f, con
         "    tr = {};\n    R = {};\n    s = {};\n}}\n",
         name, sc.body, pl->translation, pl->rotation, pl->scale);
     return {};
+}
+
+// ── WebGL2: GLSL ES 3.00 ─────────────────────────────────────────
+//
+// A field for a fragment shader in a browser: fp32 at highp, its symbols
+// read from a uniform array, so a slider sets a uniform and the shader is
+// not compiled again. WebGL2 has no storage buffers, so of the vocabulary
+// a WebGL2 field takes what needs none: the arithmetic, the elementary
+// functions, the two inputs and the symbols. Noise and a gather read
+// tables, and the instance, its origin, the point and a coordinate are
+// inputs a plot has none of; each is refused by name until a consumer
+// brings them (as textures, and as inputs).
+
+inline GlslModule glsl_es_module() {
+    GlslModule m;
+    m.slots = true;
+    return m;
+}
+
+// `float <name>(FieldIn in_)` for a scalar field, in a module from `glsl_es_module`.
+inline Result<void> emit_scalar_es(GlslModule& m, const Field<double>& f, const std::string& name) {
+    const Field<double> reached = f.reachable_from_root();
+    for (std::size_t i = 0; i < reached.size(); ++i)
+        switch (reached.op(i).op) {
+            case Op::Noise: case Op::Gather: case Op::Id: case Op::Origin: case Op::Point: case Op::Hash: case Op::Coord:
+                return std::unexpected(Error(ErrorCode::InvalidArgument,
+                    std::format("emit_scalar_es: op {} is {}, which a WebGL2 field does not take yet", i, op_name(reached.op(i).op))));
+            default: break;
+        }
+    return emit_scalar(m, f, name);
+}
+
+// What an ES module's code reads, written once the module is whole: the
+// input record and as many slots as it names (one at least, since GLSL
+// has no empty array).
+inline std::string glsl_es_prelude(const GlslModule& m) {
+    return std::format("struct FieldIn {{ float u; float v; }};\nuniform float field_symbols[{}];\n",
+                       std::max<std::size_t>(m.symbols.size(), 1));
 }
 
 }  // namespace spatium::io::build

@@ -19,6 +19,7 @@ const core = await SpatiumCore();
 const respond = core.cwrap('spatium_respond', 'string', ['string', 'number']);
 const preview = core.cwrap('spatium_preview', 'string', ['string']);
 const evaluate = core.cwrap('spatium_evaluate', 'string', ['string']);
+const plot = core.cwrap('spatium_plot', 'string', ['string']);
 
 const number = /-?\d+(\.\d+)?(e[+-]?\d+)?/gi;
 const close = (a, b) => a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
@@ -60,7 +61,8 @@ function agree(a, b, where) {
 let failed = 0;
 lines.forEach((line, i) => {
   const wasm = line.startsWith('preview ') ? preview(line.slice(8))
-             : line.startsWith('evaluate ') ? evaluate(line.slice(9)) : respond(line, 0);
+             : line.startsWith('evaluate ') ? evaluate(line.slice(9))
+             : line.startsWith('plot ') ? plot(line.slice(5)) : respond(line, 0);
   const r = agree(JSON.parse(host[i]), JSON.parse(wasm), line);
   if (r !== true) { ++failed; console.log(`differs: ${r}`); }
   if ((line.includes(' for ') || line.startsWith('evaluate ')) && !line.startsWith('preview ') && !wasm.includes('"computed":"wasm"') && wasm.includes('"certificate"'))

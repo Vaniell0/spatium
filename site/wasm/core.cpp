@@ -6,6 +6,9 @@
 //   respond(text)      the answer: evaluated, solved in closed form with its steps, or synthesised
 //   evaluate(request)  a definition of a document given its value: the document as text or JSON,
 //                      the name it asks for and the parameters it chooses, one JSON object
+//   plot(request)      a value drawn as the graph of a function of one parameter: a WebGL2
+//                      shader whose slots are the other parameters, and with a grid, F at each
+//                      pixel as the shader's check mode computes it, in fp32
 //   preview(text)      the question as LaTeX while it is typed, or the parse error and its column
 //
 // Built by build.sh with Emscripten; check.mjs holds it against the host build of the same calls.
@@ -64,6 +67,8 @@ const char* spatium_respond(const char* text, double tolerance) {
 
 const char* spatium_evaluate(const char* request) { return hand_back(rsc::evaluate_request(request).dump()); }
 
+const char* spatium_plot(const char* request) { return hand_back(rsc::plot_request(request).dump()); }
+
 const char* spatium_preview(const char* text) { return hand_back(preview(text).dump()); }
 
 }
@@ -76,6 +81,7 @@ int main() {
     for (std::string line; std::getline(std::cin, line);) {
         if (line.starts_with("preview ")) std::cout << spatium_preview(line.c_str() + 8) << "\n";
         else if (line.starts_with("evaluate ")) std::cout << spatium_evaluate(line.c_str() + 9) << "\n";
+        else if (line.starts_with("plot ")) std::cout << spatium_plot(line.c_str() + 5) << "\n";
         else std::cout << spatium_respond(line.c_str(), 0) << "\n";
     }
 }
