@@ -22,7 +22,8 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // is how it is read in code (`to_text`) and on a page (`to_latex`, which a page renders as it
 // is). Both are one walk over the ops the root reads; they differ only in how each op is
 // spelled. Parentheses go where precedence needs them and nowhere else, so u / (v * 2) keeps
-// its parentheses and u + v * 2 has none. The text is the field as built, not simplified, with
+// its parentheses and u + v * 2 has none; the text is read back by `parse` (field_parse.hpp)
+// left to right, so in it u + (v + 1) keeps them too, while LaTeX, read as mathematics, drops them. The text is the field as built, not simplified, with
 // one exception that changes no value: a factor of exactly 1 is left out, since x * 1 is x to the
 // last bit for every x. A field with an opaque leaf has no text and says why.
 
@@ -38,7 +39,8 @@ enum class Binding { Sum = 1, Product = 2, Atom = 3 };
 struct Spelled {
     std::string text;
     Binding binds = Binding::Atom;
-    bool one = false;   // the constant 1 exactly, which a product leaves out
+    bool one = false;        // the constant 1 exactly, which a product leaves out
+    bool negative = false;   // a negative constant, which a sum writes as a subtraction
 };
 
 inline std::string grouped(const Spelled& e, Binding need, TextStyle style) {
@@ -88,6 +90,10 @@ inline std::string name_latex(std::string_view name) {
 inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at, const std::string& u,
                         const std::string& v, TextStyle style) {
     const bool tex = style == TextStyle::Latex;
+    // The text is read back by `parse`, left to right, so a + (b + c) keeps its parentheses there:
+    // floating-point addition does not reassociate. A page reads LaTeX as mathematics, where it does.
+    const Binding right_of_sum = tex ? Binding::Sum : Binding::Product;
+    const Binding right_of_product = tex ? Binding::Product : Binding::Atom;
     const auto arg = [&](std::uint32_t i) -> const Spelled& { return at[i]; };
     const auto call = [&](std::string_view plain, std::string_view latex, const std::string& inside) {
         return tex ? std::format("{}\\left({}\\right)", latex, inside) : std::format("{}({})", plain, inside);
@@ -95,7 +101,7 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
     switch (n.op) {
         case Op::Const: {
             const Binding b = std::signbit(n.value) ? Binding::Sum : Binding::Atom;
-            return {number_text(n.value, style), b, n.value == 1.0};
+            return {number_text(n.value, style), b, n.value == 1.0, std::signbit(n.value) && !std::isnan(n.value)};
         }
         case Op::U:      return {tex ? name_latex(u) : u};
         case Op::V:      return {tex ? name_latex(v) : v};
@@ -103,9 +109,8 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         case Op::Add: {
             // a + (-c) is a - c to the last bit, and reads as one
             const auto& b = arg(n.b);
-            if (b.binds == Binding::Sum && !b.text.empty() && b.text[0] == '-')
-                return {arg(n.a).text + " - " + b.text.substr(1), Binding::Sum};
-            return {arg(n.a).text + " + " + b.text, Binding::Sum};
+            if (b.negative) return {arg(n.a).text + " - " + b.text.substr(1), Binding::Sum};
+            return {arg(n.a).text + " + " + grouped(b, right_of_sum, style), Binding::Sum};
         }
         case Op::Sub:
             return {arg(n.a).text + " - " + grouped(arg(n.b), Binding::Product, style), Binding::Sum};
@@ -113,7 +118,7 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
             if (arg(n.a).one) return arg(n.b);
             if (arg(n.b).one) return arg(n.a);
             return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") +
-                        grouped(arg(n.b), Binding::Product, style),
+                        grouped(arg(n.b), right_of_product, style),
                     Binding::Product};
         case Op::Div:
             if (tex) return {std::format("\\frac{{{}}}{{{}}}", arg(n.a).text, arg(n.b).text)};
