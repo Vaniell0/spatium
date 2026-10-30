@@ -1,8 +1,9 @@
 // The gallery of solved questions, as the page reads it: `site/gallery/gallery.json`.
 //
-// Each card is a question typed as text and what the library made of it -- an equation solved in
-// closed form with the steps it was solved by, or a question with a parameter whose answer was
-// synthesised and certified, or refused with the reason -- and a scene written as LaTeX. Nothing
+// Each card is a question typed as text and what the library made of it, through `respond`, the
+// door a live page uses too -- an expression evaluated, an equation solved in closed form with
+// the steps it was solved by, or a question with a parameter whose answer was synthesised and
+// certified, or refused with the reason -- and a scene written as LaTeX. Nothing
 // on a card is typed by hand: the file is this program's output, and `--check` (a ctest) fails
 // when the file and the library disagree. An error is written as the power of ten above it, so
 // the file does not move with the last digits of a libm.
@@ -10,8 +11,7 @@
 //   gallery --write site/gallery/gallery.json
 //   gallery --check site/gallery/gallery.json
 
-#include <rsc/spatium/closed_form.hpp>
-#include <rsc/spatium/query.hpp>
+#include <rsc/spatium/respond.hpp>
 #include <rsc/spatium/synthesis.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/geometry/make.hpp>
@@ -35,59 +35,23 @@ using spatium::io::JsonValue;
 using Object = JsonValue::ObjectType;
 using Array = JsonValue::ArrayType;
 
-double decade_above(double e) { return e > 0 ? std::pow(10.0, std::ceil(std::log10(e))) : 0.0; }
-
-JsonValue steps_json(const std::vector<bd::Step>& steps) {
-    Array out;
-    for (const auto& s : steps) out.push_back(Object{{"label", s.label}, {"latex", s.latex}});
-    return out;
-}
-
-JsonValue closed_form_card(std::string id, std::string question) {
-    const auto solved = rsc::solve_closed_form(question);
-    Object card{{"id", id}, {"kind", "closed form"}, {"question", question}};
-    if (!solved) {
-        card.emplace_back("refused", solved.error().message);
-        return card;
-    }
-    card.emplace_back("unknown", solved->unknown);
-    card.emplace_back("steps", steps_json(solved->steps));
+// a card is the library's own answer to its question, with an id the page links to
+JsonValue card(std::string id, std::string question, double tolerance = 1e-8) {
+    auto out = rsc::respond(question, tolerance);
+    Object card{{"id", std::move(id)}};
+    for (auto& kv : out.as_object()) card.push_back(kv);
     return card;
-}
-
-// a question with a parameter: the answer's pieces, written out when there are few of them
-JsonValue synthesis_card(std::string id, std::string question, const rsc::Answer& a, const std::string& parameter) {
-    Object card{{"id", id}, {"kind", "synthesis"}, {"question", question}, {"answered", a.answered}};
-    if (!a.refused.empty()) card.emplace_back("refused", a.refused);
-    double worst = 0;
-    for (const auto& s : a.pieces) worst = std::max(worst, s.error);
-    card.emplace_back("pieces", a.pieces.size());
-    card.emplace_back("error_below", decade_above(worst));
-    if (!a.pieces.empty() && a.pieces.size() <= 2) {
-        Array pieces;
-        for (const auto& s : a.pieces)
-            pieces.push_back(Object{{"lo", s.lo}, {"hi", s.hi}, {"latex", *bd::to_latex(s.expr, parameter)},
-                                    {"text", *bd::to_text(s.expr, parameter)}, {"accepted", s.accepted}});
-        card.emplace_back("answer", pieces);
-    }
-    return card;
-}
-
-JsonValue asked_card(std::string id, std::string question, double tolerance) {
-    auto q = rsc::ask(question);
-    if (!q) return Object{{"id", id}, {"kind", "synthesis"}, {"question", question}, {"refused", q.error().message}};
-    q->tolerance = tolerance;
-    return synthesis_card(std::move(id), std::move(question), rsc::answer(*q), q->parameter);
 }
 
 std::string gallery() {
     std::vector<JsonValue> cards;
-    cards.push_back(closed_form_card("quadratic", "2x^2 - 3x - 5 = 0"));
-    cards.push_back(closed_form_card("complex", "x^2 + 2x + 5 = 0"));
-    cards.push_back(asked_card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]", 1e-10));
-    cards.push_back(asked_card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]", 1e-9));
-    cards.push_back(asked_card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]", 1e-6));
-    cards.push_back(asked_card("refused", "solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]", 1e-8));
+    cards.push_back(card("arithmetic", "2(3 + 4)^2 - 1/4"));
+    cards.push_back(card("quadratic", "2x^2 - 3x - 5 = 0"));
+    cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
+    cards.push_back(card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]", 1e-10));
+    cards.push_back(card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]", 1e-9));
+    cards.push_back(card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]", 1e-6));
+    cards.push_back(card("refused", "solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]"));
     {
         // the volume under a triangle down to z = 0 as a function of one vertex's height, which
         // the library computes as an integral and synthesis writes as 1/6 p + 1
@@ -108,10 +72,11 @@ std::string gallery() {
         rsc::Answer a;
         a.pieces = {s};
         a.answered = s.accepted;
-        cards.push_back(synthesis_card("prism",
-                                       "the volume under the triangle (1, 0, 2), (0, 1, 4), (0, 0, p) down to z = 0, "
-                                       "p in [0, 10]",
-                                       a, "p"));
+        Object prism{{"id", "prism"},
+                     {"question", "the volume under the triangle (1, 0, 2), (0, 1, 4), (0, 0, p) down to z = 0, p in [0, 10]"},
+                     {"route", "synthesis"}};
+        for (auto& kv : rsc::answer_json(a, "p")) prism.push_back(kv);
+        cards.push_back(prism);
     }
     {
         // a scene that names its numbers: the shell's thickness is the root of an equation in them
@@ -120,7 +85,7 @@ std::string gallery() {
         const auto rr = r.field(), h = bd::Field<double>::symbol("h");
         const auto hh = t.let("h", (rr + h) * (rr + h) - bd::Field<double>(2.0) * rr * rr, 0.0, 1.0);
         const auto shell = t.offset(t.torus(R, r), hh.field());
-        cards.push_back(Object{{"id", "scene"}, {"kind", "scene"}, {"latex", *bd::to_latex(t, shell.index)}});
+        cards.push_back(Object{{"id", "scene"}, {"route", "scene"}, {"latex", *bd::to_latex(t, shell.index)}});
     }
     // one card per line, so a change to one card is a change to one line
     std::string out = "{\"cards\": [\n";
