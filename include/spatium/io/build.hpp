@@ -14,6 +14,7 @@
 #  include <spatium/geometry/ray_surface.hpp>
 #  include <spatium/io/field.hpp>
 #  include <spatium/io/field_pod.hpp>
+#  include <spatium/algebra/roots.hpp>
 #  include <any>
 #  include <bit>
 #  include <cstdint>
@@ -220,8 +221,12 @@ struct TraceNode {
 
     // Offset -- `edge` is meaningful only for a shell, i.e. when the
     // base is open. A closed base has no edge and never consults it.
+    // `thickness` is what the node computes, every symbol bound; the field
+    // as the caller wrote it, names and all, is kept beside it for the
+    // scene's description and nothing else reads it.
     std::size_t base = 0;
     ScalarField<T> thickness;
+    ScalarField<T> thickness_written;
     EdgeRule edge = EdgeRule::ZeroThickness;
 
     // Scatter
@@ -449,6 +454,37 @@ Matrix<T, 3, 3> scatter_frame(const Vec<T, 3>& normal, std::uint32_t seed,
 template<Scalar T = double>
 class Trace;
 
+// ── Named numbers ─────────────────────────────────────────────────
+//
+// A scene says what its numbers are, not only what they equal: the radius
+// of the ball is `r`, and the thickness of its shell is the `h` for which
+// the shell holds as much as the ball. `Trace::let` names a number, given
+// as it is or as the root of an equation in the names before it, and
+// returns it as a `Named`: a number where a factory wants one, and
+// `field()` where a field may read it by name. A field handed to a builder
+// has every defined name bound on the spot, and one it reads but no `let`
+// defined is refused there, by name -- the same call that made the mistake.
+//
+// A definition is solved once, when it is made. What it records -- the
+// equation as written and its bracket -- is for the scene's description,
+// so the scene reads as it was asked.
+
+template<Scalar T = double>
+struct Named {
+    std::string name;
+    T value{};
+    operator T() const { return value; }   // NOLINT: implicit on purpose
+    Field<T> field() const { return Field<T>::symbol(name); }
+};
+
+template<Scalar T = double>
+struct Definition {
+    std::string name;
+    T value{};
+    std::optional<Field<T>> equation;   // = 0, as written; empty for a number given as it is
+    T lo{}, hi{};                       // the bracket the root was found on
+};
+
 template<Scalar T = double>
 struct Handle {
     Trace<T>* trace;
@@ -642,7 +678,8 @@ public:
         TraceNode<T> n{};
         n.kind = Kind::Offset;
         n.base = base.index;
-        n.thickness = std::move(thickness);
+        n.thickness = bound(thickness, "offset");
+        n.thickness_written = std::move(thickness);
         // The base's tessellation, not this node's defaults. An offset
         // *is* its base pushed along its own normals, so the two are the
         // same grid by construction and a different one here would be a
@@ -676,7 +713,8 @@ public:
         TraceNode<T> n{};
         n.kind = Kind::Offset;
         n.base = base.index;
-        n.thickness = std::move(thickness);
+        n.thickness = bound(thickness, "offset_shell");
+        n.thickness_written = std::move(thickness);
         n.edge = edge;
         n.u_steps = node(base.index).u_steps;   // see offset(), same reason
         n.v_steps = node(base.index).v_steps;
@@ -736,6 +774,67 @@ private:
             "than one surface.");
     }
 
+public:
+    // ── Named numbers; see `Named` ────────────────────────────
+
+    Named<T> let(std::string name, T value) {
+        claim(name);
+        definitions_.push_back({name, value, std::nullopt, T{}, T{}});
+        return {std::move(name), value};
+    }
+
+    // `name` is the root of `equation` on [lo, hi]: a field that reads `name` and any names defined
+    // before it, and nothing else. Refused, by what is wrong, where the equation reads a name
+    // nothing defined, does not read `name` at all, or does not change sign on the bracket.
+    Named<T> let(std::string name, const ScalarField<T>& equation, T lo, T hi) {
+        claim(name);
+        ScalarField<T> e = equation;
+        for (const auto& d : definitions_) e = e.bind(d.name, ScalarField<T>(d.value));
+        const auto open = e.free_symbols();
+        for (const auto& other : open)
+            if (other != name)
+                throw std::invalid_argument("let(" + name + "): the equation reads '" + other +
+                                            "', which no let() before it defined");
+        if (open.empty())
+            throw std::invalid_argument("let(" + name + "): the equation does not read " + name +
+                                        ", so it has no open name to solve for");
+        const ScalarField<T> in_u = e.bind(name, ScalarField<T>::u());
+        const auto root = find_root<T>([&](T x) { return in_u(x, T{0}); }, lo, hi);
+        if (!root) throw std::invalid_argument("let(" + name + "): " + root.error().message);
+        definitions_.push_back({name, *root, equation, lo, hi});
+        return {std::move(name), *root};
+    }
+
+    const std::vector<Definition<T>>& definitions() const { return definitions_; }
+
+    // A field with every defined name bound, or refused naming the first it reads that nothing
+    // defined: what every builder that takes a field does with it, so no symbol reaches a node
+    // unbound and none can evaluate to NaN on the way to a pixel.
+    ScalarField<T> bound(const ScalarField<T>& f, const char* where) const {
+        ScalarField<T> out = f;
+        for (const auto& d : definitions_) out = out.bind(d.name, ScalarField<T>(d.value));
+        refuse_open(out.free_symbols(), where);
+        return out;
+    }
+
+    PointField<T> bound(PointField<T> f, const char* where) const {
+        for (const auto& d : definitions_) f = std::move(f).bind(d.name, ScalarField<T>(d.value));
+        refuse_open(f.free_symbols(), where);
+        return f;
+    }
+
+private:
+    static void refuse_open(const std::vector<std::string>& open, const char* where) {
+        if (!open.empty())
+            throw std::invalid_argument(std::string(where) + ": the field reads '" + open.front() +
+                                        "', which no let() defined");
+    }
+
+    void claim(const std::string& name) const {
+        for (const auto& d : definitions_)
+            if (d.name == name) throw std::invalid_argument("let(" + name + "): already defined");
+    }
+
     Handle<T> push(TraceNode<T> n) {
         std::size_t idx = nodes_.size();
         nodes_.push_back(std::move(n));
@@ -743,6 +842,7 @@ private:
     }
 
     std::vector<TraceNode<T>> nodes_;
+    std::vector<Definition<T>> definitions_;
 };
 
 template<Scalar T>
@@ -873,13 +973,13 @@ std::size_t choose_render_levels(Trace<T>& trace, const RenderPolicy& policy = {
 // two such maps have no meaningful composition (unlike motion below).
 template<Scalar T>
 Handle<T> Handle<T>::colored(PointField<T> color_fn) const {
-    trace->node(index).color_fn = std::move(color_fn);
+    trace->node(index).color_fn = trace->bound(std::move(color_fn), "colored");
     return *this;
 }
 
 template<Scalar T>
 Handle<T> Handle<T>::glowing(PointField<T> emissive_fn) const {
-    trace->node(index).emissive_fn = std::move(emissive_fn);
+    trace->node(index).emissive_fn = trace->bound(std::move(emissive_fn), "glowing");
     return *this;
 }
 
@@ -919,6 +1019,7 @@ Handle<T> Handle<T>::moving(PointField<T> f) const {
             "moving() on a Compose node: a Compose is grouping, not an object -- it "
             "materializes to its children, so a motion here would have nothing to read "
             "it. Apply .moving() to each child, or compose the moved children.");
+    f = trace->bound(std::move(f), "moving");
 
     // The exact form survives a *placement* and not a deformation, and
     // this is the question that used to be unanswerable.

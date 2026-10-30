@@ -19,6 +19,7 @@
 
 #include <rsc/spatium/synthesis.hpp>
 #include <spatium/algebra/quadrature.hpp>
+#include <spatium/algebra/roots.hpp>
 
 #include <cmath>
 #include <limits>
@@ -53,17 +54,8 @@ struct Answer {
 inline double reference(const Query& q, double p) {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     if (q.ask == Ask::Solve) {
-        double a = q.x_lo, b = q.x_hi, fa = q.f(a, p), fb = q.f(b, p);
-        if (fa == 0) return a;
-        if (fb == 0) return b;
-        if (!(fa * fb < 0)) return nan;
-        for (int i = 0; i < 200 && b - a > 4 * std::numeric_limits<double>::epsilon() * std::abs(a + b); ++i) {
-            const double m = 0.5 * (a + b), fm = q.f(m, p);
-            if (fm == 0) return m;
-            if ((fm < 0) == (fa < 0)) a = m, fa = fm;
-            else b = m;
-        }
-        return 0.5 * (a + b);
+        const auto root = spatium::find_root([&](double x) { return q.f(x, p); }, q.x_lo, q.x_hi);
+        return root ? *root : nan;
     }
     const auto r = spatium::integrate([&](double x) { return q.f(x, p); },
                                       spatium::Finite<double>{q.x_lo, q.x_hi});
