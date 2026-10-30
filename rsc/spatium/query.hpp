@@ -61,19 +61,25 @@ struct Answer {
     std::vector<Solution> pieces;
     bool answered = false;   // every piece accepted
     std::string refused;     // why there is no answer at all, when there is none
+    std::size_t evaluations = 0;   // of the question's field, over every reference it took: the cost
 };
 
 // The meaning of the question at one value of the parameter, or NaN where it has none (a
 // bracket with no change of sign; an integral the door does not trust).
-inline double reference(const Query& q, double p) {
+// `evaluations`, when given, counts the evaluations of the field it took.
+inline double reference(const Query& q, double p, std::size_t* evaluations = nullptr) {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double lo = q.x_lo_at ? (*q.x_lo_at)(0.0, p) : q.x_lo, hi = q.x_hi_at ? (*q.x_hi_at)(0.0, p) : q.x_hi;
     if (!(lo < hi)) return nan;
+    const auto f = [&](double x) {
+        if (evaluations) ++*evaluations;
+        return q.f(x, p);
+    };
     if (q.ask == Ask::Solve) {
-        const auto root = spatium::find_root([&](double x) { return q.f(x, p); }, lo, hi);
+        const auto root = spatium::find_root(f, lo, hi);
         return root ? *root : nan;
     }
-    const auto r = spatium::integrate([&](double x) { return q.f(x, p); }, spatium::Finite<double>{lo, hi});
+    const auto r = spatium::integrate(f, spatium::Finite<double>{lo, hi});
     return r.trusted() ? r.value : nan;
 }
 
@@ -100,7 +106,7 @@ inline Answer answer(const Query& asked) {
     // a question that has no meaning somewhere on the parameter's interval is refused, not fitted
     for (int i = 0; i <= 16; ++i) {
         const double p = q.p_lo + (q.p_hi - q.p_lo) * i / 16.0;
-        if (!std::isfinite(reference(q, p))) {
+        if (!std::isfinite(reference(q, p, &out.evaluations))) {
             out.refused = asked.parameter.empty() ? std::format("the question has no value at parameter {}", p)
                                                : std::format("the question has no value at {} = {}", asked.parameter, p);
             return out;
@@ -108,7 +114,7 @@ inline Answer answer(const Query& asked) {
     }
     SynthesisSpec spec{.lo = q.p_lo, .hi = q.p_hi, .tolerance = q.tolerance, .relative = q.relative,
                        .max_terms = q.max_terms, .unary = q.unary, .polynomial_degree = q.polynomial_degree};
-    out.pieces = synthesize_piecewise([&](double p) { return reference(q, p); }, spec, q.min_width);
+    out.pieces = synthesize_piecewise([&](double p) { return reference(q, p, &out.evaluations); }, spec, q.min_width);
     out.answered = std::ranges::all_of(out.pieces, [](const Solution& s) { return s.accepted; });
     return out;
 }
@@ -267,9 +273,65 @@ inline spatium::Result<AskedDocument> question_document(std::string_view text) {
     return out;
 }
 
-// The question a document asks of one of its names: a root or an integral that reads one
-// parameter, with the values it reads put in place. The Query is the one `answer` synthesises.
-inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, std::string_view wanted) {
+// Parameters given a value: a scene's, or a slider's. Each names a parameter of the document and
+// lies on its interval.
+using Chosen = std::vector<std::pair<std::string, double>>;
+
+namespace detail {
+
+// A definition with the values it reads put in place, latest first so a value reading an earlier
+// one unfolds, and then the chosen parameters: what is left are the parameters it is a function of.
+struct Unfolded {
+    Expr f;                          // a value's expression, a root's left side less its right, an integrand
+    Expr lo, hi;                     // the bracket or the limits, where written
+    std::string bound;               // the name it binds itself: a root's unknown, an integral's variable
+    std::vector<std::string> free;   // the parameters it reads and is not given, in the order it reads them
+};
+
+inline spatium::Result<Unfolded> unfolded(const spatium::io::build::Document& doc, const spatium::io::build::Statement& d,
+                                          const Chosen& chosen) {
+    namespace bd = spatium::io::build;
+    using spatium::Error, spatium::ErrorCode;
+    const auto refuse = [](std::string m) { return std::unexpected(Error(ErrorCode::InvalidArgument, std::move(m))); };
+    const auto number = [](const Expr& e) { return e(0.0, 0.0); };
+    for (const auto& [name, value] : chosen) {
+        const bd::Statement* p = doc.find(name);
+        if (!p || p->kind != bd::StatementKind::Parameter)
+            return refuse(std::format("{} is given a value, and the document has no parameter {}", name, name));
+        if (!(number(p->lo.field) <= value && value <= number(p->hi.field)))
+            return refuse(std::format("{} = {} is not on its interval [{}, {}]", name, value, p->lo.text, p->hi.text));
+    }
+    const auto unfold = [&](Expr e) {
+        for (auto it = doc.statements.rbegin(); it != doc.statements.rend(); ++it)
+            if (it->kind == bd::StatementKind::Value) e = e.bind(it->name, it->value.field);
+        for (const auto& [name, value] : chosen) e = e.bind(name, Expr(value));
+        return e;
+    };
+    Unfolded out;
+    switch (d.kind) {
+        case bd::StatementKind::Root: out.f = unfold((d.value.field - d.rhs.field).simplified()), out.bound = d.name; break;
+        case bd::StatementKind::Integral: out.f = unfold(d.value.field), out.bound = d.variable; break;
+        case bd::StatementKind::Parameter: out.f = unfold(Expr::symbol(d.name)); break;
+        default: out.f = unfold(d.value.field); break;
+    }
+    out.lo = unfold(d.lo.field), out.hi = unfold(d.hi.field);
+    for (const Expr* e : {&out.f, &out.lo, &out.hi})
+        for (const auto& n : e->free_symbols()) {
+            if (n == out.bound || std::ranges::find(out.free, n) != out.free.end()) continue;
+            const bd::Statement* p = doc.find(n);
+            if (!p || p->kind != bd::StatementKind::Parameter)
+                return refuse(std::format("{} reads {}, which is not a parameter or a value", d.name, n));
+            out.free.push_back(n);
+        }
+    return out;
+}
+
+} // namespace detail
+
+// The question a document asks of one of its names: a root on a bracket or an integral that
+// reads one parameter once the `chosen` ones are put in, with the values it reads put in place.
+// The Query is the one `answer` synthesises.
+inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, std::string_view wanted, const Chosen& chosen = {}) {
     namespace bd = spatium::io::build;
     using spatium::Error, spatium::ErrorCode;
     const auto refuse = [](std::string m) { return std::unexpected(Error(ErrorCode::InvalidArgument, "ask: " + m)); };
@@ -277,29 +339,18 @@ inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, 
     if (!d) return refuse(std::format("the document defines no '{}'", wanted));
     if (d->kind != bd::StatementKind::Root && d->kind != bd::StatementKind::Integral)
         return refuse(std::format("{} is a {}; a question asks for a root or an integral", d->name, bd::statement_kind_name(d->kind)));
-    // the values the definition reads, put in place, latest first, so a value reading an earlier one unfolds
-    const auto unfold = [&](Expr e) {
-        for (auto it = doc.statements.rbegin(); it != doc.statements.rend(); ++it)
-            if (it->kind == bd::StatementKind::Value) e = e.bind(it->name, it->value.field);
-        return e;
-    };
+    if (d->kind == bd::StatementKind::Root && !bd::has_bracket(*d))
+        return refuse(std::format("{} has no bracket; a question is answered on one, as in on [a, b]", d->name));
+    auto u = detail::unfolded(doc, *d, chosen);
+    if (!u) return refuse(u.error().message);
     Query q;
     q.ask = d->kind == bd::StatementKind::Root ? Ask::Solve : Ask::Integrate;
-    q.f = d->kind == bd::StatementKind::Root ? unfold((d->value.field - d->rhs.field).simplified()) : unfold(d->value.field);
-    q.unknown = d->kind == bd::StatementKind::Root ? d->name : d->variable;
-    const Expr ulo = unfold(d->lo.field), uhi = unfold(d->hi.field);
-    std::vector<std::string> params;
-    for (const Expr* e : {static_cast<const Expr*>(&q.f), &ulo, &uhi})
-        for (const auto& n : e->free_symbols()) {
-            if (n == q.unknown || std::ranges::find(params, n) != params.end()) continue;
-            const bd::Statement* p = doc.find(n);
-            if (!p || p->kind != bd::StatementKind::Parameter)
-                return refuse(std::format("{} reads {}, which is not a parameter or a value", d->name, n));
-            params.push_back(n);
-        }
-    if (params.size() != 1)
-        return refuse(std::format("{} reads {} parameters; a question is answered as a function of one", d->name, params.size()));
-    const bd::Statement& p = *doc.find(params.front());
+    q.f = u->f;
+    q.unknown = u->bound;
+    const Expr &ulo = u->lo, &uhi = u->hi;
+    if (u->free.size() != 1)
+        return refuse(std::format("{} reads {} parameters; a question is answered as a function of one", d->name, u->free.size()));
+    const bd::Statement& p = *doc.find(u->free.front());
     q.parameter = p.name;
     const auto number = [](const Expr& e) { return e(0.0, 0.0); };
     q.p_lo = number(p.lo.field), q.p_hi = number(p.hi.field);

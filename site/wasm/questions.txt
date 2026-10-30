@@ -20,3 +20,9 @@ preview solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]
 preview sin(x
 preview tan(x)
 preview solve x^2 - = 0 for x in [0, 10], p in [0.5, 4]
+evaluate {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x"}
+evaluate {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "chosen": {"p": 2}}
+evaluate {"document": {"statements": [{"name": "y", "kind": "root", "lhs": "y^3 - 1", "rhs": "0", "lo": "0", "hi": "2"}]}, "name": "y"}
+evaluate {"document": "I = integral exp(-t^2) dt on [0, 1]", "name": "I"}
+evaluate {"document": "p in [1, 2]\na = 2 * p", "name": "a"}
+evaluate {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "chosen": {"p": 5}}

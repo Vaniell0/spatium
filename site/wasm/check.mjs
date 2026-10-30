@@ -2,7 +2,8 @@
 // and the answers must agree -- the same JSON, numbers to 1e-9 of their size (the WebAssembly
 // build has its own libm, musl's, whose last digits differ from glibc's), numbers inside a string
 // likewise and the rest of the string exactly, a row of numbers at the scale of its largest, and
-// `computed` the only field allowed to differ.
+// `computed` and a route's `cost` the only fields allowed to differ: a root found to the last bit
+// takes as many evaluations as the libm's last digits lead it to.
 //
 //   node site/wasm/check.mjs <host binary>
 import { readFileSync } from 'node:fs';
@@ -17,6 +18,7 @@ const SpatiumCore = (await import(path.join(here, 'spatium_core.js'))).default;
 const core = await SpatiumCore();
 const respond = core.cwrap('spatium_respond', 'string', ['string', 'number']);
 const preview = core.cwrap('spatium_preview', 'string', ['string']);
+const evaluate = core.cwrap('spatium_evaluate', 'string', ['string']);
 
 const number = /-?\d+(\.\d+)?(e[+-]?\d+)?/gi;
 const close = (a, b) => a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
@@ -46,7 +48,7 @@ function agree(a, b, where) {
     const keys = Object.keys(a);
     if (keys.join() !== Object.keys(b).join()) return `${where}: keys ${keys} vs ${Object.keys(b)}`;
     for (const k of keys) {
-      if (k === 'computed') continue;
+      if (k === 'computed' || k === 'cost') continue;
       const r = agree(a[k], b[k], `${where}.${k}`);
       if (r !== true) return r;
     }
@@ -57,10 +59,11 @@ function agree(a, b, where) {
 
 let failed = 0;
 lines.forEach((line, i) => {
-  const wasm = line.startsWith('preview ') ? preview(line.slice(8)) : respond(line, 0);
+  const wasm = line.startsWith('preview ') ? preview(line.slice(8))
+             : line.startsWith('evaluate ') ? evaluate(line.slice(9)) : respond(line, 0);
   const r = agree(JSON.parse(host[i]), JSON.parse(wasm), line);
   if (r !== true) { ++failed; console.log(`differs: ${r}`); }
-  if (line.includes(' for ') && !line.startsWith('preview ') && !wasm.includes('"computed":"wasm"') && wasm.includes('"certificate"'))
+  if ((line.includes(' for ') || line.startsWith('evaluate ')) && !line.startsWith('preview ') && !wasm.includes('"computed":"wasm"') && wasm.includes('"certificate"'))
     { ++failed; console.log(`differs: ${line}: the certificate does not say wasm`); }
 });
 console.log(`${lines.length - failed} of ${lines.length} agree`);

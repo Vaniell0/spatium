@@ -43,6 +43,19 @@ JsonValue card(std::string id, std::string question) {
     auto out = rsc::respond(question);
     Object card{{"id", std::move(id)}};
     for (auto& [key, value] : out.as_object()) {
+        // a route's cost counts the evaluations it took, and a root found to the last bit takes as
+        // many as the libm's last digits lead it to; the card keeps the routes, the live answer the counts
+        if (key == "candidates") {
+            Array routes;
+            for (const auto& c : value.as_array()) {
+                Object kept;
+                for (const auto& [k, v] : c.as_object())
+                    if (k != "cost") kept.emplace_back(k, v);
+                routes.push_back(kept);
+            }
+            card.emplace_back(key, routes);
+            continue;
+        }
         if (key != "answer") {
             card.emplace_back(key, value);
             continue;

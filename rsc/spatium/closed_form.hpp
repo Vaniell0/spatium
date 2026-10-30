@@ -32,7 +32,34 @@ struct ClosedForm {
     spatium::QuadraticSteps<double> solution;
     std::optional<spatium::VietaCheck<double>> check;   // of the roots, when there are two
     std::vector<spatium::io::build::Step> steps;        // the solution, and the check last
+    std::size_t evaluations = 0;                        // of the equation's field, the route's cost
 };
+
+// The equation f = 0 in its one unknown, solved in closed form.
+inline spatium::Result<ClosedForm> solve_closed_form(const spatium::io::build::Field<double>& f, const std::string& x) {
+    using spatium::Error, spatium::ErrorCode;
+    namespace bd = spatium::io::build;
+    if (const auto names = f.free_symbols(); names.size() != 1 || names.front() != x)
+        return std::unexpected(Error(ErrorCode::InvalidArgument,
+            std::format("closed form: the equation must read exactly one unknown, it reads {}", names.size())));
+    std::size_t evaluations = 0;
+    const auto at = [&](double v) { return ++evaluations, f.bind(x, bd::Field<double>(v))(0.0, 0.0); };
+    const double c = at(0), up = at(1), down = at(-1);
+    const double a = (up + down) / 2 - c, b = (up - down) / 2;
+    for (double v : {2.0, -2.0, 0.5, 3.0, -7.0}) {
+        const double want = at(v), got = (a * v + b) * v + c;
+        const double scale = std::max({std::abs(want), std::abs(a * v * v), std::abs(b * v), std::abs(c), 1.0});
+        if (!(std::abs(want - got) <= 1e-12 * scale))
+            return std::unexpected(Error(ErrorCode::InvalidArgument,
+                std::format("closed form: the equation is not a polynomial of degree at most two in {} "
+                            "(at {} = {} it is {}, a quadratic through x = 0, 1, -1 gives {})", x, x, v, want, got)));
+    }
+    ClosedForm out{x, spatium::solve_quadratic_steps(a, b, c), std::nullopt, {}, evaluations};
+    out.check = spatium::check_vieta(out.solution);
+    out.steps = bd::to_steps(out.solution, x);
+    if (out.check) out.steps.push_back(bd::to_step(*out.check, x));
+    return out;
+}
 
 inline spatium::Result<ClosedForm> solve_closed_form(std::string_view text) {
     using spatium::Error, spatium::ErrorCode;
@@ -46,26 +73,7 @@ inline spatium::Result<ClosedForm> solve_closed_form(std::string_view text) {
     if (!r.done()) return r.fail("the end");
     const auto f = std::move(*lhs) - *rhs;
     const auto names = f.free_symbols();
-    if (names.size() != 1)
-        return std::unexpected(Error(ErrorCode::InvalidArgument,
-            std::format("closed form: the equation must read exactly one unknown, it reads {}", names.size())));
-    const std::string& x = names.front();
-    const auto at = [&](double v) { return f.bind(x, bd::Field<double>(v))(0.0, 0.0); };
-    const double c = at(0), up = at(1), down = at(-1);
-    const double a = (up + down) / 2 - c, b = (up - down) / 2;
-    for (double v : {2.0, -2.0, 0.5, 3.0, -7.0}) {
-        const double want = at(v), got = (a * v + b) * v + c;
-        const double scale = std::max({std::abs(want), std::abs(a * v * v), std::abs(b * v), std::abs(c), 1.0});
-        if (!(std::abs(want - got) <= 1e-12 * scale))
-            return std::unexpected(Error(ErrorCode::InvalidArgument,
-                std::format("closed form: the equation is not a polynomial of degree at most two in {} "
-                            "(at {} = {} it is {}, a quadratic through x = 0, 1, -1 gives {})", x, x, v, want, got)));
-    }
-    ClosedForm out{x, spatium::solve_quadratic_steps(a, b, c), std::nullopt, {}};
-    out.check = spatium::check_vieta(out.solution);
-    out.steps = bd::to_steps(out.solution, x);
-    if (out.check) out.steps.push_back(bd::to_step(*out.check, x));
-    return out;
+    return solve_closed_form(f, names.size() == 1 ? names.front() : std::string());
 }
 
 } // namespace rsc
