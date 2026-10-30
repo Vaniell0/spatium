@@ -809,12 +809,14 @@ public:
 
     // A field with every defined name bound, or refused naming the first it reads that nothing
     // defined: what every builder that takes a field does with it, so no symbol reaches a node
-    // unbound and none can evaluate to NaN on the way to a pixel.
+    // unbound and none can evaluate to NaN on the way to a pixel. With names bound to numbers the
+    // field is then simplified, which changes no value (see `Field::simplified`).
     ScalarField<T> bound(const ScalarField<T>& f, const char* where) const {
         ScalarField<T> out = f;
         for (const auto& d : definitions_) out = out.bind(d.name, ScalarField<T>(d.value));
         refuse_open(out.free_symbols(), where);
-        return out;
+        // a name bound to a number leaves arithmetic on constants; folded, it is one constant
+        return definitions_.empty() ? out : out.simplified();
     }
 
     PointField<T> bound(PointField<T> f, const char* where) const {

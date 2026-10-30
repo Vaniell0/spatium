@@ -547,6 +547,71 @@ public:
     // This field with every symbol `name` replaced by `value`, rebuilt by appending so the
     // order holds and equal ops merge (binding x to u in x * u gives u * u with u once). A
     // name the field does not read changes nothing.
+    // ── Rewrites that change no value ─────────────────────────────
+    //
+    // The same field with the rewrites that give the same bits on every input, and only those:
+    // an op whose children are all constants becomes the constant it evaluates to (evaluated
+    // here by the evaluator itself, so the bits are the ones evaluation would produce), x * 1,
+    // 1 * x and x / 1 become x, x - 0 and x + (-0) become x. One pass in order: a child is
+    // rewritten before its parent reads it, so 2 * 2 * u folds to 4 * u. Every rule removes ops
+    // and none adds one; x + x as 2 * x would read better and cost an op, so it is left alone.
+    //
+    // What is NOT rewritten, because a value somewhere would change: x * 0 (NaN and infinity
+    // times 0 are NaN), x - x (infinity minus itself), x / x, x + 0 (-0 + 0 is +0), and any
+    // reassociation or distribution, which rounds differently. A symbol bound to a number is
+    // where this pays: r * r with r bound to 0.5 is one constant rather than three ops.
+    Field simplified() const {
+        Field out;
+        out.ops_.clear();
+        out.consing_ = consing_;
+        const auto place = [&out](const FieldOp<T>& n, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+            const Key key{&n, a, b, c};
+            return out.consing_ ? out.intern(key) : out.push_copy(key);
+        };
+        const auto constant = [&](T value) {
+            FieldOp<T> n{};
+            n.op = Op::Const;
+            n.value = value;
+            return place(n, 0, 0, 0);
+        };
+        const auto is_const = [&out](std::uint32_t j) { return out.ops_[j].op == Op::Const; };
+        const auto is = [&](std::uint32_t j, T x) { return is_const(j) && same_number(out.ops_[j].value, x); };
+        std::vector<std::uint32_t> at(ops_.size());
+        for (std::size_t i = 0; i < ops_.size(); ++i) {
+            const auto& n = ops_[i];
+            const auto k = arity(n.op);
+            const std::uint32_t a = k > 0 ? at[n.a] : n.a, b = k > 1 ? at[n.b] : n.b, c = k > 2 ? at[n.c] : n.c;
+            const bool foldable = k > 0 && n.op != Op::Noise && n.op != Op::Gather &&
+                                  is_const(a) && (k < 2 || is_const(b));
+            if (foldable) {
+                FieldOp<T> x{}, y{}, op = n;
+                x.op = Op::Const;
+                x.value = out.ops_[a].value;
+                y.op = Op::Const;
+                y.value = k > 1 ? out.ops_[b].value : T{0};
+                op.a = 0;
+                op.b = 1;
+                at[i] = constant(adopt({x, y, op})(T{0}, T{0}));
+                continue;
+            }
+            if constexpr (kBitComparable) {
+                if ((n.op == Op::Mul || n.op == Op::Div) && is(b, T{1})) { at[i] = a; continue; }
+                if (n.op == Op::Mul && is(a, T{1})) { at[i] = b; continue; }
+                if (n.op == Op::Sub && is(b, T{0})) { at[i] = a; continue; }
+                if (n.op == Op::Add && is(b, -T{0})) { at[i] = a; continue; }
+                if (n.op == Op::Add && is(a, -T{0})) { at[i] = b; continue; }
+            }
+            at[i] = place(n, a, b, c);
+            out.structural_ = out.structural_ && n.op != Op::Opaque;
+            out.reads_point_ = out.reads_point_ || n.op == Op::Point;
+        }
+        if (at.back() + 1 != out.ops_.size()) {
+            FieldOp<T> root = out.ops_[at.back()];
+            out.ops_.push_back(std::move(root));
+        }
+        return out.reachable_from_root();
+    }
+
     Field bind(const std::string& name, const Field& value) const {
         Field out;
         out.ops_.clear();
