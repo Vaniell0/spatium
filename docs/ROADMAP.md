@@ -12,6 +12,24 @@ This document tracks what's done and what's open, by content and by date — not
 
 ---
 
+## The layers
+
+The library is read bottom up, and each layer reads only the one below it. The history below and in [`roadmap/`](roadmap/) is by date; this is the map of what each layer holds now and what it takes next.
+
+| Layer | What it holds | Where | Next |
+|---|---|---|---|
+| 1. IR | a quantity as one `Field`: numbers, the chart's `u` and `v`, named symbols, operations; `bind`, `free_symbols`, `simplified` | `io/field.hpp`; as text and LaTeX `io/field_text.hpp`; read back `io/field_parse.hpp` | a dense layer of a network as one operation, its weights in a buffer |
+| 2. Document | what a person writes before anything is computed, a line each: a value `r = 0.5`, a parameter `p in [0.5, 4]`, a root `x: x^2 - p = 0 on [0, 10]`, an integral, a shape `S1 = offset(S0, h)`; text and JSON read into one; its shapes built as a `Trace` | `io/document.hpp`, `io/document_trace.hpp`, `io/build.hpp` | a TypeScript builder writing the same JSON |
+| 3. Evaluation | a statement given its value by a route: evaluated, solved in closed form with its steps, a root on a bracket, an integral, an answer of a parameter synthesised and certified | `rsc/spatium/respond.hpp`, `query.hpp`, `closed_form.hpp`, `synthesis.hpp`; `algebra/roots.hpp`, `algebra/quadrature.hpp` | one door for a statement's value, `respond` its JSON view; the WebAssembly core taking a document |
+| 4. Lowering | what a computed document becomes: text, LaTeX, GLSL for Vulkan compute (std430), a picture from the CPU ray tracer | `io/field_text.hpp`, `io/trace_text.hpp`, `io/field_glsl.hpp`, `render/`, `render/gpu/` ([`gpu.md`](gpu.md)) | a symbol lowered to a uniform or buffer read, so a moved number is new data and not a new shader; a PNG plot of a field on the CPU; GLSL for WebGL2 |
+| 5. Views | the page: windows over one document, showing what the core answers and composing nothing | `site/` | cards in a grid: live input, Tab completion from the reference, a floating keyboard, the workspace in its link; then free windows; then scenes |
+
+A question typed into the calculator is a document of one statement: `solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]` is read as the parameter and the root it asks for, and answered by layer 3. There is no second language for questions.
+
+What crosses out of the library is the document, as text or JSON; there is no C ABI. The boundary and the rules of lowering (structure is code, numbers are data) are [`gpu-abi-design.md`](gpu-abi-design.md).
+
+---
+
 # Completed
 
 ## Concept hierarchy, core geometry, mesh, viewer foundations
@@ -328,7 +346,7 @@ So: the items we are actually steering by, with their state. Everything below th
 | RSC in the scene pipeline | **next** | nothing. Its first real call site is the render-level choice — exact, tessellated or Newton — where the current rule reads one feature of three and is measurably wrong past a hundred objects | RSC as search |
 | Newton's cradle demo | **next** | its legend, and pairwise contact between moving bodies plus a string: `contact_force.hpp` pushes a body out of a *static* surface, and `verlet_step` moves one `PointMass` | Contact physics / RSC |
 | Interactive voxel raytracing — free flight, the scene described in the DSL | parked | the compute-shader row; a voxel grid is walked by DDA in a compute shader, not by RT hardware | Declarative scene DSL |
-| C ABI for the DSL (CUDA) | parked | the three rows above. Not needed for a browser (WASM is compiled C++) nor for GPU *traversal* (`Cooked<T>` is already flat POD) | GPU rendering |
+| C ABI for the DSL (CUDA) | **decided against 2026-10-30** | the boundary is the document as text or JSON (`docs/gpu-abi-design.md`); the CUDA kernels were removed | GPU rendering |
 | RSC as search | **measured 2026-09-18, not parked on the ABI** | a value head, before anything larger. Substantially checked: scalar chains collapse and geometry chains do not, a policy is an anti-heuristic on small spaces, and transfer between spaces is free under a relative spec | RSC as search |
 | Learned split policy over a bound concept | parked | the bound concept itself. The one target where all three measured conditions line up: state does not collapse, expanding a node costs milliseconds, and the reward is a timing | Interop / ecosystem |
 | Ball tree on a manifold | **done 2026-09-25** | — `spatial/ball_tree.hpp`: geodesic balls split by two pivots with `distance` alone, walked by a unit-speed geodesic in closed form (`spatial/geodesic_ball.hpp`) on the sphere and in hyperbolic space. `hyperbolic_tessellation_demo` casts through it instead of marching every marker: 5x at its 126 markers, 105x at 10 000, 138x at 100 000, and the hit is exact rather than within a marching tolerance | Interop / ecosystem |
@@ -1524,29 +1542,14 @@ The goal was never to remove dependencies. It is to have a working default for e
 
 - **[want]** Porous/microstructure analysis — geodesics on pore surfaces, effective conductivity/strength, and grain-shape/orientation analysis in metals, all as manifold queries on a reconstructed surface rather than a bespoke materials-science pipeline.
 
-## GPU rendering (CUDA)
+## GPU rendering
 
-- **[course]** Land the actual production render (1920×1080, ~750 frames, Kerr flyby) — kernels are built and cross-validated (see Completed above); `gallery/blackhole_gr.mp4` currently ships a partial preview render, not the full sequence.
-- **[want]** `gpu/derive_christoffel.py` already derives the closed-form Christoffel symbols symbolically (sympy) and self-checks them (Kerr at a=0 reduces to Schwarzschild term-by-term) — but only *prints* them for a human to hand-transcribe into `christoffel_closed_form.hpp`, instead of emitting the header directly. See `docs/gpu-abi-design.md` for the concrete fix (sympy's `cxxcode()` printer, write the file, no hand transcription step). That's what turns this from a one-off calculation into a standard, repeatable method.
+One path, Vulkan compute from the IR ([`gpu.md`](gpu.md)); what crosses out of the library and how it is lowered is [`gpu-abi-design.md`](gpu-abi-design.md). Decided 2026-10-30: no C ABI for the DSL -- the boundary is the document as text or JSON, read by the same reader in the host and in WebAssembly.
 
-- **[want]** **The C ABI for the DSL.** What gates it is how much of a scene is structural — not RSC, which an earlier draft of `docs/gpu-abi-design.md` named and which pointed at something unrelated, so nothing about it ever got closer. The document was rewritten 2026-09-18 and now carries the design; this entry records the state and the open question.
-
-  Measured on every run of the donut demo, on `main`:
-
-  ```
-  fields: 107 total, 77 structural, 30 opaque; leaves 32
-          (32 recognized, 0 unknown), 11 distinct types, 3208 B captured
-  ```
-
-  A `Trace` is a flat array of tagged ops addressed by index — the exact shape a C ABI wants, and `gpu/geodesic_kernel.cu`'s own boundary comment ("flat arrays only across this boundary — no structs/STL") says the same thing from the other side. So the *structure* crosses trivially. What never crosses is an opaque leaf, because it is a C++ closure.
-
-  **The figure used to be quoted as 39 612 opaque leaves of 39 631, and later as 7 of 73. Neither is usable.** The first predates the dust collapsing from tens of thousands of per-particle nodes into a single `Scatter`. The second came from a report with two blind spots — it never walked a node's emission slot, and it never counted the closures a `Scale` or `Rotate` carries in `scale_fn`/`rot_fn`, which also left `is_structural()` returning true for a field with a lambda in it. Fixed 2026-09-18 with tests that fail without the fix; the numbers above are the honest ones.
-
-  **The open question is not the count but the classification.** `unknown = 0` says every leaf carries a `type_index`, not that every leaf is a *known operation* — a lambda that happens to be a smoothstep and a lambda that is arbitrary are indistinguishable by that number. A first pass suggests all 32 fall into a small vocabulary (noise, hash-from-origin, smoothstep, trig, lerp, clamp, dot/cross, select, normalize, and an indexed gather from a small constant table) with nothing doing I/O or iterating a solver, but that pass was made by reading call sites rather than walking the trace, and the two disagree by one. Until each of the 32 is named with a vocabulary word, "exportable" is a guess.
-
-  **The first step is a test, not a backend:** a POD interpreter run alongside `eval_into` over the whole donut scene, asserting bit-exact agreement. No epsilon — a tolerance passes under a different order of operations, and order of operations is exactly what a SIMT lane does not guarantee, so it would hide the class the test exists to catch. Passing demonstrates exportability for a real scene; failing names the missing operation. Neither outcome needs a GPU toolchain.
-
-  **What the IR is *not* needed for, recorded 2026-09-18 because it kept being assumed.** Not for a browser: WASM is compiled C++, Emscripten handles `std::function` and lambdas, so an opaque leaf there is a compiled lambda that runs. Not for GPU *traversal*: `Cooked<T>` is already flat POD arrays with no pointers, so the CPU can cook and the device can traverse and shade with none of this work — the IR is needed only when fields must be re-evaluated on the device every frame, which is a real-time-animation requirement rather than a rendering one. And not for a language binding, which has a cheaper shape than an ABI: one entry point reading a *description*. `io/scene.hpp` is already half of that — JSON in, a string-keyed `ShapeRegistry`, and an unregistered `shape_kind` still loading and saving correctly rather than breaking. Extending it from placed objects to trace nodes is the job. Keep parsing and dispatch apart while doing it: a precise description determines its result, so it wants a deterministic parser that can fail cleanly, whereas RSC belongs one step further in deciding *how* — analytic or tessellated, what resolution, which root-finder, what precision, three of its existing trained domains. Parser decides what, RSC decides how. See `docs/gpu-abi-design.md`.
+- **[course]** A symbol lowered to a read from a uniform or a buffer, so that structure is code and numbers are data: a shader compiled when a document's structure changes, not when a parameter, the time or a weight moves. `lower()` in `io/field_pod.hpp` and `io/field_glsl.hpp` refuses a symbol today; the POD interpreter is the host twin.
+- **[course]** A dense layer of a network as one IR operation with its weights in a buffer, lowered like any field, `TanhNet<double>` its host twin; a neural shader (an image filter, a learned field in a scene) is then a field.
+- **[course]** GLSL for WebGL2 from the same IR, uniforms and textures in place of std430 storage, for the page's scene windows.
+- **[course]** Land the production render (1920x1080, ~750 frames, Kerr flyby) with `blackhole_live --video`; `gallery/blackhole_gr.mp4` is a partial preview, not the full sequence.
 
 ## RSC as search, not classification
 

@@ -383,9 +383,10 @@ emitter beside `field_glsl`/`metric_glsl` is one more backend of the same IR.
 **GPU.** One path: Vulkan compute from the IR (exact derivatives without
 sympy), `docs/gpu.md`. The legacy CUDA in `gpu/` (sympy-transcribed
 Christoffels, one BL Kerr) was removed 2026-10-30. Device has no
-fp64 (Iris Xe); fp32 passes the gate (3.5e-4 at the critical curve). The
-ROADMAP's next step, an IR interpreter in GLSL, removes shader recompiles on
-scene change.
+fp64 (Iris Xe); fp32 passes the gate (3.5e-4 at the critical curve). Shader
+recompiles on a moved number go by lowering a symbol to a uniform read
+(structure is code, numbers are data, `docs/gpu-abi-design.md`); the POD
+interpreter stays the host twin.
 
 ## 10. Media, as decided
 

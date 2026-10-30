@@ -181,6 +181,32 @@ yourself:
 ./build/examples/donut_demo --photo      # also writes donut.png
 ```
 
+## The same scene, written as text
+
+The shapes of Steps 1 to 4 can be written as a document instead, one
+statement a line, and read into the same `Trace`:
+
+```
+dough = torus(2, 1)
+icing = offset(dough, 0.035)
+sprinkle = cylinder(0.025, 0.12)
+sprinkles = scatter(sprinkle, icing, 200)
+donut = union(dough, icing, sprinkles)
+```
+
+```cpp
+#include <spatium/io/document_trace.hpp>
+
+auto doc = bd::read_document(text);   // refused with the line, and the column where it stops being the language
+auto built = bd::to_trace(*doc);      // Space, Offset, Space, Scatter, Compose: the five nodes above
+```
+
+A document names its numbers too -- a value `r = 0.5`, a root
+`h: (r + h)^2 - 2 * r^2 = 0 on [0, 1]`, a parameter `p in [0.5, 4]` drawn at
+the value the caller chooses for it -- and it is what the page sends to the
+core, as text or as JSON. Colours, motions and the tessellation are added
+by the calls; a document describes the rest shape.
+
 ## Why bother being declarative
 
 Nothing above required you to write a loop over 200 sprinkles yourself —

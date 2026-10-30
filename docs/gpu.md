@@ -22,6 +22,23 @@ included.
 | Shaders | `render/gpu/gpu_trace_glsl.hpp`, `render/gpu/gpu_splat_glsl.hpp`, `render/gpu/blackhole_glsl.hpp` | the scene's trace and shade, sub-pixel particles drawn by projection, and a spacetime traced ray by ray through its metric |
 | Device | `viewer/compute.hpp`, `viewer/gpu_lbvh.hpp` (`src/viewer/`) | headless Vulkan compute: a device, host-visible storage buffers, a kernel compiled from GLSL; the LBVH build on it |
 
+## Generated from the IR, and written by hand
+
+Generated: a field as GLSL (`field_glsl`), a metric with its partials and
+the geodesic step (`metric_glsl`), and a Scatter's motion as a kernel
+(`gpu_instances`). Written by hand, each a transcription of the host
+function it is named after: the scene's trace and shade (`gpu_trace_glsl`),
+the splatting of sub-pixel particles (`gpu_splat_glsl`), and the black-hole
+frame (`blackhole_glsl`), whose loop is written by hand around the metric
+`metric_glsl` generates. A new scene reaches the device through the
+generated half; the hand-written half is the frame around it.
+
+Numbers in a generated shader are constants today: the lowering refuses a
+symbol, so every name is bound before a field reaches a device and a moved
+number is a new shader. The rule the next step follows is in
+[`gpu-abi-design.md`](gpu-abi-design.md): structure is code, numbers are
+data.
+
 `render/` itself is the CPU ray tracer (camera, supersampling, sky, textures,
 PNG); `render/gpu/` is what a device reads. `viewer/app.hpp` is the
 rasterising window, kept apart from compute so that the compute path runs on
