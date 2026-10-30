@@ -107,6 +107,12 @@ TEST_CASE("field latex: the same walk, spelled for a page", "[field][latex]") {
     CHECK(*bd::to_latex(F(1.8e-5) * u) == "1.8 \\cdot 10^{-5} \\cdot u");
     CHECK(*bd::to_latex(F(-2.5e20) + u) == "-2.5 \\cdot 10^{20} + u");
     CHECK(*bd::to_latex(less(u, v)) == "\\left[u < v\\right]");
-    CHECK(*bd::to_latex(F::coord(1) * F::coord(1)) == "x^{1} \\cdot x^{1}");
+    CHECK(*bd::to_latex(F::coord(1) * F::coord(2)) == "x^{1} \\cdot x^{2}");
+    // a product of an op with itself is a power; a base with a superscript of its own is grouped
+    CHECK(*bd::to_latex(u * u * u - v) == "u^{3} - v");
+    CHECK(*bd::to_latex(F::coord(1) * F::coord(1)) == "\\left(x^{1}\\right)^{2}");
+    CHECK(*bd::to_latex((u / v) * (u / v)) == "\\left(\\frac{u}{v}\\right)^{2}");
+    CHECK(*bd::to_text((u * u) * (u * u)) == "(u^2)^2");
+    CHECK(*bd::to_text(F(-2.0) * F(-2.0) + u * (v * v)) == "(-2)^2 + u * v^2");
     CHECK_FALSE(bd::to_latex(F([](double, double) { return 0.0; })).has_value());
 }

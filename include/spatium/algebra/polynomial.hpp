@@ -8,6 +8,7 @@
 #  include <array>
 #  include <cmath>
 #  include <numbers>
+#  include <optional>
 #  include <vector>
 #endif
 
@@ -118,6 +119,37 @@ QuadraticSteps<T> solve_quadratic_steps(T a, T b, T c) {
 template<Scalar T>
 UpTo<Complex<T>, 2> solve_quadratic(T a, T b, T c) {
     return solve_quadratic_steps(a, b, c).roots;
+}
+
+// ── A check of the roots by Vieta's formulas ──────────────────
+//
+// A second route to the same answer, cheaper than putting the roots back into the equation and
+// easier to read: the two roots of a x^2 + b x + c sum to -b/a and multiply to c/a. Each is
+// measured relative to the size of what it adds or multiplies (|x1| + |x2|, |x1| |x2|), so the
+// rounding of a sum is not mistaken for an error. It is the check that catches the solver's
+// known weakness, the root lost to cancellation when b^2 dwarfs 4ac (x^2 + 1e8 x + 1: the small
+// root comes out -7.45e-9 against -1e-8, and the product is 0.745 instead of 1).
+
+template<Scalar T>
+struct VietaCheck {
+    Complex<T> sum, product;   // of the roots, as computed
+    T want_sum{}, want_product{};   // -b/a and c/a
+    double error = 0;          // the larger of the two, relative
+};
+
+template<Scalar T>
+std::optional<VietaCheck<T>> check_vieta(const QuadraticSteps<T>& s) {
+    using std::abs, std::sqrt;
+    if (s.a == T{0} || s.roots.size() != 2) return std::nullopt;
+    const Complex<T>& x1 = s.roots[0];
+    const Complex<T>& x2 = s.roots[1];
+    VietaCheck<T> v{x1 + x2, x1 * x2, -s.b / s.a, s.c / s.a, 0.0};
+    const auto norm = [](const Complex<T>& z) { return primal_double(T(sqrt(z.re * z.re + z.im * z.im))); };
+    const double size_sum = norm(x1) + norm(x2), size_product = norm(x1) * norm(x2);
+    const double e_sum = norm(v.sum - Complex<T>{v.want_sum}) / std::max(size_sum, 1e-300);
+    const double e_product = norm(v.product - Complex<T>{v.want_product}) / std::max(size_product, 1e-300);
+    v.error = std::max(size_sum > 0 ? e_sum : 0.0, size_product > 0 ? e_product : norm(v.product - Complex<T>{v.want_product}));
+    return v;
 }
 
 // Convenience: real roots only

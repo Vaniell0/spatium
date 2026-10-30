@@ -134,6 +134,10 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
     for (const auto& s : solved->steps) steps.push_back(Object{{"label", s.label}, {"latex", s.latex}});
     out.emplace_back("unknown", solved->unknown);
     out.emplace_back("steps", steps);
+    if (solved->check)
+        out.emplace_back("check", Object{{"by", "Vieta's formulas"},
+                                         {"holds", solved->check->error <= 1e-12},
+                                         {"error_below", decade_above(solved->check->error)}});
     return out;
 }
 

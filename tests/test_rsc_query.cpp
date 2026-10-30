@@ -120,7 +120,7 @@ TEST_CASE("query: a question typed as text is the question built in code", "[rsc
     CHECK(asked->unknown == "x");
     CHECK(asked->parameter == "p");
     CHECK((asked->x_lo == 0 && asked->x_hi == 10 && asked->p_lo == 0.5 && asked->p_hi == 4));
-    CHECK(*spatium::io::build::to_text(asked->f) == "x * x - p");
+    CHECK(*spatium::io::build::to_text(asked->f) == "x^2 - p");
     asked->tolerance = 1e-10;
     const Expr x = Expr::symbol("x"), p = Expr::symbol("p");
     const rsc::Query built{.ask = rsc::Ask::Solve, .f = x * x - p, .unknown = "x", .parameter = "p", .x_lo = 0,
@@ -138,7 +138,7 @@ TEST_CASE("query: a question typed as text is the question built in code", "[rsc
     CHECK((in->unknown == "x" && in->parameter == "p"));
     const auto eq = rsc::ask("solve x * x = p for x in [0, sqrt(2) * 10], p in [1 / 3, 4]");
     REQUIRE(eq.has_value());
-    CHECK(*spatium::io::build::to_text(eq->f) == "x * x - p");
+    CHECK(*spatium::io::build::to_text(eq->f) == "x^2 - p");
     CHECK(eq->x_hi == std::sqrt(2.0) * 10);
     CHECK(eq->p_lo == 1.0 / 3);
 }

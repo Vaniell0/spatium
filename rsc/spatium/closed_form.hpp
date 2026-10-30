@@ -7,7 +7,8 @@
 // that it is a polynomial of degree at most two is checked, not assumed: the quadratic with those
 // coefficients must give the field's values at five more points, or the equation is refused by
 // name. No expression is rewritten. The roots come from `solve_quadratic_steps`, the solver
-// itself, so the steps a page shows are the ones the answer was computed through.
+// itself, so the steps a page shows are the ones the answer was computed through; the last step
+// checks the two roots by Vieta's formulas, a second route that says when the first lost digits.
 //
 // This is the closed-form side of the calculator; a question with a parameter whose answer has
 // to be found goes to `ask` and synthesis (query.hpp).
@@ -19,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,7 +30,8 @@ namespace rsc {
 struct ClosedForm {
     std::string unknown;
     spatium::QuadraticSteps<double> solution;
-    std::vector<spatium::io::build::Step> steps;
+    std::optional<spatium::VietaCheck<double>> check;   // of the roots, when there are two
+    std::vector<spatium::io::build::Step> steps;        // the solution, and the check last
 };
 
 inline spatium::Result<ClosedForm> solve_closed_form(std::string_view text) {
@@ -58,8 +61,10 @@ inline spatium::Result<ClosedForm> solve_closed_form(std::string_view text) {
                 std::format("closed form: the equation is not a polynomial of degree at most two in {} "
                             "(at {} = {} it is {}, a quadratic through x = 0, 1, -1 gives {})", x, x, v, want, got)));
     }
-    ClosedForm out{x, spatium::solve_quadratic_steps(a, b, c), {}};
+    ClosedForm out{x, spatium::solve_quadratic_steps(a, b, c), std::nullopt, {}};
+    out.check = spatium::check_vieta(out.solution);
     out.steps = bd::to_steps(out.solution, x);
+    if (out.check) out.steps.push_back(bd::to_step(*out.check, x));
     return out;
 }
 
