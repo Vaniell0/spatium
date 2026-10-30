@@ -44,6 +44,9 @@
 # The site the library's gallery and calculator are served from (GitHub Pages)
 !/site/
 !/site/**
+# the WebAssembly build of the core is built (site/wasm/build.sh), not kept
+/site/wasm/spatium_core.js
+/site/wasm/spatium_core.wasm
 !/modules/
 !/modules/**
 !/.github/
