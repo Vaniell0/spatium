@@ -39,7 +39,22 @@ using Array = JsonValue::ArrayType;
 JsonValue card(std::string id, std::string question, double tolerance = 1e-8) {
     auto out = rsc::respond(question, tolerance);
     Object card{{"id", std::move(id)}};
-    for (auto& kv : out.as_object()) card.push_back(kv);
+    for (auto& [key, value] : out.as_object()) {
+        if (key != "answer") {
+            card.emplace_back(key, value);
+            continue;
+        }
+        // a Chebyshev piece's coefficients carry the last digits of the libm that computed the
+        // reference; the card keeps its form and degree, the live answer keeps the numbers
+        Array pieces;
+        for (const auto& piece : value.as_array()) {
+            Object kept;
+            for (const auto& [k, v] : piece.as_object())
+                if (k != "coefficients") kept.emplace_back(k, v);
+            pieces.push_back(kept);
+        }
+        card.emplace_back(key, pieces);
+    }
     return card;
 }
 

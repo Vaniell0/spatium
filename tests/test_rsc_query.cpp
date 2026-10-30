@@ -63,16 +63,22 @@ TEST_CASE("query: the integral of x^p over [0, 1] is 1 / (p + 1)", "[rsc][query]
     holds(a, 0, 3, [](double v) { return 1 / (v + 1); }, 1e-9);
 }
 
-TEST_CASE("query: the integral of exp(-p x^2) over [0, 1] needs erf, and takes pieces", "[rsc][query]") {
-    // sqrt(pi / p) erf(sqrt p) / 2: erf is not among the operations; the answer is still certified
+TEST_CASE("query: the integral of exp(-p x^2) over [0, 1] needs erf, and says it found no closed form", "[rsc][query]") {
+    // sqrt(pi / p) erf(sqrt p) / 2: erf is not among the operations; the answer is still certified,
+    // as a Chebyshev polynomial, and marked so -- or, without that fallback, as pieces of short terms
     const Expr x = Expr::u(), p = Expr::v();
-    const rsc::Query q{.ask = rsc::Ask::Integrate, .f = exp(Expr(-1.0) * p * x * x), .x_lo = 0, .x_hi = 1,
-                       .p_lo = 0.1, .p_hi = 4, .tolerance = 1e-6};
+    rsc::Query q{.ask = rsc::Ask::Integrate, .f = exp(Expr(-1.0) * p * x * x), .x_lo = 0, .x_hi = 1,
+                 .p_lo = 0.1, .p_hi = 4, .tolerance = 1e-6};
     const auto a = rsc::answer(q);
     INFO(a.pieces.size() << " pieces");
     REQUIRE(a.answered);
-    CHECK(a.pieces.size() > 1);
+    CHECK(std::ranges::all_of(a.pieces, [](const rsc::Solution& s) { return s.form == rsc::Form::Chebyshev; }));
     holds(a, 0.1, 4, [](double v) { return std::sqrt(std::numbers::pi / v) * std::erf(std::sqrt(v)) / 2; }, 1e-6);
+    q.polynomial_degree = 0;
+    const auto short_terms = rsc::answer(q);
+    REQUIRE(short_terms.answered);
+    CHECK(short_terms.pieces.size() > a.pieces.size());
+    holds(short_terms, 0.1, 4, [](double v) { return std::sqrt(std::numbers::pi / v) * std::erf(std::sqrt(v)) / 2; }, 1e-6);
 }
 
 TEST_CASE("query: a root on a bracket with no change of sign is refused, not fitted", "[rsc][query]") {

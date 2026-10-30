@@ -53,6 +53,7 @@ struct Query {
     std::vector<Unary> unary{Unary::Sqrt};
     std::size_t max_terms = 4;
     double min_width = 1e-6;   // of a piece, in the parameter
+    std::size_t polynomial_degree = 32;   // a piece no short expression answers is a Chebyshev polynomial up to this
 };
 
 struct Answer {
@@ -104,7 +105,7 @@ inline Answer answer(const Query& asked) {
         }
     }
     SynthesisSpec spec{.lo = q.p_lo, .hi = q.p_hi, .tolerance = q.tolerance, .relative = q.relative,
-                       .max_terms = q.max_terms, .unary = q.unary};
+                       .max_terms = q.max_terms, .unary = q.unary, .polynomial_degree = q.polynomial_degree};
     out.pieces = synthesize_piecewise([&](double p) { return reference(q, p); }, spec, q.min_width);
     out.answered = std::ranges::all_of(out.pieces, [](const Solution& s) { return s.accepted; });
     return out;
