@@ -81,6 +81,13 @@ if(SPATIUM_BUILD_TESTS)
     add_test(NAME gallery_up_to_date COMMAND gallery --check ${PROJECT_SOURCE_DIR}/site/gallery/gallery.json)
 endif()
 
+# The reference of the question language the page reads, site/data/reference.json, written from
+# the reader's own tables with every example answered by the library. Its --check is a test.
+spatium_add_example(NAME site_reference INCLUDE_DIRS ${PROJECT_SOURCE_DIR})
+if(SPATIUM_BUILD_TESTS)
+    add_test(NAME site_reference_up_to_date COMMAND site_reference --check ${PROJECT_SOURCE_DIR}/site/data/reference.json)
+endif()
+
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
 # "planet" -- BVH<Triangle3> ray_cast against a real mesh, not an
 # analytical primitive, so -O3 -march=native matters for the per-pixel

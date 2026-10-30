@@ -188,3 +188,25 @@ TEST_CASE("field parse: a text that is not a field is refused where it stops bei
     CHECK(refusal("u^2^2").find("found '^'") != std::string::npos);
     CHECK(refusal("") == "parse: at column 1, expected a number, a name, a function or '(', found the end");
 }
+
+TEST_CASE("field parse: the language's table is the reader's, and every example in it reads", "[field][parse]") {
+    // each function the table names is read as a call of its arity, and its example reads to a number
+    for (const auto& f : bd::functions) {
+        INFO(f.name);
+        const std::string call = std::string(f.name) + (f.arity == 1 ? "(u)" : "(u, v)");
+        CHECK(bd::parse(call).has_value());
+        const auto e = bd::parse(f.example);
+        REQUIRE(e.has_value());
+        CHECK(std::isfinite((*e)(0.0, 0.0)));
+    }
+    for (const auto& o : bd::operators) {
+        INFO(o.written);
+        // an equation is read by the question's door, not as one field
+        if (std::string_view(o.example).find('=') == std::string_view::npos) CHECK(bd::parse(o.example).has_value());
+    }
+    for (const auto& c : bd::constants) CHECK(bd::parse(c.name).has_value());
+    // the case it must fail: a name the table does not have, and the refusal lists what it has
+    const auto tan = bd::parse("tan(u)");
+    REQUIRE_FALSE(tan.has_value());
+    for (const auto& f : bd::functions) CHECK(tan.error().message.find(f.name) != std::string::npos);
+}
