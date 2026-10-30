@@ -35,9 +35,10 @@ using spatium::io::JsonValue;
 using Object = JsonValue::ObjectType;
 using Array = JsonValue::ArrayType;
 
-// a card is the library's own answer to its question, with an id the page links to
-JsonValue card(std::string id, std::string question, double tolerance = 1e-8) {
-    auto out = rsc::respond(question, tolerance);
+// a card is the library's own answer to its question, with an id the page links to; at the
+// tolerance a live answer has, since the question's text is all the page sends
+JsonValue card(std::string id, std::string question) {
+    auto out = rsc::respond(question);
     Object card{{"id", std::move(id)}};
     for (auto& [key, value] : out.as_object()) {
         if (key != "answer") {
@@ -63,14 +64,14 @@ std::string gallery() {
     cards.push_back(card("arithmetic", "2(3 + 4)^2 - 1/4"));
     cards.push_back(card("quadratic", "2x^2 - 3x - 5 = 0"));
     cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
-    cards.push_back(card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]", 1e-10));
-    cards.push_back(card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]", 1e-9));
-    cards.push_back(card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]", 1e-6));
+    cards.push_back(card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]"));
+    cards.push_back(card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]"));
+    cards.push_back(card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]"));
     // functions known by a name the library does not have: the sine integral, the error function
     // and the Fresnel integral, each an integral up to the parameter, answered as pieces
-    cards.push_back(card("si", "integrate sin(t)/t for t in [0, x], x in [0.5, 6]", 1e-8));
-    cards.push_back(card("erf", "integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]", 1e-8));
-    cards.push_back(card("fresnel", "integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]", 1e-8));
+    cards.push_back(card("si", "integrate sin(t)/t for t in [0, x], x in [0.5, 6]"));
+    cards.push_back(card("erf", "integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]"));
+    cards.push_back(card("fresnel", "integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]"));
     cards.push_back(card("refused", "solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]"));
     {
         // the volume under a triangle down to z = 0 as a function of one vertex's height, which
@@ -94,7 +95,9 @@ std::string gallery() {
         a.answered = s.accepted;
         Object prism{{"id", "prism"},
                      {"question", "the volume under the triangle (1, 0, 2), (0, 1, 4), (0, 0, p) down to z = 0, p in [0, 10]"},
-                     {"route", "synthesis"}};
+                     {"route", "synthesis"},
+                     // asked in code, not typed: the page opens it as its card, not in the question line
+                     {"typed", false}};
         for (auto& kv : rsc::answer_json(a, "p")) prism.push_back(kv);
         cards.push_back(prism);
     }

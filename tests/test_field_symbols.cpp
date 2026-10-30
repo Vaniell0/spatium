@@ -89,7 +89,7 @@ TEST_CASE("field text: precedence decides the parentheses, and symbols keep thei
     // a factor of exactly 1 is left out, which changes no value: x * 1 is x to the last bit
     CHECK(*bd::to_text(F(1.0) * sqrt(u)) == "sqrt(u)");
     CHECK(*bd::to_text(u * F(1.0) + v) == "u + v");
-    CHECK(*bd::to_latex(F(0.5) * u + F(1.25) * F(1.0)) == "0.5 \\cdot u + 1.25");
+    CHECK(*bd::to_latex(F(0.5) * u + F(1.25) * F(1.0)) == "0.5u + 1.25");
     // the case it must fail: a factor near 1 is a number, not a 1
     CHECK(*bd::to_text(F(1.0000000000000002) * u) == "1.0000000000000002 * u");
     CHECK(*bd::to_text(F::symbol("mass") * F(2.0) / F::symbol("r")) == "mass * 2 / r");
@@ -98,7 +98,7 @@ TEST_CASE("field text: precedence decides the parentheses, and symbols keep thei
 
 TEST_CASE("field latex: the same walk, spelled for a page", "[field][latex]") {
     const F u = F::u(), v = F::v();
-    CHECK(*bd::to_latex(sqrt(u) + F(2.0) * log(v), "x", "y") == "\\sqrt{x} + 2 \\cdot \\ln\\left(y\\right)");
+    CHECK(*bd::to_latex(sqrt(u) + F(2.0) * log(v), "x", "y") == "\\sqrt{x} + 2\\ln\\left(y\\right)");
     CHECK(*bd::to_latex(u / (v * F(2.0))) == "\\frac{u}{v \\cdot 2}");
     CHECK(*bd::to_latex((u + v) * F(3.0)) == "\\left(u + v\\right) \\cdot 3");
     CHECK(*bd::to_latex(F::symbol("theta") + F::symbol("r_0") + F::symbol("mass")) ==
@@ -108,6 +108,12 @@ TEST_CASE("field latex: the same walk, spelled for a page", "[field][latex]") {
     CHECK(*bd::to_latex(F(-2.5e20) + u) == "-2.5 \\cdot 10^{20} + u");
     CHECK(*bd::to_latex(less(u, v)) == "\\left[u < v\\right]");
     CHECK(*bd::to_latex(F::coord(1) * F::coord(2)) == "x^{1} \\cdot x^{2}");
+    // a number or a fraction before a name is written next to it; two numbers, and a fraction on
+    // the right, keep the dot (2 1/3 would read as a mixed number)
+    CHECK(*bd::to_latex(F(2.0) * (u * u)) == "2u^{2}");
+    CHECK(*bd::to_latex(F(2.0) * F(3.0)) == "2 \\cdot 3");
+    CHECK(*bd::to_latex(F(2.0) * (u / v)) == "2 \\cdot \\frac{u}{v}");
+    CHECK(*bd::to_latex(F(1.0) / F(6.0) * u) == "\\frac{1}{6} u");
     // a product of an op with itself is a power; a base with a superscript of its own is grouped
     CHECK(*bd::to_latex(u * u * u - v) == "u^{3} - v");
     CHECK(*bd::to_latex(F::coord(1) * F::coord(1)) == "\\left(x^{1}\\right)^{2}");

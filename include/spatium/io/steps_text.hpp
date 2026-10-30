@@ -68,10 +68,10 @@ inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_v
     out.push_back({"coefficients", std::format("a = {},\\quad b = {},\\quad c = {}", num(s.a), num(s.b), num(s.c))});
     switch (s.kind) {
         case QuadraticCase::Identity:
-            out.push_back({"a = b = c = 0", "0 = 0 \\text{ for every } " + x});
+            out.push_back({"a = b = c = 0: every value is a root", "0 = 0 \\text{ for every } " + x});
             return out;
         case QuadraticCase::None:
-            out.push_back({"a = b = 0, c \\ne 0", std::format("{} = 0 \\text{{ holds for no }} {}", num(s.c), x)});
+            out.push_back({"a = b = 0 and c is not 0: no root", std::format("{} = 0 \\text{{ holds for no }} {}", num(s.c), x)});
             return out;
         case QuadraticCase::Linear:
             out.push_back({"a = 0: the equation is linear",

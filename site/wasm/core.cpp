@@ -32,10 +32,12 @@ const char* hand_back(std::string s) {
 spatium::io::JsonValue preview(std::string_view text) {
     namespace bd = spatium::io::build;
     using Object = spatium::io::JsonValue::ObjectType;
-    std::string_view body = text;
+    // the leading word is blanked rather than cut, so the column an error names is the column
+    // in the text as typed
+    std::string body(text);
     for (std::string_view word : {"solve ", "integrate "})
-        if (body.starts_with(word)) body.remove_prefix(word.size());
-    if (const auto at = body.find(" for "); at != std::string_view::npos) body = body.substr(0, at);
+        if (body.starts_with(word)) body.replace(0, word.size(), word.size(), ' ');
+    if (const auto at = body.find(" for "); at != std::string::npos) body.resize(at);
     bd::FieldReader r(body, "", "");
     auto lhs = r.expression();
     if (!lhs) return Object{{"error", lhs.error().message}};

@@ -100,7 +100,8 @@ inline Answer answer(const Query& asked) {
     for (int i = 0; i <= 16; ++i) {
         const double p = q.p_lo + (q.p_hi - q.p_lo) * i / 16.0;
         if (!std::isfinite(reference(q, p))) {
-            out.refused = "the question has no value at parameter " + std::to_string(p);
+            out.refused = asked.parameter.empty() ? std::format("the question has no value at parameter {}", p)
+                                               : std::format("the question has no value at {} = {}", asked.parameter, p);
             return out;
         }
     }
