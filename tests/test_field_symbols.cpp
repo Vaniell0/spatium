@@ -86,6 +86,12 @@ TEST_CASE("field text: precedence decides the parentheses, and symbols keep thei
     CHECK(*bd::to_text(u - (v - F(1.0))) == "u - (v - 1)");
     CHECK(*bd::to_text(u + F(-0.5)) == "u - 0.5");
     CHECK(*bd::to_text(u * F(-2.0)) == "u * (-2)");
+    // a factor of exactly 1 is left out, which changes no value: x * 1 is x to the last bit
+    CHECK(*bd::to_text(F(1.0) * sqrt(u)) == "sqrt(u)");
+    CHECK(*bd::to_text(u * F(1.0) + v) == "u + v");
+    CHECK(*bd::to_latex(F(0.5) * u + F(1.25) * F(1.0)) == "0.5 \\cdot u + 1.25");
+    // the case it must fail: a factor near 1 is a number, not a 1
+    CHECK(*bd::to_text(F(1.0000000000000002) * u) == "1.0000000000000002 * u");
     CHECK(*bd::to_text(F::symbol("mass") * F(2.0) / F::symbol("r")) == "mass * 2 / r");
     CHECK_FALSE(bd::to_text(F([](double, double) { return 0.0; })).has_value());
 }
@@ -97,7 +103,9 @@ TEST_CASE("field latex: the same walk, spelled for a page", "[field][latex]") {
     CHECK(*bd::to_latex((u + v) * F(3.0)) == "\\left(u + v\\right) \\cdot 3");
     CHECK(*bd::to_latex(F::symbol("theta") + F::symbol("r_0") + F::symbol("mass")) ==
           "\\theta + r_{0} + \\mathrm{mass}");
-    CHECK(*bd::to_latex(F(1e-26) * u) == "1 \\cdot 10^{-26} \\cdot u");
+    CHECK(*bd::to_latex(F(1e-26) * u) == "10^{-26} \\cdot u");
+    CHECK(*bd::to_latex(F(1.8e-5) * u) == "1.8 \\cdot 10^{-5} \\cdot u");
+    CHECK(*bd::to_latex(F(-2.5e20) + u) == "-2.5 \\cdot 10^{20} + u");
     CHECK(*bd::to_latex(less(u, v)) == "\\left[u < v\\right]");
     CHECK(*bd::to_latex(F::coord(1) * F::coord(1)) == "x^{1} \\cdot x^{1}");
     CHECK_FALSE(bd::to_latex(F([](double, double) { return 0.0; })).has_value());
