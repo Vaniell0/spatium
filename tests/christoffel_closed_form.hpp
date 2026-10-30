@@ -1,53 +1,30 @@
 #pragma once
 
 // Closed-form Christoffel symbols for Schwarzschild and Kerr (Boyer-
-// Lindquist), for the GPU geodesic kernel specifically -- deliberately
-// NOT built on physics/relativity/geodesic.hpp's generic Dual<T>-seeded
-// metric_derivatives() + general 4x4 invert(). That machinery is the
-// CPU engine's own considered trade-off (pay indirection/an extra
-// matrix inverse per step to support any future metric with zero new
-// derivation work); a SIMT kernel that will only ever run these two
-// published metrics pays for that indirection/branching without ever
-// using the generality, so here the expressions are hand/symbolically
-// derived once and dropped in as straight-line arithmetic instead.
+// Lindquist), derived once by sympy from the exact metric forms in
+// schwarzschild.hpp / kerr.hpp, checked symbolically (Kerr at a = 0 reduces
+// term by term to Schwarzschild), and written out as straight-line
+// arithmetic.
 //
-// Derived via sympy directly from the exact metric forms in
-// schwarzschild.hpp/kerr.hpp (not transcribed from a textbook table by
-// hand -- less reliable than an independent symbolic computation, the
-// same reasoning behind this project's other cross-checks), then
-// verified two ways before ever being used here:
-//   1. symbolically, Kerr at a=0 reduces term-by-term to the
-//      Schwarzschild expressions (exact, sympy-checked);
-//   2. numerically, both functions below are cross-checked against
-//      geodesic.hpp's own christoffel() (the Dual<T>-exact ground
-//      truth) at a spread of (r, theta, a) in
-//      tests/test_relativity.cpp's "closed-form Christoffel" cases.
-// Do not hand-edit these expressions without re-running that
-// derivation -- see gpu/derive_christoffel.py.
+// They were the CUDA kernels' Christoffels; the kernels are gone and the
+// device path takes its symbols from the metric's IR with exact
+// derivatives. What remains is their use as a witness: an independent
+// derivation that tests/test_relativity.cpp holds the generic Dual<T>
+// christoffel() against at a spread of (r, theta, a). Do not edit the
+// expressions by hand.
 //
-// No Scalar concept constraint and no spatium/ includes: this header
-// is meant to compile standalone under nvcc for __device__ code, so it
-// stays free of anything the CPU-only generic engine depends on.
 // Index convention throughout: 0=t, 1=r, 2=theta, 3=phi, matching
 // geodesic.hpp's Vec<T,8> state layout and christoffel()'s
 // Gamma[lambda](mu,nu).
 
-#ifndef SPATIUM_BUILDING_MODULE
-#  include <cmath>
-#endif
+#include <cmath>
 
-#if defined(__CUDACC__)
-#  define SPATIUM_HOST_DEVICE __host__ __device__
-#else
-#  define SPATIUM_HOST_DEVICE
-#endif
-
-namespace spatium::gpu {
+namespace spatium::closed_form {
 
 // f = 1 - 2M/r. Gamma[lambda][mu][nu], both (mu,nu) orderings filled in
 // (the tensor is symmetric in its lower two indices).
 template<typename T>
-SPATIUM_HOST_DEVICE void schwarzschild_christoffel_closed_form(T mass, T r, T theta,
+void schwarzschild_christoffel_closed_form(T mass, T r, T theta,
                                                                 T Gamma[4][4][4]) {
     using std::cos;
     using std::sin;
@@ -90,7 +67,7 @@ SPATIUM_HOST_DEVICE void schwarzschild_christoffel_closed_form(T mass, T r, T th
 
 // Sigma = r^2 + a^2*cos^2(theta), Delta = r^2 - 2Mr + a^2.
 template<typename T>
-SPATIUM_HOST_DEVICE void kerr_christoffel_closed_form(T mass, T spin, T r, T theta,
+void kerr_christoffel_closed_form(T mass, T spin, T r, T theta,
                                                         T Gamma[4][4][4]) {
     using std::cos;
     using std::sin;
@@ -175,4 +152,4 @@ SPATIUM_HOST_DEVICE void kerr_christoffel_closed_form(T mass, T spin, T r, T the
     Gamma[3][2][3] = Gamma[3][3][2] = g_ph_thph;
 }
 
-}  // namespace spatium::gpu
+}  // namespace spatium::closed_form

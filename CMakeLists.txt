@@ -379,19 +379,6 @@ if(SPATIUM_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-# ── CUDA geodesic kernel (optional) ───────────────────────────
-# Closed-form (hand/symbolically derived, not the generic Dual<T> +
-# general 4x4 invert() machinery geodesic.hpp uses on the CPU) RK4
-# geodesic integration for Schwarzschild/Kerr, one thread per ray. Off
-# by default: needs an actual CUDA toolchain (nvcc) and, to run
-# anything, an NVIDIA GPU -- neither assumed present on a default build
-# machine.
-option(SPATIUM_CUDA "Build CUDA geodesic kernel (gpu/)" OFF)
-if(SPATIUM_CUDA)
-    enable_language(CUDA)
-    add_subdirectory(gpu)
-endif()
-
 # ── Install ────────────────────────────────────────────────────
 include(CMakePackageConfigHelpers)
 

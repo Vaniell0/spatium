@@ -27,8 +27,8 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/render/cooked_scene.hpp>
-#  include <spatium/render/gpu_types.hpp>
-#  include <spatium/render/lbvh.hpp>
+#  include <spatium/render/gpu/gpu_types.hpp>
+#  include <spatium/render/gpu/lbvh.hpp>
 #  include <spatium/core/epsilon.hpp>
 #  include <algorithm>
 #  include <array>
@@ -46,7 +46,7 @@ struct Scene {
     std::vector<Node> tri_nodes;
     std::vector<Triangle> triangles;          // in leaf order
     std::vector<std::uint32_t> triangle_source;  // leaf order -> index into CookedScene::prims
-    std::vector<LNode> inst_nodes;                // a linear BVH, see render/lbvh.hpp
+    std::vector<LNode> inst_nodes;                // a linear BVH, see render/gpu/lbvh.hpp
     std::vector<Quadric> quadrics;
     std::vector<Instance> instances;          // in leaf order
     std::vector<std::uint32_t> instance_source;  // -> index into CookedScene::looks

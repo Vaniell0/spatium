@@ -26,7 +26,7 @@
 // `render/cooked_scene.hpp` is not.
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
-#  include <spatium/render/gpu_types.hpp>
+#  include <spatium/render/gpu/gpu_types.hpp>
 #  include <algorithm>
 #  include <array>
 #  include <atomic>

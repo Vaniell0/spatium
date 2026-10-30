@@ -380,9 +380,9 @@ distances/geodesics on S²/H² (and user spaces via `core/access.hpp`), "will
 these collide" with a certified time of impact. For the gallery, a WGSL
 emitter beside `field_glsl`/`metric_glsl` is one more backend of the same IR.
 
-**GPU.** Two paths exist: legacy CUDA in `gpu/` (sympy-transcribed
-Christoffels, one BL Kerr) and Vulkan compute from the IR (exact derivatives
-without sympy). Keep one; CUDA at most as a cross-check. Device has no
+**GPU.** One path: Vulkan compute from the IR (exact derivatives without
+sympy), `docs/gpu.md`. The legacy CUDA in `gpu/` (sympy-transcribed
+Christoffels, one BL Kerr) was removed 2026-10-30. Device has no
 fp64 (Iris Xe); fp32 passes the gate (3.5e-4 at the critical curve). The
 ROADMAP's next step, an IR interpreter in GLSL, removes shader recompiles on
 scene change.

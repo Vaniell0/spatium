@@ -4,8 +4,8 @@ Two problems live under this heading. They are still distinct and still
 deserve different answers, but the second one has moved a long way since
 this was first written, and most of what follows is new.
 
-1. **`gpu/` hand-transcribes physics it should share.** Narrow, concrete,
-   unchanged, and not blocked on anything. Below.
+1. **`gpu/` hand-transcribed physics it should have shared.** Closed by
+   removing `gpu/` (2026-10-30); the GPU path is `docs/gpu.md`.
 2. **Getting the scene description out of this process** — onto a GPU, into
    a browser, in front of JavaScript. This was written as speculative and
    gated on `rsc/`. Both of those were wrong. It is not speculative, the
@@ -16,36 +16,7 @@ this was first written, and most of what follows is new.
 
 ## Problem 1: the gap between the derivation script and the header
 
-**A correction to an earlier draft** which proposed sharing the generic
-`Dual<T>` headers via `__host__ __device__` and treating that as the fix.
-That contradicts a decision made earlier for real reasons: `Dual<T>`'s
-forward-mode machinery is branch- and indirection-heavy in a way that is
-specifically bad for SIMT, where every lane in a warp wants the same path.
-The existing choice — hand-derived closed-form Christoffel symbols for the
-two metrics the GPU path needs — is a deliberate CPU/GPU split, not an
-oversight. Withdrawn, and it stays withdrawn.
-
-**The real gap is one step earlier and much narrower.**
-`gpu/derive_christoffel.py` already does the hard part: it derives
-`Γ^λ_{μν}` symbolically from the exact metric forms in `schwarzschild.hpp`
-and `kerr.hpp`, self-checks that Kerr at `a = 0` reduces term by term to
-Schwarzschild, and prints every nonzero component in the form that appears
-in `christoffel_closed_form.hpp`. What it does not do is *emit* the header.
-A human reads the printed output and retypes it, and nothing catches a
-transcription slip except a numeric test noticing downstream.
-
-The fix is to make the script print valid C++ (sympy's `ccode()`/
-`cxxcode()`, not `str()`) and write the header itself. Adding a metric then
-becomes "add the metric, run the script" instead of "add the metric, do the
-tensor algebra by hand, hope the retyping was faithful". No CUDA-side
-template sharing is involved: the symbolic work and the emission both
-happen at derivation time, on the host, in Python, and the emitted header
-stays architecturally what it is today.
-
-Not built. It is the next step whenever the formulas change again, rather
-than a system to build ahead of that.
-
----
+Closed by removal (2026-10-30): the CUDA kernels in `gpu/` and the sympy script that derived their Christoffel symbols are gone. The Vulkan path computes the same symbols from the metric's IR with exact derivatives (`physics/relativity/metric_glsl.hpp`), so there is no hand transcription left to automate. The GPU path as it stands is `docs/gpu.md`.
 
 ## Problem 2: getting a scene out of this process
 

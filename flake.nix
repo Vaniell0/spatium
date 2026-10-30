@@ -151,11 +151,6 @@
       devShells = forAllSystems (pkgs:
         let
           p = mkProject pkgs;
-          # cudaPackages is unfree; allowUnfree is scoped to this second
-          # nixpkgs instantiation instead of the flake's main `pkgs`, so
-          # every other output (default shell, packages, apps) is
-          # unaffected.
-          pkgsUnfree = import nixpkgs { inherit (pkgs) system; config.allowUnfree = true; };
         in {
           default = (pkgs.mkShell.override { inherit (p) stdenv; }) {
             inputsFrom = [ p.spatium ];
@@ -181,32 +176,6 @@
               mkdir -p "$EM_CACHE"
             '';
           };
-
-          # Opt-in, Linux-only: nvcc + the CUDA runtime headers/libs for
-          # the gpu/ geodesic kernel (-DSPATIUM_CUDA=ON). Not part of the
-          # default shell -- cudaPackages is unfree and this shell is
-          # only useful on a machine with an actual NVIDIA GPU driver
-          # (nvcc alone will cross-compile without one, but running
-          # anything needs it). `nix develop .#cuda`.
-          cuda = if p.isLinux then
-            (pkgsUnfree.mkShell.override { inherit (p) stdenv; }) {
-              inputsFrom = [ p.spatium ];
-              packages = with pkgsUnfree; [
-                ccache clang-tools gdb
-                cudaPackages.cudatoolkit cudaPackages.cuda_nvcc
-              ];
-              shellHook = ''
-                export IMGUI_DIR="${imgui-src}"
-                export VK_LAYER_PATH="${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d"
-              '';
-            }
-          else
-            pkgs.mkShell {
-              shellHook = ''
-                echo "spatium's CUDA devShell is Linux-only (this is ${pkgs.system})."
-                exit 1
-              '';
-            };
         });
 
       formatter = forAllSystems (pkgs: pkgs.nixpkgs-fmt);

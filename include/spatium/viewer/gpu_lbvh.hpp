@@ -1,6 +1,6 @@
 #pragma once
 // A linear BVH built on the device over instances that already live there:
-// the kernels of `render/gpu_lbvh_glsl.hpp`, with the sort between them on
+// the kernels of `render/gpu/gpu_lbvh_glsl.hpp`, with the sort between them on
 // the host.
 //
 // Two submissions a build, because the sort sits between them: boxes and
@@ -35,7 +35,7 @@ public:
     Timing build(Buffer& instances, Buffer& quadrics, std::uint32_t count);
 
     // The same, leaving out instances a projection pass draws instead:
-    // `cam` and `fwd` as render/gpu_splat_glsl.hpp's splat_small() reads
+    // `cam` and `fwd` as render/gpu/gpu_splat_glsl.hpp's splat_small() reads
     // them -- position and pixels-per-unit, forward and the threshold.
     Timing build(Buffer& instances, Buffer& quadrics, std::uint32_t count, const float cam[4],
                  const float fwd[4]);

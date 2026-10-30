@@ -25,7 +25,7 @@
 //              as a Gaussian a pixel wide so a star is a point rather than
 //              a disc; a galactic band with dust lanes from value noise.
 //
-// Not part of any module: a header of strings, like render/gpu_trace_glsl.hpp.
+// Not part of any module: a header of strings, like render/gpu/gpu_trace_glsl.hpp.
 
 #include <spatium/io/field_glsl.hpp>
 #include <spatium/physics/relativity/metric_glsl.hpp>

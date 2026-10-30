@@ -16,7 +16,7 @@
 // device result is checked against the same arithmetic at the same
 // precision, and both against double.
 //
-// Not part of any module: a header of strings, like render/gpu_trace_glsl.hpp.
+// Not part of any module: a header of strings, like render/gpu/gpu_trace_glsl.hpp.
 
 #include <spatium/io/field.hpp>
 #include <spatium/io/field_glsl.hpp>
