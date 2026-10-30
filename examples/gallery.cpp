@@ -51,6 +51,11 @@ std::string gallery() {
     cards.push_back(card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]", 1e-10));
     cards.push_back(card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]", 1e-9));
     cards.push_back(card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]", 1e-6));
+    // functions known by a name the library does not have: the sine integral, the error function
+    // and the Fresnel integral, each an integral up to the parameter, answered as pieces
+    cards.push_back(card("si", "integrate sin(t)/t for t in [0, x], x in [0.5, 6]", 1e-8));
+    cards.push_back(card("erf", "integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]", 1e-8));
+    cards.push_back(card("fresnel", "integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]", 1e-8));
     cards.push_back(card("refused", "solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]"));
     {
         // the volume under a triangle down to z = 0 as a function of one vertex's height, which

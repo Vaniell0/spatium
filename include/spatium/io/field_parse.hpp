@@ -10,6 +10,7 @@
 #  include <charconv>
 #  include <format>
 #  include <limits>
+#  include <numbers>
 #  include <optional>
 #  include <string>
 #  include <string_view>
@@ -27,7 +28,7 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // unary minus binds tighter than a product and looser than a power, so -x^2 is -(x * x); x^n with
 // a whole n from 1 to 64 is the product of n factors of x, multiplied left to right, which is
 // the same field as writing them out. The names given for the inputs (u and v by default) read
-// as U and V, any other name as a symbol, `inf` and `nan` as numbers; a minus in front of a
+// as U and V, any other name as a symbol, `inf`, `nan` and `pi` as numbers; a minus in front of a
 // number is part of the number (-0 is negative zero), in front of anything else it is a product
 // with -1, which negates every double exactly. The functions are the field's own: sin, cos, log,
 // exp and sqrt of one argument, min, max and less of two. A product after a number or a closing
@@ -171,6 +172,7 @@ private:
         skip();
         if (take_word("inf")) return std::numeric_limits<double>::infinity();
         if (take_word("nan")) return std::numeric_limits<double>::quiet_NaN();
+        if (take_word("pi")) return std::numbers::pi;
         if (at_ >= s_.size() || !(std::isdigit(static_cast<unsigned char>(s_[at_])) || s_[at_] == '.'))
             return std::nullopt;
         double x = 0;

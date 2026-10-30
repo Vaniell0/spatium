@@ -30,6 +30,7 @@
 #include <cmath>
 #include <format>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -43,6 +44,9 @@ struct Query {
     std::string unknown{};   // the symbol bound to U; empty when f already reads U
     std::string parameter{}; // the symbol bound to V; empty when f already reads V
     double x_lo = 0, x_hi = 1; // the bracket of the root, or the limits of the integral
+    // a limit that moves with the parameter, as a field of V (the parameter): Si(x) is the integral
+    // of sin(t) / t over [0, x]; when set it is read instead of the number beside it
+    std::optional<Expr> x_lo_at{}, x_hi_at{};
     double p_lo = 0, p_hi = 1; // where the answer is wanted
     double tolerance = 1e-8;
     bool relative = true;
@@ -61,19 +65,24 @@ struct Answer {
 // bracket with no change of sign; an integral the door does not trust).
 inline double reference(const Query& q, double p) {
     const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double lo = q.x_lo_at ? (*q.x_lo_at)(0.0, p) : q.x_lo, hi = q.x_hi_at ? (*q.x_hi_at)(0.0, p) : q.x_hi;
+    if (!(lo < hi)) return nan;
     if (q.ask == Ask::Solve) {
-        const auto root = spatium::find_root([&](double x) { return q.f(x, p); }, q.x_lo, q.x_hi);
+        const auto root = spatium::find_root([&](double x) { return q.f(x, p); }, lo, hi);
         return root ? *root : nan;
     }
-    const auto r = spatium::integrate([&](double x) { return q.f(x, p); },
-                                      spatium::Finite<double>{q.x_lo, q.x_hi});
+    const auto r = spatium::integrate([&](double x) { return q.f(x, p); }, spatium::Finite<double>{lo, hi});
     return r.trusted() ? r.value : nan;
 }
 
 // The question with its named symbols bound to U and V.
 inline Query bound(Query q) {
     if (!q.unknown.empty()) q.f = q.f.bind(q.unknown, Expr::u());
-    if (!q.parameter.empty()) q.f = q.f.bind(q.parameter, Expr::v());
+    if (!q.parameter.empty()) {
+        q.f = q.f.bind(q.parameter, Expr::v());
+        if (q.x_lo_at) q.x_lo_at = q.x_lo_at->bind(q.parameter, Expr::v());
+        if (q.x_hi_at) q.x_hi_at = q.x_hi_at->bind(q.parameter, Expr::v());
+    }
     q.unknown.clear();
     q.parameter.clear();
     return q;
@@ -105,7 +114,9 @@ inline Answer answer(const Query& asked) {
 // the first name is the unknown (or the variable of integration) on its bracket, the second the
 // parameter on the interval where the answer is wanted. An equation f = g is f - g, rewritten
 // only where no value changes (so f = 0 is f). A bound is a number, or an expression in no name
-// (sqrt(2), 1 / 3). The rest of the Query keeps its defaults.
+// (sqrt(2), 1 / 3, pi); a bound of the unknown may read the parameter, so `integrate sin(t) / t
+// for t in [0, x], x in [0.5, 10]` is the sine integral Si(x). The rest of the Query keeps its
+// defaults.
 inline spatium::Result<Query> ask(std::string_view text) {
     using spatium::Error, spatium::ErrorCode;
     spatium::io::build::FieldReader r(text, "", "", {"solve", "integrate", "for", "in"});   // every other name is a symbol
@@ -123,39 +134,64 @@ inline spatium::Result<Query> ask(std::string_view text) {
     q.f = std::move(*f);
     if (!r.take_word("for")) return r.fail(q.ask == Ask::Solve ? "'=' or 'for'" : "'for'");
 
-    const auto bound_of = [&](const std::string& name) -> spatium::Result<double> {
-        auto e = r.expression();
-        if (!e) return std::unexpected(e.error());
-        if (const auto open = e->free_symbols(); !open.empty())
-            return std::unexpected(Error(ErrorCode::ParseError,
-                "ask: a bound of " + name + " reads the name '" + open.front() + "'; a bound is a number"));
-        return (*e)(0.0, 0.0);
-    };
-    const auto range = [&](std::string& name, double& lo, double& hi) -> spatium::Result<void> {
-        name = std::string(r.word());
-        if (name.empty()) return r.fail("a name");
+    // a bound is an expression; one of the unknown's bounds may read the parameter, named after it
+    const auto bound_of = [&]() -> spatium::Result<Expr> { return r.expression(); };
+    const auto number = [](const Expr& e) { return e(0.0, 0.0); };
+    Expr ulo, uhi;
+    if (const std::string name(r.word()); name.empty()) return r.fail("a name");
+    else {
+        q.unknown = name;
         r.take_word(name);
-        if (!r.take_word("in")) return r.fail("'in'");
-        if (!r.take('[')) return r.fail("'['");
-        const auto a = bound_of(name);
-        if (!a) return std::unexpected(a.error());
-        if (!r.take(',')) return r.fail("','");
-        const auto b = bound_of(name);
-        if (!b) return std::unexpected(b.error());
-        if (!r.take(']')) return r.fail("']'");
-        if (!(*a < *b))
-            return std::unexpected(Error(ErrorCode::ParseError,
-                std::format("ask: {} in [{}, {}] is empty", name, *a, *b)));
-        lo = *a;
-        hi = *b;
-        return {};
-    };
-    if (auto ok = range(q.unknown, q.x_lo, q.x_hi); !ok) return std::unexpected(ok.error());
+    }
+    if (!r.take_word("in")) return r.fail("'in'");
+    if (!r.take('[')) return r.fail("'['");
+    if (auto a = bound_of(); !a) return std::unexpected(a.error()); else ulo = *a;
+    if (!r.take(',')) return r.fail("','");
+    if (auto b = bound_of(); !b) return std::unexpected(b.error()); else uhi = *b;
+    if (!r.take(']')) return r.fail("']'");
     if (!r.take(',')) return r.fail("',' and the parameter the answer is a function of");
-    if (auto ok = range(q.parameter, q.p_lo, q.p_hi); !ok) return std::unexpected(ok.error());
+    if (const std::string name(r.word()); name.empty()) return r.fail("a name");
+    else {
+        q.parameter = name;
+        r.take_word(name);
+    }
+    if (!r.take_word("in")) return r.fail("'in'");
+    if (!r.take('[')) return r.fail("'['");
+    Expr plo, phi;
+    if (auto a = bound_of(); !a) return std::unexpected(a.error()); else plo = *a;
+    if (!r.take(',')) return r.fail("','");
+    if (auto b = bound_of(); !b) return std::unexpected(b.error()); else phi = *b;
+    if (!r.take(']')) return r.fail("']'");
     if (q.parameter == q.unknown)
         return std::unexpected(Error(ErrorCode::ParseError,
             "ask: '" + q.unknown + "' is named twice, as the unknown and as the parameter"));
+    for (const Expr* e : {&plo, &phi})
+        if (const auto open = e->free_symbols(); !open.empty())
+            return std::unexpected(Error(ErrorCode::ParseError,
+                "ask: a bound of " + q.parameter + " reads the name '" + open.front() + "'; it is a number"));
+    for (const Expr* e : {&ulo, &uhi})
+        for (const auto& name : e->free_symbols())
+            if (name != q.parameter)
+                return std::unexpected(Error(ErrorCode::ParseError,
+                    "ask: a bound of " + q.unknown + " reads the name '" + name + "'; it may read only the parameter " +
+                    q.parameter));
+    q.p_lo = number(plo), q.p_hi = number(phi);
+    if (!(q.p_lo < q.p_hi))
+        return std::unexpected(Error(ErrorCode::ParseError,
+            std::format("ask: {} in [{}, {}] is empty", q.parameter, q.p_lo, q.p_hi)));
+    const auto at = [&](const Expr& e, double p) { return e.bind(q.parameter, Expr(p))(0.0, 0.0); };
+    if (ulo.free_symbols().empty()) q.x_lo = number(ulo); else q.x_lo_at = ulo;
+    if (uhi.free_symbols().empty()) q.x_hi = number(uhi); else q.x_hi_at = uhi;
+    // the unknown's interval must hold something wherever the answer is wanted
+    for (int i = 0; i <= 16; ++i) {
+        const double p = q.p_lo + (q.p_hi - q.p_lo) * i / 16.0;
+        const double lo = at(ulo, p), hi = at(uhi, p);
+        if (!(lo < hi))
+            return std::unexpected(Error(ErrorCode::ParseError,
+                q.x_lo_at || q.x_hi_at
+                    ? std::format("ask: {} in [{}, {}] is empty at {} = {}", q.unknown, lo, hi, q.parameter, p)
+                    : std::format("ask: {} in [{}, {}] is empty", q.unknown, lo, hi)));
+    }
     if (!r.done()) return r.fail("the end");
     return q;
 }
