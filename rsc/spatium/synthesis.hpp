@@ -51,6 +51,7 @@ struct SynthesisSpec {
     std::vector<Unary> unary{Unary::Sqrt};
     std::size_t max_candidates = 4000; // no larger size is begun once this many are held; one begun is finished
     std::size_t exhaustive_pairs = 200000; // all sets of one and two terms are tried when there are at most this many
+    std::size_t exhaustive_triples = 40000; // and of three among the shortest terms, when no pair reaches rounding
 };
 
 struct Term {
@@ -266,7 +267,8 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
     };
 
     // Sets of one and two terms are tried in full (they are cheap and a greedy pick misses the
-    // pair whose members each explain little alone); larger sets grow greedily from the best pair.
+    // pair whose members each explain little alone), and sets of three among the shortest terms;
+    // larger sets grow greedily from the best of those.
     std::vector<std::size_t> seed;
     // errors below rounding are all the same error: among those the smaller set wins, which is
     // the description-length rule (a second term that only refits the noise is not kept)
@@ -278,29 +280,54 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
     // smallest: the terms come in order of size, so the short forms are always tried
     const std::size_t pool = std::min(terms.size(),
                                       static_cast<std::size_t>(std::sqrt(2.0 * double(spec.exhaustive_pairs))));
-    {
-        double top = 1e300;
-        for (std::size_t a = 0; a < pool; ++a)
-            for (std::size_t b = a; b < pool; ++b) {
-                std::vector<std::size_t> set = a == b ? std::vector<std::size_t>{a} : std::vector<std::size_t>{a, b};
-                if (set.size() > spec.max_terms)
-                    continue;
-                const double e = std::max(sample_error(set), floor);
-                // at equal error the smaller set wins, then the one of fewer IR nodes: the
-                // interval's variable t is (x - centre) * scale, five nodes against x's one, so a
-                // form in x itself is kept where it does as well
-                const auto nodes_of = [&](const std::vector<std::size_t>& t) {
-                    std::size_t n = 0;
-                    for (std::size_t i : t)
-                        n += terms[i].expr.size();
-                    return n;
-                };
-                const bool better = e < top * (1 - 1e-12) ||
-                                    (e <= top && (set.size() < seed.size() ||
-                                                  (set.size() == seed.size() && nodes_of(set) < nodes_of(seed))));
-                if (better)
-                    top = e, seed = std::move(set);
-            }
+    // at equal error the smaller set wins, then the one of fewer IR nodes: the interval's variable
+    // t is (x - centre) * scale, five nodes against x's one, so a form in x itself is kept where
+    // it does as well
+    const auto nodes_of = [&](const std::vector<std::size_t>& t) {
+        std::size_t n = 0;
+        for (std::size_t i : t)
+            n += terms[i].expr.size();
+        return n;
+    };
+    double seed_error = 1e300;
+    const auto offer_seed = [&](std::vector<std::size_t> set) {
+        if (set.size() > spec.max_terms)
+            return;
+        const double e = std::max(sample_error(set), floor);
+        const bool better = e < seed_error * (1 - 1e-12) ||
+                            (e <= seed_error && (set.size() < seed.size() ||
+                                          (set.size() == seed.size() && nodes_of(set) < nodes_of(seed))));
+        if (better)
+            seed_error = e, seed = std::move(set);
+    };
+    for (std::size_t a = 0; a < pool; ++a)
+        for (std::size_t b = a; b < pool; ++b)
+            offer_seed(a == b ? std::vector<std::size_t>{a} : std::vector<std::size_t>{a, b});
+    // the best set's sum, fitted at the samples and measured on the check grid
+    const auto certified_error = [&](const std::vector<std::size_t>& set) {
+        std::vector<std::vector<double>> cols;
+        for (std::size_t t : set)
+            cols.push_back(terms[t].at);
+        const auto c = least_squares(cols, y);
+        if (!c)
+            return 1e300;
+        Expr e(0.0);
+        for (std::size_t j = 0; j < set.size(); ++j)
+            e = j == 0 ? Expr((*c)[j]) * terms[set[j]].expr : e + Expr((*c)[j]) * terms[set[j]].expr;
+        return error_of(e);
+    };
+    // Sets of three among the shortest terms, when no pair is accepted: on a short interval the
+    // terms are nearly collinear and a greedy third pick takes whichever happens to lean toward
+    // the residual -- 1 + B x + 4/3 x^(3/2), the Thomas-Fermi solution at the origin, is three
+    // terms of six nodes and the greedy search did not find it on [0, 1e-3] or [0, 0.1]. A pair
+    // that is accepted is kept even where a triple fits the samples closer: the smaller set wins.
+    if (seed_error > floor && spec.max_terms >= 3 && !(certified_error(seed) <= spec.tolerance)) {
+        const std::size_t triple_pool = std::min(
+            terms.size(), static_cast<std::size_t>(std::cbrt(6.0 * double(spec.exhaustive_triples))));
+        for (std::size_t a = 0; a < triple_pool; ++a)
+            for (std::size_t b = a + 1; b < triple_pool; ++b)
+                for (std::size_t c = b + 1; c < triple_pool; ++c)
+                    offer_seed({a, b, c});
     }
     std::vector<std::size_t> chosen;
     std::vector<double> residual = y;
