@@ -138,6 +138,10 @@ public:
 
     bool done() { return peek() == '\0'; }
 
+    // Where the reader stands, as an offset into the text: a caller keeps the text of what it read
+    // (from the position before a read to the one after it) as the person wrote it.
+    std::size_t position() const { return at_; }
+
     std::unexpected<Error> fail(std::string_view expected) {
         skip();
         const std::string found = at_ < s_.size() ? std::format("'{}'", found_here()) : "the end";

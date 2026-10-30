@@ -23,6 +23,7 @@
 // built in code from the same symbols, to the last bit.
 
 #include <rsc/spatium/synthesis.hpp>
+#include <spatium/io/document.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/algebra/roots.hpp>
@@ -119,7 +120,11 @@ inline Answer answer(const Query& asked) {
 // (sqrt(2), 1 / 3, pi); a bound of the unknown may read the parameter, so `integrate sin(t) / t
 // for t in [0, x], x in [0.5, 10]` is the sine integral Si(x). The rest of the Query keeps its
 // defaults.
-inline spatium::Result<Query> ask(std::string_view text) {
+namespace detail {
+
+// The question read word by word into a Query, as `ask` read it before a question became a
+// document: kept as the independent second path the document route is held against.
+inline spatium::Result<Query> ask_by_words(std::string_view text) {
     using spatium::Error, spatium::ErrorCode;
     spatium::io::build::FieldReader r(text, "", "", {"solve", "integrate", "for", "in"});   // every other name is a symbol
     Query q;
@@ -196,6 +201,136 @@ inline spatium::Result<Query> ask(std::string_view text) {
     }
     if (!r.done()) return r.fail("the end");
     return q;
+}
+
+} // namespace detail
+
+// A question as a document: `solve f = g for x in [a, b], p in [c, d]` is the parameter
+// `p in [c, d]` and the root `x: f = g on [a, b]`; `integrate f for t in [a, b], x in [c, d]`
+// is `x in [c, d]` and `I = integral f dt on [a, b]`. Read from the question's own text, so an
+// error names a column of what was typed. Returns the document and the name it asks for.
+struct AskedDocument {
+    spatium::io::build::Document document;
+    std::string wanted;
+};
+
+inline spatium::Result<AskedDocument> question_document(std::string_view text) {
+    namespace bd = spatium::io::build;
+    bd::FieldReader r(text, "", "", {"solve", "integrate", "for", "in"});
+    bd::Statement asked;
+    if (r.take_word("solve")) asked.kind = bd::StatementKind::Root;
+    else if (r.take_word("integrate")) asked.kind = bd::StatementKind::Integral;
+    else return r.fail("'solve' or 'integrate'");
+    auto f = bd::detail::written(r, text);
+    if (!f) return std::unexpected(f.error());
+    asked.value = std::move(*f);
+    if (asked.kind == bd::StatementKind::Root) {
+        if (r.take('=')) {
+            auto g = bd::detail::written(r, text);
+            if (!g) return std::unexpected(g.error());
+            asked.rhs = std::move(*g);
+        } else {
+            asked.rhs = {Expr(0.0), "0"};
+        }
+    }
+    if (!r.take_word("for")) return r.fail(asked.kind == bd::StatementKind::Root ? "'=' or 'for'" : "'for'");
+    const std::string unknown(r.word());
+    if (unknown.empty()) return r.fail("a name");
+    r.take_word(unknown);
+    auto ends = bd::detail::interval(r, text, "in");
+    if (!ends) return std::unexpected(ends.error());
+    std::tie(asked.lo, asked.hi) = std::move(*ends);
+    if (!r.take(',')) return r.fail("',' and the parameter the answer is a function of");
+    bd::Statement parameter{.kind = bd::StatementKind::Parameter};
+    parameter.name = std::string(r.word());
+    if (parameter.name.empty()) return r.fail("a name");
+    r.take_word(parameter.name);
+    auto pends = bd::detail::interval(r, text, "in");
+    if (!pends) return std::unexpected(pends.error());
+    std::tie(parameter.lo, parameter.hi) = std::move(*pends);
+    if (!r.done()) return r.fail("the end");
+    if (parameter.name == unknown)
+        return std::unexpected(spatium::Error(spatium::ErrorCode::ParseError,
+            "ask: '" + unknown + "' is named twice, as the unknown and as the parameter"));
+    if (asked.kind == bd::StatementKind::Root) {
+        asked.name = unknown;
+    } else {
+        asked.variable = unknown;
+        // the integral's own name: I, or the first of I_1, I_2, ... no other name takes
+        asked.name = "I";
+        for (int k = 1; asked.name == unknown || asked.name == parameter.name; ++k) asked.name = std::format("I_{}", k);
+    }
+    AskedDocument out{{{std::move(parameter), std::move(asked)}}, {}};
+    out.wanted = out.document.statements.back().name;
+    if (auto ok = bd::check(out.document); !ok) return std::unexpected(ok.error());
+    return out;
+}
+
+// The question a document asks of one of its names: a root or an integral that reads one
+// parameter, with the values it reads put in place. The Query is the one `answer` synthesises.
+inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, std::string_view wanted) {
+    namespace bd = spatium::io::build;
+    using spatium::Error, spatium::ErrorCode;
+    const auto refuse = [](std::string m) { return std::unexpected(Error(ErrorCode::InvalidArgument, "ask: " + m)); };
+    const bd::Statement* d = doc.find(wanted);
+    if (!d) return refuse(std::format("the document defines no '{}'", wanted));
+    if (d->kind != bd::StatementKind::Root && d->kind != bd::StatementKind::Integral)
+        return refuse(std::format("{} is a {}; a question asks for a root or an integral", d->name, bd::statement_kind_name(d->kind)));
+    // the values the definition reads, put in place, latest first, so a value reading an earlier one unfolds
+    const auto unfold = [&](Expr e) {
+        for (auto it = doc.statements.rbegin(); it != doc.statements.rend(); ++it)
+            if (it->kind == bd::StatementKind::Value) e = e.bind(it->name, it->value.field);
+        return e;
+    };
+    Query q;
+    q.ask = d->kind == bd::StatementKind::Root ? Ask::Solve : Ask::Integrate;
+    q.f = d->kind == bd::StatementKind::Root ? unfold((d->value.field - d->rhs.field).simplified()) : unfold(d->value.field);
+    q.unknown = d->kind == bd::StatementKind::Root ? d->name : d->variable;
+    const Expr ulo = unfold(d->lo.field), uhi = unfold(d->hi.field);
+    std::vector<std::string> params;
+    for (const Expr* e : {static_cast<const Expr*>(&q.f), &ulo, &uhi})
+        for (const auto& n : e->free_symbols()) {
+            if (n == q.unknown || std::ranges::find(params, n) != params.end()) continue;
+            const bd::Statement* p = doc.find(n);
+            if (!p || p->kind != bd::StatementKind::Parameter)
+                return refuse(std::format("{} reads {}, which is not a parameter or a value", d->name, n));
+            params.push_back(n);
+        }
+    if (params.size() != 1)
+        return refuse(std::format("{} reads {} parameters; a question is answered as a function of one", d->name, params.size()));
+    const bd::Statement& p = *doc.find(params.front());
+    q.parameter = p.name;
+    const auto number = [](const Expr& e) { return e(0.0, 0.0); };
+    q.p_lo = number(p.lo.field), q.p_hi = number(p.hi.field);
+    if (!(q.p_lo < q.p_hi))
+        return std::unexpected(Error(ErrorCode::ParseError, std::format("ask: {} in [{}, {}] is empty", q.parameter, q.p_lo, q.p_hi)));
+    for (const Expr* e : {&ulo, &uhi})
+        for (const auto& name : e->free_symbols())
+            if (name != q.parameter)
+                return std::unexpected(Error(ErrorCode::ParseError,
+                    "ask: a bound of " + q.unknown + " reads the name '" + name + "'; it may read only the parameter " + q.parameter));
+    if (ulo.free_symbols().empty()) q.x_lo = number(ulo); else q.x_lo_at = ulo;
+    if (uhi.free_symbols().empty()) q.x_hi = number(uhi); else q.x_hi_at = uhi;
+    // the unknown's interval must hold something wherever the answer is wanted
+    const auto at = [&](const Expr& e, double v) { return e.bind(q.parameter, Expr(v))(0.0, 0.0); };
+    for (int i = 0; i <= 16; ++i) {
+        const double v = q.p_lo + (q.p_hi - q.p_lo) * i / 16.0;
+        const double lo = at(ulo, v), hi = at(uhi, v);
+        if (!(lo < hi))
+            return std::unexpected(Error(ErrorCode::ParseError,
+                q.x_lo_at || q.x_hi_at
+                    ? std::format("ask: {} in [{}, {}] is empty at {} = {}", q.unknown, lo, hi, q.parameter, v)
+                    : std::format("ask: {} in [{}, {}] is empty", q.unknown, lo, hi)));
+    }
+    return q;
+}
+
+// A question typed as text, read into the Query it asks: through its document, so a question
+// and a document line ask the same thing.
+inline spatium::Result<Query> ask(std::string_view text) {
+    auto asked = question_document(text);
+    if (!asked) return std::unexpected(asked.error());
+    return query_of(asked->document, asked->wanted);
 }
 
 } // namespace rsc

@@ -161,7 +161,7 @@ TEST_CASE("query: a text that is not a question is refused, and says where", "[r
     CHECK(refused("integrate x = p for x in [0, 1], p in [0, 1]").find("'for', found '='") != std::string::npos);
     CHECK(refused("solve x - p for x in [0, 1]").find("the parameter the answer is a function of") != std::string::npos);
     CHECK(refused("solve x - p for x in [1, 0], p in [0, 1]") == "ask: x in [1, 0] is empty");
-    CHECK(refused("solve x - p for x in [0, a], p in [0, 1]").find("reads the name 'a'") != std::string::npos);
+    CHECK(refused("solve x - p for x in [0, a], p in [0, 1]").find("x reads 'a', which no line above defines") != std::string::npos);
     CHECK(refused("solve x - p for x in [0, 1], x in [0, 1]").find("named twice") != std::string::npos);
     CHECK(refused("solve x - p for x in [0, 1], p in [0, 1] please").find("the end, found 'please'") != std::string::npos);
     CHECK(refused("solve x - for x in [0, 1], p in [0, 1]").find("parse: at column 11") != std::string::npos);
@@ -215,9 +215,9 @@ TEST_CASE("query: a limit that moves with the parameter, and special functions a
 
     // the cases it must fail: a bound reading another name, a parameter's bound reading one, and an
     // interval that is empty somewhere the answer is wanted
-    CHECK(rsc::ask("integrate t for t in [0, y], x in [0, 1]").error().message.find("may read only the parameter x") !=
+    CHECK(rsc::ask("integrate t for t in [0, y], x in [0, 1]").error().message.find("I reads 'y', which no line above defines") !=
           std::string::npos);
-    CHECK(rsc::ask("integrate t for t in [0, x], x in [0, y]").error().message.find("reads the name 'y'") !=
+    CHECK(rsc::ask("integrate t for t in [0, x], x in [0, y]").error().message.find("an end of the parameter x reads 'y'") !=
           std::string::npos);
     CHECK(rsc::ask("integrate t for t in [1, x], x in [0, 2]").error().message.find("is empty at x = 0") !=
           std::string::npos);
