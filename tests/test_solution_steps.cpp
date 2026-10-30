@@ -58,7 +58,7 @@ TEST_CASE("solution steps: the roots the steps end in are the solver's, and Viet
     for (int kind = 0; kind < 6; ++kind) CHECK(seen[kind] > 0);   // every case was reached
 }
 
-TEST_CASE("solution steps: Vieta's formulas check the roots, and catch the root lost to cancellation", "[algebra][steps]") {
+TEST_CASE("solution steps: Vieta's formulas check the roots, and the stable form keeps the small one", "[algebra][steps]") {
     std::mt19937 rng(5);
     std::uniform_int_distribution<int> k(-9, 9);
     for (int i = 0; i < 20000; ++i) {
@@ -69,9 +69,17 @@ TEST_CASE("solution steps: Vieta's formulas check the roots, and catch the root 
         INFO(a << " x^2 + " << b << " x + " << c);
         CHECK(v->error <= 1e-12);
     }
-    // the case it must fail: x^2 + 1e8 x + 1, where -b + sqrt(D) cancels and the small root loses
-    // its digits; the product of the roots is then far from c/a
-    const auto lost = spatium::check_vieta(spatium::solve_quadratic_steps(1.0, 1e8, 1.0));
+    // x^2 + 1e8 x + 1, whose small root the textbook form lost to cancellation (-7.45e-9 against
+    // -1e-8, the product of the roots 0.745): the solver's stable form keeps it
+    const auto steep = spatium::solve_quadratic_steps(1.0, 1e8, 1.0);
+    const auto kept = spatium::check_vieta(steep);
+    REQUIRE(kept.has_value());
+    CHECK(kept->error <= 1e-12);
+    CHECK(std::abs(steep.roots[0].re + 1e-8) <= 1e-22);
+    // the case it must fail: roots that are not the equation's, one off by the textbook's loss
+    auto off = steep;
+    off.roots = {spatium::Complex<double>{-7.450580596923828e-09}, steep.roots[1]};
+    const auto lost = spatium::check_vieta(off);
     REQUIRE(lost.has_value());
     CHECK(lost->error > 0.1);
     const auto step = spatium::io::build::to_step(*lost);

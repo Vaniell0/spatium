@@ -39,13 +39,9 @@ inline namespace algebra {
 // geometry produces: for a ray along a cone's generator the `t²`
 // coefficient is one quantity minus itself, which is zero to the bit.
 //
-// What this does NOT address, recorded so it is not mistaken for
-// covered: catastrophic cancellation for a leading coefficient that is
-// tiny but nonzero, where `(-b ± sqrt(disc)) / 2a` loses precision in
-// the root near zero. That is a separate defect with a separate fix (the
-// numerically stable form, `q = -(b + sign(b)·sqrt(disc))/2` then
-// `x₁ = q/a`, `x₂ = c/q`), and bundling it here would have made one
-// change two.
+// The cancellation of `(-b ± sqrt(disc)) / 2a` in the root near zero, once
+// recorded here as not addressed, is fixed below by the stable form
+// (`q = -(b + sign(b)·sqrt(disc))/2`, then `q/a` and `c/q`).
 
 // ── Linear solver ─────────────────────────────────────────────
 // bx + c = 0. Not exported as an API of its own -- it exists because a
@@ -102,11 +98,22 @@ QuadraticSteps<T> solve_quadratic_steps(T a, T b, T c) {
     auto disc = b * b - T{4} * a * c;
     s.discriminant = disc;
 
-    if (disc >= T{0}) {
-        s.kind = disc == T{0} ? QuadraticCase::Double : QuadraticCase::TwoReal;
-        auto sq = sqrt(disc);
-        s.roots = {Complex<T>{(-b + sq) / (T{2} * a)},
-                   Complex<T>{(-b - sq) / (T{2} * a)}};
+    if (disc == T{0}) {
+        s.kind = QuadraticCase::Double;
+        const T x = -b / (T{2} * a);
+        s.roots = {Complex<T>{x}, Complex<T>{x}};
+    } else if (disc > T{0}) {
+        // (-b ± sqrt(D)) / 2a, in the form that does not cancel: q = -(b + sign(b) sqrt(D)) / 2
+        // adds two numbers of one sign, and the other root is c / q. The textbook form lost the
+        // small root of x^2 + 1e8 x + 1 to cancellation (-7.45e-9 against -1e-8), which Vieta's
+        // formulas caught. The roots keep their order: x1 is the one with +sqrt(D).
+        s.kind = QuadraticCase::TwoReal;
+        const T sq = sqrt(disc);
+        const T signed_sq = b < T{0} ? T(-sq) : sq;
+        const T q = -(b + signed_sq) / T{2};
+        const T big = q / a, small = c / q;
+        s.roots = b < T{0} ? UpTo<Complex<T>, 2>{Complex<T>{big}, Complex<T>{small}}
+                           : UpTo<Complex<T>, 2>{Complex<T>{small}, Complex<T>{big}};
     } else {
         s.kind = QuadraticCase::ComplexPair;
         auto sq = sqrt(-disc);
@@ -126,9 +133,9 @@ UpTo<Complex<T>, 2> solve_quadratic(T a, T b, T c) {
 // A second route to the same answer, cheaper than putting the roots back into the equation and
 // easier to read: the two roots of a x^2 + b x + c sum to -b/a and multiply to c/a. Each is
 // measured relative to the size of what it adds or multiplies (|x1| + |x2|, |x1| |x2|), so the
-// rounding of a sum is not mistaken for an error. It is the check that catches the solver's
-// known weakness, the root lost to cancellation when b^2 dwarfs 4ac (x^2 + 1e8 x + 1: the small
-// root comes out -7.45e-9 against -1e-8, and the product is 0.745 instead of 1).
+// rounding of a sum is not mistaken for an error. It is the check that caught the solver's
+// weakness it had, the root lost to cancellation when b^2 dwarfs 4ac (x^2 + 1e8 x + 1: the small
+// root came out -7.45e-9 against -1e-8, and the product was 0.745 instead of 1).
 
 template<Scalar T>
 struct VietaCheck {
