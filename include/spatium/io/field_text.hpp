@@ -3,6 +3,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/io/field.hpp>
+#  include <algorithm>
 #  include <array>
 #  include <cmath>
 #  include <format>
@@ -21,8 +22,9 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // is how it is read in code (`to_text`) and on a page (`to_latex`, which a page renders as it
 // is). Both are one walk over the ops the root reads; they differ only in how each op is
 // spelled. Parentheses go where precedence needs them and nowhere else, so u / (v * 2) keeps
-// its parentheses and u + v * 2 has none. The text is the field as built, not simplified: a
-// constant 1 times p is written 1 * p. A field with an opaque leaf has no text and says why.
+// its parentheses and u + v * 2 has none. The text is the field as built, not simplified, with
+// one exception that changes no value: a factor of exactly 1 is left out, since x * 1 is x to the
+// last bit for every x. A field with an opaque leaf has no text and says why.
 
 namespace detail {
 
@@ -36,6 +38,7 @@ enum class Binding { Sum = 1, Product = 2, Atom = 3 };
 struct Spelled {
     std::string text;
     Binding binds = Binding::Atom;
+    bool one = false;   // the constant 1 exactly, which a product leaves out
 };
 
 inline std::string grouped(const Spelled& e, Binding need, TextStyle style) {
@@ -50,9 +53,19 @@ inline std::string number_text(double x, TextStyle style) {
     std::string s = std::format("{}", x);
     const auto e = s.find('e');
     if (e == std::string::npos) return s;
+    // 1.8e-05 is 1.8 * 10^{-5}: no '+', no leading zeros, and no mantissa of exactly 1
     std::string exponent = s.substr(e + 1);
-    if (!exponent.empty() && exponent[0] == '+') exponent.erase(0, 1);
-    return std::format("{} \\cdot 10^{{{}}}", s.substr(0, e), exponent);
+    std::string sign;
+    if (!exponent.empty() && (exponent[0] == '+' || exponent[0] == '-')) {
+        if (exponent[0] == '-') sign = "-";
+        exponent.erase(0, 1);
+    }
+    exponent.erase(0, std::min(exponent.find_first_not_of('0'), exponent.size() - 1));
+    const std::string mantissa = s.substr(0, e);
+    const std::string power = std::format("10^{{{}{}}}", sign, exponent);
+    if (mantissa == "1") return power;
+    if (mantissa == "-1") return "-" + power;
+    return std::format("{} \\cdot {}", mantissa, power);
 }
 
 // A name in LaTeX: a Greek letter by its command, one letter as it is, a longer name upright,
@@ -82,7 +95,7 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
     switch (n.op) {
         case Op::Const: {
             const Binding b = std::signbit(n.value) ? Binding::Sum : Binding::Atom;
-            return {number_text(n.value, style), b};
+            return {number_text(n.value, style), b, n.value == 1.0};
         }
         case Op::U:      return {tex ? name_latex(u) : u};
         case Op::V:      return {tex ? name_latex(v) : v};
@@ -97,6 +110,8 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         case Op::Sub:
             return {arg(n.a).text + " - " + grouped(arg(n.b), Binding::Product, style), Binding::Sum};
         case Op::Mul:
+            if (arg(n.a).one) return arg(n.b);
+            if (arg(n.b).one) return arg(n.a);
             return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") +
                         grouped(arg(n.b), Binding::Product, style),
                     Binding::Product};
