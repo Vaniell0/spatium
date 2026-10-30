@@ -133,6 +133,7 @@ add_executable(spatium_tests
     test_rsc_synthesis.cpp
     test_rsc_query.cpp
     test_rsc_respond.cpp
+    test_rsc_evaluate.cpp
 )
 
 target_include_directories(spatium_tests PRIVATE

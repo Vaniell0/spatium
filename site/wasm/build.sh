@@ -7,6 +7,6 @@ cd "$(dirname "$0")/../.."
 em++ -std=c++23 -O2 -fexperimental-library -Wno-inline-namespace-reopened-noninline -I include -I . site/wasm/core.cpp -o site/wasm/spatium_core.js \
     -sMODULARIZE=1 -sEXPORT_NAME=SpatiumCore -sENVIRONMENT=web,node \
     -sALLOW_MEMORY_GROWTH=1 \
-    -sEXPORTED_FUNCTIONS=_spatium_respond,_spatium_preview \
+    -sEXPORTED_FUNCTIONS=_spatium_respond,_spatium_evaluate,_spatium_preview \
     -sEXPORTED_RUNTIME_METHODS=cwrap
 ls -l site/wasm/spatium_core.js site/wasm/spatium_core.wasm

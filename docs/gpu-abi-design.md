@@ -22,9 +22,9 @@ writes -- a question, or a document of statements a line (`io/document.hpp`:
 `S1 = offset(S0, h)`) -- and one entry point reads it with the same reader
 the host uses. A document's JSON is read back through the line reader, so
 the two forms cannot mean different things. The page's core is this door
-built to WebAssembly (`site/wasm/core.cpp`: `spatium_respond`,
-`spatium_preview`), and CI holds it against the host build of the same
-calls. A TypeScript builder writes the same JSON and builds nothing itself.
+built to WebAssembly (`site/wasm/core.cpp`: `spatium_respond` for what is
+typed, `spatium_evaluate` for a document, `spatium_preview`), and CI holds
+it against the host build of the same calls. A TypeScript builder writes the same JSON and builds nothing itself.
 
 The price is stated rather than hidden: anything complicated has to be
 automated inside the program that reads the description -- the core --
@@ -35,9 +35,10 @@ and it costs the syntax nothing.
 `torus(2, 0.5)` determines its result, so it is parsed: deterministic,
 testable, refused at the column where it stops being the language. What a
 description leaves open -- evaluate or synthesise, which root finder, how
-fine a grid -- is chosen by the evaluation layer (`rsc/spatium/respond.hpp`
-picks the route: a value, a closed form, a synthesised answer with its
-certificate). A trained model belongs only on the second side.
+fine a grid -- is chosen by the evaluation layer (`rsc/spatium/evaluate.hpp`
+tries every route that applies, keeps each with its cost or its refusal,
+and takes one in `take`). A trained model belongs only on the second side,
+and that is where it would sit: the candidates are what it chooses among.
 
 ## The IR is the trace
 

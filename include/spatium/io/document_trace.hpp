@@ -79,6 +79,7 @@ inline Result<DocumentScene> to_trace(const Document& doc,
                     break;
                 }
                 case StatementKind::Root: {
+                    if (!has_bracket(d)) return refuse(d, "a root with no bracket, which a scene cannot find; give it one, on [a, b]");
                     // an equation written `= 0` is handed over as its left side, so the scene says it as written
                     const bool zero = d.rhs.field.free_symbols().empty() && d.rhs.field(0.0, 0.0) == 0.0;
                     t.let(d.name, zero ? d.value.field : d.value.field - d.rhs.field, detail::scene_number(t, d.lo, "lo"),

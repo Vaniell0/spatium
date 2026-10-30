@@ -27,18 +27,20 @@ SPATIUM_EXPORT namespace spatium::io::build {
 //   r = 0.5                              a value: a number or an expression in the names above
 //   p in [0.5, 4]                        a parameter: any number in the interval
 //   x: x^2 - p = 0 on [0, 10]            a root: the x on [0, 10] for which the equation holds
+//   y: 2y^2 - 3y - 5 = 0                 a root with no bracket: every y it holds for, in closed form
 //   I = integral exp(-p * t^2) dt on [0, 1]  an integral over t, named by its dt
 //   S0 = torus(2, r)                     a shape: an operation on numbers and the shapes above
 //   S1 = offset(S0, h)
 //   # a comment, to the end of the line
 //
-// A parameter is chosen (`in`); a root and an integral are found on an interval (`on`). A value
-// or a root that reads a parameter is a function of it: the calculator answers such a definition
-// for the whole interval, a scene draws it at the parameter's current value.
+// A parameter is chosen (`in`); a root and an integral are found on an interval (`on`), and a
+// root written without one is solved in closed form or not at all. A value or a root that reads a
+// parameter is a function of it: the calculator answers such a definition for the whole interval,
+// a scene draws it at the parameter's current value.
 //
 // The document is a description and computes nothing: what each definition is worth is the
-// next layer's (rsc/spatium/query.hpp reads a root or an integral of one parameter into a
-// question; io/document_trace.hpp builds its shapes as a scene). Each field keeps the text it was
+// next layer's (rsc/spatium/evaluate.hpp gives a definition its value, by the route it takes;
+// io/document_trace.hpp builds its shapes as a scene). Each field keeps the text it was
 // read from, so a document is printed back as it was written, and its JSON carries the same
 // texts, read through the same reader.
 
@@ -101,7 +103,7 @@ struct Statement {
     Written value;            // a value's expression, an integral's integrand, a root's left side
     Written rhs;              // a root's right side
     std::string variable;     // an integral's variable (a root's unknown is its own name)
-    Written lo, hi;           // the interval of a parameter, a root or an integral
+    Written lo, hi;           // the interval of a parameter, a root or an integral; a root's may be unwritten
     std::string operation;    // a shape's operation, one of `shape_operations`
     std::vector<Written> args;   // and its arguments, a shape's by its name
 };
@@ -170,6 +172,9 @@ inline std::string integral_variable(std::string_view text) {
 }
 
 } // namespace detail
+
+// Whether a root is sought on a bracket; one written without is solved in closed form.
+inline bool has_bracket(const Statement& d) { return !d.lo.text.empty(); }
 
 // The names a definition reads that it does not bind itself.
 inline std::vector<std::string> reads(const Statement& d) {
@@ -283,9 +288,11 @@ inline Result<Statement> read_statement(std::string_view text) {
         auto rhs = detail::written(r, text);
         if (!rhs) return std::unexpected(rhs.error());
         d.value = std::move(*lhs), d.rhs = std::move(*rhs);
-        auto ends = detail::interval(r, text, "on");
-        if (!ends) return std::unexpected(ends.error());
-        std::tie(d.lo, d.hi) = std::move(*ends);
+        if (!r.done()) {
+            auto ends = detail::interval(r, text, "on");
+            if (!ends) return std::unexpected(ends.error());
+            std::tie(d.lo, d.hi) = std::move(*ends);
+        }
     } else if (r.take('=')) {
         if (r.take_word("integral")) {
             d.kind = StatementKind::Integral;
@@ -353,6 +360,7 @@ inline std::string to_text(const Statement& d) {
         case StatementKind::Value: return std::format("{} = {}", d.name, d.value.text);
         case StatementKind::Parameter: return std::format("{} in [{}, {}]", d.name, d.lo.text, d.hi.text);
         case StatementKind::Root:
+            if (!has_bracket(d)) return std::format("{}: {} = {}", d.name, d.value.text, d.rhs.text);
             return std::format("{}: {} = {} on [{}, {}]", d.name, d.value.text, d.rhs.text, d.lo.text, d.hi.text);
         case StatementKind::Integral:
             return std::format("{} = integral {} d{} on [{}, {}]", d.name, d.value.text, d.variable, d.lo.text, d.hi.text);
@@ -383,7 +391,7 @@ inline JsonValue to_json(const Document& doc) {
             case StatementKind::Parameter: o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text); break;
             case StatementKind::Root:
                 o.emplace_back("lhs", d.value.text), o.emplace_back("rhs", d.rhs.text);
-                o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text);
+                if (has_bracket(d)) o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text);
                 break;
             case StatementKind::Integral:
                 o.emplace_back("integrand", d.value.text), o.emplace_back("variable", d.variable);
@@ -410,6 +418,7 @@ inline Result<Document> document_from_json(const JsonValue& json) {
         const auto s = [&](const char* key) { return d.string_or(key, ""); };
         if (kind == "value") text += std::format("{} = {}\n", name, s("value"));
         else if (kind == "parameter") text += std::format("{} in [{}, {}]\n", name, s("lo"), s("hi"));
+        else if (kind == "root" && !d.find("lo") && !d.find("hi")) text += std::format("{}: {} = {}\n", name, s("lhs"), s("rhs"));
         else if (kind == "root") text += std::format("{}: {} = {} on [{}, {}]\n", name, s("lhs"), s("rhs"), s("lo"), s("hi"));
         else if (kind == "integral")
             text += std::format("{} = integral {} d{} on [{}, {}]\n", name, s("integrand"), s("variable"), s("lo"), s("hi"));
