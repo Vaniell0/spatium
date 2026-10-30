@@ -30,8 +30,10 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // as U and V, any other name as a symbol, `inf` and `nan` as numbers; a minus in front of a
 // number is part of the number (-0 is negative zero), in front of anything else it is a product
 // with -1, which negates every double exactly. The functions are the field's own: sin, cos, log,
-// exp and sqrt of one argument, min, max and less of two. A text that is not a field is refused
-// at the column where it stops being one, with what was expected there.
+// exp and sqrt of one argument, min, max and less of two. A product after a number or a closing
+// parenthesis may leave out its '*' (2x^2, (x - 1)(x + 2)), which `to_text` never does. A text
+// that is not a field is refused at the column where it stops being one, with what was expected
+// there.
 //
 // What `to_text` writes for a field reads back to the same values bit for bit, and to the same
 // text again; when the field has no factor of exactly 1 and adds no negative constant (the two
@@ -114,12 +116,25 @@ private:
         if (!x) return x;
         while (true) {
             const char c = peek();
-            if (c != '*' && c != '/') return x;
-            ++at_;
+            const bool implied = c != '*' && c != '/' && follows_number_or_group() &&
+                                 (c == '(' || (!word().empty() && std::ranges::find(reserved_, word()) == reserved_.end()));
+            if (c != '*' && c != '/' && !implied) return x;
+            if (!implied) ++at_;
             auto y = signed_power();
             if (!y) return y;
-            *x = c == '*' ? std::move(*x) * *y : std::move(*x) / *y;
+            *x = c == '/' ? std::move(*x) / *y : std::move(*x) * *y;
         }
+    }
+
+    // A product may be written without its '*' after a number or a closing parenthesis, the way
+    // a person types one: 2x^2 is 2 * x^2 and (x - 1)(x + 2) a product of two. After a name it may
+    // not -- u v is refused -- since a name followed by a name is more often a typo than a product.
+    bool follows_number_or_group() const {
+        std::size_t k = at_;
+        while (k > 0 && std::isspace(static_cast<unsigned char>(s_[k - 1]))) --k;
+        if (k == 0) return false;
+        const char last = s_[k - 1];
+        return last == ')' || std::isdigit(static_cast<unsigned char>(last)) || last == '.';
     }
 
     Result<Field<double>> signed_power() {

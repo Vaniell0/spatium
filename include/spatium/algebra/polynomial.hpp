@@ -64,23 +64,60 @@ UpTo<Complex<T>, 2> solve_linear(T b, T c) {
 
 // ── Quadratic solver ──────────────────────────────────────────
 // ax² + bx + c = 0 → up to 2 roots (possibly complex)
+//
+// `solve_quadratic_steps` keeps what the roots were found through -- the
+// coefficients, the discriminant and which case it put the equation in --
+// so a page can show the solution as a chain of steps. It is the solver,
+// not a second account of it: `solve_quadratic` returns its roots, so the
+// steps and the answer cannot disagree in a single bit.
+
+enum class QuadraticCase {
+    Identity,     // a = b = c = 0: every x
+    None,         // a = b = 0, c != 0: no x
+    Linear,       // a = 0, b != 0: one root, -c / b
+    TwoReal,      // D > 0
+    Double,       // D = 0: one root, counted twice
+    ComplexPair,  // D < 0: two complex conjugate roots
+};
+
+template<Scalar T>
+struct QuadraticSteps {
+    T a{}, b{}, c{};
+    T discriminant{};   // b² - 4ac; 0 when a = 0, where there is none
+    QuadraticCase kind = QuadraticCase::Identity;
+    UpTo<Complex<T>, 2> roots;
+};
+
+template<Scalar T>
+QuadraticSteps<T> solve_quadratic_steps(T a, T b, T c) {
+    using std::sqrt; // ADL: lets non-std Scalar T (e.g. Real50) provide its own sqrt
+    QuadraticSteps<T> s{a, b, c, T{0}, QuadraticCase::Linear, {}};
+    if (a == T{0}) {
+        s.roots = solve_linear(b, c);
+        if (b == T{0}) s.kind = c == T{0} ? QuadraticCase::Identity : QuadraticCase::None;
+        return s;
+    }
+
+    auto disc = b * b - T{4} * a * c;
+    s.discriminant = disc;
+
+    if (disc >= T{0}) {
+        s.kind = disc == T{0} ? QuadraticCase::Double : QuadraticCase::TwoReal;
+        auto sq = sqrt(disc);
+        s.roots = {Complex<T>{(-b + sq) / (T{2} * a)},
+                   Complex<T>{(-b - sq) / (T{2} * a)}};
+    } else {
+        s.kind = QuadraticCase::ComplexPair;
+        auto sq = sqrt(-disc);
+        s.roots = {Complex<T>{-b / (T{2} * a),  sq / (T{2} * a)},
+                   Complex<T>{-b / (T{2} * a), -sq / (T{2} * a)}};
+    }
+    return s;
+}
 
 template<Scalar T>
 UpTo<Complex<T>, 2> solve_quadratic(T a, T b, T c) {
-    using std::sqrt; // ADL: lets non-std Scalar T (e.g. Real50) provide its own sqrt
-    if (a == T{0}) return solve_linear(b, c);
-
-    auto disc = b * b - T{4} * a * c;
-
-    if (disc >= T{0}) {
-        auto sq = sqrt(disc);
-        return {Complex<T>{(-b + sq) / (T{2} * a)},
-                Complex<T>{(-b - sq) / (T{2} * a)}};
-    } else {
-        auto sq = sqrt(-disc);
-        return {Complex<T>{-b / (T{2} * a),  sq / (T{2} * a)},
-                Complex<T>{-b / (T{2} * a), -sq / (T{2} * a)}};
-    }
+    return solve_quadratic_steps(a, b, c).roots;
 }
 
 // Convenience: real roots only

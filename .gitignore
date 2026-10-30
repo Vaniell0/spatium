@@ -41,6 +41,9 @@
 !/shaders/**
 !/rsc/
 !/rsc/**
+# The site the library's gallery and calculator are served from (GitHub Pages)
+!/site/
+!/site/**
 !/modules/
 !/modules/**
 !/.github/
