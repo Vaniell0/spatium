@@ -197,7 +197,6 @@ ninja -C build
 | `SPATIUM_EIGEN`              | `OFF`   | Required by the heat-method geodesic solver and the cotangent-Laplacian DEC operators. |
 | `SPATIUM_NATIVE_ARCH`        | `OFF`   | Adds `-march=native`. Resulting binaries are not portable across CPUs — use only for local performance work. |
 | `SPATIUM_USE_MODULES`        | `OFF`   | C++23 named-modules build. Currently behind the header tree (see the option's own comment in `CMakeLists.txt`) — not a compiler-bug wait, real catch-up work. |
-| `SPATIUM_CUDA`                | `OFF`   | CUDA GPU kernels (`gpu/`) for GR ray tracing. Requires nvcc; not part of a default build. |
 | `SPATIUM_BUILD_RSC_TOOLS`     | `ON`*   | RSC training tools (`rsc/tools/train_base`, ...). |
 | `IMGUI_DIR` (env or `-D`)    | unset   | Source path of Dear ImGui; enables the in-viewer panel when set. |
 

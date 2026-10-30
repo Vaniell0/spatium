@@ -68,20 +68,6 @@
             }
         },
         {
-            "name": "cuda",
-            "displayName": "CUDA render kernels (gpu/)",
-            "description": "SPATIUM_CUDA=ON for the gpu/ black-hole render kernels -- requires nvcc, meant for the GPU-equipped render machine, not local iteration.",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build-cuda",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "SPATIUM_CUDA": "ON",
-                "SPATIUM_EIGEN": "OFF",
-                "SPATIUM_BOOST": "ON",
-                "SPATIUM_BUILD_TESTS": "OFF"
-            }
-        },
-        {
             "name": "noeigen",
             "displayName": "No-Eigen verification",
             "description": "Confirms the library and examples build with the optional Eigen3 dependency fully absent.",
@@ -125,7 +111,6 @@
         { "name": "modules", "configurePreset": "modules" },
         { "name": "bench", "configurePreset": "bench" },
         { "name": "bench-modules", "configurePreset": "bench-modules" },
-        { "name": "cuda", "configurePreset": "cuda" },
         { "name": "noeigen", "configurePreset": "noeigen" },
         { "name": "noboost", "configurePreset": "noboost" },
         { "name": "vulkan-dev", "configurePreset": "vulkan-dev" }

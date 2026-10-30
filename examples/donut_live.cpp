@@ -26,11 +26,11 @@
 
 #include <spatium/render/camera.hpp>
 #include <spatium/render/cooked_scene.hpp>
-#include <spatium/render/gpu_instances.hpp>
-#include <spatium/render/gpu_scene.hpp>
-#include <spatium/render/gpu_splat_glsl.hpp>
-#include <spatium/render/lbvh.hpp>
-#include <spatium/render/gpu_trace_glsl.hpp>
+#include <spatium/render/gpu/gpu_instances.hpp>
+#include <spatium/render/gpu/gpu_scene.hpp>
+#include <spatium/render/gpu/gpu_splat_glsl.hpp>
+#include <spatium/render/gpu/lbvh.hpp>
+#include <spatium/render/gpu/gpu_trace_glsl.hpp>
 #include <spatium/render/parallel_for_rows.hpp>
 #include <spatium/render/write_image.hpp>
 #include <spatium/viewer/compute.hpp>
@@ -69,7 +69,7 @@ struct Push {
 };
 static_assert(sizeof(Push) == 128);
 
-// The splat kernel's push constants, as render/gpu_splat_glsl.hpp lays them out.
+// The splat kernel's push constants, as render/gpu/gpu_splat_glsl.hpp lays them out.
 struct SplatPush {
     float cam[4], fwd[4], right[4], up[4], key[4], fill[4];
     std::uint32_t size[4];

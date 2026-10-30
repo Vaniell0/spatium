@@ -1,12 +1,12 @@
 #pragma once
-// The linear BVH's build, as compute shaders -- `render/lbvh.hpp`'s
+// The linear BVH's build, as compute shaders -- `render/gpu/lbvh.hpp`'s
 // `build_lbvh()` step for step, less the sort, which stays on the host.
 //
 // Four kernels, each one of build_lbvh()'s phases:
 //
 //   kBoxesGlsl   an instance's world box, and the bounds of the centres
 //   kKeysGlsl    the Morton code of each centre, with the index beside it --
-//                after render/gpu_splat_glsl.hpp's kSplatClassifyGlsl, since
+//                after render/gpu/gpu_splat_glsl.hpp's kSplatClassifyGlsl, since
 //                an instance drawn by projection is left out
 //   (host)       the sort, over 8 bytes a key read from shared memory
 //   kTreeGlsl    a leaf and an internal node per invocation, Karras 2012
@@ -90,7 +90,7 @@ inline constexpr const char* kKeysGlsl = R"GLSL(
 layout(std430, binding = 0) readonly buffer Boxes { vec4 boxes[]; };
 layout(std430, binding = 1) coherent buffer Bounds { uint bounds[]; };   // [6]: live key count
 layout(std430, binding = 2) writeonly buffer Keys { uvec2 keys[]; };
-// cam and fwd are render/gpu_splat_glsl.hpp's: an instance splat_small()
+// cam and fwd are render/gpu/gpu_splat_glsl.hpp's: an instance splat_small()
 // accepts is drawn by projection and left out of the tree. A zero
 // threshold (fwd.w) keeps every instance.
 layout(push_constant) uniform Push { uvec4 info; vec4 cam; vec4 fwd; } pc;

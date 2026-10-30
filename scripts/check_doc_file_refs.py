@@ -76,6 +76,15 @@ NOT_IN_TREE = {
     "test_block_c_close.cpp": "never existed; ROADMAP's correction entry names it to say so",
     "test_block_d_start.cpp": "never existed; ROADMAP's correction entry names it to say so",
     "table.cpp": "never existed; ROADMAP's corrected table-renderer entry names the old wrong path",
+    # -- removed with the CUDA kernels in gpu/ 2026-10-30 (the Vulkan path renders the same
+    # -- holes from the metric's IR, docs/gpu.md); ROADMAP's history entries name them
+    "derive_christoffel.py": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
+    "geodesic_kernel.cu": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
+    "verify_cuda_render.cpp": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
+    "kerr_render_kernel.cu": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
+    "christoffel_closed_form.hpp": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
+    "render_4k_frame.cpp": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
+    "schwarzschild_render_kernel.cu": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
     # -- removed with the RSC prototype 2026-10-20 (tag rsc-prototype-final); the docs that
     # -- record its numbers still name its files
     "test_ipc_toolkit.cpp": "removed 2026-10-21 with the ipc-toolkit dependency, tag ipc-toolkit-final",

@@ -50,13 +50,13 @@
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <spatium/physics/relativity/geodesic.hpp>
-#include <spatium/render/blackhole_glsl.hpp>
+#include <spatium/render/gpu/blackhole_glsl.hpp>
 #include <spatium/render/write_image.hpp>
 #include <spatium/physics/relativity/metric_glsl.hpp>
 #include <spatium/physics/relativity/spacetime_scene.hpp>
 #include <spatium/viewer/compute.hpp>
 #include <spatium/viewer/gpu_lbvh.hpp>
-#include <spatium/render/gpu_types.hpp>
+#include <spatium/render/gpu/gpu_types.hpp>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>

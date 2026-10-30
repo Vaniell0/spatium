@@ -1,7 +1,7 @@
 #pragma once
 // The compute shader for a packed scene, as a string compiled at run time.
 //
-// It is `render/gpu_scene.hpp`'s `trace()` and `shade()` transcribed, and
+// It is `render/gpu/gpu_scene.hpp`'s `trace()` and `shade()` transcribed, and
 // each function here keeps the name of the one it transcribes so the two
 // can be read side by side. A change to either is a change to both; the
 // comparison in `examples/donut_live.cpp` is what notices when they drift.
@@ -17,7 +17,7 @@ inline constexpr const char* kTraceGlsl = R"GLSL(
 layout(local_size_x = 8, local_size_y = 8) in;
 
 struct Node     { vec3 lo; uint first; vec3 hi; uint count; };
-struct LNode    { vec3 lo; uint left; vec3 hi; uint right; };   // render/lbvh.hpp
+struct LNode    { vec3 lo; uint left; vec3 hi; uint right; };   // render/gpu/lbvh.hpp
 struct Triangle { vec4 v0, v1, v2, n0, n1, n2, color_rough, emissive; };
 struct Quadric  { mat4 q; vec4 lo; vec4 hi; };
 struct Instance { vec4 r0, r1, r2, scale_quadric, color_rough, emissive_opacity; };
@@ -204,7 +204,7 @@ void walk_triangles(vec3 o, vec3 d, inout Hit h) {
     }
 }
 
-// trace_lbvh in render/gpu_scene.hpp: both children named, one instance
+// trace_lbvh in render/gpu/gpu_scene.hpp: both children named, one instance
 // per leaf, marked by the top bit of `left`.
 bool slab_l(vec3 o, vec3 d, LNode n, float t_max, out float t_enter) {
     Node box;

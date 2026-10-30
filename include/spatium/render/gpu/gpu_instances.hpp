@@ -21,7 +21,7 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/io/build.hpp>
 #  include <spatium/io/field_glsl.hpp>
-#  include <spatium/render/gpu_scene.hpp>
+#  include <spatium/render/gpu/gpu_scene.hpp>
 #  include <cstdint>
 #  include <format>
 #  include <string>

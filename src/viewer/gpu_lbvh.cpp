@@ -1,9 +1,9 @@
 #include <spatium/viewer/gpu_lbvh.hpp>
 
-#include <spatium/render/gpu_lbvh_glsl.hpp>
-#include <spatium/render/gpu_splat_glsl.hpp>
-#include <spatium/render/gpu_types.hpp>
-#include <spatium/render/lbvh.hpp>
+#include <spatium/render/gpu/gpu_lbvh_glsl.hpp>
+#include <spatium/render/gpu/gpu_splat_glsl.hpp>
+#include <spatium/render/gpu/gpu_types.hpp>
+#include <spatium/render/gpu/lbvh.hpp>
 
 #include <chrono>
 #include <string>
