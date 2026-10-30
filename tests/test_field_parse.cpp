@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <random>
 #include <string>
 #include <vector>
@@ -123,6 +124,10 @@ TEST_CASE("field parse: a text written by hand is the field built in code", "[fi
     CHECK(std::isnan(read("nan")(0.0, 0.0)));
     CHECK(same(read("1.8e+20")(0.0, 0.0), 1.8e20));
     CHECK(same(read(".5")(0.0, 0.0), 0.5));
+    // pi is the double nearest pi, and prints as its name, which reads back to the same bits
+    CHECK(same(read("pi")(0.0, 0.0), std::numbers::pi));
+    CHECK(*bd::to_text(read("2 * pi - u")) == "2 * pi - u");
+    CHECK(*bd::to_latex(read("u - pi")) == "u - \\pi");
 }
 
 TEST_CASE("field parse: what to_text writes reads back to the same field", "[field][parse]") {

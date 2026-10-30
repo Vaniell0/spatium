@@ -52,6 +52,7 @@ struct SynthesisSpec {
     std::size_t max_candidates = 4000; // no larger size is begun once this many are held; one begun is finished
     std::size_t exhaustive_pairs = 200000; // all sets of one and two terms are tried when there are at most this many
     std::size_t exhaustive_triples = 40000; // and of three among the shortest terms, when no pair reaches rounding
+    std::size_t polynomial_degree = 0;  // the largest degree of the Chebyshev fallback of a piece; 0 for none
 };
 
 struct Term {
@@ -76,6 +77,10 @@ struct Certificate {
 #endif
 };
 
+// How a piece is written: a short expression found by the search, or, where none reaches the
+// tolerance, a polynomial in Chebyshev form whose coefficients are `coefficients`.
+enum class Form { Expression, Chebyshev };
+
 struct Solution {
     double lo = 0, hi = 0;
     Expr expr;
@@ -84,6 +89,7 @@ struct Solution {
     double error = 0;     // the largest error on the check grid, in the spec's sense
     bool accepted = false;
     Certificate certificate{};
+    Form form = Form::Expression;
 };
 
 namespace synthesis_detail {
@@ -458,14 +464,75 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
     return best;
 }
 
+// The fallback where no short expression reaches the tolerance: the polynomial that interpolates
+// the reference at the Chebyshev points of the piece, of degree 4, 8, 16 ... up to
+// spec.polynomial_degree, the first one the check grid accepts. It is a field like any other --
+// t = (x - centre) / half, summed by Clenshaw's recurrence, about four ops a degree -- so it
+// prints, lowers to GLSL and is certified on the same grid as an expression is; what it is not is
+// a closed form, and the piece says so (`Form::Chebyshev`). A smooth function with no closed form
+// in the operations (the sine integral, the error function) takes a piece or two this way where
+// short terms took fifty.
+inline Solution chebyshev(const std::function<double(double)>& reference, const SynthesisSpec& spec) {
+    using namespace synthesis_detail;
+    const double centre = 0.5 * (spec.lo + spec.hi), half = 0.5 * (spec.hi - spec.lo);
+    const auto checks = grid(spec.lo, spec.hi, spec.checks);
+    std::vector<double> truth(checks.size());
+    for (std::size_t i = 0; i < checks.size(); ++i)
+        truth[i] = reference(checks[i]);
+    const auto error_of = [&](const Expr& e) {
+        double worst = 0;
+        for (std::size_t i = 0; i < checks.size(); ++i) {
+            const double d = std::abs(e(checks[i], 0.0) - truth[i]);
+            const double r = spec.relative ? d / std::max(std::abs(truth[i]), 1e-300) : d;
+            if (!(r <= worst)) worst = r;   // a NaN is the worst
+        }
+        return worst;
+    };
+    const Expr t = (Expr::u() - Expr(centre)) * Expr(1 / half);
+    Solution best{spec.lo, spec.hi, Expr(0.0), {}, 0, 1, 1e300, false, {.relative = spec.relative, .points = spec.checks},
+                  Form::Chebyshev};
+    for (std::size_t n = 4; n <= spec.polynomial_degree; n *= 2) {
+        const std::size_t m = n + 1;   // nodes
+        std::vector<double> f(m), c(m, 0.0);
+        for (std::size_t j = 0; j < m; ++j)
+            f[j] = reference(centre + half * std::cos(std::numbers::pi * (double(j) + 0.5) / double(m)));
+        for (std::size_t k = 0; k < m; ++k) {
+            double sum = 0;
+            for (std::size_t j = 0; j < m; ++j)
+                sum += f[j] * std::cos(std::numbers::pi * double(k) * (double(j) + 0.5) / double(m));
+            c[k] = 2 * sum / double(m);
+        }
+        c[0] /= 2;
+        // Clenshaw: b_k = c_k + 2 t b_{k+1} - b_{k+2}, the sum c_0 + t b_1 - b_2
+        Expr b1(c[n]), b2(0.0);
+        bool second = false;   // b2 is still the zero it started as
+        for (std::size_t k = n - 1; k >= 1; --k) {
+            Expr b0 = Expr(c[k]) + Expr(2.0) * t * b1;
+            if (second) b0 = b0 - b2;
+            b2 = b1, b1 = b0, second = true;
+        }
+        const Expr e = Expr(c[0]) + t * b1 - b2;
+        const double err = error_of(e);
+        if (err < best.error)
+            best = {spec.lo, spec.hi, e, c, m, e.size(), err, err <= spec.tolerance,
+                    {.relative = spec.relative, .points = spec.checks}, Form::Chebyshev};
+        if (best.accepted) break;
+    }
+    return best;
+}
+
 // Piecewise: each interval that nothing accepts is halved, down to min_width; returns the pieces
-// in order, unaccepted ones marked so.
+// in order, unaccepted ones marked so. With spec.polynomial_degree set, a piece no short
+// expression answers is tried as a Chebyshev polynomial before it is halved.
 inline std::vector<Solution> synthesize_piecewise(const std::function<double(double)>& reference,
                                                   SynthesisSpec spec, double min_width) {
     std::vector<Solution> out;
     std::function<void(double, double)> go = [&](double lo, double hi) {
         spec.lo = lo, spec.hi = hi;
         Solution s = synthesize(reference, spec);
+        if (!s.accepted && spec.polynomial_degree >= 4)
+            if (Solution p = chebyshev(reference, spec); p.accepted || (hi - lo <= min_width && p.error < s.error))
+                s = std::move(p);
         if (s.accepted || hi - lo <= min_width) {
             out.push_back(std::move(s));
             return;

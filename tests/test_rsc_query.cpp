@@ -63,16 +63,22 @@ TEST_CASE("query: the integral of x^p over [0, 1] is 1 / (p + 1)", "[rsc][query]
     holds(a, 0, 3, [](double v) { return 1 / (v + 1); }, 1e-9);
 }
 
-TEST_CASE("query: the integral of exp(-p x^2) over [0, 1] needs erf, and takes pieces", "[rsc][query]") {
-    // sqrt(pi / p) erf(sqrt p) / 2: erf is not among the operations; the answer is still certified
+TEST_CASE("query: the integral of exp(-p x^2) over [0, 1] needs erf, and says it found no closed form", "[rsc][query]") {
+    // sqrt(pi / p) erf(sqrt p) / 2: erf is not among the operations; the answer is still certified,
+    // as a Chebyshev polynomial, and marked so -- or, without that fallback, as pieces of short terms
     const Expr x = Expr::u(), p = Expr::v();
-    const rsc::Query q{.ask = rsc::Ask::Integrate, .f = exp(Expr(-1.0) * p * x * x), .x_lo = 0, .x_hi = 1,
-                       .p_lo = 0.1, .p_hi = 4, .tolerance = 1e-6};
+    rsc::Query q{.ask = rsc::Ask::Integrate, .f = exp(Expr(-1.0) * p * x * x), .x_lo = 0, .x_hi = 1,
+                 .p_lo = 0.1, .p_hi = 4, .tolerance = 1e-6};
     const auto a = rsc::answer(q);
     INFO(a.pieces.size() << " pieces");
     REQUIRE(a.answered);
-    CHECK(a.pieces.size() > 1);
+    CHECK(std::ranges::all_of(a.pieces, [](const rsc::Solution& s) { return s.form == rsc::Form::Chebyshev; }));
     holds(a, 0.1, 4, [](double v) { return std::sqrt(std::numbers::pi / v) * std::erf(std::sqrt(v)) / 2; }, 1e-6);
+    q.polynomial_degree = 0;
+    const auto short_terms = rsc::answer(q);
+    REQUIRE(short_terms.answered);
+    CHECK(short_terms.pieces.size() > a.pieces.size());
+    holds(short_terms, 0.1, 4, [](double v) { return std::sqrt(std::numbers::pi / v) * std::erf(std::sqrt(v)) / 2; }, 1e-6);
 }
 
 TEST_CASE("query: a root on a bracket with no change of sign is refused, not fitted", "[rsc][query]") {
@@ -159,4 +165,60 @@ TEST_CASE("query: a text that is not a question is refused, and says where", "[r
     CHECK(refused("solve x - p for x in [0, 1], x in [0, 1]").find("named twice") != std::string::npos);
     CHECK(refused("solve x - p for x in [0, 1], p in [0, 1] please").find("the end, found 'please'") != std::string::npos);
     CHECK(refused("solve x - for x in [0, 1], p in [0, 1]").find("parse: at column 11") != std::string::npos);
+}
+
+TEST_CASE("query: a limit that moves with the parameter, and special functions as integrals", "[rsc][query]") {
+    // Si(x) = integral of sin(t)/t over [0, x]: the parameter is the upper limit. Its reference,
+    // the library's integral, is held against the series sum (-1)^n x^(2n+1) / ((2n+1)(2n+1)!)
+    const auto si = rsc::ask("integrate sin(t)/t for t in [0, x], x in [0.5, 6]");
+    REQUIRE(si.has_value());
+    CHECK((si->x_lo == 0 && si->x_hi_at.has_value() && !si->x_lo_at.has_value()));
+    const auto series = [](double x) {
+        double sum = 0, term = x;   // x^(2n+1) / (2n+1)!
+        for (int n = 0; n < 40; ++n) {
+            sum += (n % 2 ? -term : term) / (2 * n + 1);
+            term *= x * x / ((2 * n + 2) * (2 * n + 3));
+        }
+        return sum;
+    };
+    const rsc::Query si_bound = rsc::bound(*si);
+    for (double x : {0.5, 1.0, 2.0, 4.0, 6.0})
+        CHECK_THAT(rsc::reference(si_bound, x), WithinAbs(series(x), 1e-13));
+    auto asked = *si;
+    asked.tolerance = 1e-8;
+    const auto a = rsc::answer(asked);
+    REQUIRE(a.answered);
+    holds(a, 0.5, 6, series, 1e-8);
+
+    // erf(x) = 2 / sqrt(pi) times the integral of exp(-t^2) over [0, x], held against std::erf
+    const auto erf = rsc::ask("integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]");
+    REQUIRE(erf.has_value());
+    const rsc::Query erf_bound = rsc::bound(*erf);
+    for (double x : {0.25, 0.5, 1.0, 2.0, 3.0})
+        CHECK_THAT(rsc::reference(erf_bound, x), WithinAbs(std::erf(x), 1e-15));
+
+    // the Fresnel integral C(x), held against its series sum (-1)^n (pi/2)^(2n) x^(4n+1) / ((2n)! (4n+1))
+    const auto fresnel = rsc::ask("integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]");
+    REQUIRE(fresnel.has_value());
+    const auto c_series = [](double x) {
+        double sum = 0, term = x;   // (pi/2)^(2n) x^(4n+1) / (2n)!
+        const double h = std::numbers::pi / 2;
+        for (int n = 0; n < 30; ++n) {
+            sum += (n % 2 ? -term : term) / (4 * n + 1);
+            term *= h * h * x * x * x * x / ((2 * n + 1) * (2 * n + 2));
+        }
+        return sum;
+    };
+    const rsc::Query c_bound = rsc::bound(*fresnel);
+    for (double x : {0.25, 1.0, 2.0})
+        CHECK_THAT(rsc::reference(c_bound, x), WithinAbs(c_series(x), 1e-13));
+
+    // the cases it must fail: a bound reading another name, a parameter's bound reading one, and an
+    // interval that is empty somewhere the answer is wanted
+    CHECK(rsc::ask("integrate t for t in [0, y], x in [0, 1]").error().message.find("may read only the parameter x") !=
+          std::string::npos);
+    CHECK(rsc::ask("integrate t for t in [0, x], x in [0, y]").error().message.find("reads the name 'y'") !=
+          std::string::npos);
+    CHECK(rsc::ask("integrate t for t in [1, x], x in [0, 2]").error().message.find("is empty at x = 0") !=
+          std::string::npos);
 }

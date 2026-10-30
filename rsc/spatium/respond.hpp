@@ -22,6 +22,7 @@
 
 #include <cctype>
 #include <cmath>
+#include <format>
 #include <string>
 #include <string_view>
 
@@ -73,10 +74,25 @@ inline spatium::io::JsonValue::ObjectType answer_json(const Answer& a, const std
     }
     if (!a.pieces.empty() && a.pieces.size() <= written) {
         Array pieces;
-        for (const auto& s : a.pieces)
-            pieces.push_back(Object{{"lo", s.lo}, {"hi", s.hi}, {"latex", *bd::to_latex(s.expr, parameter)},
+        for (const auto& s : a.pieces) {
+            if (s.form == Form::Chebyshev) {
+                // the polynomial is a long field; the page shows what it is and its coefficients
+                const std::string p = bd::detail::name_latex(parameter);
+                Array coefficients;
+                for (double c : s.coefficients) coefficients.push_back(c);
+                pieces.push_back(Object{{"lo", s.lo}, {"hi", s.hi}, {"form", "chebyshev"}, {"degree", s.terms - 1},
+                                        {"latex", std::format("\\sum_{{k=0}}^{{{}}} c_k\\,T_k\\!\\left(\\frac{{2{} - {} - {}}}{{{}}}\\right)",
+                                                              s.terms - 1, p, bd::detail::number_text(s.lo, bd::detail::TextStyle::Latex),
+                                                              bd::detail::number_text(s.hi, bd::detail::TextStyle::Latex),
+                                                              bd::detail::number_text(s.hi - s.lo, bd::detail::TextStyle::Latex))},
+                                        {"coefficients", coefficients}, {"accepted", s.accepted}});
+                continue;
+            }
+            pieces.push_back(Object{{"lo", s.lo}, {"hi", s.hi}, {"form", "expression"},
+                                    {"latex", *bd::to_latex(s.expr, parameter)},
                                     {"text", *bd::to_text(s.expr, parameter)}, {"terms", s.terms},
                                     {"accepted", s.accepted}});
+        }
         out.emplace_back("answer", pieces);
     }
     return out;

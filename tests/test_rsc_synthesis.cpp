@@ -328,3 +328,29 @@ TEST_CASE("synthesis: a sum of its own terms comes back, the inverse of evaluati
         }
     }
 }
+
+TEST_CASE("synthesis: where no short expression answers, a Chebyshev polynomial does", "[rsc][synthesis]") {
+    // the error function on [0, 3]: no closed form in the operations; the fallback interpolates it
+    // at Chebyshev points, and the polynomial is a field certified on the same grid
+    rsc::SynthesisSpec spec{.lo = 0, .hi = 3, .tolerance = 1e-10, .relative = false, .polynomial_degree = 32};
+    const auto erf = rsc::chebyshev([](double x) { return std::erf(x); }, spec);
+    REQUIRE(erf.accepted);
+    CHECK(erf.form == rsc::Form::Chebyshev);
+    CHECK(erf.terms <= 33);
+    for (double x : {0.0, 0.3, 1.0, 2.2, 3.0}) CHECK_THAT(erf.expr(x, 0.0), WithinAbs(std::erf(x), 1e-10));
+    // a field like any other: lowered to plain data, it gives the interpreter's bits
+    const auto pod = spatium::io::build::lower(erf.expr);
+    REQUIRE(pod.has_value());
+    for (double x : {0.1, 1.7, 2.9})
+        CHECK(spatium::io::build::interpret(*pod, x, 0.0) == erf.expr(x, 0.0));
+
+    // pieces: the error function on [0.25, 3] took 46 pieces of short terms; with the fallback, few
+    rsc::SynthesisSpec piecewise{.lo = 0.25, .hi = 3, .tolerance = 1e-8, .polynomial_degree = 32};
+    const auto pieces = rsc::synthesize_piecewise([](double x) { return std::erf(x); }, piecewise, 1e-6);
+    CHECK(pieces.size() <= 2);
+    CHECK(std::ranges::all_of(pieces, [](const rsc::Solution& s) { return s.accepted; }));
+
+    // the case it must fail: a kink, |x - 1| on [0, 2], is no polynomial of degree 32 to 1e-10
+    rsc::SynthesisSpec kink{.lo = 0, .hi = 2, .tolerance = 1e-10, .relative = false, .polynomial_degree = 32};
+    CHECK_FALSE(rsc::chebyshev([](double x) { return std::abs(x - 1); }, kink).accepted);
+}

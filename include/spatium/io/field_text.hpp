@@ -9,6 +9,7 @@
 #  include <cstdint>
 #  include <format>
 #  include <limits>
+#  include <numbers>
 #  include <string>
 #  include <string_view>
 #  include <vector>
@@ -56,6 +57,11 @@ inline std::string grouped(const Spelled& e, Binding need, TextStyle style) {
 }
 
 inline std::string number_text(double x, TextStyle style) {
+    // the double nearest pi is written as its name, which parse reads back to the same bits
+    if (std::abs(x) == std::numbers::pi) {
+        const char* name = style == TextStyle::Plain ? "pi" : "\\pi";
+        return std::signbit(x) ? std::string("-") + name : std::string(name);
+    }
     if (style == TextStyle::Plain) return std::format("{}", x);
     if (std::isnan(x)) return "\\mathrm{NaN}";
     if (std::isinf(x)) return x > 0 ? "\\infty" : "-\\infty";
