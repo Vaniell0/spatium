@@ -82,7 +82,6 @@ NOT_IN_TREE = {
     "geodesic_kernel.cu": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
     "verify_cuda_render.cpp": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
     "kerr_render_kernel.cu": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
-    "christoffel_closed_form.hpp": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
     "render_4k_frame.cpp": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
     "schwarzschild_render_kernel.cu": "removed 2026-10-30 with gpu/; ROADMAP's history entries name it",
     # -- removed with the RSC prototype 2026-10-20 (tag rsc-prototype-final); the docs that

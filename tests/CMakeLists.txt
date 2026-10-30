@@ -135,7 +135,6 @@ add_executable(spatium_tests
 )
 
 target_include_directories(spatium_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/gpu
     # test_field_pod.cpp builds the donut demo's own scene rather than a
     # copy of it, and reads the letterform points that scene is made of.
     ${CMAKE_SOURCE_DIR}/examples

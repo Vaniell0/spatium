@@ -20,7 +20,7 @@
 #include <spatium/physics/relativity/kerr.hpp>
 #include <spatium/physics/relativity/geodesic.hpp>
 #include <spatium/physics/relativity/accretion_disk.hpp>
-#include <christoffel_closed_form.hpp>
+#include "christoffel_closed_form.hpp"
 #include <cmath>
 #include <numbers>
 
@@ -303,15 +303,10 @@ TEST_CASE("kerr_disk_redshift_factor reduces to disk_redshift_factor at a=0",
                WithinAbs(disk_redshift_factor(M, r, -b), 1e-9));
 }
 
-// gpu/christoffel_closed_form.hpp's hand/symbolically-derived, straight-
-// line expressions are meant to replace geodesic.hpp's generic Dual<T> +
-// general invert() machinery inside the GPU kernel (Phase 2 of the CUDA
-// port) -- SIMT execution punishes the indirection/branching that
-// genericity costs, and a kernel that will only ever run these two
-// published metrics doesn't need to pay for supporting a hypothetical
-// future one. Before any CUDA is written at all, the closed-form
-// version has to reproduce the already-validated generic engine
-// component-by-component, not just "look right" against a textbook.
+// christoffel_closed_form.hpp holds the Christoffel symbols of both metrics
+// derived once by sympy and written out as straight-line arithmetic: an
+// independent derivation the generic Dual<T> + invert() engine has to
+// reproduce component by component.
 // Both are exact analytic evaluations (no discretization on either
 // side, unlike the fp32-vs-fp64 precision cases above), so agreement is
 // expected to near machine precision everywhere except right next to
@@ -336,7 +331,7 @@ void check_christoffel_match(const std::array<Matrix<double, 4, 4>, 4>& ref,
 }  // namespace
 
 TEST_CASE("schwarzschild_christoffel_closed_form matches the generic Dual<T> christoffel()",
-          "[relativity][gpu][closed-form]") {
+          "[relativity][closed-form]") {
     double M = 1.0;
     SchwarzschildMetric<double> metric{M};
     for (double r : {2.2, 2.5, 3.0, 4.0, 6.0, 10.0, 25.0}) {
@@ -344,14 +339,14 @@ TEST_CASE("schwarzschild_christoffel_closed_form matches the generic Dual<T> chr
             Vec<double, 4> x{0.0, r, theta, 0.0};
             auto Gamma_ref = christoffel(metric, x);
             double Gamma_cf[4][4][4];
-            spatium::gpu::schwarzschild_christoffel_closed_form(M, r, theta, Gamma_cf);
+            spatium::closed_form::schwarzschild_christoffel_closed_form(M, r, theta, Gamma_cf);
             check_christoffel_match(Gamma_ref, Gamma_cf, 0.0, r, theta);
         }
     }
 }
 
 TEST_CASE("kerr_christoffel_closed_form matches the generic Dual<T> christoffel()",
-          "[relativity][kerr][gpu][closed-form]") {
+          "[relativity][kerr][closed-form]") {
     double M = 1.0;
     for (double a : {0.0, 0.5, 0.9, 0.99}) {
         KerrMetric<double> metric{M, a};
@@ -362,7 +357,7 @@ TEST_CASE("kerr_christoffel_closed_form matches the generic Dual<T> christoffel(
                 Vec<double, 4> x{0.0, r, theta, 0.0};
                 auto Gamma_ref = christoffel(metric, x);
                 double Gamma_cf[4][4][4];
-                spatium::gpu::kerr_christoffel_closed_form(M, a, r, theta, Gamma_cf);
+                spatium::closed_form::kerr_christoffel_closed_form(M, a, r, theta, Gamma_cf);
                 check_christoffel_match(Gamma_ref, Gamma_cf, a, r, theta);
             }
         }
