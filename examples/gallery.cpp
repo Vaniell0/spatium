@@ -16,6 +16,7 @@
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/geometry/make.hpp>
 #include <spatium/geometry/transform.hpp>
+#include <spatium/io/document_trace.hpp>
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
 #include <spatium/io/trace_text.hpp>
@@ -24,6 +25,7 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -102,13 +104,18 @@ std::string gallery() {
         cards.push_back(prism);
     }
     {
-        // a scene that names its numbers: the shell's thickness is the root of an equation in them
-        bd::Trace<double> t;
-        const auto R = t.let("R", 2.0), r = t.let("r", 0.5);
-        const auto rr = r.field(), h = bd::Field<double>::symbol("h");
-        const auto hh = t.let("h", (rr + h) * (rr + h) - bd::Field<double>(2.0) * rr * rr, 0.0, 1.0);
-        const auto shell = t.offset(t.torus(R, r), hh.field());
-        cards.push_back(Object{{"id", "scene"}, {"route", "scene"}, {"latex", *bd::to_latex(t, shell.index)}});
+        // a scene written as a document, which names its numbers: the shell's thickness is the root
+        // of an equation in them
+        const auto doc = bd::read_document("R = 2\n"
+                                           "r = 0.5\n"
+                                           "h: (r + h)^2 - 2 * r^2 = 0 on [0, 1]\n"
+                                           "S0 = torus(R, r)\n"
+                                           "S1 = offset(S0, h)\n");
+        if (!doc) throw std::runtime_error(doc.error().message);
+        const auto built = bd::to_trace(*doc);
+        if (!built) throw std::runtime_error(built.error().message);
+        const bd::DocumentScene& scene = *built;
+        cards.push_back(Object{{"id", "scene"}, {"route", "scene"}, {"latex", *bd::to_latex(scene.trace, scene.root())}});
     }
     // one card per line, so a change to one card is a change to one line
     std::string out = "{\"cards\": [\n";
