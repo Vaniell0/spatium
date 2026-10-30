@@ -210,3 +210,12 @@ TEST_CASE("field parse: the language's table is the reader's, and every example 
     REQUIRE_FALSE(tan.has_value());
     for (const auto& f : bd::functions) CHECK(tan.error().message.find(f.name) != std::string::npos);
 }
+
+TEST_CASE("parse: a typed minus is a minus on the page", "[field][parse][latex]") {
+    // -1 * a, which is how the reader takes a typed -a, is -a on a page, and a sum subtracts it;
+    // the case it must fail: a negative factor on the right keeps its parentheses
+    CHECK(*bd::to_latex(*bd::parse("exp(-u * v^2)")) == "\\exp\\left(-u \\cdot v^{2}\\right)");
+    CHECK(*bd::to_latex(*bd::parse("1 + -u")) == "1 - u");
+    CHECK(*bd::to_latex(*bd::parse("-3^2")) == "-3^{2}");
+    CHECK(*bd::to_latex(*bd::parse("v * -u")) == "v \\cdot \\left(-u\\right)");
+}

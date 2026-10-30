@@ -44,7 +44,7 @@ struct Spelled {
     std::string text;
     Binding binds = Binding::Atom;
     bool one = false;        // the constant 1 exactly, which a product leaves out
-    bool negative = false;   // a negative constant, which a sum writes as a subtraction
+    bool negative = false;   // a negative constant, or in LaTeX a term led by a minus: a sum writes it as a subtraction
     bool fraction = false;   // a LaTeX \frac, which a power's base puts in parentheses
     // a product of one op with itself, k times, multiplied left to right: written base^k
     std::uint32_t base = std::numeric_limits<std::uint32_t>::max();
@@ -100,6 +100,15 @@ inline std::string name_latex(std::string_view name) {
     return out;
 }
 
+inline bool juxtaposes(const Spelled& left, std::string_view right) {
+    const bool number = !left.text.empty() && !left.negative &&
+                        left.text.find_first_not_of("0123456789.") == std::string::npos;
+    if (!(number || left.fraction) || right.empty()) return false;
+    if (right.starts_with("\\frac") || right.starts_with("\\left[")) return false;
+    const char c = right.front();
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\\';
+}
+
 inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at, const std::string& u,
                         const std::string& v, TextStyle style) {
     const bool tex = style == TextStyle::Latex;
@@ -146,9 +155,26 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
                 out.power = k;
                 return out;
             }
-            return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") +
-                        grouped(arg(n.b), right_of_product, style),
-                    Binding::Product};
+            // on a page -1 * a is -a, as the reader took it from what was typed; a sum writes
+            // b + (-a) as b - a, and a product puts no parentheses around a negative left factor
+            if (tex && arg(n.a).negative && arg(n.a).text == "-1") {
+                Spelled out{"-" + grouped(arg(n.b), Binding::Product, style), Binding::Sum};
+                out.negative = true;
+                return out;
+            }
+            const std::string right = grouped(arg(n.b), right_of_product, style);
+            // on a page a number or a fraction before a name is written next to it, 2x and \frac{1}{6} p,
+            // as a person writes them; two numbers, a number in powers of ten, and a fraction or an
+            // Iverson bracket on the right keep the dot
+            if (tex && juxtaposes(arg(n.a), right)) return {arg(n.a).text + (arg(n.a).fraction ? " " : "") + right, Binding::Product};
+            if (tex && arg(n.a).negative) {
+                // a product that starts with a minus is negative as a whole: a sum subtracts it
+                // and a factor or a base puts it in parentheses, as a negative number
+                Spelled out{arg(n.a).text + " \\cdot " + right, Binding::Sum};
+                out.negative = true;
+                return out;
+            }
+            return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") + right, Binding::Product};
         }
         case Op::Div:
             if (tex) {

@@ -226,7 +226,7 @@ TEST_CASE("synthesis: a coefficient that is a small fraction is written as one, 
     REQUIRE(s.accepted);
     CHECK(s.error <= 1e-12);
     CHECK(*spatium::io::build::to_text(s.expr, "p") == "1 / 6 * p + 1");
-    CHECK(*spatium::io::build::to_latex(s.expr, "p") == "\\frac{1}{6} \\cdot p + 1");
+    CHECK(*spatium::io::build::to_latex(s.expr, "p") == "\\frac{1}{6} p + 1");
     // and one whose coefficient is not a fraction keeps the number
     const auto r = rsc::synthesize([](double x) { return std::sqrt(2.0) * x + 1; }, spec);
     REQUIRE(r.accepted);
