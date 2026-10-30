@@ -102,4 +102,18 @@ inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_v
     return out;
 }
 
+// The check of the roots by Vieta's formulas as the last step: the sum and the product as
+// computed, against -b/a and c/a; a check that does not hold says by how much.
+inline Step to_step(const VietaCheck<double>& v, std::string_view unknown = "x") {
+    const std::string x = detail::name_latex(unknown);
+    const bool holds = v.error <= 1e-12;
+    const std::string rel = holds ? "=" : "\\ne";
+    std::string latex = std::format("{0}_{{1}} + {0}_{{2}} = {1} {2} -\\frac{{b}}{{a}} = {3},\\quad {0}_{{1}} {0}_{{2}} = {4} {2} "
+                                    "\\frac{{c}}{{a}} = {5}",
+                                    x, detail::complex_latex(v.sum), rel, detail::num(v.want_sum),
+                                    detail::complex_latex(v.product), detail::num(v.want_product));
+    if (!holds) latex += std::format("\\quad\\text{{(relative error {})}}", detail::num(v.error));
+    return {holds ? "check: Vieta's formulas hold" : "check: Vieta's formulas do not hold", latex};
+}
+
 } // namespace spatium::io::build

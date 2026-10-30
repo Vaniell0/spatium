@@ -58,10 +58,35 @@ TEST_CASE("solution steps: the roots the steps end in are the solver's, and Viet
     for (int kind = 0; kind < 6; ++kind) CHECK(seen[kind] > 0);   // every case was reached
 }
 
+TEST_CASE("solution steps: Vieta's formulas check the roots, and catch the root lost to cancellation", "[algebra][steps]") {
+    std::mt19937 rng(5);
+    std::uniform_int_distribution<int> k(-9, 9);
+    for (int i = 0; i < 20000; ++i) {
+        const double a = k(rng), b = k(rng), c = k(rng);
+        if (a == 0) continue;
+        const auto v = spatium::check_vieta(spatium::solve_quadratic_steps(a, b, c));
+        REQUIRE(v.has_value());
+        INFO(a << " x^2 + " << b << " x + " << c);
+        CHECK(v->error <= 1e-12);
+    }
+    // the case it must fail: x^2 + 1e8 x + 1, where -b + sqrt(D) cancels and the small root loses
+    // its digits; the product of the roots is then far from c/a
+    const auto lost = spatium::check_vieta(spatium::solve_quadratic_steps(1.0, 1e8, 1.0));
+    REQUIRE(lost.has_value());
+    CHECK(lost->error > 0.1);
+    const auto step = spatium::io::build::to_step(*lost);
+    CHECK(step.label == "check: Vieta's formulas do not hold");
+    CHECK(step.latex.find("\\ne") != std::string::npos);
+    // a linear equation has one root and nothing to check this way
+    CHECK_FALSE(spatium::check_vieta(spatium::solve_quadratic_steps(0.0, 2.0, 1.0)).has_value());
+}
+
 TEST_CASE("solution steps: a quadratic as a chain a page reads", "[io][steps]") {
     namespace bd = spatium::io::build;
     const auto two = bd::to_steps(spatium::solve_quadratic_steps(2.0, -3.0, -5.0));
     REQUIRE(two.size() == 5);
+    CHECK(bd::to_step(*spatium::check_vieta(spatium::solve_quadratic_steps(2.0, -3.0, -5.0))).latex ==
+          "x_{1} + x_{2} = 1.5 = -\\frac{b}{a} = 1.5,\\quad x_{1} x_{2} = -2.5 = \\frac{c}{a} = -2.5");
     CHECK(two[0].latex == "2x^{2} - 3x - 5 = 0");
     CHECK(two[1].latex == "a = 2,\\quad b = -3,\\quad c = -5");
     CHECK(two[2].latex == "D = b^{2} - 4ac = \\left(-3\\right)^{2} - 4 \\cdot 2 \\cdot \\left(-5\\right) = 49");
