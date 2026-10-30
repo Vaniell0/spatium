@@ -31,6 +31,7 @@
 #include <map>
 #include <numbers>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace rsc {
@@ -68,6 +69,30 @@ struct Solution {
 };
 
 namespace synthesis_detail {
+
+// The simplest fraction p / q (q up to `max_q`) that `c` is to within `rel`, from the convergents
+// of its continued fraction, which are the best approximations for their size; none when no
+// convergent that small comes that close.
+inline std::optional<std::pair<long long, long long>> simplest_fraction(double c, double rel = 1e-9,
+                                                                        long long max_q = 1000) {
+    if (!std::isfinite(c)) return std::nullopt;
+    const double target = std::abs(c), tol = rel * std::max(1.0, target);
+    long long p0 = 0, q0 = 1, p1 = 1, q1 = 0;   // the convergents before the current one
+    double x = target;
+    for (int i = 0; i < 40; ++i) {
+        const double a = std::floor(x);
+        if (a > 1e15) break;
+        const long long ai = static_cast<long long>(a);
+        const long long p = ai * p1 + p0, q = ai * q1 + q0;
+        if (q > max_q) break;
+        if (std::abs(double(p) / double(q) - target) <= tol)
+            return std::pair{c < 0 ? -p : p, q};
+        p0 = p1, q0 = q1, p1 = p, q1 = q;
+        if (x - a == 0) break;
+        x = 1 / (x - a);
+    }
+    return std::nullopt;
+}
 
 inline std::vector<double> grid(double lo, double hi, std::size_t n) {
     std::vector<double> x(n);
@@ -219,6 +244,7 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
     };
 
     Solution best{spec.lo, spec.hi, Expr(0.0), {}, 0, 1, 1e300, false};
+    std::vector<std::size_t> best_terms;
     // the squared error at the sample points of the fit on `set`, or infinity
     auto sample_error = [&](const std::vector<std::size_t>& set) {
         std::vector<std::vector<double>> cols;
@@ -335,10 +361,43 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
             residual[i] = y[i] - fit;
         }
         const double err = error_of(e);
-        if (err < best.error)
+        if (err < best.error) {
             best = {spec.lo, spec.hi, e, *c, chosen.size(), nodes, err, err <= spec.tolerance};
+            best_terms = chosen;
+        }
         if (best.accepted)
             break;
+    }
+
+    // A coefficient that is a small fraction to nine digits is written as that fraction -- the
+    // answer 0.16666666666666663 * p + 1.0000000000000002 is 1/6 * p + 1 -- but a fraction is a
+    // different number from the fitted one, so each is kept only if the whole answer still holds
+    // on the check grid. One at a time, so a fraction that does not hold costs the others nothing.
+    if (best.accepted) {
+        const auto assemble = [&](const std::vector<Expr>& coef) {
+            Expr e(0.0);
+            for (std::size_t j = 0; j < best_terms.size(); ++j)
+                e = j == 0 ? coef[j] * terms[best_terms[j]].expr : e + coef[j] * terms[best_terms[j]].expr;
+            return e;
+        };
+        std::vector<Expr> coef;
+        for (double c : best.coefficients) coef.emplace_back(c);
+        for (std::size_t j = 0; j < coef.size(); ++j) {
+            const auto f = simplest_fraction(best.coefficients[j]);
+            if (!f) continue;
+            const Expr was = coef[j];
+            coef[j] = f->second == 1 ? Expr(double(f->first)) : Expr(double(f->first)) / Expr(double(f->second));
+            const Expr e = assemble(coef);
+            const double err = error_of(e);
+            if (err <= spec.tolerance) {
+                best.expr = e;
+                best.error = err;
+                best.coefficients[j] = double(f->first) / double(f->second);
+                if (f->second != 1) best.nodes += 2;   // the fraction is two constants and a quotient
+            } else {
+                coef[j] = was;
+            }
+        }
     }
     return best;
 }

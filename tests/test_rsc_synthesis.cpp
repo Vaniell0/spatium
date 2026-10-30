@@ -205,3 +205,28 @@ TEST_CASE("synthesis: an answer that x itself writes is written in x, and reads 
     CHECK(*spatium::io::build::to_text(sqrt(F::u()) + F(2.0) * log(F::v()), "x", "y") == "sqrt(x) + 2 * log(y)");
     CHECK_FALSE(spatium::io::build::to_text(F([](double, double) { return 0.0; })).has_value());
 }
+
+TEST_CASE("synthesis: a coefficient that is a small fraction is written as one, if the answer still holds",
+          "[rsc][synthesis]") {
+    using rsc::synthesis_detail::simplest_fraction;
+    CHECK(simplest_fraction(0.16666666666666663) == std::pair{1LL, 6LL});
+    CHECK(simplest_fraction(1.0000000000000002) == std::pair{1LL, 1LL});
+    CHECK(simplest_fraction(-2.5) == std::pair{-5LL, 2LL});
+    CHECK(simplest_fraction(0.333333333) == std::pair{1LL, 3LL});   // 1/3 to nine digits
+    // the cases it must fail: a number that is no small fraction to nine digits
+    CHECK_FALSE(simplest_fraction(std::sqrt(2.0)).has_value());
+    CHECK_FALSE(simplest_fraction(0.3333).has_value());
+
+    // the prism's volume, 1 + p/6: the fitted 0.16666666666666663 and 1.0000000000000002 become
+    // 1/6 and 1, and the answer is certified again in that form
+    const rsc::SynthesisSpec spec{.lo = 0, .hi = 10, .tolerance = 1e-12, .relative = false};
+    const auto s = rsc::synthesize([](double x) { return 1 + x / 6; }, spec);
+    REQUIRE(s.accepted);
+    CHECK(s.error <= 1e-12);
+    CHECK(*spatium::io::build::to_text(s.expr, "p") == "1 / 6 * p + 1");
+    CHECK(*spatium::io::build::to_latex(s.expr, "p") == "\\frac{1}{6} \\cdot p + 1");
+    // and one whose coefficient is not a fraction keeps the number
+    const auto r = rsc::synthesize([](double x) { return std::sqrt(2.0) * x + 1; }, spec);
+    REQUIRE(r.accepted);
+    CHECK(spatium::io::build::to_text(r.expr, "p")->find('/') == std::string::npos);
+}
