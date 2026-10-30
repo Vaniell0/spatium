@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
+#include <functional>
 #include <numbers>
 #include <random>
 
@@ -159,8 +160,9 @@ TEST_CASE("synthesis: next to the critical parameter the operations run out", "[
 TEST_CASE("synthesis: with the logarithm among the operations the critical neighbourhood is one piece", "[rsc][synthesis][relativity]") {
     // The job's own variable there is y = b / b_c - 1 (b_c is a constant of the job, not a hint),
     // and the deflection is -log(y) and a constant to leading order. Measured from y = 1e-6 to
-    // 1e-2: at 1e-4 one piece of 14 nodes against eight of 120; at 1e-6 four of 75 against 24 of
-    // 537; at 1e-8 six of 161 against 62 of 1555.
+    // 1e-2: at 1e-4 one piece of 19 nodes against five of 106, with sets of three terms searched
+    // whole (eight of 120 before them); before them, at 1e-6 four of 75 against 24 of 537, and at
+    // 1e-8 six of 161 against 62 of 1555.
     const auto alpha = [](double y) { return deflection(critical * (1 + y)); };
     const rsc::SynthesisSpec without{.lo = 1e-6, .hi = 1e-2, .tolerance = 1e-4, .max_terms = 4};
     rsc::SynthesisSpec with = without;
@@ -170,7 +172,7 @@ TEST_CASE("synthesis: with the logarithm among the operations the critical neigh
     CHECK(accepted(a) == a.size());
     CHECK(accepted(b) == b.size());
     CHECK(b.size() == 1);
-    CHECK(a.size() >= 8);
+    CHECK(a.size() >= 4);
     std::size_t na = 0, nb = 0;
     for (const auto& p : a)
         na += p.nodes;
@@ -241,7 +243,7 @@ TEST_CASE("synthesis: a size begun is searched whole, and a term that only refit
     const auto s = rsc::synthesize(reference, spec);
     REQUIRE(s.accepted);
     CHECK(s.terms == 1);
-    CHECK(*spatium::io::build::to_text(s.expr, "n") == "2 * n / (log(n) * log(n))");
+    CHECK(*spatium::io::build::to_text(s.expr, "n") == "2 * (n / (log(n) * log(n)))");
 
     // every expression of the sizes held is there, whatever the budget once the size is begun
     const auto x = rsc::synthesis_detail::grid(spec.lo, spec.hi, spec.samples);
@@ -257,4 +259,72 @@ TEST_CASE("synthesis: a size begun is searched whole, and a term that only refit
     spec.max_size = 6;
     const auto six = rsc::synthesize(reference, spec);
     CHECK_FALSE((six.accepted && six.terms == 1));
+}
+
+TEST_CASE("synthesis: three short terms are tried together, not grown one at a time", "[rsc][synthesis]") {
+    // the Thomas-Fermi solution at the origin, 1 + B x + 4/3 x^(3/2): three terms of six nodes in
+    // all, which on a short interval are nearly collinear, so a third term picked greedily after
+    // the best pair took whichever leaned toward the residual and the answer was not found
+    const double B = -1.5880710226113753;
+    const auto origin = [&](double x) { return 1 + B * x + 4.0 / 3 * x * std::sqrt(x); };
+    for (double hi : {1e-3, 0.1, 1.0}) {
+        INFO("on [0, " << hi << "]");
+        rsc::SynthesisSpec spec{.lo = 0, .hi = hi, .tolerance = 1e-12};
+        const auto s = rsc::synthesize(origin, spec);
+        REQUIRE(s.accepted);
+        CHECK(s.terms == 3);
+        CHECK(spatium::io::build::to_text(s.expr, "x")->find("x * sqrt(x)") != std::string::npos);
+        // the case it must fail: without the sets of three the short intervals are not answered
+        if (hi < 1) {
+            spec.exhaustive_triples = 0;
+            CHECK_FALSE(rsc::synthesize(origin, spec).accepted);
+        }
+    }
+}
+
+TEST_CASE("synthesis: a sum of its own terms comes back, the inverse of evaluation", "[rsc][synthesis]") {
+    using rsc::Expr;
+    // Synthesis is the inverse of evaluating an expression: a sum of up to three terms of its own
+    // language (x, 1, + - * /, sqrt, up to four nodes each) with coefficients no fraction writes,
+    // evaluated on an interval, must come back accepted, in no more terms than it has. This is
+    // the measure the search is held to: before the sets of three, 46 of 60 sums of three terms
+    // came back on [0.5, 3] and 36 of 60 of four; with them all of three and 56 of four.
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> coef(-3, 3);
+    const std::function<Expr(int)> grow = [&](int size) -> Expr {
+        if (size == 1) return std::uniform_int_distribution<int>(0, 2)(rng) ? Expr::u() : Expr(1.0);
+        if (size == 2) return sqrt(grow(1));
+        if (std::uniform_int_distribution<int>(0, 4)(rng) == 0) return sqrt(grow(size - 1));
+        const int a = std::uniform_int_distribution<int>(1, size - 2)(rng);
+        const Expr l = grow(a), r = grow(size - 1 - a);
+        switch (std::uniform_int_distribution<int>(0, 3)(rng)) {
+            case 0: return l + r;
+            case 1: return l - r;
+            case 2: return l * r;
+            default: return l / r;
+        }
+    };
+    for (auto [lo, hi] : {std::pair{1.0, 1.01}, std::pair{0.5, 3.0}}) {
+        for (int k = 1; k <= 3; ++k) {
+            int tried = 0;
+            while (tried < 12) {
+                Expr e(0.0);
+                for (int j = 0; j < k; ++j) {
+                    const Expr t = grow(std::uniform_int_distribution<int>(1, 4)(rng));
+                    e = j == 0 ? Expr(coef(rng) + 1e-3 * std::sqrt(2.0)) * t : e + Expr(coef(rng) + 1e-3 * std::sqrt(3.0)) * t;
+                }
+                bool usable = true;
+                for (int i = 0; i <= 64 && usable; ++i) {
+                    const double v = e(lo + (hi - lo) * i / 64, 0.0);
+                    usable = std::isfinite(v) && std::abs(v) < 1e6 && std::abs(v) > 1e-6;
+                }
+                if (!usable) continue;
+                ++tried;
+                const auto s = rsc::synthesize([&](double x) { return e(x, 0.0); }, {.lo = lo, .hi = hi, .tolerance = 1e-10});
+                INFO("[" << lo << ", " << hi << "] " << *spatium::io::build::to_text(e, "x"));
+                CHECK(s.accepted);
+                CHECK(s.terms <= std::size_t(k));
+            }
+        }
+    }
 }
