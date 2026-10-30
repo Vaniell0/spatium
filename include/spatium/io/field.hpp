@@ -224,6 +224,50 @@ std::uint64_t scalar_bits(const T& x) {
     else return 0;
 }
 
+// `std::move_only_function` where the standard library has it, and where it does not -- libc++,
+// so WebAssembly through Emscripten and clang hosts built against it -- an owner of the same
+// shape: a callable held by `unique_ptr`, moved and never copied, called const. Only what the
+// motion slots below use: construction from a callable, emptiness, the call.
+#if defined(__cpp_lib_move_only_function)
+template<class Signature>
+using move_only_function = std::move_only_function<Signature>;
+#else
+template<class Signature>
+class move_only_function;
+
+template<class R, class... Args>
+class move_only_function<R(Args...) const> {
+    struct Base {
+        virtual ~Base() = default;
+        virtual R call(Args... args) const = 0;
+    };
+    template<class F>
+    struct Held final : Base {
+        F f;
+        explicit Held(F&& g) : f(std::move(g)) {}
+        explicit Held(const F& g) : f(g) {}
+        R call(Args... args) const override { return std::invoke(f, std::forward<Args>(args)...); }
+    };
+    std::unique_ptr<Base> held_;
+
+public:
+    move_only_function() noexcept = default;
+    move_only_function(std::nullptr_t) noexcept {}
+    template<class F>
+        requires(!std::same_as<std::remove_cvref_t<F>, move_only_function> &&
+                 std::is_invocable_r_v<R, const std::decay_t<F>&, Args...>)
+    move_only_function(F&& f) : held_(std::make_unique<Held<std::decay_t<F>>>(std::forward<F>(f))) {}
+    move_only_function(move_only_function&&) noexcept = default;
+    move_only_function& operator=(move_only_function&&) noexcept = default;
+    move_only_function& operator=(std::nullptr_t) noexcept {
+        held_.reset();
+        return *this;
+    }
+    explicit operator bool() const noexcept { return static_cast<bool>(held_); }
+    R operator()(Args... args) const { return held_->call(std::forward<Args>(args)...); }
+};
+#endif
+
 }  // namespace detail
 
 enum class Op : std::uint8_t {
@@ -1553,12 +1597,12 @@ struct VecFieldOp {
     // a motion is classifiable whether or not the erasure that holds it
     // can be asked. The report's blind spot was never move_only_function's
     // missing target_type() -- it was that the type did not belong to us.
-    std::move_only_function<Vec<T, 3>(const MotionEnv<T>&) const> fn;
+    detail::move_only_function<Vec<T, 3>(const MotionEnv<T>&) const> fn;
 
     // The scalar a Scale multiplies by. Read from the environment, never
     // from the point -- a Scale whose factor depended on the point would
     // be a deformation again.
-    std::move_only_function<T(const MotionEnv<T>&) const> scale_fn;
+    detail::move_only_function<T(const MotionEnv<T>&) const> scale_fn;
 
     // The rotation a Rotate turns by, under exactly the same rule: read
     // from the environment, never from the point. A rotation that varied
@@ -1570,7 +1614,7 @@ struct VecFieldOp {
     // transpose. Callers who think in axis-angle get the `rotated()`
     // overload that exponentiates through SO3, so nothing is lost at the
     // authoring end and no exp() runs per vertex.
-    std::move_only_function<Matrix<T, 3, 3>(const MotionEnv<T>&) const> rot_fn;
+    detail::move_only_function<Matrix<T, 3, 3>(const MotionEnv<T>&) const> rot_fn;
 
     // The same factor, written as an expression instead of as a closure --
     // empty when the caller passed a callable, which is what the two

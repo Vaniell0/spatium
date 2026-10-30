@@ -112,6 +112,23 @@ jobs:
       - name: Run tests
         run: nix develop --command bash -c 'ctest --preset modules --output-on-failure -j'
 
+  wasm:
+    name: the core in WebAssembly answers as the host does
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build the core both ways and compare the answers
+        run: nix develop .#wasm --command site/wasm/check.sh
+
   connectivity:
     name: connectivity matrix is up to date
     runs-on: ubuntu-24.04

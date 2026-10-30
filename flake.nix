@@ -170,6 +170,18 @@
             '';
           };
 
+          # Opt-in: Emscripten and node, for the WebAssembly build of the core the page calls
+          # (site/wasm/) and the check that it answers as the host does. `nix develop .#wasm`.
+          # Emscripten writes its cache of system libraries; the store is read-only, so it goes
+          # under the user's cache.
+          wasm = pkgs.mkShell {
+            packages = with pkgs; [ emscripten nodejs ];
+            shellHook = ''
+              export EM_CACHE="''${EM_CACHE:-$HOME/.cache/emscripten}"
+              mkdir -p "$EM_CACHE"
+            '';
+          };
+
           # Opt-in, Linux-only: nvcc + the CUDA runtime headers/libs for
           # the gpu/ geodesic kernel (-DSPATIUM_CUDA=ON). Not part of the
           # default shell -- cudaPackages is unfree and this shell is

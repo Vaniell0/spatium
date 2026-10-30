@@ -1,0 +1,32 @@
+{
+  "functions": [
+    {"name":"sin","arity":1,"caption":"sine, of an angle in radians","domain":"every x","example":"sin(pi / 6)","answer":{"route":"evaluate","value":"0.5","latex":"\\sin\\left(\\frac{\\pi}{6}\\right)"}},
+    {"name":"cos","arity":1,"caption":"cosine, of an angle in radians","domain":"every x","example":"cos(pi / 3)","answer":{"route":"evaluate","value":"0.5","latex":"\\cos\\left(\\frac{\\pi}{3}\\right)"}},
+    {"name":"log","arity":1,"caption":"natural logarithm, the inverse of exp","domain":"x > 0","example":"log(10)","answer":{"route":"evaluate","value":"2.30258509299","latex":"\\ln\\left(10\\right)"}},
+    {"name":"exp","arity":1,"caption":"exponential, e raised to x","domain":"every x","example":"exp(1)","answer":{"route":"evaluate","value":"2.71828182846","latex":"\\exp\\left(1\\right)"}},
+    {"name":"sqrt","arity":1,"caption":"square root","domain":"x >= 0","example":"sqrt(2)","answer":{"route":"evaluate","value":"1.41421356237","latex":"\\sqrt{2}"}},
+    {"name":"min","arity":2,"caption":"the smaller of two numbers","domain":"every x, y","example":"min(2, 3)","answer":{"route":"evaluate","value":"2","latex":"\\min\\left(2, 3\\right)"}},
+    {"name":"max","arity":2,"caption":"the larger of two numbers","domain":"every x, y","example":"max(2, 3)","answer":{"route":"evaluate","value":"3","latex":"\\max\\left(2, 3\\right)"}},
+    {"name":"less","arity":2,"caption":"1 where the first is below the second, else 0: a step that composes by multiplication","domain":"every x, y","example":"less(1, 2)","answer":{"route":"evaluate","value":"1","latex":"\\left[1 < 2\\right]"}}
+  ],
+  "operators": [
+    {"written":"a + b, a - b","caption":"sum and difference, read left to right: a - b - c is (a - b) - c","example":"7 - 2 - 1","answer":{"route":"evaluate","value":"4","latex":"7 - 2 - 1"}},
+    {"written":"a * b, a / b","caption":"product and quotient, tighter than a sum, read left to right","example":"12 / 3 / 2","answer":{"route":"evaluate","value":"2","latex":"\\frac{\\frac{12}{3}}{2}"}},
+    {"written":"2x, 2(a + b), (a)(b)","caption":"a product may leave out its * after a number or a closing parenthesis, not after a name","example":"2(3 + 4)","answer":{"route":"evaluate","value":"14","latex":"2 \\cdot \\left(3 + 4\\right)"}},
+    {"written":"-a","caption":"minus, tighter than a product and looser than a power: -x^2 is -(x^2)","example":"-3^2","answer":{"route":"evaluate","value":"-9","latex":"\\left(-1\\right) \\cdot 3^{2}"}},
+    {"written":"a^n","caption":"a whole power n from 1 to 64; a^b for another b is exp(b * log(a))","example":"2^10","answer":{"route":"evaluate","value":"1024","latex":"2^{10}"}},
+    {"written":"(a)","caption":"grouping","example":"(1 + 2) * 3","answer":{"route":"evaluate","value":"9","latex":"\\left(1 + 2\\right) \\cdot 3"}},
+    {"written":"a = b","caption":"an equation in one unknown, solved for it","example":"x^2 - 4 = 0","answer":{"route":"closed form"}}
+  ],
+  "constants": [
+    {"name":"pi","caption":"the double nearest pi"},
+    {"name":"inf","caption":"infinity"},
+    {"name":"nan","caption":"not a number: what a function gives outside its domain"}
+  ],
+  "questions": [
+    {"form":"an expression","caption":"evaluated, as a calculator does","example":"2(3 + 4)^2 - 1/4","answer":{"route":"evaluate","value":"97.75","latex":"2 \\cdot \\left(3 + 4\\right)^{2} - \\frac{1}{4}"}},
+    {"form":"f = g","caption":"an equation in one unknown of degree at most two, solved in closed form with its steps and checked by Vieta's formulas","example":"2x^2 - 3x - 5 = 0","answer":{"route":"closed form"}},
+    {"form":"solve f = g for x in [a, b], p in [c, d]","caption":"the root on [a, b] as a function of the parameter p, synthesised and certified","example":"solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]","answer":{"route":"synthesis"}},
+    {"form":"integrate f for t in [a, b], p in [c, d]","caption":"the integral as a function of p; a limit may be p itself","example":"integrate sin(t)/t for t in [0, x], x in [0.5, 6]","answer":{"route":"synthesis"}}
+  ]
+}

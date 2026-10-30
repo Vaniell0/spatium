@@ -40,6 +40,59 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // text again; when the field has no factor of exactly 1 and adds no negative constant (the two
 // things the printer writes more simply), to the same ops.
 
+// The language, as a table: every function the reader knows, with what a person needs to use it.
+// The reader takes its names from here and the page's reference is written from here (the
+// `site_reference` example), so the two cannot disagree.
+struct Function {
+    std::string_view name;
+    int arity;
+    std::string_view caption;   // what it is, in a few words
+    std::string_view domain;    // where it has a value; elsewhere it is NaN
+    std::string_view example;   // a text the reader reads, with no unknown
+};
+
+inline constexpr std::array<Function, 8> functions{{
+    {"sin", 1, "sine, of an angle in radians", "every x", "sin(pi / 6)"},
+    {"cos", 1, "cosine, of an angle in radians", "every x", "cos(pi / 3)"},
+    {"log", 1, "natural logarithm, the inverse of exp", "x > 0", "log(10)"},
+    {"exp", 1, "exponential, e raised to x", "every x", "exp(1)"},
+    {"sqrt", 1, "square root", "x >= 0", "sqrt(2)"},
+    {"min", 2, "the smaller of two numbers", "every x, y", "min(2, 3)"},
+    {"max", 2, "the larger of two numbers", "every x, y", "max(2, 3)"},
+    {"less", 2, "1 where the first is below the second, else 0: a step that composes by multiplication",
+     "every x, y", "less(1, 2)"},
+}};
+
+// The operators, tightest last, and the numbers that have names.
+struct Operator {
+    std::string_view written;
+    std::string_view caption;
+    std::string_view example;
+};
+
+inline constexpr std::array<Operator, 7> operators{{
+    {"a + b, a - b", "sum and difference, read left to right: a - b - c is (a - b) - c", "7 - 2 - 1"},
+    {"a * b, a / b", "product and quotient, tighter than a sum, read left to right", "12 / 3 / 2"},
+    {"2x, 2(a + b), (a)(b)", "a product may leave out its * after a number or a closing parenthesis, not after a name",
+     "2(3 + 4)"},
+    {"-a", "minus, tighter than a product and looser than a power: -x^2 is -(x^2)", "-3^2"},
+    {"a^n", "a whole power n from 1 to 64; a^b for another b is exp(b * log(a))", "2^10"},
+    {"(a)", "grouping", "(1 + 2) * 3"},
+    {"a = b", "an equation in one unknown, solved for it", "x^2 - 4 = 0"},
+}};
+
+struct Constant {
+    std::string_view name;
+    double value;
+    std::string_view caption;
+};
+
+inline constexpr std::array<Constant, 3> constants{{
+    {"pi", std::numbers::pi, "the double nearest pi"},
+    {"inf", std::numeric_limits<double>::infinity(), "infinity"},
+    {"nan", std::numeric_limits<double>::quiet_NaN(), "not a number: what a function gives outside its domain"},
+}};
+
 // The reader itself, for a text in which a field is one part: it reads an expression from where
 // it stands up to the first thing that cannot continue it, and a caller reads the words around
 // it (a question's `solve ... for x in [0, 1]` is read this way).
@@ -170,9 +223,8 @@ private:
     // A literal: digits in the shortest form `to_text` writes them, or inf, or nan.
     std::optional<double> number() {
         skip();
-        if (take_word("inf")) return std::numeric_limits<double>::infinity();
-        if (take_word("nan")) return std::numeric_limits<double>::quiet_NaN();
-        if (take_word("pi")) return std::numbers::pi;
+        for (const Constant& c : constants)
+            if (take_word(c.name)) return c.value;
         if (at_ >= s_.size() || !(std::isdigit(static_cast<unsigned char>(s_[at_])) || s_[at_] == '.'))
             return std::nullopt;
         double x = 0;
@@ -196,7 +248,7 @@ private:
         const std::size_t name_at = at_;
         at_ += name.size();
         if (peek() == '(') return call(name, name_at);
-        if (std::ranges::find(unary_, name) != unary_.end() || std::ranges::find(binary_, name) != binary_.end()) {
+        if (arity_of(name) > 0) {
             at_ = name_at;
             return fail(std::format("a name, but '{}' is a function: write {}(...)", name, name));
         }
@@ -206,10 +258,14 @@ private:
     }
 
     Result<Field<double>> call(std::string_view name, std::size_t name_at) {
-        const bool one = std::ranges::find(unary_, name) != unary_.end();
-        if (!one && std::ranges::find(binary_, name) == binary_.end()) {
+        const int arity = arity_of(name);
+        const bool one = arity == 1;
+        if (arity == 0) {
             at_ = name_at;
-            return fail("sin, cos, log, exp, sqrt, min, max or less before '('");
+            std::string known;
+            for (std::size_t i = 0; i < functions.size(); ++i)
+                known += std::string(functions[i].name) + (i + 2 < functions.size() ? ", " : i + 1 < functions.size() ? " or " : "");
+            return fail(known + " before '('");
         }
         take('(');
         auto a = expression();
@@ -231,8 +287,11 @@ private:
         return less(std::move(*a), *b);
     }
 
-    static constexpr std::array<std::string_view, 5> unary_{"sin", "cos", "log", "exp", "sqrt"};
-    static constexpr std::array<std::string_view, 3> binary_{"min", "max", "less"};
+    static int arity_of(std::string_view name) {
+        for (const Function& f : functions)
+            if (f.name == name) return f.arity;
+        return 0;
+    }
 
     std::string_view s_;
     std::size_t at_ = 0;
