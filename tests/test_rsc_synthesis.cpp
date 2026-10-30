@@ -230,3 +230,31 @@ TEST_CASE("synthesis: a coefficient that is a small fraction is written as one, 
     REQUIRE(r.accepted);
     CHECK(spatium::io::build::to_text(r.expr, "p")->find('/') == std::string::npos);
 }
+
+TEST_CASE("synthesis: a size begun is searched whole, and a term that only refits the noise is dropped",
+          "[rsc][synthesis]") {
+    // 2n / (log n)^2, the Hardy-Littlewood growth of Goldbach pairs, is one term of seven nodes,
+    // n / (log(n) * log(n)); a budget cut inside size seven missed it, and once found by a swap the
+    // term beside it stayed with a coefficient of 1e-17
+    rsc::SynthesisSpec spec{.lo = 10, .hi = 1e6, .max_size = 7, .unary = {rsc::Unary::Sqrt, rsc::Unary::Log}};
+    const auto reference = [](double n) { return 2 * n / (std::log(n) * std::log(n)); };
+    const auto s = rsc::synthesize(reference, spec);
+    REQUIRE(s.accepted);
+    CHECK(s.terms == 1);
+    CHECK(*spatium::io::build::to_text(s.expr, "n") == "2 * n / (log(n) * log(n))");
+
+    // every expression of the sizes held is there, whatever the budget once the size is begun
+    const auto x = rsc::synthesis_detail::grid(spec.lo, spec.hi, spec.samples);
+    const auto count_of = [&](std::size_t budget, std::size_t size) {
+        rsc::SynthesisSpec b = spec;
+        b.max_candidates = budget;
+        return std::ranges::count_if(rsc::enumerate(b, x), [&](const rsc::Term& t) { return t.size == size; });
+    };
+    CHECK(count_of(4000, 7) == count_of(1000000, 7));
+    CHECK(count_of(10, 7) == 0);   // a size not begun is not there at all, not in part
+
+    // the case it must fail: six nodes cannot write it, and no single term is accepted
+    spec.max_size = 6;
+    const auto six = rsc::synthesize(reference, spec);
+    CHECK_FALSE((six.accepted && six.terms == 1));
+}

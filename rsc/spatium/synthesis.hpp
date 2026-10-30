@@ -49,7 +49,7 @@ struct SynthesisSpec {
     std::size_t samples = 48;   // where terms are compared and fitted
     std::size_t checks = 2001;  // where the answer is certified
     std::vector<Unary> unary{Unary::Sqrt};
-    std::size_t max_candidates = 4000;
+    std::size_t max_candidates = 4000; // no larger size is begun once this many are held; one begun is finished
     std::size_t exhaustive_pairs = 200000; // all sets of one and two terms are tried when there are at most this many
 };
 
@@ -166,15 +166,17 @@ inline std::optional<std::vector<double>> least_squares(const std::vector<std::v
 } // namespace synthesis_detail
 
 // Every distinct expression of up to spec.max_size nodes over the interval's variable t and x, the
-// constant 1, + - * / and the spec's unary operations, by their values at `x`.
+// constant 1, + - * / and the spec's unary operations, by their values at `x`. The budget is spent
+// by whole sizes: once spec.max_candidates are held no larger size is begun, but a size begun is
+// finished, so what is returned is every expression up to the last size it holds. A budget that
+// stopped inside a size kept whichever expressions of it came first in the loop, and missed
+// x / (log x * log x), seven nodes, while it was cut at 2483 of the 4837 of its size.
 inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<double>& x) {
     using namespace synthesis_detail;
     std::vector<std::vector<Term>> by_size(spec.max_size + 1);
     std::map<std::vector<long long>, bool> seen;
     std::size_t count = 0;
     auto offer = [&](Expr e, std::size_t size) {
-        if (count >= spec.max_candidates)
-            return;
         auto v = values(e, x);
         if (!usable(v))
             return;
@@ -190,7 +192,7 @@ inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<
     offer((Expr::u() - Expr(centre)) * Expr(scale), 1);
     offer(Expr::u(), 1); // and x itself, for the forms that are global (sin x, 4 / b)
     offer(Expr(1.0), 1);
-    for (std::size_t s = 2; s <= spec.max_size; ++s) {
+    for (std::size_t s = 2; s <= spec.max_size && count < spec.max_candidates; ++s) {
         for (const Term& t : std::vector<Term>(by_size[s - 1]))
             for (Unary op : spec.unary)
                 offer(op == Unary::Sqrt  ? sqrt(t.expr)
@@ -341,6 +343,15 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
                         chosen = std::move(trial), current = e, improved = true;
                     }
                 }
+        }
+        // a swap can make another chosen term useless: once one term explains the reference to
+        // rounding, the term beside it only refits the noise (its coefficient 1e-17), so a term
+        // without which the error does not grow is dropped -- the description-length rule again
+        for (std::size_t j = chosen.size(); j-- > 0 && chosen.size() > 1;) {
+            auto trial = chosen;
+            trial.erase(trial.begin() + static_cast<std::ptrdiff_t>(j));
+            if (std::max(sample_error(trial), floor) <= current)
+                chosen = std::move(trial);
         }
         std::vector<std::vector<double>> basis;
         for (std::size_t t : chosen)
