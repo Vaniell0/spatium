@@ -3,53 +3,156 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/io/field.hpp>
-#  include <spatium/io/field_pod.hpp>
+#  include <array>
+#  include <cmath>
 #  include <format>
 #  include <string>
+#  include <string_view>
 #  include <vector>
 #endif
 
 SPATIUM_EXPORT namespace spatium::io::build {
 
-// ── A field as text ───────────────────────────────────────────────
+// ── A field as text, and as LaTeX ─────────────────────────────────
 //
-// What a person reads of a field: its lowered ops written out in the usual notation, the
-// inputs under names the caller gives (u and v by default), a constant in the shortest digits
-// that read back to the same double. A synthesised answer is a field, and this is how it is
-// read. A field that does not lower (an opaque leaf) has no text and says why.
+// What a person reads of a field: its ops written out in the usual notation, the inputs under
+// names the caller gives (u and v by default), a symbol under its own name, a constant in the
+// shortest digits that read back to the same double. A synthesised answer is a field, and this
+// is how it is read in code (`to_text`) and on a page (`to_latex`, which a page renders as it
+// is). Both are one walk over the ops the root reads; they differ only in how each op is
+// spelled. Parentheses go where precedence needs them and nowhere else, so u / (v * 2) keeps
+// its parentheses and u + v * 2 has none. The text is the field as built, not simplified: a
+// constant 1 times p is written 1 * p. A field with an opaque leaf has no text and says why.
+
+namespace detail {
+
+enum class TextStyle { Plain, Latex };
+
+// How tightly an expression binds, for deciding parentheses: a sum, a product, then an atom
+// (a name, a number, a call). A negative number binds like a sum, so x * (-2) keeps its
+// parentheses.
+enum class Binding { Sum = 1, Product = 2, Atom = 3 };
+
+struct Spelled {
+    std::string text;
+    Binding binds = Binding::Atom;
+};
+
+inline std::string grouped(const Spelled& e, Binding need, TextStyle style) {
+    if (e.binds >= need) return e.text;
+    return style == TextStyle::Latex ? "\\left(" + e.text + "\\right)" : "(" + e.text + ")";
+}
+
+inline std::string number_text(double x, TextStyle style) {
+    if (style == TextStyle::Plain) return std::format("{}", x);
+    if (std::isnan(x)) return "\\mathrm{NaN}";
+    if (std::isinf(x)) return x > 0 ? "\\infty" : "-\\infty";
+    std::string s = std::format("{}", x);
+    const auto e = s.find('e');
+    if (e == std::string::npos) return s;
+    std::string exponent = s.substr(e + 1);
+    if (!exponent.empty() && exponent[0] == '+') exponent.erase(0, 1);
+    return std::format("{} \\cdot 10^{{{}}}", s.substr(0, e), exponent);
+}
+
+// A name in LaTeX: a Greek letter by its command, one letter as it is, a longer name upright,
+// and what follows the first '_' as a subscript (r_0 is r with subscript 0).
+inline std::string name_latex(std::string_view name) {
+    static constexpr std::array<std::string_view, 30> greek{
+        "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+        "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi",
+        "omega", "Gamma", "Delta", "Theta", "Lambda", "Sigma", "Phi", "Omega"};
+    const auto bar = name.find('_');
+    const std::string_view stem = name.substr(0, bar);
+    std::string out;
+    if (std::ranges::find(greek, stem) != greek.end()) out = std::format("\\{}", stem);
+    else if (stem.size() == 1) out = std::string(stem);
+    else out = std::format("\\mathrm{{{}}}", stem);
+    if (bar != std::string_view::npos) out += std::format("_{{{}}}", name.substr(bar + 1));
+    return out;
+}
+
+inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at, const std::string& u,
+                        const std::string& v, TextStyle style) {
+    const bool tex = style == TextStyle::Latex;
+    const auto arg = [&](std::uint32_t i) -> const Spelled& { return at[i]; };
+    const auto call = [&](std::string_view plain, std::string_view latex, const std::string& inside) {
+        return tex ? std::format("{}\\left({}\\right)", latex, inside) : std::format("{}({})", plain, inside);
+    };
+    switch (n.op) {
+        case Op::Const: {
+            const Binding b = std::signbit(n.value) ? Binding::Sum : Binding::Atom;
+            return {number_text(n.value, style), b};
+        }
+        case Op::U:      return {tex ? name_latex(u) : u};
+        case Op::V:      return {tex ? name_latex(v) : v};
+        case Op::Symbol: return {tex ? name_latex(n.name) : n.name};
+        case Op::Add: {
+            // a + (-c) is a - c to the last bit, and reads as one
+            const auto& b = arg(n.b);
+            if (b.binds == Binding::Sum && !b.text.empty() && b.text[0] == '-')
+                return {arg(n.a).text + " - " + b.text.substr(1), Binding::Sum};
+            return {arg(n.a).text + " + " + b.text, Binding::Sum};
+        }
+        case Op::Sub:
+            return {arg(n.a).text + " - " + grouped(arg(n.b), Binding::Product, style), Binding::Sum};
+        case Op::Mul:
+            return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") +
+                        grouped(arg(n.b), Binding::Product, style),
+                    Binding::Product};
+        case Op::Div:
+            if (tex) return {std::format("\\frac{{{}}}{{{}}}", arg(n.a).text, arg(n.b).text)};
+            return {grouped(arg(n.a), Binding::Product, style) + " / " + grouped(arg(n.b), Binding::Atom, style),
+                    Binding::Product};
+        case Op::Min:  return {call("min", "\\min", arg(n.a).text + ", " + arg(n.b).text)};
+        case Op::Max:  return {call("max", "\\max", arg(n.a).text + ", " + arg(n.b).text)};
+        case Op::Sin:  return {call("sin", "\\sin", arg(n.a).text)};
+        case Op::Cos:  return {call("cos", "\\cos", arg(n.a).text)};
+        case Op::Log:  return {call("log", "\\ln", arg(n.a).text)};
+        case Op::Exp:  return {call("exp", "\\exp", arg(n.a).text)};
+        case Op::Sqrt: return {tex ? std::format("\\sqrt{{{}}}", arg(n.a).text) : call("sqrt", "", arg(n.a).text)};
+        case Op::Less:
+            // 1 where a < b and 0 elsewhere: an Iverson bracket on a page
+            return {tex ? std::format("\\left[{} < {}\\right]", arg(n.a).text, arg(n.b).text)
+                        : call("less", "", arg(n.a).text + ", " + arg(n.b).text)};
+        case Op::Noise:
+            return {call("noise", "\\operatorname{noise}",
+                         arg(n.a).text + ", " + arg(n.b).text + ", " + arg(n.c).text)};
+        case Op::Gather:
+            return {tex ? std::format("\\operatorname{{gather}}_{{{}}}\\left({}\\right)", n.k, arg(n.a).text)
+                        : std::format("gather[{}]({})", n.k, arg(n.a).text)};
+        case Op::Coord:  return {tex ? std::format("x^{{{}}}", n.k) : std::format("x[{}]", n.k)};
+        case Op::Origin: return {tex ? std::format("o_{{{}}}", n.k) : std::format("origin[{}]", n.k)};
+        case Op::Point:  return {tex ? std::format("p_{{{}}}", n.k) : std::format("point[{}]", n.k)};
+        case Op::Hash:   return {tex ? std::format("h_{{{}}}", n.k) : std::format("hash[{}]", n.k)};
+        case Op::Id:     return {tex ? std::string("\\mathrm{id}") : std::string("id")};
+        case Op::Opaque: break;   // refused before the walk
+    }
+    return {"?"};
+}
+
+inline Result<std::string> spell(const Field<double>& whole, const std::string& u, const std::string& v,
+                                 TextStyle style) {
+    const Field<double> f = whole.reachable_from_root();
+    std::vector<Spelled> at(f.size());
+    for (std::size_t i = 0; i < f.size(); ++i) {
+        const auto& n = f.op(i);
+        if (n.op == Op::Opaque)
+            return std::unexpected(Error(ErrorCode::InvalidArgument,
+                std::format("to_text: op {} is Opaque -- a closure has no notation", i)));
+        at[i] = spell_op(n, at, u, v, style);
+    }
+    return at.back().text;
+}
+
+} // namespace detail
 
 inline Result<std::string> to_text(const Field<double>& f, std::string u = "u", std::string v = "v") {
-    const auto pod = lower(f);
-    if (!pod)
-        return std::unexpected(pod.error());
-    std::vector<std::string> text(pod->ops.size());
-    for (std::size_t i = 0; i < pod->ops.size(); ++i) {
-        const auto& n = pod->ops[i];
-        const auto& a = text[n.a];
-        const auto& b = text[n.b];
-        switch (static_cast<Op>(n.code)) {
-            case Op::Const: text[i] = std::format("{}", n.value); break;
-            case Op::U:     text[i] = u; break;
-            case Op::V:     text[i] = v; break;
-            case Op::Add:   text[i] = std::format("({} + {})", a, b); break;
-            case Op::Sub:   text[i] = std::format("({} - {})", a, b); break;
-            case Op::Mul:   text[i] = std::format("{} * {}", a, b); break;
-            case Op::Div:   text[i] = std::format("{} / {}", a, b); break;
-            case Op::Min:   text[i] = std::format("min({}, {})", a, b); break;
-            case Op::Max:   text[i] = std::format("max({}, {})", a, b); break;
-            case Op::Less:  text[i] = std::format("less({}, {})", a, b); break;
-            case Op::Sin: case Op::Cos: case Op::Sqrt: case Op::Log: case Op::Exp: {
-                std::string name = op_name(static_cast<Op>(n.code));
-                name[0] = static_cast<char>(name[0] - 'A' + 'a');
-                text[i] = std::format("{}({})", name, a);
-                break;
-            }
-            default:
-                text[i] = std::format("{}[{}]", op_name(static_cast<Op>(n.code)), n.k);
-                break;
-        }
-    }
-    return text.empty() ? std::string("0") : text.back();
+    return detail::spell(f, u, v, detail::TextStyle::Plain);
+}
+
+inline Result<std::string> to_latex(const Field<double>& f, std::string u = "u", std::string v = "v") {
+    return detail::spell(f, u, v, detail::TextStyle::Latex);
 }
 
 } // namespace spatium::io::build

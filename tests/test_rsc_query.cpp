@@ -6,10 +6,13 @@
 // integral whose closed form needs a function the operations do not have takes pieces.
 
 #include <rsc/spatium/query.hpp>
+#include <spatium/io/field_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
 #include <random>
 
@@ -79,4 +82,31 @@ TEST_CASE("query: a root on a bracket with no change of sign is refused, not fit
     CHECK_FALSE(a.answered);
     CHECK(a.pieces.empty());
     CHECK(a.refused.find("no value") != std::string::npos);
+}
+
+TEST_CASE("query: written in named symbols, the question is the one written in U and V", "[rsc][query]") {
+    // the same root asked twice; the symbols are bound to U and V before anything is evaluated,
+    // so the two answers are one answer to the last bit
+    const Expr x = Expr::symbol("x"), p = Expr::symbol("p");
+    const rsc::Query named{.ask = rsc::Ask::Solve, .f = x * x - p, .unknown = "x", .parameter = "p", .x_lo = 0,
+                           .x_hi = 10, .p_lo = 0.5, .p_hi = 4, .tolerance = 1e-10};
+    const rsc::Query positional{.ask = rsc::Ask::Solve, .f = Expr::u() * Expr::u() - Expr::v(), .x_lo = 0,
+                                .x_hi = 10, .p_lo = 0.5, .p_hi = 4, .tolerance = 1e-10};
+    const auto a = rsc::answer(named), b = rsc::answer(positional);
+    REQUIRE(a.answered);
+    REQUIRE(a.pieces.size() == b.pieces.size());
+    for (double v : {0.5, 1.0, 2.25, 3.7})
+        CHECK(std::bit_cast<std::uint64_t>(at(a, v)) == std::bit_cast<std::uint64_t>(at(b, v)));
+    // and read under the parameter's name, in code and on a page
+    CHECK(spatium::io::build::to_text(a.pieces.front().expr, named.parameter)->find("sqrt(p)") != std::string::npos);
+    CHECK(spatium::io::build::to_latex(a.pieces.front().expr, named.parameter)->find("\\sqrt{p}") != std::string::npos);
+}
+
+TEST_CASE("query: a symbol the question reads but does not name is refused by name", "[rsc][query]") {
+    const Expr x = Expr::symbol("x"), p = Expr::symbol("p"), a = Expr::symbol("a");
+    const auto r = rsc::answer({.ask = rsc::Ask::Solve, .f = x * x - a * p, .unknown = "x", .parameter = "p",
+                                .x_lo = 0, .x_hi = 10, .p_lo = 0.5, .p_hi = 4});
+    CHECK_FALSE(r.answered);
+    CHECK(r.pieces.empty());
+    CHECK(r.refused.find("'a'") != std::string::npos);
 }

@@ -182,6 +182,11 @@ Result<PodRange> lower_into(PodField<T>& out, const Field<T>& whole, const std::
             return std::unexpected(Error(ErrorCode::InvalidArgument,
                 std::format("lower: {}op {} is {} -- a closure has no plain-data form",
                             where, i, op_name(n.op))));
+        if (n.op == Op::Symbol)
+            return std::unexpected(Error(ErrorCode::InvalidArgument,
+                std::format("lower: {}op {} is the symbol '{}', which is not bound -- a family of "
+                            "fields has no plain-data form until one member is picked",
+                            where, i, n.name)));
         PodOp<T> p{};
         p.code  = static_cast<std::uint8_t>(n.op);
         p.a     = n.a;
@@ -294,6 +299,7 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             // crash in a lane that has no way to report one.
             case Op::Opaque: s[i] = T{0}; break;
             case Op::Coord:  s[i] = in.x[n.k]; break;
+            case Op::Symbol: s[i] = T{0}; break;   // refused by `lower()`, like Opaque
         }
     }
     return s[count - 1];

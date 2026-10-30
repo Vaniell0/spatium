@@ -17,6 +17,7 @@
 #  include <cstdint>
 #  include <cstring>
 #  include <functional>
+#  include <limits>
 #  include <map>
 #  include <memory>
 #  include <mutex>
@@ -308,6 +309,13 @@ enum class Op : std::uint8_t {
     // over + - * / sqrt can only chase it with ever narrower pieces; the exponential, because a
     // tanh is 1 - 2 / (exp(2 x) + 1) and a net of tanh units is otherwise not a field.
     Log, Exp,
+
+    // A named number, `name`, that the field does not fix: the radius of a surface written
+    // x^2 + y^2 + z^2 = r^2, the mass of a black hole, the parameter of a question. A field with
+    // one is a family of fields, and `bind` picks a member -- a number, or another field (a
+    // question binds its unknown to `U` and its parameter to `V`). Unbound, it evaluates to NaN
+    // and does not lower: what it means is not yet decided, and no plain-data form can say so.
+    Symbol,
 };
 
 // The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
@@ -352,6 +360,7 @@ inline const char* op_name(Op o) {
         case Op::Coord:  return "Coord";
         case Op::Log:    return "Log";
         case Op::Exp:    return "Exp";
+        case Op::Symbol: return "Symbol";
     }
     return "?";
 }
@@ -420,6 +429,9 @@ struct FieldOp {
     // an op that is not an opaque leaf. Copied with the op, so every copy
     // of a field keeps the identity of its leaves.
     std::uint64_t serial = 0;
+
+    // Symbol: the name. Empty for every other op, so it costs a copy of an empty string.
+    std::string name;
 };
 
 // What a field can read. A surface field reads (u, v) and nothing else;
@@ -510,6 +522,55 @@ public:
 
     // Coordinate k of the spacetime point a metric is evaluated at.
     static Field coord(std::uint32_t k) { return input(Op::Coord, k); }
+
+    // A named number left open; see Op::Symbol. Two symbols of one name are one op.
+    static Field symbol(std::string name) {
+        Field f;
+        f.ops_.clear();
+        f.push(Op::Symbol);
+        f.ops_.back().name = std::move(name);
+        return f;
+    }
+
+    // The names of the symbols the root reads, sorted, each once. Derived from the ops, never
+    // declared, like `is_structural()`; empty means the field is one field, not a family.
+    std::vector<std::string> free_symbols() const {
+        std::vector<std::string> names;
+        for (const auto& n : reachable_from_root().ops_)
+            if (n.op == Op::Symbol) names.push_back(n.name);
+        std::ranges::sort(names);
+        names.erase(std::unique(names.begin(), names.end()), names.end());
+        return names;
+    }
+
+    // This field with every symbol `name` replaced by `value`, rebuilt by appending so the
+    // order holds and equal ops merge (binding x to u in x * u gives u * u with u once). A
+    // name the field does not read changes nothing.
+    Field bind(const std::string& name, const Field& value) const {
+        Field out;
+        out.ops_.clear();
+        out.consing_ = consing_;
+        std::vector<std::uint32_t> at(ops_.size());
+        for (std::size_t i = 0; i < ops_.size(); ++i) {
+            const auto& n = ops_[i];
+            if (n.op == Op::Symbol && n.name == name) {
+                at[i] = out.append_operand(value);
+                continue;
+            }
+            const auto k = arity(n.op);
+            const Key key{&n, k > 0 ? at[n.a] : n.a, k > 1 ? at[n.b] : n.b, k > 2 ? at[n.c] : n.c};
+            at[i] = out.consing_ ? out.intern(key) : out.push_copy(key);
+            out.structural_ = out.structural_ && n.op != Op::Opaque;
+            out.reads_point_ = out.reads_point_ || n.op == Op::Point;
+        }
+        // The root has to stay last: a symbol at the root bound to a field already present, or
+        // a parent merged into an earlier op, would otherwise leave a later op in its place.
+        if (at.back() + 1 != out.ops_.size()) {
+            FieldOp<T> root = out.ops_[at.back()];
+            out.ops_.push_back(std::move(root));
+        }
+        return out;
+    }
 
     // The escape hatch, and deliberately as ordinary to write as the
     // structural builders. An IR whose hatch is second-class becomes a
@@ -798,6 +859,10 @@ public:
                         if (n.serial == 0) return false;
                         rec.push_back(n.serial);
                         break;
+                    case Op::Symbol:
+                        rec.push_back(n.name.size());
+                        for (unsigned char ch : n.name) rec.push_back(ch);
+                        break;
                     default: break;
                 }
                 // An op equal to one already numbered is that one, so the
@@ -861,6 +926,10 @@ private:
             case Op::Opaque:
                 h = detail::id_mix(h, n.serial);
                 break;
+            case Op::Symbol:
+                h = detail::id_mix(h, n.name.size());
+                for (unsigned char ch : n.name) h = detail::id_mix(h, ch);
+                break;
             default: break;
         }
         return detail::id_finish(h);
@@ -918,6 +987,8 @@ private:
         if (k > 2) h = mix(h, key.c);
         h = mix(h, n.k);
         if (n.op == Op::Const) h = mix(h, bits_of(n.value));
+        if (n.op == Op::Symbol)
+            for (unsigned char ch : n.name) h = mix(h, ch);
         if (n.op == Op::Noise) {
             std::uint64_t w[4];
             std::memcpy(w, n.noise->permutation().data(), sizeof w);
@@ -940,6 +1011,8 @@ private:
         switch (n.op) {
             case Op::Const:
                 return same_number(n.value, e.value);
+            case Op::Symbol:
+                return n.name == e.name;
             case Op::Noise:
                 return n.noise == e.noise || n.noise->permutation() == e.noise->permutation();
             case Op::Gather: {
@@ -1060,9 +1133,25 @@ private:
                 case Op::Exp:    { using std::exp; s[i] = exp(s[n.a]); break; }
                 case Op::Opaque: s[i] = n.fn(in.u, in.v); break;
                 case Op::Coord:  s[i] = in.x[n.k]; break;
+                case Op::Symbol: s[i] = unbound(); break;
             }
         }
         return s[ops_.size() - 1];
+    }
+
+    static T unbound() {
+        if constexpr (std::numeric_limits<T>::has_quiet_NaN) return std::numeric_limits<T>::quiet_NaN();
+        else return T(std::numeric_limits<double>::quiet_NaN());
+    }
+
+    // `intern` without the lookup, for a field built without merging.
+    std::uint32_t push_copy(const Key& key) {
+        FieldOp<T> c = *key.src;
+        c.a = key.a;
+        c.b = key.b;
+        c.c = key.c;
+        ops_.push_back(std::move(c));
+        return static_cast<std::uint32_t>(ops_.size() - 1);
     }
 
 public:
