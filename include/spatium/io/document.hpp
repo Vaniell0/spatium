@@ -21,13 +21,15 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // ── A document: named definitions, one a line ────────────────────
 //
 // What a person writes to say what is wanted, before anything is computed: numbers and
-// expressions with names, parameters that range over an interval, roots of equations and
-// integrals, each a line, each reading only the names above it.
+// expressions with names, parameters that range over an interval, roots of equations,
+// integrals and shapes, each a line, each reading only the names above it.
 //
 //   r = 0.5                              a value: a number or an expression in the names above
 //   p in [0.5, 4]                        a parameter: any number in the interval
 //   x: x^2 - p = 0 on [0, 10]            a root: the x on [0, 10] for which the equation holds
 //   I = integral exp(-p * t^2) dt on [0, 1]  an integral over t, named by its dt
+//   S0 = torus(2, r)                     a shape: an operation on numbers and the shapes above
+//   S1 = offset(S0, h)
 //   # a comment, to the end of the line
 //
 // A parameter is chosen (`in`); a root and an integral are found on an interval (`on`). A value
@@ -36,15 +38,16 @@ SPATIUM_EXPORT namespace spatium::io::build {
 //
 // The document is a description and computes nothing: what each definition is worth is the
 // next layer's (rsc/spatium/query.hpp reads a root or an integral of one parameter into a
-// question). Each field keeps the text it was read from, so a document is printed back as it
-// was written, and its JSON carries the same texts, read through the same reader.
+// question; io/document_trace.hpp builds its shapes as a scene). Each field keeps the text it was
+// read from, so a document is printed back as it was written, and its JSON carries the same
+// texts, read through the same reader.
 
 struct Written {
     Field<double> field;
     std::string text;   // as written; for a field built in code, its `to_text`
 };
 
-enum class StatementKind { Value, Parameter, Root, Integral };
+enum class StatementKind { Value, Parameter, Root, Integral, Shape };
 
 inline const char* statement_kind_name(StatementKind k) {
     switch (k) {
@@ -52,9 +55,45 @@ inline const char* statement_kind_name(StatementKind k) {
         case StatementKind::Parameter: return "parameter";
         case StatementKind::Root: return "root";
         case StatementKind::Integral: return "integral";
+        case StatementKind::Shape: return "shape";
     }
     return "?";
 }
+
+// The operations a shape is made by, and what each argument is: `n` a number, `f` a field (both
+// expressions in the names above), `s` the name of a shape above. Arguments past `required` may
+// be left out; a `variadic` operation takes its last kind any number of times.
+struct ShapeOperation {
+    std::string_view name, arguments;
+    std::size_t required;
+    bool variadic;
+    std::string_view caption;
+};
+
+inline constexpr ShapeOperation shape_operations[] = {
+    {"torus", "nn", 2, false, "a torus: the radius to the tube's centre, and the tube's"},
+    {"cylinder", "nn", 2, false, "a closed cylinder on the z axis: its radius and its height"},
+    {"sphere", "n", 1, false, "a sphere at the origin: its radius"},
+    {"flake", "nnnn", 3, false, "a shallow cap in a slab: the slab's half extents, and how much wider its sphere is"},
+    {"offset", "sf", 2, false, "a closed surface pushed along its normal by a thickness"},
+    {"scatter", "ssnn", 3, false, "copies of a shape on a surface: the shape, the surface, how many, and a seed"},
+    {"union", "s", 1, true, "the shapes together"},
+};
+
+namespace detail {
+
+inline const ShapeOperation* shape_operation(std::string_view name) {
+    for (const auto& op : shape_operations)
+        if (op.name == name) return &op;
+    return nullptr;
+}
+
+// what argument k of an operation is
+inline char argument_kind(const ShapeOperation& op, std::size_t k) {
+    return k < op.arguments.size() ? op.arguments[k] : op.arguments.back();
+}
+
+} // namespace detail
 
 struct Statement {
     StatementKind kind = StatementKind::Value;
@@ -63,6 +102,8 @@ struct Statement {
     Written rhs;              // a root's right side
     std::string variable;     // an integral's variable (a root's unknown is its own name)
     Written lo, hi;           // the interval of a parameter, a root or an integral
+    std::string operation;    // a shape's operation, one of `shape_operations`
+    std::vector<Written> args;   // and its arguments, a shape's by its name
 };
 
 struct Document {
@@ -85,6 +126,7 @@ inline std::string_view trim(std::string_view s) {
 
 inline bool reserved_name(std::string_view name) {
     if (name == "in" || name == "on" || name == "integral") return true;
+    if (detail::shape_operation(name)) return true;
     if (std::ranges::any_of(functions, [&](const Function& f) { return f.name == name; })) return true;
     return std::ranges::any_of(constants, [&](const Constant& c) { return c.name == name; });
 }
@@ -141,13 +183,18 @@ inline std::vector<std::string> reads(const Statement& d) {
         case StatementKind::Parameter: add(d.lo.field, {}), add(d.hi.field, {}); break;
         case StatementKind::Root: add(d.value.field, d.name), add(d.rhs.field, d.name), add(d.lo.field, {}), add(d.hi.field, {}); break;
         case StatementKind::Integral: add(d.value.field, d.variable), add(d.lo.field, {}), add(d.hi.field, {}); break;
+        case StatementKind::Shape:
+            for (const auto& a : d.args) add(a.field, {});
+            break;
     }
     return out;
 }
 
 // That a document reads well: every name defined once and not a word of the language, every
 // definition reading only the names above it, a parameter's ends numbers, a root reading its
-// unknown. `line_of` says which line each definition came from, for the message.
+// unknown, a shape's arguments as many and of the kinds its operation takes, and a shape read
+// only where a shape is taken. `line_of` says which line each definition came from, for the
+// message.
 inline Result<void> check(const Document& doc, const std::vector<std::size_t>& line_of = {}) {
     const auto line = [&](std::size_t i) { return i < line_of.size() ? line_of[i] : std::size_t{0}; };
     for (std::size_t i = 0; i < doc.statements.size(); ++i) {
@@ -175,6 +222,38 @@ inline Result<void> check(const Document& doc, const std::vector<std::size_t>& l
         for (const auto& n : reads(d))
             if (!defined_above(n))
                 return detail::doc_error(line(i), std::format("{} reads '{}', which no line above defines", d.name, n));
+        const auto is_shape = [&](std::string_view n) {
+            const Statement* s = doc.find(n);
+            return s && s->kind == StatementKind::Shape;
+        };
+        // a shape is taken by its name alone, where an operation takes one, and nowhere else
+        const auto numbers_only = [&](const Field<double>& f, std::string_view what) -> Result<void> {
+            for (const auto& n : f.free_symbols())
+                if (is_shape(n)) return detail::doc_error(line(i), std::format("{} reads the shape {} as a number", what, n));
+            return {};
+        };
+        if (d.kind != StatementKind::Shape) {
+            for (const Written* w : {&d.value, &d.rhs, &d.lo, &d.hi})
+                if (auto ok = numbers_only(w->field, d.name); !ok) return ok;
+            continue;
+        }
+        const ShapeOperation* op = detail::shape_operation(d.operation);
+        if (!op) return detail::doc_error(line(i), std::format("'{}' is not an operation a shape is made by", d.operation));
+        if (d.args.size() < op->required || (!op->variadic && d.args.size() > op->arguments.size()))
+            return detail::doc_error(line(i), std::format("{} takes {} arguments, given {}", op->name,
+                                                          op->required == op->arguments.size() || op->variadic
+                                                              ? std::format("{}{}", op->required, op->variadic ? " or more" : "")
+                                                              : std::format("{} to {}", op->required, op->arguments.size()),
+                                                          d.args.size()));
+        for (std::size_t k = 0; k < d.args.size(); ++k) {
+            const Written& a = d.args[k];
+            const std::string what = std::format("argument {} of {}", k + 1, op->name);
+            if (detail::argument_kind(*op, k) == 's') {
+                if (!is_shape(a.text)) return detail::doc_error(line(i), std::format("{} is a shape, given '{}'", what, a.text));
+            } else if (auto ok = numbers_only(a.field, what); !ok) {
+                return ok;
+            }
+        }
     }
     return {};
 }
@@ -218,6 +297,19 @@ inline Result<Statement> read_statement(std::string_view text) {
             auto ends = detail::interval(r, text, "on");
             if (!ends) return std::unexpected(ends.error());
             std::tie(d.lo, d.hi) = std::move(*ends);
+        } else if (const ShapeOperation* op = detail::shape_operation(r.word())) {
+            d.kind = StatementKind::Shape;
+            d.operation = std::string(op->name);
+            r.take_word(op->name);
+            if (!r.take('(')) return r.fail(std::format("'(' after {}", op->name));
+            if (!r.take(')'))
+                while (true) {
+                    auto a = detail::written(r, text);
+                    if (!a) return std::unexpected(a.error());
+                    d.args.push_back(std::move(*a));
+                    if (r.take(')')) break;
+                    if (!r.take(',')) return r.fail("',' or ')'");
+                }
         } else {
             d.kind = StatementKind::Value;
             auto f = detail::written(r, text);
@@ -264,6 +356,11 @@ inline std::string to_text(const Statement& d) {
             return std::format("{}: {} = {} on [{}, {}]", d.name, d.value.text, d.rhs.text, d.lo.text, d.hi.text);
         case StatementKind::Integral:
             return std::format("{} = integral {} d{} on [{}, {}]", d.name, d.value.text, d.variable, d.lo.text, d.hi.text);
+        case StatementKind::Shape: {
+            std::string args;
+            for (const auto& a : d.args) args += (args.empty() ? "" : ", ") + a.text;
+            return std::format("{} = {}({})", d.name, d.operation, args);
+        }
     }
     return {};
 }
@@ -292,6 +389,12 @@ inline JsonValue to_json(const Document& doc) {
                 o.emplace_back("integrand", d.value.text), o.emplace_back("variable", d.variable);
                 o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text);
                 break;
+            case StatementKind::Shape: {
+                JsonValue::ArrayType args;
+                for (const auto& a : d.args) args.emplace_back(a.text);
+                o.emplace_back("operation", d.operation), o.emplace_back("args", std::move(args));
+                break;
+            }
         }
         defs.push_back(std::move(o));
     }
@@ -310,22 +413,30 @@ inline Result<Document> document_from_json(const JsonValue& json) {
         else if (kind == "root") text += std::format("{}: {} = {} on [{}, {}]\n", name, s("lhs"), s("rhs"), s("lo"), s("hi"));
         else if (kind == "integral")
             text += std::format("{} = integral {} d{} on [{}, {}]\n", name, s("integrand"), s("variable"), s("lo"), s("hi"));
-        else return std::unexpected(Error(ErrorCode::ParseError, std::format("document: '{}' is not a kind of definition", kind)));
+        else if (kind == "shape") {
+            std::string args;
+            if (const JsonValue* a = d.find("args"); a && a->is_array())
+                for (const auto& x : a->as_array()) args += (args.empty() ? "" : ", ") + (x.is_string() ? x.as_string() : std::string("?"));
+            text += std::format("{} = {}({})\n", name, s("operation"), args);
+        } else return std::unexpected(Error(ErrorCode::ParseError, std::format("document: '{}' is not a kind of definition", kind)));
     }
     return read_document(text);
 }
 
-// Whether two documents say the same: the same names, kinds and variables in the same order,
-// and every field the same function.
+// Whether two documents say the same: the same names, kinds, variables and operations in the
+// same order, and every field the same function.
 inline bool same_document(const Document& a, const Document& b) {
     if (a.statements.size() != b.statements.size()) return false;
     for (std::size_t i = 0; i < a.statements.size(); ++i) {
         const Statement &x = a.statements[i], &y = b.statements[i];
-        if (x.kind != y.kind || x.name != y.name || x.variable != y.variable) return false;
+        if (x.kind != y.kind || x.name != y.name || x.variable != y.variable || x.operation != y.operation) return false;
         const auto same = [](const Written& p, const Written& q) {
             return p.text.empty() == q.text.empty() && (p.text.empty() || same_value(p.field, q.field));
         };
         if (!same(x.value, y.value) || !same(x.rhs, y.rhs) || !same(x.lo, y.lo) || !same(x.hi, y.hi)) return false;
+        if (x.args.size() != y.args.size()) return false;
+        for (std::size_t k = 0; k < x.args.size(); ++k)
+            if (!same(x.args[k], y.args[k])) return false;
     }
     return true;
 }

@@ -241,7 +241,8 @@ inline spatium::Result<AskedDocument> question_document(std::string_view text) {
     if (!ends) return std::unexpected(ends.error());
     std::tie(asked.lo, asked.hi) = std::move(*ends);
     if (!r.take(',')) return r.fail("',' and the parameter the answer is a function of");
-    bd::Statement parameter{.kind = bd::StatementKind::Parameter};
+    bd::Statement parameter;
+    parameter.kind = bd::StatementKind::Parameter;
     parameter.name = std::string(r.word());
     if (parameter.name.empty()) return r.fail("a name");
     r.take_word(parameter.name);

@@ -1,14 +1,18 @@
 // A document of named definitions, read from text and from JSON, printed back as it was written,
 // and the question a calculator reads as one: the same Query whether the question is read word by
-// word or through its document.
+// word or through its document. Its shapes are a scene: the same Trace, node for node and line for
+// line of its LaTeX, whether built from the document or by calls.
 
 #include <rsc/spatium/query.hpp>
 #include <spatium/io/document.hpp>
+#include <spatium/io/document_trace.hpp>
 #include <spatium/io/json.hpp>
+#include <spatium/io/trace_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
+#include <format>
 #include <string>
 #include <vector>
 
@@ -147,4 +151,126 @@ TEST_CASE("query_of: a document's root with the values it reads put in place", "
     CHECK_FALSE(rsc::query_of(*doc, "a").has_value());
     CHECK_FALSE(rsc::query_of(*doc, "y").has_value());
     CHECK_FALSE(rsc::query_of(*doc, "z").has_value());
+}
+
+namespace {
+
+// the gallery's shell, then a dusting of spheres on it, and both together
+const char* const shell_document = "R = 2\n"
+                                   "r = 0.5\n"
+                                   "h: (r + h)^2 - 2 * r^2 = 0 on [0, 1]\n"
+                                   "S0 = torus(R, r)\n"
+                                   "S1 = offset(S0, h)\n"
+                                   "S2 = sphere(r / 10)\n"
+                                   "S3 = scatter(S2, S1, 40, 7)\n"
+                                   "S4 = union(S1, S3)\n";
+
+std::string scene_latex(const char* text, const std::vector<std::pair<std::string, double>>& chosen = {}) {
+    const auto doc = bd::read_document(text);
+    if (!doc) return doc.error().message;
+    const auto scene = bd::to_trace(*doc, chosen);
+    if (!scene) return scene.error().message;
+    const auto latex = bd::to_latex(scene->trace, scene->root());
+    return latex ? *latex : latex.error().message;
+}
+
+} // namespace
+
+TEST_CASE("document: shapes read as written, printed back and read back through JSON", "[document]") {
+    const auto doc = bd::read_document(shell_document);
+    REQUIRE(doc.has_value());
+    REQUIRE(doc->statements.size() == 8);
+    const auto& offset = doc->statements[4];
+    CHECK(offset.kind == bd::StatementKind::Shape);
+    CHECK(offset.operation == "offset");
+    REQUIRE(offset.args.size() == 2);
+    CHECK(offset.args[0].text == "S0");
+    CHECK(doc->statements[5].args[0].text == "r / 10");
+    CHECK(bd::to_text(*doc) == shell_document);
+    const auto from_json = bd::document_from_json(bd::to_json(*doc));
+    REQUIRE(from_json.has_value());
+    CHECK(bd::same_document(*doc, *from_json));
+    // the case it must fail: another argument is another document
+    const auto other = bd::read_document(std::string(shell_document).replace(std::string(shell_document).find("40"), 2, "41"));
+    REQUIRE(other.has_value());
+    CHECK_FALSE(bd::same_document(*doc, *other));
+}
+
+TEST_CASE("document: a shape refused by what is wrong with it", "[document]") {
+    const auto message = [](const char* text) {
+        const auto d = bd::read_document(text);
+        return d ? std::string("(read)") : d.error().message;
+    };
+    CHECK(message("S = torus(2)") == "line 1: torus takes 2 arguments, given 1");
+    CHECK(message("S = flake(1, 1)") == "line 1: flake takes 3 to 4 arguments, given 2");
+    CHECK(message("S = union()") == "line 1: union takes 1 or more arguments, given 0");
+    CHECK(message("r = 1\nS = offset(r, 0.1)") == "line 2: argument 1 of offset is a shape, given 'r'");
+    CHECK(message("S = sphere(1)\nT = sphere(S)") == "line 2: argument 1 of sphere reads the shape S as a number");
+    CHECK(message("S = sphere(1)\na = S + 1") == "line 2: a reads the shape S as a number");
+    CHECK(message("S = sphere(1)\nT = offset(S, q)") == "line 2: T reads 'q', which no line above defines");
+    // every operation's name is a word of the language
+    for (const bd::ShapeOperation& op : bd::shape_operations)
+        CHECK(message(std::format("{} = 1", op.name).c_str()) == std::format("line 1: '{}' is a word of the language, not a name", op.name));
+    CHECK(message("S = sphere 1") == "line 1: parse: at column 12, expected '(' after sphere, found '1'");
+    CHECK(message("S = sphere(1") == "line 1: parse: at column 13, expected ',' or ')', found the end");
+}
+
+TEST_CASE("to_trace: a document's scene is the scene its calls build", "[document][build_dsl]") {
+    const auto doc = bd::read_document(shell_document);
+    REQUIRE(doc.has_value());
+    const auto scene = bd::to_trace(*doc);
+    REQUIRE(scene.has_value());
+
+    // the same scene by calls, the equation as the document's reader reads it
+    bd::Trace<double> t;
+    const auto R = t.let("R", 2.0), r = t.let("r", 0.5);
+    const auto h = t.let("h", *bd::parse("(r + h)^2 - 2 * r^2"), 0.0, 1.0);
+    const auto shell = t.offset(t.torus(R, r), h.field());
+    const auto dust = t.scatter(t.sphere(r / 10), shell, 40, 7);
+    const auto both = t.compose({shell, dust});
+
+    const auto& a = scene->trace;
+    REQUIRE(a.size() == t.size());
+    CHECK(scene->root() == both.index);
+    for (std::size_t i = 0; i < t.size(); ++i) {
+        INFO(i);
+        const auto &x = a.node(i), &y = t.node(i);
+        CHECK(x.kind == y.kind);
+        CHECK(x.recipe == y.recipe);
+        CHECK(x.base == y.base);
+        CHECK(x.item == y.item);
+        CHECK(x.target == y.target);
+        CHECK(x.count == y.count);
+        CHECK(x.seed == y.seed);
+        CHECK(x.children == y.children);
+    }
+    REQUIRE(a.definitions().size() == t.definitions().size());
+    for (std::size_t i = 0; i < t.definitions().size(); ++i)
+        CHECK(a.definitions()[i].value == t.definitions()[i].value);   // to the bit: the same root found the same way
+    const auto by_document = bd::to_latex(a, scene->root()), by_calls = bd::to_latex(t, both.index);
+    REQUIRE(by_document.has_value());
+    REQUIRE(by_calls.has_value());
+    CHECK(*by_document == *by_calls);
+
+    // the case it must fail: another tube is another recipe, and another line of LaTeX
+    const auto wider = bd::read_document(std::string(shell_document).replace(std::string(shell_document).find("torus(R, r)"), 11, "torus(R, 2 * r)"));
+    REQUIRE(wider.has_value());
+    const auto other = bd::to_trace(*wider);
+    REQUIRE(other.has_value());
+    CHECK(other->trace.node(0).recipe != t.node(0).recipe);
+    CHECK(*bd::to_latex(other->trace, other->root()) != *by_calls);
+}
+
+TEST_CASE("to_trace: a parameter is drawn at the value chosen for it, and what a scene cannot take is refused",
+          "[document][build_dsl]") {
+    const char* const text = "p in [0.5, 4]\nS0 = sphere(p)\n";
+    const std::string latex = scene_latex(text, {{"p", 1.0}});
+    CHECK(latex == "\\begin{aligned}\np &= 1,\\quad p \\in \\left[0.5, 4\\right] \\\\\nS_{0} &= \\operatorname{sphere}\\left(1\\right)\n\\end{aligned}");
+    CHECK(scene_latex(text) == "p: a parameter on [0.5, 4], drawn at a value it is not given");
+    CHECK(scene_latex(text, {{"p", 5.0}}) == "p: choose(p): the value is not on its interval");
+    CHECK(scene_latex("I = integral t dt on [0, 1]\nS = sphere(I)") == "I: an integral, which is not a number a scene takes");
+    CHECK(scene_latex("S = sphere(1)\nT = scatter(S, S, 2.5)") == "T: scatter: '2.5' is 2.5, not a whole number from 0 to 1000000000");
+    CHECK(scene_latex("r = 1") == "the document has no shape");
+    // a builder's own refusal, named by the line it came from: an open base has no offset
+    CHECK(scene_latex("S = flake(1, 1, 0.1)\nT = offset(S, 0.1)").starts_with("T: offset: the base surface has an edge"));
 }

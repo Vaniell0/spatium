@@ -16,9 +16,9 @@ SPATIUM_EXPORT namespace spatium::io::build {
 // ── A scene as LaTeX ──────────────────────────────────────────────
 //
 // What a page shows of a scene: its named numbers, then the nodes the root reaches, one aligned
-// line each. A number given as it is reads r = 1; one given by an equation reads as the equation
-// was written, with its bracket and the root found on it, so the page says both what was asked
-// and what it came to. A node is its operation over the nodes before it: a factory with its
+// line each. A number given as it is reads r = 1; a chosen one reads p = 1 with its interval; one
+// given by an equation reads as the equation was written, with its bracket and the root found on
+// it, so the page says both what was asked and what it came to. A node is its operation over the nodes before it: a factory with its
 // numbers, an offset with its thickness as written (names and all), a scatter, a union. A
 // factory's numbers are printed as numbers, since a factory keeps its parameters as values; a
 // thickness that cannot be written (an opaque leaf) is refused, like `to_latex` of a field.
@@ -45,6 +45,12 @@ inline Result<std::string> to_latex(const Trace<double>& trace, std::size_t root
     for (const Definition<double>& d : trace.definitions()) {
         const std::string name = detail::name_latex(d.name);
         const std::string value = detail::number_text(d.value, TextStyle::Latex);
+        if (d.chosen) {
+            lines.push_back(std::format("{} &= {},\\quad {} \\in \\left[{}, {}\\right]", name, value, name,
+                                        detail::number_text(d.lo, TextStyle::Latex),
+                                        detail::number_text(d.hi, TextStyle::Latex)));
+            continue;
+        }
         if (!d.equation) {
             lines.push_back(std::format("{} &= {}", name, value));
             continue;

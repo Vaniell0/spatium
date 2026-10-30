@@ -482,7 +482,8 @@ struct Definition {
     std::string name;
     T value{};
     std::optional<Field<T>> equation;   // = 0, as written; empty for a number given as it is
-    T lo{}, hi{};                       // the bracket the root was found on
+    T lo{}, hi{};                       // the bracket the root was found on, or a chosen number's interval
+    bool chosen = false;                // a parameter: a number chosen on [lo, hi], which may move
 };
 
 template<Scalar T = double>
@@ -779,7 +780,7 @@ public:
 
     Named<T> let(std::string name, T value) {
         claim(name);
-        definitions_.push_back({name, value, std::nullopt, T{}, T{}});
+        definitions_.push_back({name, value, std::nullopt, T{}, T{}, false});
         return {std::move(name), value};
     }
 
@@ -801,8 +802,18 @@ public:
         const ScalarField<T> in_u = e.bind(name, ScalarField<T>::u());
         const auto root = find_root<T>([&](T x) { return in_u(x, T{0}); }, lo, hi);
         if (!root) throw std::invalid_argument("let(" + name + "): " + root.error().message);
-        definitions_.push_back({name, *root, equation, lo, hi});
+        definitions_.push_back({name, *root, equation, lo, hi, false});
         return {std::move(name), *root};
+    }
+
+    // `name` is a parameter: `value`, chosen on [lo, hi], which a page may move along it. Refused
+    // where the value is not on the interval.
+    Named<T> choose(std::string name, T value, T lo, T hi) {
+        claim(name);
+        if (!(lo <= value && value <= hi))
+            throw std::invalid_argument("choose(" + name + "): the value is not on its interval");
+        definitions_.push_back({name, value, std::nullopt, lo, hi, true});
+        return {std::move(name), value};
     }
 
     const std::vector<Definition<T>>& definitions() const { return definitions_; }
