@@ -202,6 +202,6 @@ TEST_CASE("synthesis: an answer that x itself writes is written in x, and reads 
     CHECK(text->find("- 5") == std::string::npos); // no t in it
     // the text of a known field, and a field that has no text
     using F = spatium::io::build::Field<double>;
-    CHECK(*spatium::io::build::to_text(sqrt(F::u()) + F(2.0) * log(F::v()), "x", "y") == "(sqrt(x) + 2 * log(y))");
+    CHECK(*spatium::io::build::to_text(sqrt(F::u()) + F(2.0) * log(F::v()), "x", "y") == "sqrt(x) + 2 * log(y)");
     CHECK_FALSE(spatium::io::build::to_text(F([](double, double) { return 0.0; })).has_value());
 }

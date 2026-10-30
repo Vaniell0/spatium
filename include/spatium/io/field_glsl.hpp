@@ -279,6 +279,7 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
                 break;
             case Op::Opaque: v[i] = "0.0"; continue;   // unreachable: lower() refuses it
             case Op::Coord:  e = std::format("{}.x[{}]", in.rec, n.k); break;
+            case Op::Symbol: v[i] = "0.0"; continue;   // unreachable: lower() refuses it
         }
         v[i] = sc.value("float", e);
     }
