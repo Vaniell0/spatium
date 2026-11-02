@@ -77,7 +77,7 @@ inline constexpr std::array<Operator, 7> operators{{
     {"2x, 2(a + b), (a)(b)", "a product may leave out its * after a number or a closing parenthesis, not after a name",
      "2(3 + 4)"},
     {"-a", "minus, tighter than a product and looser than a power: -x^2 is -(x^2)", "-3^2"},
-    {"a^n", "a whole power n from 1 to 64; a^b for another b is exp(b * log(a))", "2^10"},
+    {"a^b", "a power: a whole n from 1 to 64 is a product of n factors; any other b, a^b for a > 0 (a^0 is 1)", "2^0.5"},
     {"(a)", "grouping", "(1 + 2) * 3"},
     {"a = b", "an equation in one unknown, solved for it", "x^2 - 4 = 0"},
 }};
@@ -216,8 +216,12 @@ private:
         const auto [end, ec] = std::from_chars(s_.data() + at_, s_.data() + s_.size(), n);
         const std::size_t to = static_cast<std::size_t>(end - s_.data());
         if (ec != std::errc{} || n < 1 || n > 64 || (to < s_.size() && (s_[to] == '.' || s_[to] == 'e'))) {
+            // any other power -- a name, a fraction, a negative, a parenthesis -- is pow(x, b),
+            // read with a minus as tight as the power's own operand
             at_ = from;
-            return fail("a whole power from 1 to 64 (x^a for another a is exp(a * log(x)))");
+            auto b = signed_power();
+            if (!b) return b;
+            return pow(std::move(*x), *b);
         }
         at_ = to;
         Field<double> out = *x;

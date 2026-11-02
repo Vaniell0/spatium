@@ -294,6 +294,7 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
             case Op::Sin:    e = std::format("sin({})", A); break;
             case Op::Cos:    e = std::format("cos({})", A); break;
             case Op::Less:   e = std::format("({} < {} ? 1.0 : 0.0)", A, B); break;
+            case Op::Pow:    e = std::format("pow({}, {})", A, B); break;
             case Op::Noise:
                 e = std::format("field_noise({}u, {}, {}, {})",
                                 b.perm + n.table * static_cast<std::uint32_t>(kNoiseTableBytes), A, B, C);

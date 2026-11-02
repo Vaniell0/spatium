@@ -15,7 +15,7 @@
     {"written":"a * b, a / b","caption":"product and quotient, tighter than a sum, read left to right","example":"12 / 3 / 2","answer":{"route":"evaluate","value":"2","latex":"\\frac{\\frac{12}{3}}{2}"}},
     {"written":"2x, 2(a + b), (a)(b)","caption":"a product may leave out its * after a number or a closing parenthesis, not after a name","example":"2(3 + 4)","answer":{"route":"evaluate","value":"14","latex":"2\\left(3 + 4\\right)"}},
     {"written":"-a","caption":"minus, tighter than a product and looser than a power: -x^2 is -(x^2)","example":"-3^2","answer":{"route":"evaluate","value":"-9","latex":"-3^{2}"}},
-    {"written":"a^n","caption":"a whole power n from 1 to 64; a^b for another b is exp(b * log(a))","example":"2^10","answer":{"route":"evaluate","value":"1024","latex":"2^{10}"}},
+    {"written":"a^b","caption":"a power: a whole n from 1 to 64 is a product of n factors; any other b, a^b for a > 0 (a^0 is 1)","example":"2^0.5","answer":{"route":"evaluate","value":"1.41421356237","latex":"2^{0.5}"}},
     {"written":"(a)","caption":"grouping","example":"(1 + 2) * 3","answer":{"route":"evaluate","value":"9","latex":"\\left(1 + 2\\right) \\cdot 3"}},
     {"written":"a = b","caption":"an equation in one unknown, solved for it","example":"x^2 - 4 = 0","answer":{"route":"closed form"}}
   ],

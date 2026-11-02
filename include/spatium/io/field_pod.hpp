@@ -360,6 +360,7 @@ T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const 
         case Op::Sqrt: { using std::sqrt; return sqrt(s[n.a]); }
         case Op::Log:  { using std::log; return log(s[n.a]); }
         case Op::Exp:  { using std::exp; return exp(s[n.a]); }
+        case Op::Pow:  { using std::pow; return pow(s[n.a], s[n.b]); }
         case Op::Noise:
             return algebra::PerlinNoise::sample(tables + std::size_t{n.table} * kNoiseTableBytes, s[n.a], s[n.b], s[n.c]);
         case Op::Id:   return static_cast<T>(in.id);
