@@ -23,13 +23,25 @@
 // before a root on a bracket, since its steps are exact and it finds every root. The candidates
 // not taken stay in the record, so what was chosen among, and at what cost, can be read back
 // from it, not only the choice.
+//
+// How it computes is the engine's (`Engine`), apart from what is asked: the arithmetic -- a
+// double; a float, as a device computes; a fraction, in which 1/3 + 1/6 is 1/2; a decimal, in
+// which ten times 0.1 is 1; Real50 -- the tolerance of a synthesis, and whether an arithmetic
+// that cannot compute something refuses (`strict`) or hands it to a double. Each candidate says
+// which arithmetic it computed in, so a record holds the engine with the answer. The arithmetic
+// is the interpreter's own parameter (io/field_pod.hpp), one program run in each.
 
 #include <rsc/spatium/closed_form.hpp>
 #include <rsc/spatium/query.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/algebra/roots.hpp>
+#include <spatium/core/decimal.hpp>
+#include <spatium/core/precision.hpp>
+#include <spatium/core/rational.hpp>
 #include <spatium/io/document.hpp>
+#include <spatium/io/field_pod.hpp>
 
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <format>
@@ -54,11 +66,47 @@ inline const char* route_name(Route r) {
     return "?";
 }
 
+enum class Arithmetic { Double, Float, Rational, Decimal, Real50 };
+
+inline const char* arithmetic_name(Arithmetic a) {
+    switch (a) {
+        case Arithmetic::Double: return "double";
+        case Arithmetic::Float: return "float";
+        case Arithmetic::Rational: return "rational";
+        case Arithmetic::Decimal: return "decimal";
+        case Arithmetic::Real50: return "real50";
+    }
+    return "?";
+}
+
+inline constexpr Arithmetic arithmetics[] = {Arithmetic::Double, Arithmetic::Float, Arithmetic::Rational,
+                                             Arithmetic::Decimal, Arithmetic::Real50};
+
+// Why this build cannot compute in `a`; empty when it can.
+inline std::string unavailable(Arithmetic a) {
+    if (a == Arithmetic::Decimal && !SPATIUM_HAS_DECIMAL)
+        return "this build has no decimal: its compiler has no decimal64 (GCC's <decimal/decimal>)";
+#if !(defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION)
+    if (a == Arithmetic::Real50) return "this build has no real50: it was built without Boost.Multiprecision";
+#endif
+    return {};
+}
+
+// How the engine computes, apart from what is asked. The defaults are a double and a synthesis
+// tolerance of 1e-8.
+struct Engine {
+    Arithmetic arithmetic = Arithmetic::Double;
+    bool strict = false;       // an arithmetic that cannot compute a value refuses, instead of a double
+    double tolerance = 1e-8;   // of a synthesis
+};
+
 struct Candidate {
     Route route = Route::Evaluate;
     std::size_t cost = 0;        // evaluations of the definition's field
     std::string refused;         // why the route gives no value; empty when it gives one
     std::vector<double> values;  // the numbers it gives, when it gives numbers
+    Arithmetic arithmetic = Arithmetic::Double;   // what it computed in
+    std::string text;            // its number as that arithmetic holds it, when that is not a double (`21/4`)
 };
 
 struct Evaluation {
@@ -83,6 +131,82 @@ struct Evaluation {
     }
 };
 
+namespace detail {
+
+template<class F>
+std::string shortest(F x) {
+    char buf[32];
+    const auto [end, ec] = std::to_chars(buf, buf + sizeof buf, x);
+    return ec == std::errc{} ? std::string(buf, end) : "nan";
+}
+
+// A number of arithmetic T as a double, as text, and whether it holds a number at all.
+template<class T> double as_double(const T& x) {
+    if constexpr (requires { x.to_double(); }) return x.to_double();
+    else return static_cast<double>(x);
+}
+template<class T> std::string as_text(const T& x) {
+    if constexpr (requires { x.text(); }) return x.text();
+    else if constexpr (std::is_floating_point_v<T>) return shortest(x);   // a float's own shortest digits
+    else return x.str();
+}
+template<class T> bool holds(const T& x) {
+    if constexpr (requires { x.ok(); }) return x.ok();
+    else if constexpr (requires { x.finite(); }) return x.finite();
+    else return std::isfinite(as_double(x));
+}
+
+// A field with nothing left to read, computed in arithmetic T.
+template<spatium::Scalar T>
+Candidate value_in(const spatium::io::build::PodField<double>& pod, Arithmetic a) {
+    namespace bd = spatium::io::build;
+    Candidate c{Route::Evaluate, 1, {}, {}, a, {}};
+    if (const auto op = bd::beyond<T>(pod)) {
+        c.refused = std::format("{} has no {} in it", arithmetic_name(a), bd::op_name(*op));
+        return c;
+    }
+    const T v = bd::interpret(bd::converted<T>(pod), T{0}, T{0});
+    if (!holds(v)) {
+        c.refused = a == Arithmetic::Rational ? "the fraction does not fit in 64 bits, or divides by zero"
+                                              : std::format("the value is not a number in {}", arithmetic_name(a));
+        return c;
+    }
+    c.values = {as_double(v)};
+    c.text = as_text(v);
+    return c;
+}
+
+inline Candidate value_in(const Expr& f, Arithmetic a) {
+    namespace bd = spatium::io::build;
+    Candidate c{Route::Evaluate, 1, unavailable(a), {}, a, {}};
+    if (!c.refused.empty()) return c;
+    const auto pod = bd::lower(f);
+    if (!pod) {
+        c.refused = pod.error().message;
+        return c;
+    }
+    switch (a) {
+        case Arithmetic::Double: break;
+        case Arithmetic::Float: return value_in<float>(*pod, a);
+        case Arithmetic::Rational: return value_in<spatium::Rational>(*pod, a);
+        case Arithmetic::Decimal:
+#if SPATIUM_HAS_DECIMAL
+            return value_in<spatium::Decimal>(*pod, a);
+#else
+            break;
+#endif
+        case Arithmetic::Real50:
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+            return value_in<spatium::Real50>(*pod, a);
+#else
+            break;
+#endif
+    }
+    return value_in<double>(*pod, a);
+}
+
+} // namespace detail
+
 // The route whose value is taken: the first, in the order of preference, that gives one.
 inline std::optional<std::size_t> take(const std::vector<Candidate>& candidates) {
     for (std::size_t i = 0; i < candidates.size(); ++i)
@@ -91,7 +215,7 @@ inline std::optional<std::size_t> take(const std::vector<Candidate>& candidates)
 }
 
 inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_view name, const Chosen& chosen = {},
-                           double tolerance = 1e-8) {
+                           const Engine& engine = {}) {
     namespace bd = spatium::io::build;
     Evaluation out;
     out.name = std::string(name);
@@ -130,22 +254,27 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
 
     if (d->kind == bd::StatementKind::Value || d->kind == bd::StatementKind::Parameter) {
         out.written = d->kind == bd::StatementKind::Value ? d->value.field : Expr::symbol(d->name);
-        if (out.free.empty()) {
-            out.candidates.push_back({Route::Evaluate, 1, {}, {number(u->f)}});
+        if (out.free.empty() && engine.arithmetic == Arithmetic::Double) {
+            out.candidates.push_back({Route::Evaluate, 1, {}, {number(u->f)}, Arithmetic::Double, {}});
+        } else if (out.free.empty()) {
+            // in the engine's arithmetic, and where it cannot, in a double unless it is strict
+            out.candidates.push_back(detail::value_in(u->f, engine.arithmetic));
+            if (!out.candidates.back().refused.empty() && !engine.strict)
+                out.candidates.push_back({Route::Evaluate, 1, {}, {number(u->f)}, Arithmetic::Double, {}});
         } else {
             out.written = u->f;   // the function, exact, in the parameter's name
-            out.candidates.push_back({Route::Expression, 0, {}, {}});
+            out.candidates.push_back({Route::Expression, 0, {}, {}, Arithmetic::Double, {}});
         }
         finish();
         return out;
     }
 
     if (!out.free.empty()) {
-        Candidate c{Route::Synthesis, 0, {}, {}};
+        Candidate c{Route::Synthesis, 0, {}, {}, Arithmetic::Double, {}};
         if (auto q = query_of(doc, name, chosen); !q) {
             c.refused = q.error().message;
         } else {
-            q->tolerance = tolerance;
+            q->tolerance = engine.tolerance;
             Answer a = answer(*q);
             c.cost = a.evaluations, c.refused = a.refused;
             out.parameter = q->parameter;
@@ -164,7 +293,7 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
     };
     if (d->kind == bd::StatementKind::Integral) {
         const auto r = spatium::integrate(field, spatium::Finite<double>{number(u->lo), number(u->hi)});
-        Candidate c{Route::Integral, evaluations, {}, {}};
+        Candidate c{Route::Integral, evaluations, {}, {}, Arithmetic::Double, {}};
         if (r.trusted()) c.values = {r.value}, out.error = r.error_estimate;
         else c.refused = std::format("the integral of {} did not converge", d->name);
         out.candidates.push_back(std::move(c));
@@ -176,7 +305,7 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
     const bool bracket = bd::has_bracket(*d);
     const double lo = bracket ? number(u->lo) : 0, hi = bracket ? number(u->hi) : 0;
     {
-        Candidate c{Route::ClosedForm, 0, {}, {}};
+        Candidate c{Route::ClosedForm, 0, {}, {}, Arithmetic::Double, {}};
         if (auto solved = solve_closed_form(u->f, d->name); !solved) {
             c.refused = solved.error().message;
             if (!bracket) c.refused += std::format(", so {} needs a bracket, as in {}: ... on [a, b]", d->name, d->name);
@@ -192,7 +321,7 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
     if (bracket) {
         evaluations = 0;
         const auto root = spatium::find_root(field, lo, hi);
-        Candidate c{Route::Bracket, evaluations, root ? std::string() : root.error().message, {}};
+        Candidate c{Route::Bracket, evaluations, root ? std::string() : root.error().message, {}, Arithmetic::Double, {}};
         if (root) c.values = {*root};
         out.candidates.push_back(std::move(c));
     }
