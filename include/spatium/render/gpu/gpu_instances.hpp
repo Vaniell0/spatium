@@ -95,8 +95,10 @@ inline Result<InstanceKernel> make_instance_kernel(const io::build::Trace<double
         auto pod = bd::lower(f);
         if (!pod)
             return std::unexpected(Error(pod.error().code, std::format("node {} {}: {}", idx, what, pod.error().message)));
-        const auto b = bd::detail::append_data(k.module, pod->scalars.tables, pod->scalars.points);
-        return bd::emit_vector_into(sc, *pod, b, at_point, "at");
+        const auto b = bd::detail::append_data(k.module, pod->scalars);
+        if (!b)
+            return std::unexpected(Error(b.error().code, std::format("node {} {}: {}", idx, what, b.error().message)));
+        return bd::emit_vector_into(sc, *pod, *b, at_point, "at");
     };
     if (has_colour) {
         auto r = vector_at(n.color_fn, "colour");

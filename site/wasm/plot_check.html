@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Plot check</title>
+<!--
+  The graph's shader held against the core: each case's fragment shader is compiled once, run in
+  its check mode (F, x and y written into a float target) for each set of slot values, read back,
+  and compared at every pixel with F as the core computes it in fp32 (spatium_plot with a grid).
+  The difference is measured in pixels: F is a height, so how far the drawn curve moves is the
+  difference over a pixel's height in y.
+  plot_check.mjs opens this page in a headless browser and reads window.result.
+-->
+<script src="spatium_core.js"></script>
+<script>
+const cases = [
+  { document: "a in [0.5, 2]\nx in [-4, 4]\nf = a * sin(x) + x^2 / 10", name: "f", along: "x",
+    view: [-4, -2, 4, 2], slots: [[0.5], [1.25], [2]] },
+  { document: "p in [0.1, 4]\nx in [-3, 3]\ng = exp(-p * x^2)", name: "g", along: "x",
+    view: [-3, -0.5, 3, 1.5], slots: [[0.1], [1.5], [4]] },
+  { document: "c in [0, 1]\nk in [1, 3]\nx in [0.01, 9]\nh = sqrt(x) * cos(k * x) + c * log(x)", name: "h", along: "x",
+    view: [0.01, -4, 9, 4], slots: [[0, 1], [1, 3]] },
+];
+const W = 96, H = 64;
+
+window.result = (async () => {
+  const core = await SpatiumCore();
+  const plot = core.cwrap("spatium_plot", "string", ["string"]);
+  const canvas = document.createElement("canvas");
+  canvas.width = W, canvas.height = H;
+  const gl = canvas.getContext("webgl2");
+  if (!gl) return { ok: false, why: "no WebGL2" };
+  if (!gl.getExtension("EXT_color_buffer_float")) return { ok: false, why: "no EXT_color_buffer_float" };
+  const target = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, target);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, W, H);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+  gl.viewport(0, 0, W, H);
+  const compile = (type, text) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, text);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const report = { ok: true, compiled: 0, runs: 0, worst: 0, cases: [] };
+  for (const c of cases) {
+    const p = JSON.parse(plot(JSON.stringify({ document: c.document, name: c.name, along: c.along })));
+    if (p.refused) return { ok: false, why: `${c.name}: ${p.refused}` };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, p.vertex));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, p.fragment));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return { ok: false, why: gl.getProgramInfoLog(prog) };
+    ++report.compiled;
+    gl.useProgram(prog);
+    const at = (n) => gl.getUniformLocation(prog, n);
+    gl.uniform4fv(at("plot_view"), c.view);
+    gl.uniform2f(at("plot_size"), W, H);
+    gl.uniform1i(at("plot_values"), 1);
+    let worst = 0;
+    const runs = c.slots.map((s) => [s, s]);
+    // the case it must fail: the frame drawn at one slot value, the twin at a hundredth more
+    if (c.name === "f") runs.push([c.slots[0], c.slots[0].map((v) => v + 0.01)]);
+    for (const [slots, twinSlots] of runs) {
+      const wrong = slots !== twinSlots;
+      // only the slots change between runs: the same program, new numbers
+      if (slots.length) gl.uniform1fv(at("field_symbols"), new Float32Array(slots));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      const got = new Float32Array(W * H * 4);
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, got);
+      const twin = JSON.parse(plot(JSON.stringify({ document: c.document, name: c.name, along: c.along,
+                                                    grid: { width: W, height: H, view: c.view, slots: twinSlots } }))).values;
+      const pixel = (c.view[3] - c.view[1]) / H;
+      let frame = 0;
+      for (let i = 0; i < W * H; ++i) {
+        const F = got[4 * i], want = twin[i];
+        if (Number.isNaN(want) && Number.isNaN(F)) continue;
+        const e = Math.abs(F - want) / pixel;
+        frame = Number.isNaN(e) ? Infinity : Math.max(frame, e);
+      }
+      if (wrong) { report.wrong = frame; continue; }
+      worst = Math.max(worst, frame);
+      ++report.runs;
+    }
+    report.cases.push({ name: c.name, symbols: p.symbols.map((s) => s.name), worst });
+    report.worst = Math.max(report.worst, worst);
+  }
+  // and one frame as it is drawn, for a person to look at: the first case, its middle slot value
+  const shown = document.createElement("canvas");
+  shown.width = 480, shown.height = 320;
+  const g2 = shown.getContext("webgl2", { preserveDrawingBuffer: true, premultipliedAlpha: false });
+  const c = cases[0], p = JSON.parse(plot(JSON.stringify({ document: c.document, name: c.name, along: c.along })));
+  const build = (type, text) => { const s = g2.createShader(type); g2.shaderSource(s, text); g2.compileShader(s); return s; };
+  const prog = g2.createProgram();
+  g2.attachShader(prog, build(g2.VERTEX_SHADER, p.vertex));
+  g2.attachShader(prog, build(g2.FRAGMENT_SHADER, p.fragment));
+  g2.linkProgram(prog);
+  g2.useProgram(prog);
+  const u = (n) => g2.getUniformLocation(prog, n);
+  g2.uniform4fv(u("plot_view"), c.view);
+  g2.uniform2f(u("plot_size"), 480, 320);
+  g2.uniform1f(u("plot_width"), 1.0);
+  g2.uniform4f(u("plot_ink"), 0.1, 0.3, 0.8, 1.0);
+  g2.uniform1i(u("plot_values"), 0);
+  g2.uniform1fv(u("field_symbols"), new Float32Array(c.slots[1]));
+  g2.clearColor(1, 1, 1, 1);
+  g2.clear(g2.COLOR_BUFFER_BIT);
+  g2.enable(g2.BLEND);
+  g2.blendFunc(g2.SRC_ALPHA, g2.ONE_MINUS_SRC_ALPHA);
+  g2.drawArrays(g2.TRIANGLES, 0, 3);
+  report.png = shown.toDataURL("image/png");
+  return report;
+})().catch((e) => ({ ok: false, why: String(e) }));
+</script>

@@ -23,6 +23,7 @@
 #include <rsc/spatium/query.hpp>
 #include <rsc/spatium/synthesis.hpp>
 #include <spatium/io/document.hpp>
+#include <spatium/io/plot_glsl.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
@@ -252,6 +253,65 @@ inline spatium::io::JsonValue evaluate_request(std::string_view request) {
     Object out{{"name", name}};
     for (auto& [k, v] : evaluation_json(evaluate(*doc, name, chosen, json->number_or("tolerance", 1e-8))))
         out.emplace_back(std::move(k), std::move(v));
+    return out;
+}
+
+// A value of a document drawn as the graph of a function of one of its parameters, as one JSON
+// object: `document` (text or JSON), `name`, and `along`, the parameter on the x axis. The other
+// parameters it reads stay symbols, read from the shader's slots, and come back with their
+// intervals so a page can give each a slider. With `grid` -- {"width", "height", "view": [x0, y0,
+// x1, y1], "slots": [...]} -- the answer also holds F at every pixel's centre as the shader's
+// check mode computes it, run in fp32 on the host: what a browser holds its WebGL2 frame against.
+inline spatium::io::JsonValue plot_request(std::string_view request) {
+    using namespace respond_detail;
+    namespace bd = spatium::io::build;
+    const auto refuse = [](std::string why) { return JsonValue(Object{{"refused", std::move(why)}}); };
+    const auto json = spatium::io::parse(request);
+    if (!json || !json->is_object()) return refuse("the request is not a JSON object");
+    const JsonValue* given = json->find("document");
+    spatium::Result<bd::Document> doc = std::unexpected(spatium::Error(spatium::ErrorCode::ParseError, "the request has no document"));
+    if (given && given->is_string()) doc = bd::read_document(given->as_string());
+    else if (given && given->is_object()) doc = bd::document_from_json(*given);
+    if (!doc) return refuse(doc.error().message);
+    const std::string name = json->string_or("name", ""), along = json->string_or("along", "");
+    const bd::Statement* d = doc->find(name);
+    if (!d) return refuse(std::format("the document defines no '{}'", name));
+    if (d->kind != bd::StatementKind::Value)
+        return refuse(std::format("{} is a {}; a graph is drawn of a value", d->name, bd::statement_kind_name(d->kind)));
+    auto u = detail::unfolded(*doc, *d, {});
+    if (!u) return refuse(u.error().message);
+    if (std::ranges::find(u->free, along) == u->free.end())
+        return refuse(std::format("{} does not read the parameter '{}'", d->name, along));
+    const Expr f = u->f.bind(along, Expr::u());
+    const spatium::Result<bd::PlotShader> shader = bd::plot_shader(f);
+    if (!shader) return refuse(shader.error().message);
+    const auto interval = [&](const std::string& p) {
+        const bd::Statement* s = doc->find(p);
+        return Array{s->lo.field(0.0, 0.0), s->hi.field(0.0, 0.0)};
+    };
+    Array symbols;
+    for (const auto& s : shader->symbols) symbols.push_back(Object{{"name", s}, {"interval", interval(s)}});
+    Object out{{"name", name}, {"along", along}, {"interval", interval(along)}, {"vertex", shader->vertex},
+               {"fragment", shader->fragment}, {"symbols", symbols}};
+    if (const JsonValue* g = json->find("grid"); g && g->is_object()) {
+        const int w = static_cast<int>(g->number_or("width", 0)), h = static_cast<int>(g->number_or("height", 0));
+        float view[4]{}, size[2]{static_cast<float>(w), static_cast<float>(h)};
+        if (const JsonValue* v = g->find("view"); v && v->is_array() && v->as_array().size() == 4)
+            for (std::size_t k = 0; k < 4; ++k) view[k] = static_cast<float>(v->as_array()[k].as_number());
+        std::vector<float> slots;
+        if (const JsonValue* s = g->find("slots"); s && s->is_array())
+            for (const auto& x : s->as_array()) slots.push_back(static_cast<float>(x.as_number()));
+        auto pod = bd::lower(f);
+        if (!pod) return refuse(pod.error().message);
+        const auto twin = bd::narrowed(*pod);
+        Array values;
+        for (int py = 0; py < h; ++py)
+            for (int px = 0; px < w; ++px) {
+                const bd::PlotValue at = bd::plot_value(twin, view, size, px, py, slots);
+                values.push_back(static_cast<double>(at.F));
+            }
+        out.emplace_back("values", values);
+    }
     return out;
 }
 

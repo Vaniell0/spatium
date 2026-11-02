@@ -11,7 +11,9 @@
 #  include <cstddef>
 #  include <cstdint>
 #  include <cstring>
+#  include <algorithm>
 #  include <format>
+#  include <limits>
 #  include <string>
 #  include <type_traits>
 #  include <vector>
@@ -46,6 +48,13 @@
 // omits it. The count of fields that lower is then a fact about the
 // scene, and it must equal what `field_report()` calls structural -- if
 // the two ever differ, one of them is describing something it is not.
+//
+// **A symbol is a slot.** A named symbol lowers to a read of the slot its
+// name is given in `symbols`, and its value is passed in when the program
+// runs: the program is the field's structure, the slot its number. So a
+// parameter moved by a slider, or time, changes data and not the program
+// -- on a device, a uniform rather than a new shader. Run with no value for
+// a slot, a symbol reads NaN, as the unbound field it came from does.
 
 SPATIUM_EXPORT namespace spatium::io::build {
 
@@ -76,6 +85,9 @@ struct PodField {
     // Every Gather's points, x y z per point, tables back to back and
     // shared by content the way noise tables are.
     std::vector<T>            points;
+    // The name of each slot a Symbol op reads (its `k`), in the order the
+    // ops first read them; one slot per name, however many ops read it.
+    std::vector<std::string>  symbols;
 };
 
 // Where one factor's program sits inside a VecField's shared scalar pool.
@@ -182,11 +194,6 @@ Result<PodRange> lower_into(PodField<T>& out, const Field<T>& whole, const std::
             return std::unexpected(Error(ErrorCode::InvalidArgument,
                 std::format("lower: {}op {} is {} -- a closure has no plain-data form",
                             where, i, op_name(n.op))));
-        if (n.op == Op::Symbol)
-            return std::unexpected(Error(ErrorCode::InvalidArgument,
-                std::format("lower: {}op {} is the symbol '{}', which is not bound -- a family of "
-                            "fields has no plain-data form until one member is picked",
-                            where, i, n.name)));
         PodOp<T> p{};
         p.code  = static_cast<std::uint8_t>(n.op);
         p.a     = n.a;
@@ -196,6 +203,11 @@ Result<PodRange> lower_into(PodField<T>& out, const Field<T>& whole, const std::
         p.k     = n.k;
         if (n.op == Op::Noise) p.table = intern_table(out.tables, *n.noise);
         if (n.op == Op::Gather) p.extent = intern_points(out.points, *n.table, p.table);
+        if (n.op == Op::Symbol) {
+            const auto at = std::ranges::find(out.symbols, n.name);
+            p.k = static_cast<std::uint32_t>(at - out.symbols.begin());
+            if (at == out.symbols.end()) out.symbols.push_back(n.name);
+        }
         out.ops.push_back(p);
     }
     return r;
@@ -249,15 +261,31 @@ Result<PodVecField<T>> lower(const VecField<T>& f) {
     return out;
 }
 
+// The same program at fp32, as a device runs it: each number rounded to
+// the nearest float, the ops and tables as they are. What a shader is
+// compared against on the host.
+inline PodField<float> narrowed(const PodField<double>& f) {
+    PodField<float> out;
+    out.ops.reserve(f.ops.size());
+    for (const auto& n : f.ops)
+        out.ops.push_back(PodOp<float>{n.code, n.a, n.b, n.c, n.table, n.extent, n.k, static_cast<float>(n.value)});
+    out.tables = f.tables;
+    for (double p : f.points) out.points.push_back(static_cast<float>(p));
+    out.symbols = f.symbols;
+    return out;
+}
+
 // ── The interpreter ──────────────────────────────────────────────
 //
 // Reads nothing but the arrays. `scratch` must hold `count` values; it is
 // the caller's so that a consumer evaluating many points can keep one,
-// the way a GPU lane keeps its registers.
+// the way a GPU lane keeps its registers. `slots` holds `slot_count`
+// values, a symbol's by its slot; one past them reads NaN.
 
 template<Scalar T>
 T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables,
-            const T* points, T* s, const FieldInputs<T>& in) {
+            const T* points, T* s, const FieldInputs<T>& in,
+            const T* slots = nullptr, std::size_t slot_count = 0) {
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto& n = ops[i];
         switch (static_cast<Op>(n.code)) {
@@ -299,26 +327,30 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             // crash in a lane that has no way to report one.
             case Op::Opaque: s[i] = T{0}; break;
             case Op::Coord:  s[i] = in.x[n.k]; break;
-            case Op::Symbol: s[i] = T{0}; break;   // refused by `lower()`, like Opaque
+            case Op::Symbol:
+                s[i] = n.k < slot_count ? slots[n.k] : T(std::numeric_limits<double>::quiet_NaN());
+                break;
         }
     }
     return s[count - 1];
 }
 
+// `slots` are the values of `f.symbols`, in that order.
 template<Scalar T>
-T interpret(const PodField<T>& f, const FieldInputs<T>& in) {
+T interpret(const PodField<T>& f, const FieldInputs<T>& in, const std::vector<T>& slots = {}) {
     std::vector<T> scratch(f.ops.size());
     return interpret(f.ops.data(), static_cast<std::uint32_t>(f.ops.size()),
-                     f.tables.data(), f.points.data(), scratch.data(), in);
+                     f.tables.data(), f.points.data(), scratch.data(), in, slots.data(), slots.size());
 }
 
 template<Scalar T>
-T interpret(const PodField<T>& f, T u, T v) {
-    return interpret(f, FieldInputs<T>{u, v});
+T interpret(const PodField<T>& f, T u, T v, const std::vector<T>& slots = {}) {
+    return interpret(f, FieldInputs<T>{u, v}, slots);
 }
 
+// `slots` are the values of `f.scalars.symbols`, in that order.
 template<Scalar T>
-Vec<T, 3> interpret(const PodVecField<T>& f, const MotionEnv<T>& env) {
+Vec<T, 3> interpret(const PodVecField<T>& f, const MotionEnv<T>& env, const std::vector<T>& slots = {}) {
     std::vector<Vec<T, 3>> s(f.ops.size());
     std::vector<T> scratch(f.scalars.ops.size());
 
@@ -327,7 +359,7 @@ Vec<T, 3> interpret(const PodVecField<T>& f, const MotionEnv<T>& env) {
     const FieldInputs<T> in = VecField<T>::inputs_of(env);
     auto factor = [&](const PodRange& r) {
         return interpret(f.scalars.ops.data() + r.begin, r.count, f.scalars.tables.data(),
-                         f.scalars.points.data(), scratch.data(), in);
+                         f.scalars.points.data(), scratch.data(), in, slots.data(), slots.size());
     };
 
     for (std::size_t i = 0; i < f.ops.size(); ++i) {
