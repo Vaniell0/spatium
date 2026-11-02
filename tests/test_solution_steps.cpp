@@ -111,7 +111,7 @@ TEST_CASE("solution steps: a quadratic as a chain a page reads", "[io][steps]") 
     CHECK(twice[3].label == "D = 0: one root, counted twice");
     CHECK(twice.back().latex == "x = 1");
     const auto line = bd::to_steps(spatium::solve_quadratic_steps(0.0, 2.0, -1.0));
-    CHECK(line.back().latex == "x = -\\frac{c}{b} = -\\frac{-1}{2} = 0.5");
+    CHECK(line.back().latex == "x = -\\frac{c}{b} = \\frac{1}{2} = 0.5");
 }
 
 TEST_CASE("solution steps: an equation typed as text is solved in closed form, or refused by name", "[rsc][steps]") {
@@ -137,4 +137,21 @@ TEST_CASE("solution steps: an equation typed as text is solved in closed form, o
     REQUIRE_FALSE(two_names.has_value());
     CHECK(two_names.error().message.find("exactly one unknown") != std::string::npos);
     CHECK_FALSE(rsc::solve_closed_form("x^2 - 1").has_value());
+}
+
+TEST_CASE("solution steps: a minus is written once", "[io][steps]") {
+    namespace bd = spatium::io::build;
+    const auto steps = [](double a, double b, double c) { return bd::to_steps(spatium::solve_quadratic_steps(a, b, c)); };
+    // -c / b with its sign worked out: x - 3 = 0 is 3/1, -2x + 4 = 0 is 4/2
+    CHECK(steps(0, 1, -3).back().latex == "x = -\\frac{c}{b} = \\frac{3}{1} = 3");
+    CHECK(steps(0, -2, 4).back().latex == "x = -\\frac{c}{b} = \\frac{4}{2} = 2");
+    CHECK(steps(0, 2, 4).back().latex == "x = -\\frac{c}{b} = -\\frac{4}{2} = -2");
+    // b = 0 writes no -0, and a negative 2a turns the fraction over: (b ± √D) / |2a| is the same pair
+    CHECK(steps(-1, 0, 4)[3].latex == "x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a} = \\frac{\\pm \\sqrt{16}}{2}");
+    CHECK(steps(-1, 2, 3)[3].latex == "x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a} = \\frac{2 \\pm \\sqrt{16}}{2}");
+    CHECK(steps(-1, 2, -1)[3].latex == "x = -\\frac{b}{2a} = \\frac{2}{2}");
+    CHECK(steps(1, 0, 4)[3].latex == "x_{1,2} = \\frac{-b \\pm i\\sqrt{-D}}{2a} = \\frac{\\pm i\\sqrt{16}}{2}");
+    // the case it must fail: a positive 2a and a nonzero b are written as they are
+    CHECK(steps(1, -2, -3)[3].latex == "x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a} = \\frac{2 \\pm \\sqrt{16}}{2}");
+    CHECK(steps(2, 3, -5)[3].latex == "x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a} = \\frac{-3 \\pm \\sqrt{49}}{4}");
 }

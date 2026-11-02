@@ -5,6 +5,7 @@
 #  include <spatium/io/field.hpp>
 #  include <algorithm>
 #  include <array>
+#  include <cctype>
 #  include <cmath>
 #  include <cstdint>
 #  include <format>
@@ -162,6 +163,12 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
                 out.negative = true;
                 return out;
             }
+            // in text too: -a, which `parse` reads back as the same -1 * a; a power or an atom
+            // follows the minus bare and anything looser in parentheses, as the reader binds it.
+            // Not a number, which after a minus would be read as one negative number instead
+            if (!tex && arg(n.a).negative && arg(n.a).text == "-1" &&
+                !(arg(n.b).text.size() && std::isdigit(static_cast<unsigned char>(arg(n.b).text.front()))))
+                return {"-" + grouped(arg(n.b), Binding::Power, style), Binding::Sum};
             const std::string right = grouped(arg(n.b), right_of_product, style);
             // on a page a number or a fraction before a name is written next to it, 2x and \frac{1}{6} p,
             // as a person writes them; two numbers, a number in powers of ten, and a fraction or an
@@ -178,7 +185,12 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         }
         case Op::Div:
             if (tex) {
-                Spelled out{std::format("\\frac{{{}}}{{{}}}", arg(n.a).text, arg(n.b).text)};
+                // a minus that leads the top or the bottom stands in front of the fraction, once
+                const Spelled &top = arg(n.a), &bottom = arg(n.b);
+                const bool up = top.negative && top.text.starts_with('-'), down = bottom.negative && bottom.text.starts_with('-');
+                Spelled out{std::format("{}\\frac{{{}}}{{{}}}", up != down ? "-" : "", up ? top.text.substr(1) : top.text,
+                                        down ? bottom.text.substr(1) : bottom.text)};
+                if (up != down) out.binds = Binding::Sum, out.negative = true;
                 out.fraction = true;
                 return out;
             }

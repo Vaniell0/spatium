@@ -233,3 +233,26 @@ TEST_CASE("parse: abs is the size of a number, and |x| on a page", "[field][pars
     // the case it must fail: abs takes one argument
     CHECK(refusal("abs(u, v)").find("')' after the one argument of abs") != std::string::npos);
 }
+
+TEST_CASE("parse: a minus is written once, in text and on the page", "[field][parse][latex]") {
+    // in text a typed -a is -a, not (-1) * a, and reads back to the same ops
+    const auto text = [](std::string_view t) { return *bd::to_text(*bd::parse(t)); };
+    CHECK(text("-v") == "-v");
+    CHECK(text("-u^2") == "-u^2");
+    CHECK(text("-(u - v)") == "-(u - v)");
+    CHECK(text("-sqrt(u)") == "-sqrt(u)");
+    CHECK(text("2 * -x") == "2 * (-x)");
+    CHECK(text("u - (-v)") == "u - (-v)");
+    CHECK(text("-(-u)") == "-(-u)");
+    for (const char* t : {"-v", "-u^2", "-(u - v)", "2 * -x", "u - (-v)", "-(-u)", "-u * -v", "v + -u"}) {
+        INFO(t);
+        CHECK(key(*bd::parse(text(t))) == key(*bd::parse(t)));
+    }
+    // on a page a fraction's sign stands in front of it
+    CHECK(*bd::to_latex(*bd::parse("-1/4 - 3")) == "-\\frac{1}{4} - 3");
+    CHECK(*bd::to_latex(*bd::parse("u / -2")) == "-\\frac{u}{2}");
+    CHECK(*bd::to_latex(*bd::parse("-u / -2")) == "\\frac{u}{2}");
+    CHECK(*bd::to_latex(*bd::parse("v + u / -2")) == "v - \\frac{u}{2}");
+    // the case it must fail: a minus inside a sum is not moved out of it
+    CHECK(*bd::to_latex(*bd::parse("(1 - u) / 2")) == "\\frac{1 - u}{2}");
+}
