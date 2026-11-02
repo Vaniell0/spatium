@@ -3,7 +3,9 @@
 // build has its own libm, musl's, whose last digits differ from glibc's), numbers inside a string
 // likewise and the rest of the string exactly, a row of numbers at the scale of its largest, and
 // `computed` and a route's `cost` the only fields allowed to differ: a root found to the last bit
-// takes as many evaluations as the libm's last digits lead it to.
+// takes as many evaluations as the libm's last digits lead it to. A graph's numbers are its fp32
+// twin, the device's, and are compared to four float steps of their scale (2^-22): musl's tanhf
+// and glibc's differ in a float's last bit.
 //
 //   node site/wasm/check.mjs <host binary>
 import { readFileSync } from 'node:fs';
@@ -22,7 +24,8 @@ const evaluate = core.cwrap('spatium_evaluate', 'string', ['string']);
 const plot = core.cwrap('spatium_plot', 'string', ['string']);
 
 const number = /-?\d+(\.\d+)?(e[+-]?\d+)?/gi;
-const close = (a, b) => a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+let tolerance = 1e-9;   // relative; a graph's is a float's, set per line below
+const close = (a, b) => a === b || Math.abs(a - b) <= tolerance * Math.max(Math.abs(a), Math.abs(b));
 function agree(a, b, where) {
   if (typeof a === 'number' && typeof b === 'number') return close(a, b) || `${where}: ${a} vs ${b}`;
   if (typeof a === 'string' && typeof b === 'string') {
@@ -39,7 +42,7 @@ function agree(a, b, where) {
     if (a.length > 0 && a.every(x => typeof x === 'number') && b.every(x => typeof x === 'number')) {
       const scale = Math.max(...a.map(Math.abs), ...b.map(Math.abs));
       for (let i = 0; i < a.length; ++i)
-        if (Math.abs(a[i] - b[i]) > 1e-9 * scale) return `${where}[${i}]: ${a[i]} vs ${b[i]} (scale ${scale})`;
+        if (Math.abs(a[i] - b[i]) > tolerance * scale) return `${where}[${i}]: ${a[i]} vs ${b[i]} (scale ${scale})`;
       return true;
     }
     for (let i = 0; i < a.length; ++i) { const r = agree(a[i], b[i], `${where}[${i}]`); if (r !== true) return r; }
@@ -63,6 +66,7 @@ lines.forEach((line, i) => {
   const wasm = line.startsWith('preview ') ? preview(line.slice(8))
              : line.startsWith('evaluate ') ? evaluate(line.slice(9))
              : line.startsWith('plot ') ? plot(line.slice(5)) : respond(line, 0);
+  tolerance = line.startsWith('plot ') ? 2 ** -22 : 1e-9;
   const r = agree(JSON.parse(host[i]), JSON.parse(wasm), line);
   if (r !== true) { ++failed; console.log(`differs: ${r}`); }
   if ((line.includes(' for ') || line.startsWith('evaluate ')) && !line.startsWith('preview ') && !wasm.includes('"computed":"wasm"') && wasm.includes('"certificate"'))

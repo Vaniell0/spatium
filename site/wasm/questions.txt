@@ -36,3 +36,5 @@ evaluate {"document": "x: 2x^2 - 3x - 5 = 0", "name": "x", "engine": {"arithmeti
 plot {"document": "a in [0.5, 2]\nx in [-4, 4]\nf = a * sin(x) + x^2 / 10", "name": "f", "along": "x"}
 plot {"document": "p in [0.1, 4]\nx in [-3, 3]\ng = exp(-p * x^2)", "name": "g", "along": "x", "grid": {"width": 8, "height": 4, "view": [-3, -0.5, 3, 1.5], "slots": [1.5]}}
 plot {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "along": "p"}
+plot {"net": {"hidden": 2, "weights": [0.5, -1.25, 0.1, 0.0, 0.3, -0.7, 0.05], "interval": [-2, 2]}, "grid": {"width": 4, "height": 3, "view": [-2, -1, 2, 1]}}
+plot {"net": {"hidden": 2, "weights": [0.5, -1.25, 0.1]}}
