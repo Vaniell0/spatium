@@ -33,11 +33,14 @@ frame (`blackhole_glsl`), whose loop is written by hand around the metric
 `metric_glsl` generates. A new scene reaches the device through the
 generated half; the hand-written half is the frame around it.
 
-Numbers in a generated shader are constants today: the lowering refuses a
-symbol, so every name is bound before a field reaches a device and a moved
-number is a new shader. The rule the next step follows is in
+A named symbol lowers to a slot (`field_pod`: `PodField::symbols`), so a
+moved number is new data, not a new shader -- the rule in
 [`gpu-abi-design.md`](gpu-abi-design.md): structure is code, numbers are
-data.
+data. The WebGL2 target (`glsl_es_module`, `emit_scalar_es`) reads slots
+from a uniform array, and the graph of a function is its first consumer
+(`io/plot_glsl.hpp`, checked in a headless browser by
+`site/wasm/plot_check.mjs`). A Vulkan kernel binds no slot yet, so there a
+symbol is refused by name and bound to a number first.
 
 `render/` itself is the CPU ray tracer (camera, supersampling, sky, textures,
 PNG); `render/gpu/` is what a device reads. `viewer/app.hpp` is the

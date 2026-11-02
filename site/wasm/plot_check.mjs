@@ -38,13 +38,14 @@ const port = 9300 + Math.floor(Math.random() * 600);
 const chrome = spawn(browser, ['--headless=new', '--no-first-run', '--no-sandbox', `--user-data-dir=${profile}`,
   '--use-angle=swiftshader', '--enable-unsafe-swiftshader', `--remote-debugging-port=${port}`, 'about:blank'], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const done = (code) => {
+// ends the run; awaited, so nothing after it runs while the browser exits
+const done = (code) => new Promise(() => {
   chrome.once('exit', () => { server.close(); rmSync(profile, { recursive: true, force: true }); process.exit(code); });
   chrome.kill();
-};
+});
 
 let ws;
-for (let i = 0; i < 100 && !ws; i++) {
+for (let i = 0; i < 300 && !ws; i++) {
   try {
     const page = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page');
     const socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -52,7 +53,7 @@ for (let i = 0; i < 100 && !ws; i++) {
     ws = socket;
   } catch { await sleep(200); }
 }
-if (!ws) { console.log('plot check: the browser did not start'); done(1); }
+if (!ws) { console.log('plot check: the browser did not start'); await done(1); }
 let id = 0;
 const waiting = new Map();
 ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waiting.has(d.id)) { waiting.get(d.id)(d); waiting.delete(d.id); } };
@@ -66,7 +67,7 @@ for (let i = 0; i < 150 && !report; i++) {
   const r = await send('Runtime.evaluate', { expression: 'window.result', awaitPromise: true, returnByValue: true });
   report = r.result?.result?.value;
 }
-if (!report) { console.log('plot check: the page gave no report'); done(1); }
+if (!report) { console.log('plot check: the page gave no report'); await done(1); }
 // PLOT_PNG=<path> keeps the drawn frame, for a person to look at
 if (report.png && process.env.PLOT_PNG) writeFileSync(process.env.PLOT_PNG, Buffer.from(report.png.split(',')[1], 'base64'));
 delete report.png;
@@ -74,4 +75,4 @@ console.log(JSON.stringify(report));
 const ok = report.ok && report.worst <= tolerance && report.compiled === report.cases.length && report.wrong > tolerance;
 console.log(ok ? `plot check: ${report.runs} frames of ${report.compiled} shaders agree, worst ${report.worst.toExponential(2)} px`
                : `plot check: failed${report.why ? ': ' + report.why : ''}`);
-done(ok ? 0 : 1);
+await done(ok ? 0 : 1);

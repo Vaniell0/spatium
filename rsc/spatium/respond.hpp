@@ -283,7 +283,7 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
     if (std::ranges::find(u->free, along) == u->free.end())
         return refuse(std::format("{} does not read the parameter '{}'", d->name, along));
     const Expr f = u->f.bind(along, Expr::u());
-    auto shader = bd::plot_shader(f);
+    const spatium::Result<bd::PlotShader> shader = bd::plot_shader(f);
     if (!shader) return refuse(shader.error().message);
     const auto interval = [&](const std::string& p) {
         const bd::Statement* s = doc->find(p);
@@ -306,7 +306,10 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
         const auto twin = bd::narrowed(*pod);
         Array values;
         for (int py = 0; py < h; ++py)
-            for (int px = 0; px < w; ++px) values.push_back(static_cast<double>(bd::plot_value(twin, view, size, px, py, slots).F));
+            for (int px = 0; px < w; ++px) {
+                const bd::PlotValue at = bd::plot_value(twin, view, size, px, py, slots);
+                values.push_back(static_cast<double>(at.F));
+            }
         out.emplace_back("values", values);
     }
     return out;

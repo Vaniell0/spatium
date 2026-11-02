@@ -71,11 +71,14 @@ for Vulkan compute and uniforms or textures for WebGL2. So compilation is
 automatic -- document, IR, GLSL, compiled by the driver -- and a slider or a
 retrained network changes data, not code.
 
-Today the lowering refuses a symbol (`lower()` in `io/field_pod.hpp`,
-`io/field_glsl.hpp`), so every name is bound to its number before a field
-reaches a device, and a moved number is a new shader. Lowering a symbol to
-a uniform read is the step that changes this; the interpreter in
-`field_pod` is the host twin it is checked against.
+A symbol lowers to a slot: `lower()` in `io/field_pod.hpp` gives each
+name one, and the interpreter takes their values, the bound field's value
+to the bit. The WebGL2 target reads the slots from `uniform float
+field_symbols[N]`; the graph of a function (`io/plot_glsl.hpp`) is drawn by
+one shader per form while its parameters move, and a frame read back in a
+headless browser agrees with the fp32 twin to 0.006 of a pixel. The Vulkan
+target binds no slot yet and refuses a symbol by name, until a kernel there
+needs one.
 
 ## Decided: a network is one operation of the IR
 
