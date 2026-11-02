@@ -331,3 +331,56 @@ TEST_CASE("evaluate: the engine as JSON, beside the document", "[rsc][evaluate][
     CHECK(contains(ask(R"({"arithmetic": "ternary"})").string_or("refused", ""),
                    "no arithmetic 'ternary'; it has double, float, rational, decimal, real50"));
 }
+
+TEST_CASE("evaluate: in fractions, a closed form's roots are what they are", "[rsc][evaluate][engine]") {
+    using spatium::Rational;
+    // the fraction's own square root: where it is one, and spoiled where it is not
+    CHECK(sqrt(Rational(9, 4)) == Rational(3, 2));
+    CHECK_FALSE(sqrt(Rational(2)).ok());
+    CHECK_FALSE(sqrt(Rational(-4)).ok());
+
+    const auto roots = [](std::string_view equation, bool strict = false) {
+        return rsc::evaluate(doc(std::string("x: ") + std::string(equation)), "x", {},
+                             rsc::Engine{.arithmetic = rsc::Arithmetic::Rational, .strict = strict});
+    };
+    const auto& taken = [](const rsc::Evaluation& e) -> const rsc::Candidate& { return e.candidates[*e.taken]; };
+
+    const auto two = roots("2x^2 - 3x - 5 = 0");
+    CHECK(taken(two).arithmetic == rsc::Arithmetic::Rational);
+    CHECK(taken(two).text == "5/2, -1");
+    CHECK(two.values == std::vector<double>{2.5, -1.0});
+    CHECK(two.closed->steps[4].latex == "x_{1} = \\frac{5}{2},\\quad x_{2} = -1");
+    CHECK(roots("x^2 - 2x + 1 = 0").closed->exact->text == "1, 1");
+    CHECK(roots("0.5x^2 - 0.125 = 0").closed->exact->text == "1/2, -1/2");
+    // a constant is read as written, not as the double it folds to: 1/3 is a third
+    CHECK(roots("3x^2 - 1/3 = 0").closed->exact->text == "1/3, -1/3");
+    CHECK(roots("x - 1/3 = 0").closed->exact->text == "1/3");
+
+    // where the discriminant is not a square: (p ± q√m)/d, m free of square factors
+    const auto surd = roots("x^2 - 3x - 2 = 0");
+    CHECK(taken(surd).text == "(3 ± √17)/2");
+    CHECK(surd.closed->exact->latex == "\\frac{3 \\pm \\sqrt{17}}{2}");
+    CHECK(roots("x^2 - 8 = 0").closed->exact->text == "±2√2");
+    CHECK(roots("x^2 + 2x + 5 = 0").closed->exact->text == "-1 ± 2i");
+    CHECK(roots("3x^2 - 2x - 2 = 0").closed->exact->text == "(1 ± √7)/3");
+    // the pair: p ± q√m as doubles are the double solver's roots
+    for (const char* eq : {"x^2 - 3x - 2 = 0", "x^2 - 8 = 0", "3x^2 - 2x - 2 = 0", "x^2 - 0.1 = 0"}) {
+        INFO(eq);
+        const auto e = roots(eq);
+        REQUIRE(e.closed->exact);
+        const auto& x = *e.closed->exact;
+        const double p = x.p.to_double(), q = x.q.to_double() * std::sqrt(static_cast<double>(x.m));
+        const double r0 = e.closed->solution.roots[0].re, r1 = e.closed->solution.roots[1].re;
+        CHECK(std::abs(std::max(r0, r1) - (p + q)) <= 4e-16 * std::abs(p + q) + 1e-300);
+        CHECK(std::abs(std::min(r0, r1) - (p - q)) <= 4e-16 * std::abs(p - q) + 1e-300);
+    }
+
+    // the case it must fail: coefficients that are not fractions, and the double's route stands
+    const auto irrational = roots("sqrt(2) x^2 - 1 = 0");
+    REQUIRE(irrational.candidates.size() >= 2);
+    CHECK(irrational.candidates[0].refused == "the equation reads Sqrt, which has no fraction");
+    CHECK(taken(irrational).arithmetic == rsc::Arithmetic::Double);
+    CHECK(roots("sqrt(2) x^2 - 1 = 0", true).refused == "the equation reads Sqrt, which has no fraction");
+    // and with no engine, the closed form is the double's, with nothing exact
+    CHECK_FALSE(rsc::evaluate(doc("x: x^2 - 3x - 2 = 0"), "x").closed->exact);
+}

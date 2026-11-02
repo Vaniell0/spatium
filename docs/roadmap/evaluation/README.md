@@ -6,7 +6,6 @@ One door for a statement's value, `evaluate(doc, name, chosen, engine)` (`rsc/sp
 
 ## Now
 
-- exact closed-form roots in fractions (open as #197)
 - refusals that say why: a bracket ending where the equation is infinite (0^-1) is refused as having no value
 
 ## Later

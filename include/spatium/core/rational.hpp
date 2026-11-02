@@ -3,9 +3,10 @@
 // A fraction of two 64-bit integers, kept in lowest terms with a positive denominator: the
 // arithmetic in which 1/3 + 1/6 is 1/2 and not 0.49999999999999994.
 //
-// It is closed under + - * / and order, and under nothing else: there is no square root or sine
-// of a fraction in general, so it has none, and an evaluation that needs one is refused by the
-// op's name before it runs (`exact_op` in io/field_pod.hpp). A result that does not fit -- a
+// It is closed under + - * / and order, and under nothing else: there is no sine of a fraction
+// in general, and a square root only where the fraction is a square (`sqrt`, spoiled otherwise),
+// so an evaluation that needs one is refused by the op's name before it runs (`exact_op` in
+// io/field_pod.hpp). A result that does not fit -- a
 // numerator or denominator past 64 bits, or a division by zero -- is not wrapped or rounded: the
 // fraction is spoiled (`ok()` false) and stays so through everything computed from it, the way a
 // NaN does, so one check at the end tells whether the whole computation was exact.
@@ -124,6 +125,20 @@ public:
     Rational& operator*=(Rational b) { return *this = *this * b; }
     Rational& operator/=(Rational b) { return *this = *this / b; }
     friend Rational abs(Rational a) { return a.num_ < 0 ? -a : a; }
+    // The square root where it is a fraction -- of 9/4 it is 3/2 -- and spoiled where it is not
+    // (of 2, or of a negative): a fraction has no other. A solver written for any scalar
+    // (`solve_quadratic_steps`) finds it by ADL and so gives exact roots where they are fractions.
+    friend Rational sqrt(Rational a) {
+        if (!a.ok() || a.num_ < 0) return spoiled();
+        const auto root = [](long long n) -> long long {
+            auto r = static_cast<long long>(std::sqrt(static_cast<double>(n)));
+            while (r > 0 && r * r > n) --r;
+            while (__int128(r + 1) * (r + 1) <= n) ++r;
+            return __int128(r) * r == n ? r : -1;
+        };
+        const long long n = root(a.num_), d = root(a.den_);
+        return n < 0 || d < 0 ? spoiled() : Rational(n, d);
+    }
 
     // Spoiled fractions are equal to each other and below every fraction, so the order stays total.
     friend constexpr bool operator==(const Rational&, const Rational&) = default;
