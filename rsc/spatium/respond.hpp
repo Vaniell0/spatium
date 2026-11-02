@@ -28,6 +28,7 @@
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <format>
@@ -108,6 +109,19 @@ inline spatium::io::JsonValue::ObjectType answer_json(const Answer& a, const std
 
 // An evaluation as JSON: the route its value came by and the value as that route gives it, or
 // why there is none, and every candidate with its cost.
+// A computed number on a page: a fraction as one, otherwise the arithmetic's own digits, and a
+// double as the printer writes it.
+inline std::string number_latex(const Candidate& c, double value) {
+    namespace bd = spatium::io::build;
+    if (c.text.empty()) return bd::detail::number_text(value, bd::detail::TextStyle::Latex);
+    if (const auto slash = c.text.find('/'); slash != std::string::npos) {
+        const bool negative = c.text.front() == '-';
+        return std::format("{}\\frac{{{}}}{{{}}}", negative ? "-" : "", c.text.substr(negative, slash - negative),
+                           c.text.substr(slash + 1));
+    }
+    return c.text;
+}
+
 inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, std::size_t written = 2) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -119,10 +133,13 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
     else if (!e.refused.empty())
         out.emplace_back("refused", e.refused);
     if (e.taken) switch (e.candidates[*e.taken].route) {
-        case Route::Evaluate:
+        case Route::Evaluate: {
+            const Candidate& c = e.candidates[*e.taken];
             out.emplace_back("value", e.values.front());
-            out.emplace_back("latex", *bd::to_latex(e.written) + " = " + bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex));
+            if (!c.text.empty()) out.emplace_back("text", c.text);
+            out.emplace_back("latex", *bd::to_latex(e.written) + " = " + number_latex(c, e.values.front()));
             break;
+        }
         case Route::Expression:
             out.emplace_back("reads", e.free.front());
             out.emplace_back("latex", *bd::to_latex(e.written));
@@ -160,13 +177,15 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
     Array candidates;
     for (std::size_t i = 0; i < e.candidates.size(); ++i) {
         const Candidate& c = e.candidates[i];
-        Object o{{"route", route_name(c.route)}, {"cost", c.cost}, {"taken", e.taken == i}};
+        Object o{{"route", route_name(c.route)}, {"arithmetic", arithmetic_name(c.arithmetic)}, {"cost", c.cost},
+                 {"taken", e.taken == i}};
         if (!c.refused.empty()) o.emplace_back("refused", c.refused);
         if (!c.values.empty()) {
             Array values;
             for (double v : c.values) values.push_back(v);
             o.emplace_back("values", values);
         }
+        if (!c.text.empty()) o.emplace_back("text", c.text);
         candidates.push_back(std::move(o));
     }
     out.emplace_back("candidates", candidates);
@@ -185,7 +204,7 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
         return JsonValue(std::move(out));
     };
     const auto answered = [&](const AskedDocument& asked) {
-        for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, tolerance)))
+        for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance})))
             out.emplace_back(std::move(k), std::move(v));
         out.emplace_back("document", bd::to_json(asked.document));
         return JsonValue(std::move(out));
@@ -230,8 +249,10 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
 }
 
 // A document given to the door as one JSON object: `document` its text or its JSON, `name` the
-// definition wanted, `chosen` the parameters given a value ({"p": 2}), `tolerance` the
-// synthesis's. The answer is `name` and the evaluation, or what could not be read.
+// definition wanted, `chosen` the parameters given a value ({"p": 2}), and `engine`, how it is
+// computed ({"arithmetic": "rational", "strict": false, "tolerance": 1e-8}, each optional; a
+// `tolerance` beside them is the synthesis's too). The answer is `name` and the evaluation, or
+// what could not be read.
 inline spatium::io::JsonValue evaluate_request(std::string_view request) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -249,9 +270,22 @@ inline spatium::io::JsonValue evaluate_request(std::string_view request) {
             if (!v.is_number()) return refuse(std::format("the value chosen for {} is not a number", k));
             chosen.emplace_back(k, v.as_number());
         }
+    Engine engine{.tolerance = json->number_or("tolerance", 1e-8)};
+    if (const JsonValue* e = json->find("engine"); e && e->is_object()) {
+        const std::string a = e->string_or("arithmetic", "double");
+        const auto known = std::ranges::find_if(arithmetics, [&](Arithmetic x) { return a == arithmetic_name(x); });
+        if (known == std::end(arithmetics)) {
+            std::string names;
+            for (Arithmetic x : arithmetics) names += std::string(names.empty() ? "" : ", ") + arithmetic_name(x);
+            return refuse(std::format("the engine has no arithmetic '{}'; it has {}", a, names));
+        }
+        engine.arithmetic = *known;
+        if (const JsonValue* strict = e->find("strict"); strict && strict->is_bool()) engine.strict = strict->as_bool();
+        engine.tolerance = e->number_or("tolerance", engine.tolerance);
+    }
     const std::string name = json->string_or("name", "");
     Object out{{"name", name}};
-    for (auto& [k, v] : evaluation_json(evaluate(*doc, name, chosen, json->number_or("tolerance", 1e-8))))
+    for (auto& [k, v] : evaluation_json(evaluate(*doc, name, chosen, engine)))
         out.emplace_back(std::move(k), std::move(v));
     return out;
 }

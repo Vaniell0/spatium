@@ -7,6 +7,9 @@
 #  include <spatium/algebra/noise.hpp>
 #  include <spatium/algebra/groups/so3.hpp>
 #  include <bit>
+#  include <charconv>
+#  include <concepts>
+#  include <optional>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
@@ -261,19 +264,107 @@ Result<PodVecField<T>> lower(const VecField<T>& f) {
     return out;
 }
 
-// The same program at fp32, as a device runs it: each number rounded to
-// the nearest float, the ops and tables as they are. What a shader is
-// compared against on the host.
-inline PodField<float> narrowed(const PodField<double>& f) {
-    PodField<float> out;
+// ── Other arithmetics ────────────────────────────────────────────
+//
+// The interpreter below is one program for every arithmetic it is run in: a float, as a device
+// runs it; a double; Real50; a fraction (core/rational.hpp) or a decimal (core/decimal.hpp), in
+// which 0.1 is exact. An arithmetic with no square root has no sine either: such an arithmetic
+// computes only the ops `exact_op` names, and a program reading any other is refused by that op's
+// name (`beyond`) before it runs.
+
+namespace detail {
+using std::sqrt, std::sin, std::cos, std::log, std::exp;
+template<class T>
+concept transcendental = requires(T a) { sqrt(a); sin(a); cos(a); log(a); exp(a); };
+} // namespace detail
+
+template<class T>
+concept Transcendental = detail::transcendental<T>;
+
+// The ops an arithmetic with nothing but + - * / and order computes.
+inline bool exact_op(Op o) {
+    switch (o) {
+        case Op::Const: case Op::U: case Op::V: case Op::Add: case Op::Sub: case Op::Mul: case Op::Div:
+        case Op::Min: case Op::Max: case Op::Less: case Op::Abs: case Op::Symbol: case Op::Coord:
+        case Op::Origin: case Op::Point: case Op::Opaque:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// The first op of `f` that arithmetic T cannot compute, if any.
+template<Scalar T>
+std::optional<Op> beyond(const PodField<double>& f) {
+    if constexpr (!Transcendental<T>)
+        for (const auto& n : f.ops)
+            if (!exact_op(static_cast<Op>(n.code))) return static_cast<Op>(n.code);
+    return std::nullopt;
+}
+
+// A double as arithmetic T: rounded for a float, and read through its shortest decimal form for
+// an arithmetic that holds decimals (Real50 from its text, a fraction or a decimal by their own
+// constructor), so a literal 0.1 is the 0.1 that was typed.
+template<Scalar T>
+T from_double(double x) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return static_cast<T>(x);
+    } else if constexpr (std::constructible_from<T, const char*>) {
+        char buf[32];
+        const auto [end, ec] = std::to_chars(buf, buf + sizeof buf - 1, x);
+        *(ec == std::errc{} ? end : buf) = '\0';
+        return T(buf);
+    } else {
+        return T(x);
+    }
+}
+
+// The same program in arithmetic T: each number as T holds it, the ops and tables as they are.
+template<Scalar T>
+PodField<T> converted(const PodField<double>& f) {
+    PodField<T> out;
     out.ops.reserve(f.ops.size());
     for (const auto& n : f.ops)
-        out.ops.push_back(PodOp<float>{n.code, n.a, n.b, n.c, n.table, n.extent, n.k, static_cast<float>(n.value)});
+        out.ops.push_back(PodOp<T>{n.code, n.a, n.b, n.c, n.table, n.extent, n.k, from_double<T>(n.value)});
     out.tables = f.tables;
-    for (double p : f.points) out.points.push_back(static_cast<float>(p));
+    for (double p : f.points) out.points.push_back(from_double<T>(p));
     out.symbols = f.symbols;
     return out;
 }
+
+// The same program at fp32, as a device runs it: each number rounded to
+// the nearest float, the ops and tables as they are. What a shader is
+// compared against on the host.
+inline PodField<float> narrowed(const PodField<double>& f) { return converted<float>(f); }
+
+namespace detail {
+
+// The ops past + - * / and order, for an arithmetic that has them.
+template<Scalar T>
+T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const T* points, const FieldInputs<T>& in) {
+    switch (static_cast<Op>(n.code)) {
+        case Op::Sin:  { using std::sin; return sin(s[n.a]); }
+        case Op::Cos:  { using std::cos; return cos(s[n.a]); }
+        case Op::Sqrt: { using std::sqrt; return sqrt(s[n.a]); }
+        case Op::Log:  { using std::log; return log(s[n.a]); }
+        case Op::Exp:  { using std::exp; return exp(s[n.a]); }
+        case Op::Noise:
+            return algebra::PerlinNoise::sample(tables + std::size_t{n.table} * kNoiseTableBytes, s[n.a], s[n.b], s[n.c]);
+        case Op::Id:   return static_cast<T>(in.id);
+        case Op::Hash: return instance_unit<T>(in.id, n.k);
+        case Op::Gather: {
+            // Field::gather_at's rounding, over the flat buffer.
+            if (n.extent == 0) return T{0};
+            const T lo = s[n.a] < T{0} ? T{0} : s[n.a];
+            auto at = static_cast<std::size_t>(lo);
+            if (at >= n.extent) at = n.extent - 1;
+            return points[(std::size_t{n.table} + at) * 3 + n.k];
+        }
+        default: return T{0};
+    }
+}
+
+} // namespace detail
 
 // ── The interpreter ──────────────────────────────────────────────
 //
@@ -298,30 +389,15 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             case Op::Div:   s[i] = s[n.a] / s[n.b]; break;
             case Op::Min:   { using std::min; s[i] = min(s[n.a], s[n.b]); break; }
             case Op::Max:   { using std::max; s[i] = max(s[n.a], s[n.b]); break; }
-            case Op::Sin:   { using std::sin; s[i] = sin(s[n.a]); break; }
-            case Op::Cos:   { using std::cos; s[i] = cos(s[n.a]); break; }
             case Op::Less:  s[i] = s[n.a] < s[n.b] ? T{1} : T{0}; break;
-            case Op::Noise:
-                s[i] = algebra::PerlinNoise::sample(tables + std::size_t{n.table} * kNoiseTableBytes,
-                                                    s[n.a], s[n.b], s[n.c]);
-                break;
-            case Op::Id:     s[i] = static_cast<T>(in.id); break;
             case Op::Origin: s[i] = in.origin[n.k]; break;
             case Op::Point:  s[i] = in.p[n.k]; break;
-            case Op::Hash:   s[i] = instance_unit<T>(in.id, n.k); break;
-            case Op::Sqrt:   { using std::sqrt; s[i] = sqrt(s[n.a]); break; }
-            case Op::Log:    { using std::log; s[i] = log(s[n.a]); break; }
-            case Op::Exp:    { using std::exp; s[i] = exp(s[n.a]); break; }
             case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }
-            case Op::Gather: {
-                // Field::gather_at's rounding, over the flat buffer.
-                if (n.extent == 0) { s[i] = T{0}; break; }
-                const T lo = s[n.a] < T{0} ? T{0} : s[n.a];
-                auto at = static_cast<std::size_t>(lo);
-                if (at >= n.extent) at = n.extent - 1;
-                s[i] = points[(std::size_t{n.table} + at) * 3 + n.k];
+            default:
+                // the rest are computed in an arithmetic that has them; `beyond` refuses them elsewhere
+                if constexpr (Transcendental<T>) s[i] = detail::inexact_step(n, s, tables, points, in);
+                else s[i] = T(std::numeric_limits<double>::quiet_NaN());
                 break;
-            }
             // Unreachable from `lower()`, which refuses it. A zero rather
             // than an assert, so a hand-built program with one in it gives
             // a wrong number a bit-exact comparison will catch, not a

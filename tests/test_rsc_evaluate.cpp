@@ -253,3 +253,79 @@ TEST_CASE("plot: a value is drawn along one parameter, the others its shader's s
                        .string_or("refused", ""), "does not read the parameter 'q'"));
     (void)text;
 }
+
+TEST_CASE("evaluate: a value is computed in the engine's arithmetic, each held against a double", "[rsc][evaluate][engine]") {
+    const auto d = doc("a = 1/3 + 1/6\nb = 0.1 * 3\nc = abs(2 - 7) + min(1/4, 2) * 2^3\ns = sqrt(2) + 1\n"
+                       "big = 2^62 * 4\nnone = 1 / (2 - 2)");
+    const auto in = [&](const char* name, rsc::Arithmetic a, bool strict = false) {
+        return rsc::evaluate(d, name, {}, rsc::Engine{.arithmetic = a, .strict = strict});
+    };
+    const auto& taken = [](const rsc::Evaluation& e) -> const rsc::Candidate& { return e.candidates[*e.taken]; };
+
+    // a fraction is exact where a double is not, and says so
+    CHECK(taken(in("a", rsc::Arithmetic::Rational)).text == "1/2");
+    CHECK(taken(in("b", rsc::Arithmetic::Rational)).text == "3/10");
+    CHECK(taken(in("c", rsc::Arithmetic::Rational)).text == "7");
+    // the case a double must fail: 0.1 * 3 is not 3/10 in binary
+    CHECK(in("b", rsc::Arithmetic::Double).values.front() != 0.3);
+    CHECK(in("b", rsc::Arithmetic::Rational).values.front() == 0.3);
+
+    // the pair: every arithmetic's value, as a double, is the double's to its own precision
+    for (const char* name : {"a", "b", "c"}) {
+        INFO(name);
+        const double want = in(name, rsc::Arithmetic::Double).values.front();
+        CHECK(std::abs(in(name, rsc::Arithmetic::Rational).values.front() - want) <= 4e-16 * std::abs(want));
+        const auto f = in(name, rsc::Arithmetic::Float);
+        CHECK(taken(f).arithmetic == rsc::Arithmetic::Float);
+        CHECK(std::abs(f.values.front() - want) <= 2e-7 * std::abs(want));
+        if (std::string_view(name) == "b") CHECK(f.values.front() != want);   // and 0.1 * 3 rounds otherwise in a float
+#if SPATIUM_HAS_DECIMAL
+        CHECK(std::abs(in(name, rsc::Arithmetic::Decimal).values.front() - want) <= 4e-16 * std::abs(want));
+#endif
+    }
+
+    // what an arithmetic cannot compute: a double after it, or with `strict`, a refusal
+    const auto s = in("s", rsc::Arithmetic::Rational);
+    REQUIRE(s.candidates.size() == 2);
+    CHECK(s.candidates[0].refused == "rational has no Sqrt in it");
+    CHECK(taken(s).arithmetic == rsc::Arithmetic::Double);
+    CHECK(in("s", rsc::Arithmetic::Rational, true).refused == "rational has no Sqrt in it");
+    CHECK(contains(in("big", rsc::Arithmetic::Rational, true).refused, "does not fit in 64 bits"));
+    CHECK(contains(in("none", rsc::Arithmetic::Rational, true).refused, "divides by zero"));
+    CHECK(in("big", rsc::Arithmetic::Rational).values.front() == std::ldexp(1.0, 64));
+
+#if SPATIUM_HAS_DECIMAL
+    // a decimal: ten digits of 0.1 are 1, and a third has sixteen threes
+    CHECK(taken(in("b", rsc::Arithmetic::Decimal)).text == "0.3");
+    CHECK(taken(in("a", rsc::Arithmetic::Decimal)).text == "0.5");
+    CHECK(rsc::evaluate(doc("t = 1/3"), "t", {}, rsc::Engine{.arithmetic = rsc::Arithmetic::Decimal}).candidates[0].text ==
+          "0.3333333333333333");
+#else
+    CHECK(contains(in("b", rsc::Arithmetic::Decimal, true).refused, "no decimal"));
+#endif
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+    // Real50 has a square root, so it computes what a fraction cannot
+    const auto r = in("s", rsc::Arithmetic::Real50, true);
+    REQUIRE(r.taken);
+    CHECK(taken(r).text.starts_with("2.41421356237309504880168872420969807856967187537"));
+    CHECK(r.values.front() == std::sqrt(2.0) + 1);
+#endif
+}
+
+TEST_CASE("evaluate: the engine as JSON, beside the document", "[rsc][evaluate][engine]") {
+    const auto ask = [](std::string_view engine) {
+        return rsc::evaluate_request(std::string(R"({"document": "a = 1/3 + 1/6 - 1", "name": "a", "engine": )") +
+                                     std::string(engine) + "}");
+    };
+    const auto r = ask(R"({"arithmetic": "rational"})");
+    CHECK(r.string_or("text", "") == "-1/2");
+    CHECK(r.string_or("latex", "") == "\\frac{1}{3} + \\frac{1}{6} - 1 = -\\frac{1}{2}");
+    CHECK(r.find("candidates")->as_array()[0].string_or("arithmetic", "") == "rational");
+    // with no engine, a double, and every candidate says so
+    const auto plain = rsc::evaluate_request(R"({"document": "a = 1/3 + 1/6 - 1", "name": "a"})");
+    CHECK_FALSE(plain.find("text"));
+    CHECK(plain.find("candidates")->as_array()[0].string_or("arithmetic", "") == "double");
+    // the case it must fail: an arithmetic the engine does not have, refused with those it has
+    CHECK(contains(ask(R"({"arithmetic": "ternary"})").string_or("refused", ""),
+                   "no arithmetic 'ternary'; it has double, float, rational, decimal, real50"));
+}
