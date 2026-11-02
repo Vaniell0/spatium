@@ -354,3 +354,20 @@ TEST_CASE("synthesis: where no short expression answers, a Chebyshev polynomial 
     rsc::SynthesisSpec kink{.lo = 0, .hi = 2, .tolerance = 1e-10, .relative = false, .polynomial_degree = 32};
     CHECK_FALSE(rsc::chebyshev([](double x) { return std::abs(x - 1); }, kink).accepted);
 }
+
+TEST_CASE("synthesis: an answer reads as a person writes it, if it still holds", "[rsc][synthesis]") {
+    namespace bd = spatium::io::build;
+    const auto read = [](const std::function<double(double)>& f, double lo, double hi) {
+        const auto s = rsc::synthesize(f, {.lo = lo, .hi = hi});
+        REQUIRE(s.accepted);
+        return std::pair{*bd::to_text(s.expr, "p"), *bd::to_latex(s.expr, "p")};
+    };
+    // the root of x^2 + p = 0 on p in [-1, 0]: it was 0.7071067811865477 * sqrt(1 - (p - (-0.5)) * 2),
+    // the interval's own variable and a coefficient that belong under the root
+    const auto [text, latex] = read([](double p) { return std::sqrt(-p); }, -1, 0);
+    CHECK(latex == "\\sqrt{-p}");
+    CHECK(text == "sqrt(-p)");
+    // an argument linear in p is written in p, and a coefficient goes under the root where the
+    // numbers it leaves there are short: 0.7071067811865476 * sqrt(1 + t) is sqrt(p + 1)
+    CHECK(read([](double p) { return std::sqrt(p + 1); }, -1, 0).second == "\\sqrt{p + 1}");
+}
