@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <cmath>
 #include <format>
 #include <string>
@@ -302,31 +303,51 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
     const auto refuse = [](std::string why) { return JsonValue(Object{{"refused", std::move(why)}}); };
     const auto json = spatium::io::parse(request);
     if (!json || !json->is_object()) return refuse("the request is not a JSON object");
-    const JsonValue* given = json->find("document");
+    std::string name = json->string_or("name", ""), along = json->string_or("along", "");
+    Expr f;
+    std::function<Array(const std::string&)> interval;
     spatium::Result<bd::Document> doc = std::unexpected(spatium::Error(spatium::ErrorCode::ParseError, "the request has no document"));
-    if (given && given->is_string()) doc = bd::read_document(given->as_string());
-    else if (given && given->is_object()) doc = bd::document_from_json(*given);
-    if (!doc) return refuse(doc.error().message);
-    const std::string name = json->string_or("name", ""), along = json->string_or("along", "");
-    const bd::Statement* d = doc->find(name);
-    if (!d) return refuse(std::format("the document defines no '{}'", name));
-    if (d->kind != bd::StatementKind::Value)
-        return refuse(std::format("{} is a {}; a graph is drawn of a value", d->name, bd::statement_kind_name(d->kind)));
-    auto u = detail::unfolded(*doc, *d, {});
-    if (!u) return refuse(u.error().message);
-    if (std::ranges::find(u->free, along) == u->free.end())
-        return refuse(std::format("{} does not read the parameter '{}'", d->name, along));
-    const Expr f = u->f.bind(along, Expr::u());
+    if (const JsonValue* n = json->find("net"); n && n->is_object()) {
+        // a net of one input, y = net(x): its width and its weights in `TanhNet`'s order
+        std::vector<double> weights;
+        if (const JsonValue* w = n->find("weights"); w && w->is_array())
+            for (const auto& x : w->as_array()) weights.push_back(x.as_number());
+        auto made = Expr::net_of(std::move(weights), static_cast<std::size_t>(n->number_or("hidden", 0)), {Expr::u()});
+        if (!made) return refuse(made.error().message);
+        f = std::move(*made);
+        if (name.empty()) name = "net";
+        if (along.empty()) along = "x";
+        Array range{-1.0, 1.0};
+        if (const JsonValue* r = n->find("interval"); r && r->is_array() && r->as_array().size() == 2)
+            range = Array{r->as_array()[0].as_number(), r->as_array()[1].as_number()};
+        interval = [range](const std::string&) { return range; };
+    } else {
+        const JsonValue* given = json->find("document");
+        if (given && given->is_string()) doc = bd::read_document(given->as_string());
+        else if (given && given->is_object()) doc = bd::document_from_json(*given);
+        if (!doc) return refuse(doc.error().message);
+        const bd::Statement* d = doc->find(name);
+        if (!d) return refuse(std::format("the document defines no '{}'", name));
+        if (d->kind != bd::StatementKind::Value)
+            return refuse(std::format("{} is a {}; a graph is drawn of a value", d->name, bd::statement_kind_name(d->kind)));
+        auto u = detail::unfolded(*doc, *d, {});
+        if (!u) return refuse(u.error().message);
+        if (std::ranges::find(u->free, along) == u->free.end())
+            return refuse(std::format("{} does not read the parameter '{}'", d->name, along));
+        f = u->f.bind(along, Expr::u());
+        interval = [&doc](const std::string& p) {
+            const bd::Statement* s = doc->find(p);
+            return Array{s->lo.field(0.0, 0.0), s->hi.field(0.0, 0.0)};
+        };
+    }
     const spatium::Result<bd::PlotShader> shader = bd::plot_shader(f);
     if (!shader) return refuse(shader.error().message);
-    const auto interval = [&](const std::string& p) {
-        const bd::Statement* s = doc->find(p);
-        return Array{s->lo.field(0.0, 0.0), s->hi.field(0.0, 0.0)};
-    };
     Array symbols;
     for (const auto& s : shader->symbols) symbols.push_back(Object{{"name", s}, {"interval", interval(s)}});
+    Array weights;
+    for (float w : shader->weights) weights.push_back(static_cast<double>(w));
     Object out{{"name", name}, {"along", along}, {"interval", interval(along)}, {"vertex", shader->vertex},
-               {"fragment", shader->fragment}, {"symbols", symbols}};
+               {"fragment", shader->fragment}, {"symbols", symbols}, {"weights", weights}};
     if (const JsonValue* g = json->find("grid"); g && g->is_object()) {
         const int w = static_cast<int>(g->number_or("width", 0)), h = static_cast<int>(g->number_or("height", 0));
         float view[4]{}, size[2]{static_cast<float>(w), static_cast<float>(h)};

@@ -11,11 +11,13 @@
 #  include <bit>
 #  include <cassert>
 #  include <algorithm>
+#  include <array>
 #  include <atomic>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
 #  include <cstring>
+#  include <format>
 #  include <functional>
 #  include <limits>
 #  include <map>
@@ -365,6 +367,15 @@ enum class Op : std::uint8_t {
     // with only min and max it read max(x, -x) on the page; it is total, and one instruction on
     // every target.
     Abs,
+
+    // A net of one hidden tanh layer over three children, tanh(c + sum_j v_j tanh(b_j + w_j . x)),
+    // as `TanhNet<F, H>` computes it (algebra/models/network.hpp), with its weights in its order
+    // in `weights`, H in `k`, and F -- one to three, the children past it unread -- from how many
+    // weights there are. The weights are numbers the op reads, not constants written into the
+    // field: lowered, they are a buffer (in WebGL2, a uniform array), so a net trained further is
+    // new numbers for the same program, and a shader is not compiled again. Written out as scalar
+    // ops it would be the other way round. Nothing folds it, for the same reason.
+    Net,
 };
 
 // The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
@@ -411,6 +422,7 @@ inline const char* op_name(Op o) {
         case Op::Exp:    return "Exp";
         case Op::Symbol: return "Symbol";
         case Op::Abs:    return "Abs";
+        case Op::Net:    return "Net";
     }
     return "?";
 }
@@ -426,7 +438,7 @@ inline bool is_binary(Op o) {
 inline std::uint32_t arity(Op o) {
     if (o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Gather || o == Op::Log || o == Op::Exp ||
         o == Op::Abs) return 1;
-    if (o == Op::Noise)               return 3;
+    if (o == Op::Noise || o == Op::Net) return 3;
     return is_binary(o) ? 2 : 0;
 }
 
@@ -450,6 +462,9 @@ struct FieldOp {
 
     // Gather: the table. Shared for the reason `noise` is.
     std::shared_ptr<const std::vector<Vec<T, 3>>> table;
+
+    // Net: its weights, in `TanhNet`'s order. Shared for the reason `noise` is.
+    std::shared_ptr<const std::vector<T>> weights;
 
     // Opaque leaf. The callable itself, plus what can be known about it
     // without asking the user for a name.
@@ -632,7 +647,7 @@ public:
             const auto& n = ops_[i];
             const auto k = arity(n.op);
             const std::uint32_t a = k > 0 ? at[n.a] : n.a, b = k > 1 ? at[n.b] : n.b, c = k > 2 ? at[n.c] : n.c;
-            const bool foldable = k > 0 && n.op != Op::Noise && n.op != Op::Gather &&
+            const bool foldable = k > 0 && n.op != Op::Noise && n.op != Op::Gather && n.op != Op::Net &&
                                   is_const(a) && (k < 2 || is_const(b));
             if (foldable) {
                 FieldOp<T> x{}, y{}, op = n;
@@ -896,6 +911,44 @@ public:
         return x;
     }
 
+    // The same from weights known only at run time (a net read from JSON), refused when their
+    // count is not F H + 2 H + 1 for the inputs given.
+    static Result<Field> net_of(std::vector<T> weights, std::size_t hidden, const std::vector<Field>& inputs) {
+        const std::size_t F = inputs.size();
+        if (F < 1 || F > 3 || hidden < 1 || weights.size() != F * hidden + 2 * hidden + 1)
+            return std::unexpected(Error(ErrorCode::InvalidArgument, std::format(
+                "net: {} inputs through {} units take {} weights, and {} were given; a net reads one to three inputs",
+                F, hidden, F * hidden + 2 * hidden + 1, weights.size())));
+        Field x = inputs[0];
+        const auto xr = static_cast<std::uint32_t>(x.ops_.size() - 1);
+        const auto yr = F > 1 ? x.append_operand(inputs[1]) : xr;
+        const auto zr = F > 2 ? x.append_operand(inputs[2]) : xr;
+        FieldOp<T> parent{};
+        parent.op = Op::Net;
+        parent.a = xr;
+        parent.b = yr;
+        parent.c = zr;
+        parent.k = static_cast<std::uint32_t>(hidden);
+        parent.weights = std::make_shared<const std::vector<T>>(std::move(weights));
+        x.ops_.push_back(std::move(parent));
+        return x;
+    }
+
+    // What a Net op computes, in `TanhNet::forward`'s order to the bit; public so an interpreter
+    // of the lowered form shares it. `w` holds F H + 2 H + 1 weights.
+    static T net_at(const T* w, std::size_t F, std::size_t H, const T (&x)[3]) {
+        using std::tanh;
+        T sum = w[F * H + 2 * H];
+        for (std::size_t j = 0; j < H; ++j) {
+            T pre = w[F * H + j];
+            for (std::size_t k = 0; k < F; ++k)
+                pre = pre + w[j * F + k] * x[k];
+            sum = sum + w[F * H + H + j] * tanh(pre);
+        }
+        return tanh(sum);
+    }
+    static std::size_t net_inputs(std::size_t weight_count, std::size_t H) { return (weight_count - 1 - 2 * H) / H; }
+
     // The accumulating form. Appends into this field's own pool, so
     // building a field term by term is linear rather than quadratic:
     // nothing else can observe this pool mid-expression, so appending to
@@ -973,6 +1026,11 @@ public:
                         for (const auto& p : *n.table)
                             for (std::size_t j = 0; j < 3; ++j) rec.push_back(bits_of(p[j]));
                         break;
+                    case Op::Net:
+                        if (!n.weights) return false;
+                        rec.push_back(n.weights->size());
+                        for (const auto& w : *n.weights) rec.push_back(bits_of(w));
+                        break;
                     case Op::Opaque:
                         if (n.serial == 0) return false;
                         rec.push_back(n.serial);
@@ -1041,6 +1099,12 @@ private:
                         for (std::size_t j = 0; j < 3; ++j) h = detail::id_mix(h, bits_of(p[j]));
                 }
                 break;
+            case Op::Net:
+                if (n.weights) {
+                    h = detail::id_mix(h, n.weights->size());
+                    for (const auto& w : *n.weights) h = detail::id_mix(h, bits_of(w));
+                }
+                break;
             case Op::Opaque:
                 h = detail::id_mix(h, n.serial);
                 break;
@@ -1087,6 +1151,7 @@ private:
             case Op::Const:  return kBitComparable;
             case Op::Noise:  return n.noise != nullptr;
             case Op::Gather: return n.table != nullptr;
+            case Op::Net:    return kBitComparable && n.weights != nullptr;
             default:         return true;
         }
     }
@@ -1117,6 +1182,10 @@ private:
             if (!n.table->empty())
                 for (std::size_t j = 0; j < 3; ++j) h = mix(h, bits_of((*n.table)[0][j]));
         }
+        if (n.op == Op::Net) {
+            h = mix(h, n.weights->size());
+            for (const auto& w : *n.weights) h = mix(h, bits_of(w));
+        }
         return h;
     }
 
@@ -1139,6 +1208,13 @@ private:
                 for (std::size_t i = 0; i < n.table->size(); ++i)
                     for (std::size_t j = 0; j < 3; ++j)
                         if (!same_number((*n.table)[i][j], (*e.table)[i][j])) return false;
+                return true;
+            }
+            case Op::Net: {
+                if (n.weights == e.weights) return true;
+                if (n.weights->size() != e.weights->size()) return false;
+                for (std::size_t i = 0; i < n.weights->size(); ++i)
+                    if (!same_number((*n.weights)[i], (*e.weights)[i])) return false;
                 return true;
             }
             default:
@@ -1253,6 +1329,11 @@ private:
                 case Op::Coord:  s[i] = in.x[n.k]; break;
                 case Op::Symbol: s[i] = unbound(); break;
                 case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }
+                case Op::Net: {
+                    const T x[3] = {s[n.a], s[n.b], s[n.c]};
+                    s[i] = net_at(n.weights->data(), net_inputs(n.weights->size(), n.k), n.k, x);
+                    break;
+                }
             }
         }
         return s[ops_.size() - 1];
@@ -1378,6 +1459,16 @@ private:
     }
 
 };
+
+// A net of one hidden tanh layer of H units over F inputs (one to three), from the weights a
+// `TanhNet<F, H>` holds (`net.weights()`, in its order), so the field computes what the net does.
+// Their count is fixed at compile time: the array is the net's own type.
+template<std::size_t F, std::size_t H, Scalar T>
+Field<T> net(const std::array<T, F * H + 2 * H + 1>& weights, const std::array<Field<T>, F>& inputs) {
+    static_assert(F >= 1 && F <= 3 && H >= 1, "a Net op reads one to three inputs through at least one unit");
+    return *Field<T>::net_of(std::vector<T>(weights.begin(), weights.end()), H,
+                             std::vector<Field<T>>(inputs.begin(), inputs.end()));
+}
 
 // Whether two fields are the same function. Candidates are the fields with
 // one `content_id`; the answer is yes only when their descriptions agree

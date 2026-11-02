@@ -51,6 +51,7 @@ struct GlslModule {
     std::vector<std::uint32_t> perm;
     std::vector<float> points;
     std::vector<std::string> symbols;
+    std::vector<float> weights;   // every Net's, back to back: `field_weights` in an ES module
     bool slots = false;
 };
 
@@ -175,6 +176,7 @@ inline std::string glsl_float(double v) {
 struct GlslBases {
     std::uint32_t perm = 0;
     std::uint32_t points = 0;   // in points, not floats
+    std::uint32_t weights = 0;
     std::vector<std::uint32_t> symbols;
 };
 
@@ -185,6 +187,9 @@ inline Result<GlslBases> append_data(GlslModule& m, const PodField<double>& data
         return std::unexpected(Error(ErrorCode::InvalidArgument,
             std::format("emit: the field reads the symbol '{}', and this target binds no slot to read it "
                         "from; bind it to a number first", data.symbols.front())));
+    if (!data.weights.empty() && !m.slots)
+        return std::unexpected(Error(ErrorCode::InvalidArgument,
+            "emit: the field holds a Net, and this target binds no buffer to read its weights from"));
     // A block already in the module is reused whole, so two programs that
     // gather from one table name the same offsets -- and a gather in a
     // motion and the same gather in its colour become one value in a scope.
@@ -213,6 +218,11 @@ inline Result<GlslBases> append_data(GlslModule& m, const PodField<double>& data
     if (pa < 0) { pa = static_cast<std::ptrdiff_t>(m.perm.size()); m.perm.insert(m.perm.end(), perm.begin(), perm.end()); }
     auto qa = find_block(m.points, pts, 3);
     if (qa < 0) { qa = static_cast<std::ptrdiff_t>(m.points.size()); m.points.insert(m.points.end(), pts.begin(), pts.end()); }
+    std::vector<float> ws;
+    for (auto x : data.weights) ws.push_back(static_cast<float>(x));
+    auto wa = find_block(m.weights, ws, 1);
+    if (wa < 0) { wa = static_cast<std::ptrdiff_t>(m.weights.size()); m.weights.insert(m.weights.end(), ws.begin(), ws.end()); }
+    b.weights = static_cast<std::uint32_t>(wa);
     b.perm = static_cast<std::uint32_t>(pa);
     b.points = static_cast<std::uint32_t>(qa / 3);
     for (const auto& name : data.symbols) {
@@ -302,6 +312,9 @@ inline std::string emit_scalar_into(GlslScope& sc, const PodOp<double>* ops, std
             case Op::Opaque: v[i] = "0.0"; continue;   // unreachable: lower() refuses it
             case Op::Coord:  e = std::format("{}.x[{}]", in.rec, n.k); break;
             case Op::Symbol: e = std::format("field_symbols[{}]", b.symbols[n.k]); break;
+            case Op::Net:
+                e = std::format("field_net({}, {}, {}, vec3({}, {}, {}))", b.weights + n.table, n.extent, n.k, A, B, C);
+                break;
         }
         v[i] = sc.value("float", e);
     }
@@ -480,11 +493,36 @@ inline Result<void> emit_scalar_es(GlslModule& m, const Field<double>& f, const 
 }
 
 // What an ES module's code reads, written once the module is whole: the
-// input record and as many slots as it names (one at least, since GLSL
-// has no empty array).
+// input record, as many slots as it names (one at least, since GLSL has no
+// empty array), and its nets' weights, four to a vec4 since a uniform
+// array of floats takes a whole register an element, with the one function
+// every Net calls -- `TanhNet::forward`, at `at` in the weights.
 inline std::string glsl_es_prelude(const GlslModule& m) {
-    return std::format("struct FieldIn {{ float u; float v; }};\nuniform float field_symbols[{}];\n",
-                       std::max<std::size_t>(m.symbols.size(), 1));
+    std::string out = std::format("struct FieldIn {{ float u; float v; }};\nuniform float field_symbols[{}];\n",
+                                  std::max<std::size_t>(m.symbols.size(), 1));
+    if (m.weights.empty()) return out;
+    return out + std::format(R"GLSL(uniform vec4 field_weights[{}];
+float field_net(int at, int F, int H, vec3 x) {{
+    int i = at + F * H + 2 * H;
+    float sum = field_weights[i >> 2][i & 3];
+    for (int j = 0; j < H; ++j) {{
+        i = at + F * H + j;
+        float pre = field_weights[i >> 2][i & 3];
+        for (int k = 0; k < F; ++k) {{ i = at + j * F + k; pre = pre + field_weights[i >> 2][i & 3] * x[k]; }}
+        i = at + F * H + H + j;
+        sum = sum + field_weights[i >> 2][i & 3] * tanh(pre);
+    }}
+    return tanh(sum);
+}}
+)GLSL", (m.weights.size() + 3) / 4);
+}
+
+// The weights an ES module's `field_weights` holds, padded to whole vec4s: what a page sets
+// with uniform4fv, and sets again, alone, when the nets are trained further.
+inline std::vector<float> glsl_es_weights(const GlslModule& m) {
+    std::vector<float> w = m.weights;
+    w.resize((w.size() + 3) / 4 * 4, 0.0f);
+    return w;
 }
 
 }  // namespace spatium::io::build

@@ -72,9 +72,10 @@ struct PodOp {
     std::uint8_t  code  = 0;
     std::uint32_t a = 0, b = 0, c = 0;
     std::uint32_t table = 0;   // Noise: which 512-byte table in `tables`;
-                               // Gather: the first point of its table in `points`
-    std::uint32_t extent = 0;  // Gather: how many points that table has
-    std::uint32_t k = 0;       // Origin, Point, Gather: component; Hash: salt
+                               // Gather: the first point of its table in `points`;
+                               // Net: its first weight in `weights`
+    std::uint32_t extent = 0;  // Gather: how many points that table has; Net: its inputs, F
+    std::uint32_t k = 0;       // Origin, Point, Gather: component; Hash: salt; Net: its units, H
     T             value{};     // Const
 };
 
@@ -91,6 +92,10 @@ struct PodField {
     // The name of each slot a Symbol op reads (its `k`), in the order the
     // ops first read them; one slot per name, however many ops read it.
     std::vector<std::string>  symbols;
+    // Every Net's weights, in `TanhNet`'s order, nets back to back and
+    // shared by content. Numbers the program reads, so a net trained
+    // further changes these and not the ops.
+    std::vector<T>            weights;
 };
 
 // Where one factor's program sits inside a VecField's shared scalar pool.
@@ -206,6 +211,14 @@ Result<PodRange> lower_into(PodField<T>& out, const Field<T>& whole, const std::
         p.k     = n.k;
         if (n.op == Op::Noise) p.table = intern_table(out.tables, *n.noise);
         if (n.op == Op::Gather) p.extent = intern_points(out.points, *n.table, p.table);
+        if (n.op == Op::Net) {
+            const auto& w = *n.weights;
+            std::size_t at = 0;
+            while (at + w.size() <= out.weights.size() && !std::equal(w.begin(), w.end(), out.weights.begin() + at)) ++at;
+            if (at + w.size() > out.weights.size()) at = out.weights.size(), out.weights.insert(out.weights.end(), w.begin(), w.end());
+            p.table = static_cast<std::uint32_t>(at);
+            p.extent = static_cast<std::uint32_t>(Field<T>::net_inputs(w.size(), n.k));
+        }
         if (n.op == Op::Symbol) {
             const auto at = std::ranges::find(out.symbols, n.name);
             p.k = static_cast<std::uint32_t>(at - out.symbols.begin());
@@ -326,6 +339,7 @@ PodField<T> converted(const PodField<double>& f) {
     out.tables = f.tables;
     for (double p : f.points) out.points.push_back(from_double<T>(p));
     out.symbols = f.symbols;
+    for (double w : f.weights) out.weights.push_back(from_double<T>(w));
     return out;
 }
 
@@ -338,7 +352,8 @@ namespace detail {
 
 // The ops past + - * / and order, for an arithmetic that has them.
 template<Scalar T>
-T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const T* points, const FieldInputs<T>& in) {
+T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const T* points, const T* weights,
+               const FieldInputs<T>& in) {
     switch (static_cast<Op>(n.code)) {
         case Op::Sin:  { using std::sin; return sin(s[n.a]); }
         case Op::Cos:  { using std::cos; return cos(s[n.a]); }
@@ -357,6 +372,10 @@ T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const 
             if (at >= n.extent) at = n.extent - 1;
             return points[(std::size_t{n.table} + at) * 3 + n.k];
         }
+        case Op::Net: {
+            const T x[3] = {s[n.a], s[n.b], s[n.c]};
+            return Field<T>::net_at(weights + n.table, n.extent, n.k, x);
+        }
         default: return T{0};
     }
 }
@@ -373,7 +392,7 @@ T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const 
 template<Scalar T>
 T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables,
             const T* points, T* s, const FieldInputs<T>& in,
-            const T* slots = nullptr, std::size_t slot_count = 0) {
+            const T* slots = nullptr, std::size_t slot_count = 0, const T* weights = nullptr) {
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto& n = ops[i];
         switch (static_cast<Op>(n.code)) {
@@ -392,7 +411,7 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }
             default:
                 // the rest are computed in an arithmetic that has them; `beyond` refuses them elsewhere
-                if constexpr (detail::transcendental<T>) s[i] = detail::inexact_step(n, s, tables, points, in);
+                if constexpr (detail::transcendental<T>) s[i] = detail::inexact_step(n, s, tables, points, weights, in);
                 else s[i] = T(std::numeric_limits<double>::quiet_NaN());
                 break;
             // Unreachable from `lower()`, which refuses it. A zero rather
@@ -414,7 +433,7 @@ template<Scalar T>
 T interpret(const PodField<T>& f, const FieldInputs<T>& in, const std::vector<T>& slots = {}) {
     std::vector<T> scratch(f.ops.size());
     return interpret(f.ops.data(), static_cast<std::uint32_t>(f.ops.size()),
-                     f.tables.data(), f.points.data(), scratch.data(), in, slots.data(), slots.size());
+                     f.tables.data(), f.points.data(), scratch.data(), in, slots.data(), slots.size(), f.weights.data());
 }
 
 template<Scalar T>
@@ -433,7 +452,7 @@ Vec<T, 3> interpret(const PodVecField<T>& f, const MotionEnv<T>& env, const std:
     const FieldInputs<T> in = VecField<T>::inputs_of(env);
     auto factor = [&](const PodRange& r) {
         return interpret(f.scalars.ops.data() + r.begin, r.count, f.scalars.tables.data(),
-                         f.scalars.points.data(), scratch.data(), in, slots.data(), slots.size());
+                         f.scalars.points.data(), scratch.data(), in, slots.data(), slots.size(), f.scalars.weights.data());
     };
 
     for (std::size_t i = 0; i < f.ops.size(); ++i) {

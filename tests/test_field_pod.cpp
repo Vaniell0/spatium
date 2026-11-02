@@ -82,11 +82,12 @@ TEST_CASE("The interpreter covers every op, bit for bit", "[field][pod]") {
              F::id() * F{1e-3} + F::origin(1) - F::point(2) * F::hash(7u) +
              sqrt(F::hash(11u) + F{0.5}) + gather(table, F::hash(3u) * F{3.0}, 2) +
              gather(table, F::u(), 0) + log(F::hash(5u) + F{1.0}) + exp(F::u() * F{0.1}) +
-             abs(F::v() - F::u());
+             abs(F::v() - F::u()) +
+             bd::net<1, 2>(std::array<double, 7>{0.5, -0.25, 0.1, 0.0, 0.3, -0.7, 0.05}, {F::u()});
 
     auto lowered = bd::lower(f);
     REQUIRE(lowered.has_value());
-    for (auto op : {bd::Op::Log, bd::Op::Exp, bd::Op::Abs}) {
+    for (auto op : {bd::Op::Log, bd::Op::Exp, bd::Op::Abs, bd::Op::Net}) {
         bool present = false;
         for (const auto& p : lowered->ops) present = present || p.code == static_cast<std::uint8_t>(op);
         INFO("op " << bd::op_name(op) << " is not exercised");
