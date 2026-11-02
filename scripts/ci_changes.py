@@ -87,7 +87,7 @@ def selftest():
     # (changed paths, (code, matrix, rsc))
     cases = [
         (["docs/ROADMAP.md"], (False, False, False)),
-        (["docs/roadmap/2026-10-08-01-x.md", "CLAUDE.md"], (False, False, False)),
+        (["docs/roadmap/tooling/x.md", "CLAUDE.md"], (False, False, False)),
         (["gallery/boom.png", "README.md"], (False, False, False)),
         (["include/spatium/geometry/polygon.hpp"], (True, False, True)),
         (["include/spatium/physics/mechanics/narrow_phase.hpp", "tests/symmetry/pairs.hpp"], (True, False, True)),
