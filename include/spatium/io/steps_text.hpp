@@ -30,6 +30,11 @@ namespace detail {
 inline std::string num(double v) { return number_text(v, TextStyle::Latex); }
 
 // a number as a factor or a term after an operator: in parentheses when negative
+// p / q on a page with its sign worked out: -\frac{4}{2}, never \frac{-4}{2} or -\frac{-4}{-2}
+inline std::string signed_fraction(double p, double q) {
+    return std::format("{}\\frac{{{}}}{{{}}}", std::signbit(p) != std::signbit(q) ? "-" : "", num(std::abs(p)), num(std::abs(q)));
+}
+
 inline std::string grouped_num(double v) { return std::signbit(v) ? "\\left(" + num(v) + "\\right)" : num(v); }
 
 // a x^2 + b x + c with the zero terms left out, a coefficient of 1 unwritten, and a negative one
@@ -75,27 +80,29 @@ inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_v
             return out;
         case QuadraticCase::Linear:
             out.push_back({"a = 0: the equation is linear",
-                           std::format("{} = -\\frac{{c}}{{b}} = -\\frac{{{}}}{{{}}} = {}", x, num(s.c), num(s.b),
+                           std::format("{} = -\\frac{{c}}{{b}} = {} = {}", x, detail::signed_fraction(-s.c, s.b),
                                        num(s.roots[0].re))});
             return out;
         default: break;
     }
     out.push_back({"discriminant", std::format("D = b^{{2}} - 4ac = {}^{{2}} - 4 \\cdot {} \\cdot {} = {}", grouped_num(s.b),
                                                grouped_num(s.a), grouped_num(s.c), num(s.discriminant))});
-    const std::string minus_b = num(-s.b), two_a = num(2 * s.a);
+    // (-b ± √D) / 2a with a negative 2a is (b ± √D) / |2a|, the same pair; a zero b is not written
+    const double top_b = s.a < 0 ? s.b : -s.b;
+    const std::string head = top_b == 0 ? "" : num(top_b) + " ", two_a = num(std::abs(2 * s.a));
     if (s.kind == QuadraticCase::ComplexPair) {
         out.push_back({"D < 0: two complex conjugate roots",
-                       std::format("{}_{{1,2}} = \\frac{{-b \\pm i\\sqrt{{-D}}}}{{2a}} = \\frac{{{} \\pm i\\sqrt{{{}}}}}{{{}}}", x,
-                                   minus_b, num(-s.discriminant), two_a)});
+                       std::format("{}_{{1,2}} = \\frac{{-b \\pm i\\sqrt{{-D}}}}{{2a}} = \\frac{{{}\\pm i\\sqrt{{{}}}}}{{{}}}", x,
+                                   head, num(-s.discriminant), two_a)});
     } else if (s.kind == QuadraticCase::Double) {
         out.push_back({"D = 0: one root, counted twice",
-                       std::format("{} = -\\frac{{b}}{{2a}} = \\frac{{{}}}{{{}}}", x, minus_b, two_a)});
+                       std::format("{} = -\\frac{{b}}{{2a}} = {}", x, detail::signed_fraction(-s.b, 2 * s.a))});
         out.push_back({"root", std::format("{} = {}", x, num(s.roots[0].re))});
         return out;
     } else {
         out.push_back({"D > 0: two real roots",
-                       std::format("{}_{{1,2}} = \\frac{{-b \\pm \\sqrt{{D}}}}{{2a}} = \\frac{{{} \\pm \\sqrt{{{}}}}}{{{}}}", x,
-                                   minus_b, num(s.discriminant), two_a)});
+                       std::format("{}_{{1,2}} = \\frac{{-b \\pm \\sqrt{{D}}}}{{2a}} = \\frac{{{}\\pm \\sqrt{{{}}}}}{{{}}}", x,
+                                   head, num(s.discriminant), two_a)});
     }
     out.push_back({"roots", std::format("{}_{{1}} = {},\\quad {}_{{2}} = {}", x, detail::complex_latex(s.roots[0]), x,
                                         detail::complex_latex(s.roots[1]))});
