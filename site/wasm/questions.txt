@@ -14,6 +14,7 @@ solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]
 integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]
 integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]
 solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]
+solve x^2 + p = 0 for x in [0, 10], p in [-1, 0]
 integrate sin(t)/t for t in [0, x], x in [0.5, 6]
 integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]
 preview 2x^2 - 3

@@ -59,6 +59,10 @@ struct Term {
     Expr expr;
     std::size_t size = 1;
     std::vector<double> at; // values at the sample points
+    // a function of one argument, op(inner), when the term is one: what the answer's tidying
+    // rewrites when the argument is a line in x
+    std::optional<Unary> op;
+    Expr inner;
 };
 
 // What an accepted answer's certificate is worth, said with it. The error is measured, not
@@ -195,18 +199,26 @@ inline std::optional<std::vector<double>> least_squares(const std::vector<std::v
 // finished, so what is returned is every expression up to the last size it holds. A budget that
 // stopped inside a size kept whichever expressions of it came first in the loop, and missed
 // x / (log x * log x), seven nodes, while it was cut at 2483 of the 4837 of its size.
+inline Expr unary(Unary op, const Expr& e) {
+    return op == Unary::Sqrt  ? sqrt(e)
+         : op == Unary::Sin ? sin(e)
+         : op == Unary::Cos ? cos(e)
+         : op == Unary::Log ? log(e)
+                            : exp(e);
+}
+
 inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<double>& x) {
     using namespace synthesis_detail;
     std::vector<std::vector<Term>> by_size(spec.max_size + 1);
     std::map<std::vector<long long>, bool> seen;
     std::size_t count = 0;
-    auto offer = [&](Expr e, std::size_t size) {
+    auto offer = [&](Expr e, std::size_t size, std::optional<Unary> op = std::nullopt, const Expr* inner = nullptr) {
         auto v = values(e, x);
         if (!usable(v))
             return;
         if (!seen.emplace(key(v), true).second)
             return;
-        by_size[size].push_back({std::move(e), size, std::move(v)});
+        by_size[size].push_back({std::move(e), size, std::move(v), op, inner ? *inner : Expr(0.0)});
         ++count;
     };
     // the variable of the interval: t = (x - centre) * 2 / width on [-1, 1], a field of x like any
@@ -219,12 +231,7 @@ inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<
     for (std::size_t s = 2; s <= spec.max_size && count < spec.max_candidates; ++s) {
         for (const Term& t : std::vector<Term>(by_size[s - 1]))
             for (Unary op : spec.unary)
-                offer(op == Unary::Sqrt  ? sqrt(t.expr)
-                      : op == Unary::Sin ? sin(t.expr)
-                      : op == Unary::Cos ? cos(t.expr)
-                      : op == Unary::Log ? log(t.expr)
-                                         : exp(t.expr),
-                      s);
+                offer(unary(op, t.expr), s, op, &t.expr);
         for (std::size_t a = 1; a + 1 < s; ++a) {
             const std::size_t b = s - 1 - a;
             const auto left = by_size[a], right = by_size[b];
@@ -458,6 +465,71 @@ inline Solution synthesize(const std::function<double(double)>& reference, const
                 if (f->second != 1) best.nodes += 2;   // the fraction is two constants and a quotient
             } else {
                 coef[j] = was;
+            }
+        }
+
+        // How it reads. A term is built over the interval's own variable t = (x - centre) * 2 /
+        // width, so the root of x^2 + p = 0 on [-1, 0] came out 0.7071067811865477 *
+        // sqrt(1 - (p - (-0.5)) * 2), which is sqrt(-p). Where a term, or the argument of a
+        // term's function, is a line in x, it is written as one -- b x + a, its numbers as
+        // fractions where they are -- with the coefficient taken in: into the line, or under
+        // the root as its square when what it leaves there is short. Each rewrite, one term at
+        // a time, is kept only if the whole answer still holds on the check grid and is no
+        // longer than it was: it reads better or it is not taken.
+        const auto line_of = [&](const Expr& e) -> std::optional<std::pair<double, double>> {
+            const double x0 = x.front(), x1 = x.back(), y0 = e(x0, 0.0), y1 = e(x1, 0.0);
+            const double b = (y1 - y0) / (x1 - x0), a = y0 - b * x0;
+            for (double xi : x) {
+                const double yi = e(xi, 0.0);
+                if (!(std::abs(yi - (a + b * xi)) <= 1e-12 * std::max({1.0, std::abs(yi), std::abs(b * xi)}))) return std::nullopt;
+            }
+            const double small = 1e-12 * std::max({1.0, std::abs(b * x0), std::abs(b * x1)});
+            return std::pair{std::abs(a) <= small ? 0.0 : a, b};
+        };
+        const auto short_number = [](double v) { return simplest_fraction(v).has_value(); };
+        const auto number = [](double v) {
+            const auto f = simplest_fraction(v);
+            if (!f) return Expr(v);
+            return f->second == 1 ? Expr(double(f->first)) : Expr(double(f->first)) / Expr(double(f->second));
+        };
+        const auto line = [&](double a, double b) {
+            const Expr bx = b == 1 ? Expr::u() : b == -1 ? Expr(-1.0) * Expr::u() : number(b) * Expr::u();
+            if (a == 0) return bx;
+            return a > 0 ? bx + number(a) : bx - number(-a);
+        };
+        std::vector<Expr> part;
+        for (std::size_t j = 0; j < best_terms.size(); ++j) part.push_back(coef[j] * terms[best_terms[j]].expr);
+        const auto sum = [&] {
+            Expr e = part[0];
+            for (std::size_t j = 1; j < part.size(); ++j) e = e + part[j];
+            return e;
+        };
+        for (std::size_t j = 0; j < part.size(); ++j) {
+            const Term& t = terms[best_terms[j]];
+            const double c = best.coefficients[j];
+            std::optional<Expr> tidy;
+            if (const auto l = line_of(t.expr)) {
+                tidy = line(c * l->first, c * l->second);
+            } else if (t.op) {
+                if (const auto l = line_of(t.inner)) {
+                    const double a = c * c * l->first, b = c * c * l->second;
+                    if (*t.op == Unary::Sqrt && c != 0 && short_number(a) && short_number(b))
+                        tidy = c > 0 ? sqrt(line(a, b)) : Expr(-1.0) * sqrt(line(a, b));
+                    else
+                        tidy = coef[j] * unary(*t.op, line(l->first, l->second));
+                }
+            }
+            if (!tidy) continue;
+            const Expr was = part[j];
+            part[j] = *tidy;
+            const Expr e = sum();
+            const double err = error_of(e);
+            if (err <= spec.tolerance && e.size() <= best.expr.size()) {
+                best.expr = e;
+                best.error = err;
+                best.nodes = e.size();
+            } else {
+                part[j] = was;
             }
         }
     }
