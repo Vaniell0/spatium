@@ -100,6 +100,13 @@ template <SearchGame A> struct SearchResult {
     // Above zero the side to move at the root wins by force in that many moves (plies), below zero
     // it loses in that many, zero when nothing is proved.
     int proof = 0;
+    // The states where the evaluator gave what is not a number. A value that is a NaN reads
+    // nothing: its simulation backs nothing up, and the next one through that state goes on below
+    // it, so the search reads by playing what the net could not. A move's prior that is a NaN,
+    // infinite or below zero is taken as none (zero, the rest renormalised; uniform when nothing
+    // is left). A value outside [-1, 1], an infinity among them, is the net's certainty and is
+    // clamped to it, not counted.
+    std::size_t unread_values = 0, unread_priors = 0;
 
     // The move chosen: the most visited at temperature 0, else drawn with probability
     // proportional to visits^(1/temperature).
@@ -167,6 +174,18 @@ SearchResult<A> search(
         const auto rows = A::rows(node.state, std::span<const Move>(node.moves));
         prior.resize(rows.size());
         evaluator.prior(std::span<const typename A::Row>(rows), std::span<double>(prior));
+        double total = 0;
+        bool unread = false;
+        for (double& p : prior) {
+            if (!(p >= 0) || !std::isfinite(p))
+                p = 0, unread = true;
+            total += p;
+        }
+        if (unread) {
+            ++result.unread_priors;
+            for (double& p : prior)
+                p = total > 0 ? p / total : 1.0 / static_cast<double>(prior.size());
+        }
         node.edges.resize(node.moves.size());
         for (std::size_t i = 0; i < node.edges.size(); ++i)
             node.edges[i].prior = prior[i];
@@ -184,7 +203,12 @@ SearchResult<A> search(
                                           options.noise * dirichlet[i] / total;
             }
         }
-        return static_cast<double>(evaluator.value(A::features(node.state)));
+        const auto v = static_cast<double>(evaluator.value(A::features(node.state)));
+        if (std::isnan(v)) {
+            ++result.unread_values;
+            return v;
+        }
+        return std::clamp(v, -1.0, 1.0);
     };
 
     result.value = expand(0, true);
@@ -231,6 +255,10 @@ SearchResult<A> search(
                      .edges[path.back().second]
                      .child;
         }
+        // a leaf the net could not read backs nothing up; the state is expanded, so the next
+        // simulation through it goes on below
+        if (std::isnan(v))
+            continue;
         // v is the leaf's standing for its side to move; each step up is the other side, unless
         // the move kept the side.
         for (auto it = path.rbegin(); it != path.rend(); ++it) {

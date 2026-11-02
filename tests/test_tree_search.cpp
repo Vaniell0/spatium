@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -367,5 +368,76 @@ TEST_CASE("search: the outcome of a sample follows the sides through a turn", "[
         const bool next_is_confirmation = s[i + 1].features[4] > 0;
         CHECK(s[i].kept_side == next_is_confirmation);
         CHECK(s[i].outcome == (s[i].kept_side ? s[i + 1].outcome : -s[i + 1].outcome));
+    }
+}
+
+namespace {
+
+// A net that cannot read some states: its value there is `bad` (a NaN, an infinity), and its
+// prior for one move is `bad_prior`; everywhere else it knows nothing (value 0, uniform prior).
+struct Unreadable {
+    int pile = -1;           // the pile whose value is `bad`
+    double bad = 0;
+    int take = 0;            // the move whose prior is `bad_prior`, at every state
+    double bad_prior = 0;
+    void prior(std::span<const std::array<double, row_size>> rows, std::span<double> out) const {
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = static_cast<int>(std::lround(rows[i][4] * 3)) == take ? bad_prior : 1.0 / static_cast<double>(out.size());
+    }
+    double value(const std::array<double, state_size>& f) const {
+        return static_cast<int>(std::lround(f[4] * 30)) == pile ? bad : 0.0;
+    }
+};
+
+// From 9 stones the winning take is 1; what the search found must hold numbers only.
+void finds_the_take(const SearchResult<Nim>& r) {
+    REQUIRE(std::isfinite(r.searched));
+    for (double v : r.values) {
+        REQUIRE(std::isfinite(v));
+        REQUIRE(std::abs(v) <= 1);
+    }
+    std::mt19937_64 rng(0);
+    REQUIRE(r.moves[r.pick(0, rng)] == 1);
+}
+
+} // namespace
+
+TEST_CASE("search: a value that is not a number backs up nothing, and the search reads on below it", "[rsc][search]") {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::mt19937_64 rng(1);
+    SearchOptions options;
+    options.simulations = 400;
+    // pile 6, two plies under the root: every line through it used to carry the NaN to the root
+    const auto r = search<Nim>({9}, Unreadable{.pile = 6, .bad = nan}, options, rng);
+    finds_the_take(r);
+    REQUIRE(r.unread_values > 0);
+    // and the net that reads everything leaves nothing unread
+    const auto clean = search<Nim>({9}, Unreadable{}, options, rng);
+    REQUIRE(clean.unread_values == 0);
+    REQUIRE(clean.unread_priors == 0);
+}
+
+TEST_CASE("search: an infinite value is the net's certainty, a standing of one", "[rsc][search]") {
+    const double inf = std::numeric_limits<double>::infinity();
+    std::mt19937_64 rng(1);
+    SearchOptions options;
+    options.simulations = 400;
+    // 6 stones are won for the side to move, so +inf there is a true certainty and -inf a false
+    // one; neither may take the search over
+    for (double bad : {inf, -inf})
+        finds_the_take(search<Nim>({9}, Unreadable{.pile = 6, .bad = bad}, options, rng));
+    const auto r = search<Nim>({9}, Unreadable{.pile = 6, .bad = inf}, options, rng);
+    REQUIRE(r.unread_values == 0);
+}
+
+TEST_CASE("search: a prior that is not a number or below zero is no prior, and the move is still tried", "[rsc][search]") {
+    std::mt19937_64 rng(1);
+    SearchOptions options;
+    options.simulations = 400;
+    // the winning take's prior is unreadable at every state: with a NaN it was never tried
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(), -0.5, std::numeric_limits<double>::infinity()}) {
+        const auto r = search<Nim>({9}, Unreadable{.take = 1, .bad_prior = bad}, options, rng);
+        finds_the_take(r);
+        REQUIRE(r.unread_priors > 0);
     }
 }
