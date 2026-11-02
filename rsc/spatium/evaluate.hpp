@@ -305,8 +305,10 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
     const bool bracket = bd::has_bracket(*d);
     const double lo = bracket ? number(u->lo) : 0, hi = bracket ? number(u->hi) : 0;
     {
+        // as fractions when the engine asks for them: the roots as they are, or why they are not
+        const bool exact = engine.arithmetic == Arithmetic::Rational;
         Candidate c{Route::ClosedForm, 0, {}, {}, Arithmetic::Double, {}};
-        if (auto solved = solve_closed_form(u->f, d->name); !solved) {
+        if (auto solved = solve_closed_form(u->f, d->name, exact ? &u->written : nullptr); !solved) {
             c.refused = solved.error().message;
             if (!bracket) c.refused += std::format(", so {} needs a bracket, as in {}: ... on [a, b]", d->name, d->name);
         } else {
@@ -314,6 +316,19 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
             for (const auto& z : solved->solution.roots)
                 if (z.im == 0 && (!bracket || (lo <= z.re && z.re <= hi))) c.values.push_back(z.re);
             if (bracket && c.values.empty()) c.refused = std::format("no root of the closed form is on [{}, {}]", d->lo.text, d->hi.text);
+            if (exact && solved->exact) {
+                c.arithmetic = Arithmetic::Rational, c.text = solved->exact->text;
+                // a fraction is the root itself, not the double's rounding of it
+                if (!solved->exact->fractions.empty()) {
+                    c.values.clear();
+                    for (const auto& r : solved->exact->fractions)
+                        if (!bracket || (lo <= r.to_double() && r.to_double() <= hi)) c.values.push_back(r.to_double());
+                }
+            } else if (exact) {
+                Candidate refused{Route::ClosedForm, c.cost, solved->inexact, {}, Arithmetic::Rational, {}};
+                if (engine.strict) c = std::move(refused);
+                else out.candidates.push_back(std::move(refused));
+            }
             out.closed = std::move(*solved);
         }
         out.candidates.push_back(std::move(c));

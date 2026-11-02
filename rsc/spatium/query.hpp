@@ -283,6 +283,9 @@ namespace detail {
 // one unfolds, and then the chosen parameters: what is left are the parameters it is a function of.
 struct Unfolded {
     Expr f;                          // a value's expression, a root's left side less its right, an integrand
+    // a root's left side less its right as written: `f` before its constants are folded, which
+    // rounds 1/3 and sqrt(2) to doubles; what an exact route reads
+    Expr written;
     Expr lo, hi;                     // the bracket or the limits, where written
     std::string bound;               // the name it binds itself: a root's unknown, an integral's variable
     std::vector<std::string> free;   // the parameters it reads and is not given, in the order it reads them
@@ -309,7 +312,10 @@ inline spatium::Result<Unfolded> unfolded(const spatium::io::build::Document& do
     };
     Unfolded out;
     switch (d.kind) {
-        case bd::StatementKind::Root: out.f = unfold((d.value.field - d.rhs.field).simplified()), out.bound = d.name; break;
+        case bd::StatementKind::Root:
+            out.written = unfold(d.value.field - d.rhs.field);
+            out.f = unfold((d.value.field - d.rhs.field).simplified()), out.bound = d.name;
+            break;
         case bd::StatementKind::Integral: out.f = unfold(d.value.field), out.bound = d.variable; break;
         case bd::StatementKind::Parameter: out.f = unfold(Expr::symbol(d.name)); break;
         default: out.f = unfold(d.value.field); break;

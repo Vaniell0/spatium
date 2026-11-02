@@ -160,6 +160,7 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             for (const auto& z : c.solution.roots) roots.push_back(Array{z.re, z.im});
             out.emplace_back("solution", Object{{"a", c.solution.a}, {"b", c.solution.b}, {"c", c.solution.c},
                                                 {"discriminant", c.solution.discriminant}, {"roots", roots}});
+            if (c.exact) out.emplace_back("exact", Object{{"text", c.exact->text}, {"latex", c.exact->latex}});
             Array values;
             for (double v : e.values) values.push_back(v);
             out.emplace_back("values", values);
