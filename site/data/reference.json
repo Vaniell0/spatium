@@ -5,6 +5,7 @@
     {"name":"log","arity":1,"caption":"natural logarithm, the inverse of exp","domain":"x > 0","example":"log(10)","answer":{"route":"evaluate","value":"2.30258509299","latex":"\\ln\\left(10\\right)"}},
     {"name":"exp","arity":1,"caption":"exponential, e raised to x","domain":"every x","example":"exp(1)","answer":{"route":"evaluate","value":"2.71828182846","latex":"\\exp\\left(1\\right)"}},
     {"name":"sqrt","arity":1,"caption":"square root","domain":"x >= 0","example":"sqrt(2)","answer":{"route":"evaluate","value":"1.41421356237","latex":"\\sqrt{2}"}},
+    {"name":"abs","arity":1,"caption":"absolute value, the size of x","domain":"every x","example":"abs(-3)","answer":{"route":"evaluate","value":"3","latex":"\\left|-3\\right|"}},
     {"name":"min","arity":2,"caption":"the smaller of two numbers","domain":"every x, y","example":"min(2, 3)","answer":{"route":"evaluate","value":"2","latex":"\\min\\left(2, 3\\right)"}},
     {"name":"max","arity":2,"caption":"the larger of two numbers","domain":"every x, y","example":"max(2, 3)","answer":{"route":"evaluate","value":"3","latex":"\\max\\left(2, 3\\right)"}},
     {"name":"less","arity":2,"caption":"1 where the first is below the second, else 0: a step that composes by multiplication","domain":"every x, y","example":"less(1, 2)","answer":{"route":"evaluate","value":"1","latex":"\\left[1 < 2\\right]"}}

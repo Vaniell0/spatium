@@ -312,6 +312,7 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             case Op::Sqrt:   { using std::sqrt; s[i] = sqrt(s[n.a]); break; }
             case Op::Log:    { using std::log; s[i] = log(s[n.a]); break; }
             case Op::Exp:    { using std::exp; s[i] = exp(s[n.a]); break; }
+            case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }
             case Op::Gather: {
                 // Field::gather_at's rounding, over the flat buffer.
                 if (n.extent == 0) { s[i] = T{0}; break; }

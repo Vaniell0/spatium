@@ -51,12 +51,13 @@ struct Function {
     std::string_view example;   // a text the reader reads, with no unknown
 };
 
-inline constexpr std::array<Function, 8> functions{{
+inline constexpr std::array<Function, 9> functions{{
     {"sin", 1, "sine, of an angle in radians", "every x", "sin(pi / 6)"},
     {"cos", 1, "cosine, of an angle in radians", "every x", "cos(pi / 3)"},
     {"log", 1, "natural logarithm, the inverse of exp", "x > 0", "log(10)"},
     {"exp", 1, "exponential, e raised to x", "every x", "exp(1)"},
     {"sqrt", 1, "square root", "x >= 0", "sqrt(2)"},
+    {"abs", 1, "absolute value, the size of x", "every x", "abs(-3)"},
     {"min", 2, "the smaller of two numbers", "every x, y", "min(2, 3)"},
     {"max", 2, "the larger of two numbers", "every x, y", "max(2, 3)"},
     {"less", 2, "1 where the first is below the second, else 0: a step that composes by multiplication",
@@ -280,6 +281,7 @@ private:
             if (name == "cos") return cos(std::move(*a));
             if (name == "log") return log(std::move(*a));
             if (name == "exp") return exp(std::move(*a));
+            if (name == "abs") return abs(std::move(*a));
             return sqrt(std::move(*a));
         }
         if (!take(',')) return fail(std::format("',' between the two arguments of {}", name));

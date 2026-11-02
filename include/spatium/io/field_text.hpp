@@ -191,6 +191,7 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         case Op::Log:  return {call("log", "\\ln", arg(n.a).text)};
         case Op::Exp:  return {call("exp", "\\exp", arg(n.a).text)};
         case Op::Sqrt: return {tex ? std::format("\\sqrt{{{}}}", arg(n.a).text) : call("sqrt", "", arg(n.a).text)};
+        case Op::Abs:  return {tex ? std::format("\\left|{}\\right|", arg(n.a).text) : call("abs", "", arg(n.a).text)};
         case Op::Less:
             // 1 where a < b and 0 elsewhere: an Iverson bracket on a page
             return {tex ? std::format("\\left[{} < {}\\right]", arg(n.a).text, arg(n.b).text)

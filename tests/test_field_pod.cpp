@@ -81,11 +81,12 @@ TEST_CASE("The interpreter covers every op, bit for bit", "[field][pod]") {
              cos(F::v()) / F{3.0} + less(F::u(), F::v()) * noise(n, F::u(), F::v(), F{0.25}) +
              F::id() * F{1e-3} + F::origin(1) - F::point(2) * F::hash(7u) +
              sqrt(F::hash(11u) + F{0.5}) + gather(table, F::hash(3u) * F{3.0}, 2) +
-             gather(table, F::u(), 0) + log(F::hash(5u) + F{1.0}) + exp(F::u() * F{0.1});
+             gather(table, F::u(), 0) + log(F::hash(5u) + F{1.0}) + exp(F::u() * F{0.1}) +
+             abs(F::v() - F::u());
 
     auto lowered = bd::lower(f);
     REQUIRE(lowered.has_value());
-    for (auto op : {bd::Op::Log, bd::Op::Exp}) {
+    for (auto op : {bd::Op::Log, bd::Op::Exp, bd::Op::Abs}) {
         bool present = false;
         for (const auto& p : lowered->ops) present = present || p.code == static_cast<std::uint8_t>(op);
         INFO("op " << bd::op_name(op) << " is not exercised");
@@ -253,14 +254,15 @@ TEST_CASE("GLSL emission refuses a closure and a deformation, and carries the ta
     CHECK(m.code.find("field_noise(0u") != std::string::npos);
 }
 
-TEST_CASE("Log and Exp lower to GLSL's own log and exp", "[field][pod][glsl]") {
+TEST_CASE("Log, Exp and Abs lower to GLSL's own log, exp and abs", "[field][pod][glsl]") {
     using F = bd::ScalarField<double>;
     bd::GlslModule m;
-    REQUIRE(bd::emit_scalar(m, log(F::u() + F{1.0}) * exp(F::v()), "le").has_value());
+    REQUIRE(bd::emit_scalar(m, log(F::u() + F{1.0}) * exp(F::v()) + abs(F::v() - F{0.5}), "le").has_value());
     CHECK(m.code.find("log(") != std::string::npos);
     CHECK(m.code.find("exp(") != std::string::npos);
+    CHECK(m.code.find("abs(") != std::string::npos);
     // and the interpreter agrees with the field, bit for bit, where log is defined
-    const auto f = log(F::u() + F{1.0}) * exp(F::v());
+    const auto f = log(F::u() + F{1.0}) * exp(F::v()) + abs(F::v() - F{0.5});
     const auto pod = bd::lower(f);
     REQUIRE(pod.has_value());
     for (double u : {0.0, 0.5, 3.0})
