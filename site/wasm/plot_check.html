@@ -20,7 +20,14 @@ const cases = [
     view: [0.01, -4, 9, 4], slots: [[0, 1], [1, 3]] },
   { document: "q in [-1, 1]\nx in [-3, 3]\nm = abs(x - q) - 1", name: "m", along: "x",
     view: [-3, -1.5, 3, 2.5], slots: [[-1], [0.25]] },
+  // a net of one input and eight units: two sets of weights, one program -- the weights are data
+  { net: { hidden: 8, interval: [-3, 3] }, name: "n", view: [-3, -1.2, 3, 1.2],
+    nets: [1, 2].map((seed) => Array.from({ length: 25 }, (_, i) => Math.sin(1.7 * i + seed) * (i < 16 ? 1.5 : 0.8))) },
 ];
+// the request for a case: its document, or its net with one set of weights; and a grid for the twin
+const ask = (c, weights, grid) => JSON.stringify(Object.assign(
+  c.net ? { net: Object.assign({}, c.net, { weights }) } : { document: c.document, name: c.name, along: c.along },
+  grid ? { grid } : {}));
 const W = 96, H = 64;
 
 window.result = (async () => {
@@ -47,7 +54,7 @@ window.result = (async () => {
   };
   const report = { ok: true, compiled: 0, runs: 0, worst: 0, cases: [] };
   for (const c of cases) {
-    const p = JSON.parse(plot(JSON.stringify({ document: c.document, name: c.name, along: c.along })));
+    const p = JSON.parse(plot(ask(c, c.nets && c.nets[0])));
     if (p.refused) return { ok: false, why: `${c.name}: ${p.refused}` };
     const prog = gl.createProgram();
     gl.attachShader(prog, compile(gl.VERTEX_SHADER, p.vertex));
@@ -61,18 +68,21 @@ window.result = (async () => {
     gl.uniform2f(at("plot_size"), W, H);
     gl.uniform1i(at("plot_values"), 1);
     let worst = 0;
-    const runs = c.slots.map((s) => [s, s]);
+    // a run: the slots set and the twin's, or a net's weights set and the twin's
+    const runs = c.nets ? c.nets.map((w) => [w, w]) : c.slots.map((s) => [s, s]);
     // the case it must fail: the frame drawn at one slot value, the twin at a hundredth more
     if (c.name === "f") runs.push([c.slots[0], c.slots[0].map((v) => v + 0.01)]);
+    // and for a net: the frame drawn with one net's weights, the twin with the other's
+    if (c.nets) runs.push([c.nets[0], c.nets[1]]);
     for (const [slots, twinSlots] of runs) {
       const wrong = slots !== twinSlots;
       // only the slots change between runs: the same program, new numbers
-      if (slots.length) gl.uniform1fv(at("field_symbols"), new Float32Array(slots));
+      if (c.nets) gl.uniform4fv(at("field_weights"), new Float32Array(JSON.parse(plot(ask(c, slots))).weights));
+      else if (slots.length) gl.uniform1fv(at("field_symbols"), new Float32Array(slots));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       const got = new Float32Array(W * H * 4);
       gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, got);
-      const twin = JSON.parse(plot(JSON.stringify({ document: c.document, name: c.name, along: c.along,
-                                                    grid: { width: W, height: H, view: c.view, slots: twinSlots } }))).values;
+      const twin = JSON.parse(plot(ask(c, twinSlots, { width: W, height: H, view: c.view, slots: c.nets ? [] : twinSlots }))).values;
       const pixel = (c.view[3] - c.view[1]) / H;
       let frame = 0;
       for (let i = 0; i < W * H; ++i) {
@@ -81,7 +91,7 @@ window.result = (async () => {
         const e = Math.abs(F - want) / pixel;
         frame = Number.isNaN(e) ? Infinity : Math.max(frame, e);
       }
-      if (wrong) { report.wrong = frame; continue; }
+      if (wrong) { report.wrong = Math.min(report.wrong ?? Infinity, frame); continue; }
       worst = Math.max(worst, frame);
       ++report.runs;
     }

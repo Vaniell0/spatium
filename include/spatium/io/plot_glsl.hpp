@@ -5,7 +5,8 @@
 // |F| / fwidth(F), its distance from the curve in pixels, so the line keeps one width however
 // steep the curve is, with no grid of points and no derivative of f -- fwidth is the screen's own.
 // Every symbol f reads is a slot (`field_symbols[k]`, named by `symbols`), so moving a parameter
-// sets a uniform and the shader is compiled once per form of f.
+// sets a uniform and the shader is compiled once per form of f; a net's weights are a uniform
+// array too (`weights`), so a net trained further is drawn by the same program.
 //
 // `plot_values` set to 1 writes F, x and y themselves instead of the colour, into a float
 // target; that is what the shader is checked by, against `plot_value` -- the same program run in
@@ -27,6 +28,7 @@ SPATIUM_EXPORT namespace spatium::io::build {
 struct PlotShader {
     std::string vertex, fragment;
     std::vector<std::string> symbols;   // the slots, in order: `field_symbols[k]` is `symbols[k]`
+    std::vector<float> weights;         // its nets' weights, `field_weights` as vec4s; empty with no net
 };
 
 // A triangle that covers the viewport, made from the vertex index alone.
@@ -40,7 +42,7 @@ void main() {
 inline Result<PlotShader> plot_shader(const Field<double>& f) {
     GlslModule m = glsl_es_module();
     if (auto ok = emit_scalar_es(m, f, "plot_f"); !ok) return std::unexpected(ok.error());
-    PlotShader out{plot_vertex, {}, m.symbols};
+    PlotShader out{plot_vertex, {}, m.symbols, glsl_es_weights(m)};
     out.fragment = "#version 300 es\nprecision highp float;\nprecision highp int;\n" + glsl_es_prelude(m) + m.code + R"GLSL(
 uniform vec4 plot_view;    // x at the left edge, y at the bottom, x at the right, y at the top
 uniform vec2 plot_size;    // the viewport, in pixels

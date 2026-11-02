@@ -207,6 +207,15 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         case Op::Point:  return {tex ? std::format("p_{{{}}}", n.k) : std::format("point[{}]", n.k)};
         case Op::Hash:   return {tex ? std::format("h_{{{}}}", n.k) : std::format("hash[{}]", n.k)};
         case Op::Id:     return {tex ? std::string("\\mathrm{id}") : std::string("id")};
+        case Op::Net: {
+            // its weights are data and are not written; its inputs and its width are
+            const std::size_t F = Field<double>::net_inputs(n.weights->size(), n.k);
+            std::string inside = arg(n.a).text;
+            if (F > 1) inside += ", " + arg(n.b).text;
+            if (F > 2) inside += ", " + arg(n.c).text;
+            return {tex ? std::format("\\operatorname{{net}}_{{{}}}\\left({}\\right)", n.k, inside)
+                        : std::format("net[{}]({})", n.k, inside)};
+        }
         case Op::Opaque: break;   // refused before the walk
     }
     return {"?"};
