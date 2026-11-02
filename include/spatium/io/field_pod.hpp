@@ -278,9 +278,6 @@ template<class T>
 concept transcendental = requires(T a) { sqrt(a); sin(a); cos(a); log(a); exp(a); };
 } // namespace detail
 
-template<class T>
-concept Transcendental = detail::transcendental<T>;
-
 // The ops an arithmetic with nothing but + - * / and order computes.
 inline bool exact_op(Op o) {
     switch (o) {
@@ -296,7 +293,7 @@ inline bool exact_op(Op o) {
 // The first op of `f` that arithmetic T cannot compute, if any.
 template<Scalar T>
 std::optional<Op> beyond(const PodField<double>& f) {
-    if constexpr (!Transcendental<T>)
+    if constexpr (!detail::transcendental<T>)
         for (const auto& n : f.ops)
             if (!exact_op(static_cast<Op>(n.code))) return static_cast<Op>(n.code);
     return std::nullopt;
@@ -395,7 +392,7 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }
             default:
                 // the rest are computed in an arithmetic that has them; `beyond` refuses them elsewhere
-                if constexpr (Transcendental<T>) s[i] = detail::inexact_step(n, s, tables, points, in);
+                if constexpr (detail::transcendental<T>) s[i] = detail::inexact_step(n, s, tables, points, in);
                 else s[i] = T(std::numeric_limits<double>::quiet_NaN());
                 break;
             // Unreachable from `lower()`, which refuses it. A zero rather

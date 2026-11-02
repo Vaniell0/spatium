@@ -266,6 +266,8 @@ TEST_CASE("evaluate: a value is computed in the engine's arithmetic, each held a
     CHECK(taken(in("a", rsc::Arithmetic::Rational)).text == "1/2");
     CHECK(taken(in("b", rsc::Arithmetic::Rational)).text == "3/10");
     CHECK(taken(in("c", rsc::Arithmetic::Rational)).text == "7");
+    // a float writes its own shortest digits: 0.1 * 3 in a float is the float nearest 0.3
+    CHECK(taken(in("b", rsc::Arithmetic::Float)).text == "0.3");
     // the case a double must fail: 0.1 * 3 is not 3/10 in binary
     CHECK(in("b", rsc::Arithmetic::Double).values.front() != 0.3);
     CHECK(in("b", rsc::Arithmetic::Rational).values.front() == 0.3);

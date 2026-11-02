@@ -133,7 +133,8 @@ struct Evaluation {
 
 namespace detail {
 
-inline std::string shortest(double x) {
+template<class F>
+std::string shortest(F x) {
     char buf[32];
     const auto [end, ec] = std::to_chars(buf, buf + sizeof buf, x);
     return ec == std::errc{} ? std::string(buf, end) : "nan";
@@ -146,7 +147,7 @@ template<class T> double as_double(const T& x) {
 }
 template<class T> std::string as_text(const T& x) {
     if constexpr (requires { x.text(); }) return x.text();
-    else if constexpr (std::is_floating_point_v<T>) return shortest(static_cast<double>(x));
+    else if constexpr (std::is_floating_point_v<T>) return shortest(x);   // a float's own shortest digits
     else return x.str();
 }
 template<class T> bool holds(const T& x) {
