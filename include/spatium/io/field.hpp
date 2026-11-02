@@ -360,6 +360,11 @@ enum class Op : std::uint8_t {
     // question binds its unknown to `U` and its parameter to `V`). Unbound, it evaluates to NaN
     // and does not lower: what it means is not yet decided, and no plain-data form can say so.
     Symbol,
+
+    // One child: its size, |x|. A calculator's question writes it as often as a square root, and
+    // with only min and max it read max(x, -x) on the page; it is total, and one instruction on
+    // every target.
+    Abs,
 };
 
 // The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
@@ -405,6 +410,7 @@ inline const char* op_name(Op o) {
         case Op::Log:    return "Log";
         case Op::Exp:    return "Exp";
         case Op::Symbol: return "Symbol";
+        case Op::Abs:    return "Abs";
     }
     return "?";
 }
@@ -418,7 +424,8 @@ inline bool is_binary(Op o) {
 // shift indices, check order and lower -- each of which would otherwise
 // have to learn separately that Sin has one child and Noise three.
 inline std::uint32_t arity(Op o) {
-    if (o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Gather || o == Op::Log || o == Op::Exp) return 1;
+    if (o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Gather || o == Op::Log || o == Op::Exp ||
+        o == Op::Abs) return 1;
     if (o == Op::Noise)               return 3;
     return is_binary(o) ? 2 : 0;
 }
@@ -859,6 +866,7 @@ public:
     friend Field sqrt(Field x) { x.push_unary(Op::Sqrt); return x; }
     friend Field log(Field x) { x.push_unary(Op::Log); return x; }
     friend Field exp(Field x) { x.push_unary(Op::Exp); return x; }
+    friend Field abs(Field x) { x.push_unary(Op::Abs); return x; }
 
     // Component `k` of `table[floor(index)]`. The table is shared, not
     // copied into every field that gathers from it.
@@ -1244,6 +1252,7 @@ private:
                 case Op::Opaque: s[i] = n.fn(in.u, in.v); break;
                 case Op::Coord:  s[i] = in.x[n.k]; break;
                 case Op::Symbol: s[i] = unbound(); break;
+                case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }
             }
         }
         return s[ops_.size() - 1];

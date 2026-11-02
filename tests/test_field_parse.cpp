@@ -54,7 +54,7 @@ const std::vector<double> kInputs{0.0, -0.0, 1.0, -1.0, 0.5, 2.0, -3.25, 1e300, 
 // printer writes more simply -- a factor of exactly 1, a negative constant added -- so only its
 // values and its text come back, not its ops.
 F grow(std::mt19937& rng, int depth, bool shortened) {
-    std::uniform_int_distribution<int> pick(0, depth > 0 ? 15 : 3);
+    std::uniform_int_distribution<int> pick(0, depth > 0 ? 16 : 3);
     const auto next = [&] { return grow(rng, depth - 1, shortened); };
     switch (pick(rng)) {
         case 0: return F::u();
@@ -76,6 +76,7 @@ F grow(std::mt19937& rng, int depth, bool shortened) {
         case 12: return exp(next());
         case 13: return min(next(), next());
         case 14: return max(next(), next());
+        case 15: return abs(next());
         default: return less(next(), next());
     }
 }
@@ -107,6 +108,7 @@ TEST_CASE("field parse: a text written by hand is the field built in code", "[fi
     CHECK(key(read("sqrt(p) + 2 * log(x)")) == key(sqrt(p) + F(2.0) * log(x)));
     CHECK(key(read("min(u, max(v, 0.5)) * less(u, 1e-5)")) == key(min(u, max(v, F(0.5))) * less(u, F(1e-5))));
     CHECK(key(read("exp(p * log(x))")) == key(exp(p * log(x))));
+    CHECK(key(read("abs(x - p) / 2")) == key(abs(x - p) / F(2.0)));
     // a product after a number or a closing parenthesis may leave out its '*'
     CHECK(key(read("2x^2 - 3x")) == key(F(2.0) * (x * x) - F(3.0) * x));
     CHECK(key(read("(x - 1)(x + 2)")) == key((x - F(1.0)) * (x + F(2.0))));
@@ -178,7 +180,7 @@ TEST_CASE("field parse: a text that is not a field is refused where it stops bei
     CHECK(refusal("u v") == "parse: at column 3, expected an operator or the end, found 'v'");
     CHECK(refusal("(u + v") == "parse: at column 7, expected ')', found the end");
     CHECK(refusal("sin u").find("'sin' is a function: write sin(...)") != std::string::npos);
-    CHECK(refusal("tan(u)") == "parse: at column 1, expected sin, cos, log, exp, sqrt, min, max or less "
+    CHECK(refusal("tan(u)") == "parse: at column 1, expected sin, cos, log, exp, sqrt, abs, min, max or less "
                                "before '(', found 'tan'");
     CHECK(refusal("min(u)").find("',' between the two arguments of min") != std::string::npos);
     CHECK(refusal("sqrt(u, v)").find("')' after the one argument of sqrt") != std::string::npos);
@@ -218,4 +220,16 @@ TEST_CASE("parse: a typed minus is a minus on the page", "[field][parse][latex]"
     CHECK(*bd::to_latex(*bd::parse("1 + -u")) == "1 - u");
     CHECK(*bd::to_latex(*bd::parse("-3^2")) == "-3^{2}");
     CHECK(*bd::to_latex(*bd::parse("v * -u")) == "v \\cdot \\left(-u\\right)");
+}
+
+TEST_CASE("parse: abs is the size of a number, and |x| on a page", "[field][parse][latex]") {
+    const auto f = bd::parse("abs(u - 2) + abs(v)");
+    REQUIRE(f.has_value());
+    CHECK((*f)(0.5, 3.0) == 1.5 + 3.0);
+    CHECK((*f)(-1.0, -0.0) == 3.0);
+    CHECK(*bd::to_text(*f) == "abs(u - 2) + abs(v)");
+    CHECK(*bd::to_latex(*f) == "\\left|u - 2\\right| + \\left|v\\right|");
+    CHECK(*bd::to_latex(*bd::parse("abs(-v)")) == "\\left|-v\\right|");
+    // the case it must fail: abs takes one argument
+    CHECK(refusal("abs(u, v)").find("')' after the one argument of abs") != std::string::npos);
 }
