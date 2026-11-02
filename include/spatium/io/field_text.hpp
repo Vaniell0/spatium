@@ -204,6 +204,21 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
         case Op::Exp:  return {call("exp", "\\exp", arg(n.a).text)};
         case Op::Sqrt: return {tex ? std::format("\\sqrt{{{}}}", arg(n.a).text) : call("sqrt", "", arg(n.a).text)};
         case Op::Abs:  return {tex ? std::format("\\left|{}\\right|", arg(n.a).text) : call("abs", "", arg(n.a).text)};
+        case Op::Pow: {
+            // a^b; in text an exponent that is a whole number from 1 to 64 keeps its parentheses,
+            // since x^2 bare is read back as the product x * x, another op
+            const Spelled& b = arg(n.b);
+            const bool whole = !b.text.empty() && b.text.find_first_not_of("0123456789") == std::string::npos &&
+                               b.text.size() <= 2 && std::stoi(b.text) >= 1 && std::stoi(b.text) <= 64;
+            if (tex) {
+                const Spelled& a = arg(n.a);
+                const bool raised = a.fraction || a.text.find('^') != std::string::npos || a.binds != Binding::Atom;
+                Spelled out{std::format("{}^{{{}}}", raised ? "\\left(" + a.text + "\\right)" : a.text, b.text), Binding::Power};
+                return out;
+            }
+            return {grouped(arg(n.a), Binding::Atom, style) + "^" + (whole ? "(" + b.text + ")" : grouped(b, Binding::Atom, style)),
+                    Binding::Power};
+        }
         case Op::Less:
             // 1 where a < b and 0 elsewhere: an Iverson bracket on a page
             return {tex ? std::format("\\left[{} < {}\\right]", arg(n.a).text, arg(n.b).text)

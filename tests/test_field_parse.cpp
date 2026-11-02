@@ -54,7 +54,7 @@ const std::vector<double> kInputs{0.0, -0.0, 1.0, -1.0, 0.5, 2.0, -3.25, 1e300, 
 // printer writes more simply -- a factor of exactly 1, a negative constant added -- so only its
 // values and its text come back, not its ops.
 F grow(std::mt19937& rng, int depth, bool shortened) {
-    std::uniform_int_distribution<int> pick(0, depth > 0 ? 16 : 3);
+    std::uniform_int_distribution<int> pick(0, depth > 0 ? 17 : 3);
     const auto next = [&] { return grow(rng, depth - 1, shortened); };
     switch (pick(rng)) {
         case 0: return F::u();
@@ -77,6 +77,7 @@ F grow(std::mt19937& rng, int depth, bool shortened) {
         case 13: return min(next(), next());
         case 14: return max(next(), next());
         case 15: return abs(next());
+        case 16: return pow(next(), next());
         default: return less(next(), next());
     }
 }
@@ -184,9 +185,14 @@ TEST_CASE("field parse: a text that is not a field is refused where it stops bei
                                "before '(', found 'tan'");
     CHECK(refusal("min(u)").find("',' between the two arguments of min") != std::string::npos);
     CHECK(refusal("sqrt(u, v)").find("')' after the one argument of sqrt") != std::string::npos);
-    CHECK(refusal("u^2.5").find("a whole power from 1 to 64") != std::string::npos);
-    CHECK(refusal("u^0").find("column 3") != std::string::npos);
-    CHECK(refusal("u^-1").find("a whole power") != std::string::npos);
+    // a power that is not a whole number from 1 to 64 is pow, not refused
+    const F u = F::u(), v = F::v();
+    CHECK(key(read("u^2.5")) == key(pow(u, F(2.5))));
+    CHECK(key(read("u^0")) == key(pow(u, F(0.0))));
+    CHECK(key(read("u^-1")) == key(pow(u, F(-1.0))));
+    CHECK(key(read("u^v")) == key(pow(u, v)));
+    CHECK(key(read("u^(v + 1)")) == key(pow(u, v + F(1.0))));
+    CHECK(key(read("u^3")) == key(u * u * u));   // and a whole one stays the product
     CHECK(refusal("u^2^2").find("found '^'") != std::string::npos);
     CHECK(refusal("") == "parse: at column 1, expected a number, a name, a function or '(', found the end");
 }

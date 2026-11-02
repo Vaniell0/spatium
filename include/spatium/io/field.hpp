@@ -376,6 +376,12 @@ enum class Op : std::uint8_t {
     // new numbers for the same program, and a shader is not compiled again. Written out as scalar
     // ops it would be the other way round. Nothing folds it, for the same reason.
     Net,
+
+    // a^b for any b, std::pow: where b is not a whole number it has a value for a > 0 only
+    // (a^0 is 1 everywhere). A whole power from 1 to 64 typed as such stays a product, x * x,
+    // which is exact and was the language's only power; this is the rest of them -- x^p, x^0.5,
+    // x^-1 -- which the reader refused before.
+    Pow,
 };
 
 // The FNV-and-avalanche hash `Op::Hash` is defined by, spelled once so the
@@ -423,13 +429,14 @@ inline const char* op_name(Op o) {
         case Op::Symbol: return "Symbol";
         case Op::Abs:    return "Abs";
         case Op::Net:    return "Net";
+        case Op::Pow:    return "Pow";
     }
     return "?";
 }
 
 inline bool is_binary(Op o) {
     return o == Op::Add || o == Op::Sub || o == Op::Mul || o == Op::Div ||
-           o == Op::Min || o == Op::Max || o == Op::Less;
+           o == Op::Min || o == Op::Max || o == Op::Less || o == Op::Pow;
 }
 
 // How many children an op reads, named once for the three places that
@@ -877,6 +884,7 @@ public:
     // boolean, so the result composes with everything else here by
     // multiplication. See Op::Less for why there is no boolean type.
     friend Field less(Field x, const Field& y) { x.append(Op::Less, y); return x; }
+    friend Field pow(Field x, const Field& y) { x.append(Op::Pow, y); return x; }
 
     friend Field sqrt(Field x) { x.push_unary(Op::Sqrt); return x; }
     friend Field log(Field x) { x.push_unary(Op::Log); return x; }
@@ -1316,6 +1324,7 @@ private:
                 case Op::Sin:    { using std::sin; s[i] = sin(s[n.a]); break; }
                 case Op::Cos:    { using std::cos; s[i] = cos(s[n.a]); break; }
                 case Op::Less:   s[i] = s[n.a] < s[n.b] ? T{1} : T{0}; break;
+                case Op::Pow:    { using std::pow; s[i] = pow(s[n.a], s[n.b]); break; }
                 case Op::Noise:  s[i] = (*n.noise)(s[n.a], s[n.b], s[n.c]); break;
                 case Op::Id:     s[i] = static_cast<T>(in.id); break;
                 case Op::Origin: s[i] = in.origin[n.k]; break;
