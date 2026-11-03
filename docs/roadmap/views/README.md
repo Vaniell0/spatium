@@ -2,7 +2,7 @@
 
 ## Where it stands
 
-The page (`site/`), published at `vaniell0.github.io/spatium/` from the `gh-pages` branch by `site/publish.sh`, shows what the core answers and composes nothing: windows of questions asked as rows of a LaTeX editor (MathLive) and answered live by the core in a worker, with their steps, certificates and graphs, the workspace kept in its link (`#w=`) and in the browser, the gallery written by `examples/gallery.cpp`, the reference written from the reader's tables. The core it calls is the library built to WebAssembly (`site/wasm/`), held against the host on every question in `questions.txt`.
+The page (`site/`), published at `vaniell0.github.io/spatium/` from each commit of main CI passed, shows what the core answers and composes nothing: windows of questions asked as rows of a LaTeX editor (MathLive) and answered live by the core in a worker, with their steps, certificates and graphs, the workspace kept in its link (`#w=`) and in the browser, the gallery written by `examples/gallery.cpp`, the reference written from the reader's tables. The core it calls is the library built to WebAssembly (`site/wasm/`), held against the host on every question in `questions.txt`.
 
 ## Now
 
