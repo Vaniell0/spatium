@@ -122,11 +122,17 @@ TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as"
         ["InvisibleOperator", 3, "x"]], 5], {"num": "0"}]]})");
     CHECK(at(typed, "route").as_string() == "closed form");
     CHECK(at(typed, "steps").dump() == at(rsc::respond("2x^2 - 3x - 5 = 0"), "steps").dump());
+    // a row may be a line already in the language beside rows of MathJSON: the same document
+    const auto mixed = rsc::respond_rows(R"({"rows": [["Element", "p", ["Interval", {"num": "0.5"}, 4]],
+        {"text": "x: x^2 - p = 0 on [0, 10]"}]})");
+    CHECK(mixed.dump() == by_text.dump());
     // the cases it must fail: a row the language cannot say is refused with its number, and no rows
     const auto integral_inside = rsc::respond_rows(R"({"rows": [["Element", "p", ["Interval", 0, 1]], ["Add", "p", ["D", "p"]]]})");
     CHECK(at(integral_inside, "row").as_number() == 2);
     CHECK(at(integral_inside, "refused").as_string() == "row 2: at [2]: 'D' is not in the language");
     CHECK(at(rsc::respond_rows(R"({"rows": []})"), "refused").as_string() == "the request has no rows");
+    const auto bad_text = rsc::respond_rows(R"({"rows": [{"text": "x: x^2 - p = 0 on [0, 10]"}, {"text": "1 +"}]})");
+    CHECK(at(bad_text, "refused").is_string());
 }
 
 TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][respond]") {
