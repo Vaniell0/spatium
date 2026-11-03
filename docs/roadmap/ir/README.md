@@ -2,11 +2,11 @@
 
 ## Where it stands
 
-A quantity is one `Field` (`io/field.hpp`): numbers, the chart's `u` and `v`, named symbols, and operations -- arithmetic, min/max, less, sin/cos, sqrt, log/exp, abs, any power (`Pow`), noise, gather, instance inputs, and a net of one hidden tanh layer whose weights are data (`Net`). It is written as text and LaTeX (`io/field_text.hpp`; a minus written once) and read back (`io/field_parse.hpp`, the language as tables the page's reference is written from). It lowers to plain data run by one interpreter in any arithmetic (`io/field_pod.hpp`).
+A quantity is one `Field` (`io/field.hpp`): numbers, the chart's `u` and `v`, named symbols, and operations -- arithmetic, min/max, less, sin/cos, sqrt, log/exp, abs, any power (`Pow`), noise, gather, instance inputs, and a net of one hidden tanh layer whose weights are data (`Net`). It is written as text and LaTeX (`io/field_text.hpp`; a minus written once) and read back (`io/field_parse.hpp`, the language as tables the page's reference is written from), also from MathJSON, the output of a LaTeX editor, by a table into that text (`io/field_mathjson.hpp`). It lowers to plain data run by one interpreter in any arithmetic (`io/field_pod.hpp`).
 
 ## Now
 
-- the language read from MathJSON, the output of an existing LaTeX editor (MathLive), so input is typed as LaTeX and no grammar of our own grows
+- the page's input through MathLive, sending MathJSON; then the text reader's page-only paths removed
 - refusals as data: what, where, why, and what to write instead -- for a person editing and for automation retrying
 
 ## Later

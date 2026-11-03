@@ -4,6 +4,7 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/error.hpp>
 #  include <spatium/io/field.hpp>
+#  include <spatium/io/field_mathjson.hpp>
 #  include <spatium/io/field_parse.hpp>
 #  include <spatium/io/field_text.hpp>
 #  include <spatium/io/json.hpp>
@@ -381,7 +382,8 @@ inline std::string to_text(const Document& doc) {
 
 // The document as JSON: each definition its name, its kind and the texts of its fields, which
 // are read back through the same reader as a line is, so the two forms cannot mean different
-// things.
+// things. Read back, a field may also be MathJSON, what a LaTeX editor on a page writes; it is
+// read as the text of the language first (field_mathjson.hpp), so it means the same again.
 inline JsonValue to_json(const Document& doc) {
     JsonValue::ArrayType defs;
     for (const auto& d : doc.statements) {
@@ -415,7 +417,27 @@ inline Result<Document> document_from_json(const JsonValue& json) {
     std::string text;
     for (const auto& d : defs->as_array()) {
         const std::string kind = d.string_or("kind", ""), name = d.string_or("name", "");
-        const auto s = [&](const char* key) { return d.string_or(key, ""); };
+        // a field is its text, or MathJSON (field_mathjson.hpp) read as that text; a root's whole
+        // equation may stand as its left side, ["Equal", a, b], with no right side
+        std::optional<Error> unread;
+        const auto read = [&](const char* key, const JsonValue& v) -> std::string {
+            if (v.is_string()) return v.as_string();
+            auto t = mathjson_text(v);
+            if (!t && !unread) unread = Error(ErrorCode::ParseError, std::format("document: {}, {}: {}", name, key, t.error().message));
+            return t ? *t : std::string();
+        };
+        std::vector<std::pair<std::string, std::string>> sides;
+        if (const JsonValue* lhs = d.find("lhs"); kind == "root" && lhs && !d.find("rhs") && lhs->is_array()) {
+            auto eq = mathjson_equation(*lhs);
+            if (!eq) return std::unexpected(Error(ErrorCode::ParseError, std::format("document: {}, lhs: {}", name, eq.error().message)));
+            sides = {{"lhs", eq->first}, {"rhs", eq->second}};
+        }
+        const auto s = [&](const char* key) -> std::string {
+            for (const auto& [k, v] : sides)
+                if (k == key) return v;
+            const JsonValue* v = d.find(key);
+            return v ? read(key, *v) : std::string();
+        };
         if (kind == "value") text += std::format("{} = {}\n", name, s("value"));
         else if (kind == "parameter") text += std::format("{} in [{}, {}]\n", name, s("lo"), s("hi"));
         else if (kind == "root" && !d.find("lo") && !d.find("hi")) text += std::format("{}: {} = {}\n", name, s("lhs"), s("rhs"));
@@ -428,6 +450,7 @@ inline Result<Document> document_from_json(const JsonValue& json) {
                 for (const auto& x : a->as_array()) args += (args.empty() ? "" : ", ") + (x.is_string() ? x.as_string() : std::string("?"));
             text += std::format("{} = {}({})\n", name, s("operation"), args);
         } else return std::unexpected(Error(ErrorCode::ParseError, std::format("document: '{}' is not a kind of definition", kind)));
+        if (unread) return std::unexpected(*unread);
     }
     return read_document(text);
 }
