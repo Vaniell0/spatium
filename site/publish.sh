@@ -35,6 +35,10 @@ export GIT_INDEX_FILE=$scratch/index
 git --git-dir="$(git rev-parse --absolute-git-dir)" --work-tree="$out" add -A -f "$out"
 tree=$(git write-tree)
 unset GIT_INDEX_FILE
+if [[ -n $parent && $(git rev-parse "$parent^{tree}") == "$tree" ]]; then
+    echo "gh-pages already holds this page (site from $source)"
+    exit 0
+fi
 commit=$(git commit-tree "$tree" ${parent:+-p "$parent"} -m "site from $source")
 git push "$remote" "$commit:refs/heads/gh-pages"
 echo "published $commit (site from $source)"
