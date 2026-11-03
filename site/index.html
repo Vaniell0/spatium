@@ -20,15 +20,18 @@
   } catch {}
 </script>
 <script defer src="vendor/katex/katex.min.js"></script>
-<script type="module" src="app.js"></script>
+<script type="module" src="pkg/src/page.js"></script>
 </head>
 <body>
 <header class="bar">
   <a class="mark" href="./">spatium</a>
-  <nav class="add" aria-label="Open a window">
-    <button type="button" data-open="ask"><span aria-hidden="true">+</span> Ask</button>
-    <button type="button" data-open="ref"><span aria-hidden="true">+</span> Reference</button>
-    <button type="button" data-open="gallery"><span aria-hidden="true">+</span> Gallery</button>
+  <div class="seg preset" role="group" aria-label="Page">
+    <button type="button" data-preset="calculator">Calculator</button>
+    <button type="button" data-preset="canvas">Canvas</button>
+  </div>
+  <nav class="add" aria-label="Panels">
+    <button type="button" data-panel="ref" aria-pressed="false">Reference</button>
+    <button type="button" data-panel="gallery" aria-pressed="false">Gallery</button>
   </nav>
   <span class="core-dot" id="core-dot" title="Core loading" aria-hidden="true"></span>
   <button class="icon" id="copy-link" type="button" aria-label="Copy a link to this workspace" title="Copy a link to this workspace">
@@ -44,7 +47,10 @@
 
 <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
 
-<main class="work" id="work" aria-label="Workspace"></main>
+<div class="layout">
+  <main id="sheet" aria-label="Document"></main>
+  <aside class="panel" id="panel" aria-label="Panel" hidden></aside>
+</div>
 
 <section class="keys" id="keys" aria-label="Keyboard" hidden>
   <div class="keys-head">
@@ -79,14 +85,6 @@
         <button type="button" value="1">Normal</button>
         <button type="button" value="1.15">Large</button>
         <button type="button" value="1.3">Larger</button>
-      </div>
-    </fieldset>
-    <fieldset>
-      <legend>Digits shown</legend>
-      <div class="seg" data-setting="digits">
-        <button type="button" value="6">6</button>
-        <button type="button" value="12">12</button>
-        <button type="button" value="17">17</button>
       </div>
     </fieldset>
     <fieldset>

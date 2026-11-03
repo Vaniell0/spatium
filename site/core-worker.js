@@ -1,6 +1,6 @@
 // The core in a worker, so a long synthesis never holds the page: the page sends a question, the
 // worker answers it with the library's JSON. A question made stale by a newer one is not waited
-// for -- the page ends this worker and starts another (app.js), which is how a synthesis is
+// for -- the page ends this worker and starts another (web/src/core.ts), which is how a synthesis is
 // cancelled. Nothing here reads or changes an answer.
 
 let respond = null, rows = null, plot = null;
