@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: the workspace is a link, and the page is published on GitHub Pages
-files: [site/app.js, site/index.html, site/publish.sh]
+files: [site/app.js, site/index.html]
 resolves: [views/the-page-is-windows-of-questions#1, views/the-page-is-windows-of-questions#2]
 open:
   - a link opened in a browser replaces the workspace that browser kept; the one it had is not offered back
