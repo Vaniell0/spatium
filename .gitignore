@@ -71,3 +71,5 @@
 
 !/gallery/
 !/gallery/**
+# the page's package, compiled from web/ (tsc -p web)
+/site/pkg/
