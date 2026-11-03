@@ -413,7 +413,9 @@ function addWindow(item, { focus = false } = {}) {
   work.items.push(item);
   const win = item.kind === "ask" ? askWindow(item) : item.kind === "ref" ? refWindow(item) : galleryWindow(item);
   item.win = win;
+  if (item.wide) win.classList.add("wide");
   $("#work").append(win);
+  saveSoon();
   if (focus) {
     win.scrollIntoView({ block: "nearest", behavior: "smooth" });
     focusFirst(item);
@@ -425,6 +427,7 @@ function closeWindow(item) {
   work.items = work.items.filter((x) => x !== item);
   waiting.delete(item);
   item.win.remove();
+  saveSoon();
   if (editor.active && !document.body.contains(editor.active)) { editor.active = null; setKeys(false); }
 }
 
@@ -479,6 +482,7 @@ function setMode(item, mode) {
   item.mode = mode;
   buildInput(item);
   focusFirst(item);
+  saveSoon();
 }
 
 function buildInput(item) {
@@ -526,6 +530,7 @@ function rowView(item, k, latex) {
       row.after(next);
       renumber(item);
       next.querySelector("math-field").focus();
+      saveSoon();
     } else if (e.key === "Backspace" && mf.value === "" && item.rows.length > 1) {
       e.preventDefault();
       const prev = row.previousElementSibling || row.nextElementSibling;
@@ -552,6 +557,7 @@ function renumber(item) {
 
 // live: each change asks the core again, a moment after the last keystroke
 function schedule(item) {
+  saveSoon();
   clearTimeout(item.timer);
   item.timer = setTimeout(() => recompute(item), 120);
 }
@@ -627,6 +633,8 @@ async function drawGraph(item, request) {
   grow.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
   grow.addEventListener("click", () => {
     const wide = item.win.classList.toggle("wide");
+    item.wide = wide;
+    saveSoon();
     grow.setAttribute("aria-pressed", String(wide));
     paint();
   });
@@ -873,15 +881,114 @@ function placeKeys() {
   keys.style.left = `${Math.max(16, Math.min(r.left, innerWidth - w - 16))}px`;
 }
 
-// ── routes: #solve?q=… opens a question typed as text ─────────────────
+// ── the workspace as a link: #w= is its windows, kept in the address and in this browser ─
+// A window is written as what it holds, an array led by a letter: ["f", rows...] a formula,
+// ["t", text] a text, ["g", id] a gallery card, ["r"] the reference, ["G"] the gallery; "+" after
+// the letter when its graph is expanded. JSON, deflate-raw, base64url. #solve?q=… opens one question as text.
 
-function fromHash() {
-  const [path, query] = location.hash.slice(1).split("?");
+const WORKSPACE = "spatium.workspace";
+
+function snapshot() {
+  const windows = work.items.map((item) => {
+    const wide = item.wide ? "+" : "";
+    if (item.kind === "ref") return ["r" + wide];
+    if (item.kind === "gallery") return ["G" + wide];
+    if (item.mode === "formula") return ["f" + wide, ...item.rows];
+    if (item.mode === "text") return ["t" + wide, item.text || ""];
+    return ["g" + wide, item.card.id];
+  });
+  return [1, ...windows];
+}
+
+// a window as the page opens it, or null for one it cannot (an unknown letter, a card no longer in the gallery)
+function windowOf(w) {
+  if (!Array.isArray(w) || typeof w[0] !== "string" || !w.slice(1).every((x) => typeof x === "string")) return null;
+  const [letter, ...held] = w, wide = letter.endsWith("+");
+  switch (letter.replace(/\+$/, "")) {
+    case "r": return { kind: "ref", wide };
+    case "G": return { kind: "gallery", wide };
+    case "f": return { kind: "ask", mode: "formula", rows: held.length ? held : [""], wide };
+    case "t": return { kind: "ask", mode: "text", text: held[0] ?? "", wide };
+    case "g": {
+      const card = data.gallery.find((c) => c.id === held[0]);
+      return card ? { kind: "ask", mode: "fixed", card, wide } : null;
+    }
+  }
+  return null;
+}
+
+function restore(state) {
+  if (!Array.isArray(state) || state[0] !== 1) return false;
+  const windows = state.slice(1).map(windowOf).filter(Boolean);
+  for (const item of [...work.items]) closeWindow(item);
+  for (const w of windows) addWindow(w);
+  return true;
+}
+
+const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unbase64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+const through = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer();
+
+async function linkOf(state) {
+  if (!("CompressionStream" in window)) return null;
+  return base64url(new Uint8Array(await through(JSON.stringify(state), new CompressionStream("deflate-raw"))));
+}
+
+async function stateOf(code) {
+  return JSON.parse(new TextDecoder().decode(await through(unbase64url(code), new DecompressionStream("deflate-raw"))));
+}
+
+// a moment after the last change: the address names the workspace, and this browser keeps it
+let saveTimer, restoring = false;
+function saveSoon() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 300);
+}
+
+async function save() {
+  const state = snapshot();
+  try { localStorage.setItem(WORKSPACE, JSON.stringify(state)); } catch {}
+  const code = await linkOf(state).catch(() => null);
+  if (code !== null) history.replaceState(null, "", `#w=${code}`);
+}
+
+async function copyLink() {
+  clearTimeout(saveTimer);
+  await save();
+  try {
+    await navigator.clipboard.writeText(location.href);
+    toast("Link to this workspace copied");
+  } catch {
+    toast("The address bar holds the link to this workspace");
+  }
+}
+
+// what the address asks for: true when it opened something
+async function fromHash() {
+  const hash = location.hash.slice(1);
+  if (hash.startsWith("w=")) {
+    let state = null;
+    try { state = await stateOf(hash.slice(2)); } catch {}
+    if (opened(state)) return true;
+    toast("The link to a workspace could not be read", true);
+    return false;
+  }
+  const [path, query] = hash.split("?");
   if (path === "solve" || path === "") {
     const q = new URLSearchParams(query || "").get("q");
     if (q !== null) { openText(q); return true; }
   }
   return false;
+}
+
+function opened(state) {
+  restoring = true;
+  try { return restore(state); } finally { restoring = false; saveSoon(); }
+}
+
+function fromBrowser() {
+  try { return opened(JSON.parse(localStorage.getItem(WORKSPACE) || "null")); } catch { return false; }
 }
 
 function rerender() {
@@ -915,6 +1022,7 @@ function wire() {
       if (["digits", "formulas"].includes(seg.dataset.setting)) rerender();
     });
   $("#check-update").addEventListener("click", checkUpdate);
+  $("#copy-link").addEventListener("click", copyLink);
   addEventListener("hashchange", fromHash);
 }
 
@@ -923,9 +1031,10 @@ applySettings();
 loadCore();
 await Promise.all([loadData(), loadEditor()]);
 applySettings();
-// a link to a question opens it; otherwise two questions to start from: an equation solved with
-// its steps, and a root as a function of a parameter, synthesised and certified
-if (!fromHash()) {
+// a link opens what it names, else the workspace this browser kept; otherwise two questions to
+// start from: an equation solved with its steps, and a root as a function of a parameter,
+// synthesised and certified
+if (!(await fromHash()) && !fromBrowser()) {
   addWindow({ kind: "ask", mode: "formula", rows: ["2x^2-3x-5=0"] });
   addWindow({ kind: "ask", mode: "formula", rows: ["p\\in[0.5,4]", "x^2-p=0,\\ x\\in[0,10]"] });
 }
