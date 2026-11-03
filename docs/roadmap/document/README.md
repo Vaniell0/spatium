@@ -2,11 +2,11 @@
 
 ## Where it stands
 
-What a person writes before anything is computed, a statement a line (`io/document.hpp`): a value, a parameter on an interval, a root with or without a bracket, an integral, a shape. Each reads only the names above it; it is printed back as written and as JSON read through the same reader, and its shapes are built as the scene its calls would build (`io/document_trace.hpp`). The scene DSL (`io/build.hpp`, a `Trace`) is the same layer for scenes.
+What a person writes before anything is computed, a statement a line (`io/document.hpp`): a value, a parameter on an interval, a root with or without a bracket, an integral, a shape. Each reads only the names above it; it is printed back as written and as JSON read through the same reader, and its shapes are built as the scene its calls would build (`io/document_trace.hpp`). A page's question is a document too: rows of a LaTeX editor, each a formula as MathJSON, read as its lines, the last the question (`mathjson_row_text`, `rsc::respond_rows`). The scene DSL (`io/build.hpp`, a `Trace`) is the same layer for scenes.
 
 ## Now
 
-- nothing is taken up here now
+- the page asks its question as rows of MathLive fields, sent as MathJSON
 
 ## Later
 

@@ -20,6 +20,7 @@ const SpatiumCore = (await import(path.join(here, 'spatium_core.js'))).default;
 const core = await SpatiumCore();
 const respond = core.cwrap('spatium_respond', 'string', ['string', 'number']);
 const preview = core.cwrap('spatium_preview', 'string', ['string']);
+const rows = core.cwrap('spatium_rows', 'string', ['string']);
 const evaluate = core.cwrap('spatium_evaluate', 'string', ['string']);
 const plot = core.cwrap('spatium_plot', 'string', ['string']);
 
@@ -64,12 +65,13 @@ function agree(a, b, where) {
 let failed = 0;
 lines.forEach((line, i) => {
   const wasm = line.startsWith('preview ') ? preview(line.slice(8))
+             : line.startsWith('rows ') ? rows(line.slice(5))
              : line.startsWith('evaluate ') ? evaluate(line.slice(9))
              : line.startsWith('plot ') ? plot(line.slice(5)) : respond(line, 0);
   tolerance = line.startsWith('plot ') ? 2 ** -22 : 1e-9;
   const r = agree(JSON.parse(host[i]), JSON.parse(wasm), line);
   if (r !== true) { ++failed; console.log(`differs: ${r}`); }
-  if ((line.includes(' for ') || line.startsWith('evaluate ')) && !line.startsWith('preview ') && !wasm.includes('"computed":"wasm"') && wasm.includes('"certificate"'))
+  if ((line.includes(' for ') || line.startsWith('evaluate ') || line.startsWith('rows ')) && !line.startsWith('preview ') && !wasm.includes('"computed":"wasm"') && wasm.includes('"certificate"'))
     { ++failed; console.log(`differs: ${line}: the certificate does not say wasm`); }
 });
 console.log(`${lines.length - failed} of ${lines.length} agree`);

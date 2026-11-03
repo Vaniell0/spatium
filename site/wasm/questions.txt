@@ -44,3 +44,8 @@ plot {"document": "p in [0.5, 2]\nx in [0.1, 3]\nf = x^p", "name": "f", "along":
 evaluate {"document": {"statements": [{"kind": "root", "name": "x", "lhs": ["Equal", ["Add", ["Square", "x"], ["Multiply", -3, "x"], -2], 0]}]}, "name": "x", "engine": {"arithmetic": "rational"}}
 evaluate {"document": {"statements": [{"kind": "parameter", "name": "p", "lo": -1, "hi": 0}, {"kind": "root", "name": "x", "lhs": ["Equal", ["Add", ["Square", "x"], "p"], 0], "lo": 0, "hi": 10}]}, "name": "x"}
 evaluate {"document": {"statements": [{"kind": "value", "name": "a", "value": ["Add", 1, ["Integrate", "t"]]}]}, "name": "a"}
+rows {"rows": [["Element", "p", ["Interval", {"num": "0.5"}, 4]], ["Delimiter", ["Sequence", ["Equal", ["Subtract", ["Power", "x", 2], "p"], {"num": "0"}], ["Element", "x", ["Interval", {"num": "0"}, 10]]], {"str": ","}]]}
+rows {"rows": [["Equal", ["Subtract", ["Subtract", ["InvisibleOperator", 2, ["Power", "x", 2]], ["InvisibleOperator", 3, "x"]], 5], {"num": "0"}]]}
+rows {"rows": [["Equal", "a", ["Add", 2, 2]], ["InvisibleOperator", 3, "a"]]}
+rows {"rows": [["Element", "p", ["Interval", {"num": "0.1"}, 4]], ["Equal", "I", ["Integrate", ["Power", "e", ["InvisibleOperator", ["Negate", "p"], ["Power", "t", 2]]], ["Tuple", "t", 0, 1]]]]}
+rows {"rows": [["Element", "p", ["Interval", 0, 1]], ["Add", "p", ["D", "p"]]]}

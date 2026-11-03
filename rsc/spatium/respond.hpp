@@ -23,6 +23,7 @@
 #include <rsc/spatium/query.hpp>
 #include <rsc/spatium/synthesis.hpp>
 #include <spatium/io/document.hpp>
+#include <spatium/io/field_mathjson.hpp>
 #include <spatium/io/plot_glsl.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/io/field_text.hpp>
@@ -32,6 +33,7 @@
 #include <cctype>
 #include <functional>
 #include <cmath>
+#include <expected>
 #include <format>
 #include <string>
 #include <string_view>
@@ -194,27 +196,35 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
     return out;
 }
 
-inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 1e-8) {
-    using namespace respond_detail;
+namespace respond_detail {
+
+// The shorthand of one line read as the document it stands for, with the names `above` defined
+// before it: the definition asked for, or the route it asked by and why it does not read.
+struct Shorthand {
+    std::expected<AskedDocument, std::pair<const char*, std::string>> asked;
+};
+
+inline Shorthand shorthand(std::string_view q, const spatium::io::build::Document& above) {
     namespace bd = spatium::io::build;
-    const std::string_view q = trimmed(text);
-    Object out{{"question", std::string(q)}};
-    // a shorthand that does not read as a document is refused under the route it asked for
-    const auto refuse = [&](const char* route, std::string why) {
-        out.emplace_back("route", route);
-        out.emplace_back("refused", std::move(why));
-        return JsonValue(std::move(out));
+    const auto refuse = [](const char* route, std::string why) {
+        return Shorthand{std::unexpected(std::pair{route, std::move(why)})};
     };
-    const auto answered = [&](const AskedDocument& asked) {
-        for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance})))
-            out.emplace_back(std::move(k), std::move(v));
-        out.emplace_back("document", bd::to_json(asked.document));
-        return JsonValue(std::move(out));
+    // the statements above, then the one asked; checked as one document
+    const auto with_above = [&](bd::Document asked, std::string wanted, const char* route) {
+        asked.statements.insert(asked.statements.begin(), above.statements.begin(), above.statements.end());
+        if (auto ok = bd::check(asked); !ok) return refuse(route, ok.error().message);
+        return Shorthand{AskedDocument{std::move(asked), std::move(wanted)}};
+    };
+    const auto unknown = [&](const auto& f) {
+        std::vector<std::string> open;
+        for (auto& n : f.free_symbols())
+            if (!above.find(n)) open.push_back(std::move(n));
+        return open;
     };
     if (has_word(q, "for")) {
         auto asked = question_document(q);
         if (!asked) return refuse("synthesis", asked.error().message);
-        return answered(*asked);
+        return with_above(std::move(asked->document), std::move(asked->wanted), "synthesis");
     }
     // an equation, with or without the word solve in front
     std::string_view equation = q;
@@ -225,12 +235,12 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
         const std::string_view expression = trimmed(equation.substr(0, eq));
         const auto f = bd::parse(expression, "", "");
         if (!f) return refuse("evaluate", f.error().message);
-        if (const auto open = f->free_symbols(); !open.empty())
+        if (const auto open = unknown(*f); !open.empty())
             return refuse("evaluate", "evaluate: the expression reads '" + open.front() +
                                           "', which has no value; to find it, write an equation (" + std::string(expression) + " = 0)");
         bd::Statement value;
         value.name = "answer", value.value = {*f, std::string(expression)};
-        return answered({{{std::move(value)}}, "answer"});
+        return with_above({{std::move(value)}}, "answer", "evaluate");
     }
     // the root of the equation in its one unknown, with no bracket: solved in closed form
     bd::FieldReader r(equation, "", "");
@@ -242,12 +252,75 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
     auto rhs = bd::detail::written(r, equation);
     if (!rhs) return refuse("closed form", rhs.error().message);
     if (!r.done()) return refuse("closed form", r.fail("the end").error().message);
-    const auto names = (lhs->field - rhs->field).free_symbols();
+    const auto names = unknown(lhs->field - rhs->field);
     if (names.size() != 1) return refuse("closed form", solve_closed_form(lhs->field - rhs->field, "").error().message);
     root.name = names.front(), root.value = std::move(*lhs), root.rhs = std::move(*rhs);
-    AskedDocument asked{{{std::move(root)}}, names.front()};
-    if (auto ok = bd::check(asked.document); !ok) return refuse("closed form", ok.error().message);
-    return answered(asked);
+    return with_above({{std::move(root)}}, names.front(), "closed form");
+}
+
+} // namespace respond_detail
+
+// What a person types, answered. One line is a shorthand (`2 + 2`, `2x^2 - 3x - 5 = 0`, `solve
+// ... for ...`), or else a line of a document (`x: x^2 - 2 = 0 on [0, 2]`). Several lines are a
+// document and its question: the lines above the last define names, and the last is the
+// shorthand read with them (`p in [0.5, 4]` above `solve`-less `x^2 - p = 0` asks for x as a
+// function of p), or else the document's last definition.
+inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 1e-8) {
+    using namespace respond_detail;
+    namespace bd = spatium::io::build;
+    const std::string_view all = trimmed(text);
+    Object out{{"question", std::string(all)}};
+    const auto answered = [&](const AskedDocument& asked) {
+        for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance})))
+            out.emplace_back(std::move(k), std::move(v));
+        out.emplace_back("document", bd::to_json(asked.document));
+        return JsonValue(std::move(out));
+    };
+    bd::Document above;
+    std::string_view q = all;
+    if (const auto nl = all.rfind('\n'); nl != std::string_view::npos) {
+        auto doc = bd::read_document(all.substr(0, nl));
+        if (!doc) {
+            out.emplace_back("route", "document");
+            out.emplace_back("refused", doc.error().message);
+            return JsonValue(std::move(out));
+        }
+        above = std::move(*doc);
+        q = trimmed(all.substr(nl + 1));
+    }
+    auto s = shorthand(q, above);
+    if (s.asked) return answered(*s.asked);
+    // a shorthand that does not read, but a document that does
+    if (auto whole = bd::read_document(all); whole && !whole->statements.empty()) {
+        std::string wanted = whole->statements.back().name;
+        return answered({std::move(*whole), std::move(wanted)});
+    }
+    // refused under the route the shorthand asked for
+    out.emplace_back("route", s.asked.error().first);
+    out.emplace_back("refused", std::move(s.asked.error().second));
+    return JsonValue(std::move(out));
+}
+
+// The rows of a LaTeX editor, each a formula as MathJSON, answered as the lines they read as
+// (`mathjson_row_text`): `{"rows": [...], "tolerance": 1e-8}`. The answer is the one `respond`
+// gives the same lines typed, and a row that does not read is refused with its number, `row`,
+// counted from 1.
+inline spatium::io::JsonValue respond_rows(std::string_view request) {
+    using namespace respond_detail;
+    namespace bd = spatium::io::build;
+    const auto json = spatium::io::parse(request);
+    const JsonValue* rows = json && json->is_object() ? json->find("rows") : nullptr;
+    if (!rows || !rows->is_array() || rows->as_array().empty())
+        return JsonValue(Object{{"question", ""}, {"route", "document"}, {"refused", "the request has no rows"}});
+    std::string text;
+    for (std::size_t k = 0; k < rows->as_array().size(); ++k) {
+        auto line = bd::mathjson_row_text(rows->as_array()[k]);
+        if (!line)
+            return JsonValue(Object{{"question", text}, {"route", "document"}, {"row", static_cast<double>(k + 1)},
+                                    {"refused", std::format("row {}: {}", k + 1, line.error().message)}});
+        text += (k ? "\n" : "") + *line;
+    }
+    return respond(text, json->number_or("tolerance", 1e-8));
 }
 
 // A document given to the door as one JSON object: `document` its text or its JSON, `name` the

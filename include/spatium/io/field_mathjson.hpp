@@ -31,8 +31,14 @@
 // refused with the name it was given and where in the formula it stood ("at [2][1]"), which is
 // what a page needs to point at it.
 //
-// A symbol is written {"sym": "x"}; a bare string is left to the caller, which in a document is
-// the text of the language.
+// A symbol is written {"sym": "x"}, or as a bare string inside a formula; a field of a document
+// that is a bare string is the text of the language. What the editor's own parser writes before
+// any rewriting is read too: a product written without a sign (`2x`, `InvisibleOperator`), the
+// logarithms in base 2 and 10 (`Lb`, `Lg`), and `e` as the number e.
+//
+// A row of the editor is one line of a document (`mathjson_row_text`): `p \in [0.5, 4]` a
+// parameter, `x^2 - p = 0, x \in [0, 10]` a root on its interval, `I = \int_0^1 ... dt` an
+// integral, and an equation or an expression the question a page asks.
 
 SPATIUM_EXPORT namespace spatium::io::build {
 
@@ -44,11 +50,12 @@ struct MathJsonHead {
     std::string_view caption;
 };
 
-inline constexpr std::array<MathJsonHead, 23> mathjson_heads{{
+inline constexpr std::array<MathJsonHead, 26> mathjson_heads{{
     {"Add", 2, -1, "a + b + ..."},
     {"Subtract", 2, 2, "a - b"},
     {"Negate", 1, 1, "-a"},
     {"Multiply", 2, -1, "a * b * ..."},
+    {"InvisibleOperator", 2, -1, "a b ..., a product written without a sign"},
     {"Divide", 2, 2, "a / b"},
     {"Rational", 2, 2, "a / b"},
     {"Half", 1, 1, "a / 2"},
@@ -59,6 +66,8 @@ inline constexpr std::array<MathJsonHead, 23> mathjson_heads{{
     {"Exp", 1, 1, "exp(a)"},
     {"Ln", 1, 1, "log(a)"},
     {"Log", 1, 2, "log(a) / log(10), or log(a) / log(b)"},
+    {"Lb", 1, 1, "log(a) / log(2)"},
+    {"Lg", 1, 1, "log(a) / log(10)"},
     {"Sin", 1, 1, "sin(a)"},
     {"Cos", 1, 1, "cos(a)"},
     {"Tan", 1, 1, "sin(a) / cos(a)"},
@@ -76,9 +85,10 @@ struct MathJsonConstant {
     std::string_view text;
 };
 
-inline constexpr std::array<MathJsonConstant, 4> mathjson_constants{{
+inline constexpr std::array<MathJsonConstant, 5> mathjson_constants{{
     {"Pi", "pi"},
     {"ExponentialE", "exp(1)"},
+    {"e", "exp(1)"},   // the editor's parser writes e as typed; the language has no constant e
     {"PositiveInfinity", "inf"},
     {"NaN", "nan"},
 }};
@@ -166,7 +176,8 @@ inline std::optional<MathText> mathjson_flipped(const JsonValue& v, const std::s
         auto t = mathjson_text(a[1], path + "[1]");
         if (t) return *t;
     }
-    if (a[0].as_string() == "Multiply" && a.size() >= 3 && a[1].is_number() && a[1].as_number() < 0) {
+    if ((a[0].as_string() == "Multiply" || a[0].as_string() == "InvisibleOperator") && a.size() >= 3 && a[1].is_number() &&
+        a[1].as_number() < 0) {
         JsonValue::ArrayType rest(a.begin(), a.end());
         if (a[1].as_number() == -1) rest.erase(rest.begin() + 1);
         else rest[1] = JsonValue(-a[1].as_number());
@@ -237,13 +248,15 @@ inline Result<MathText> mathjson_text(const JsonValue& v, const std::string& pat
     }
     if (head == "Subtract") return MathText{wrapped(arg[0], Tight::Sum) + " - " + wrapped(arg[1], Tight::Product), Tight::Sum};
     if (head == "Negate") return MathText{"-" + wrapped(arg[0], Tight::Power), Tight::Minus};
-    if (head == "Multiply") {
+    if (head == "Multiply" || head == "InvisibleOperator") {
         std::string s = wrapped(arg[0], Tight::Product);
         for (int k = 1; k < n; ++k) s += " * " + wrapped(arg[k], Tight::Minus);
         return MathText{s, Tight::Product};
     }
     if (head == "Divide" || head == "Rational") return quotient(arg[0], arg[1]);
     if (head == "Half") return quotient(arg[0], MathText{"2", Tight::Atom});
+    // e to a power is exp of it, as \exp is: the two ways of writing it read the same
+    if (head == "Power" && arg[0].text == "exp(1)") return MathText{"exp(" + arg[1].text + ")", Tight::Atom};
     if (head == "Power") return power(arg[0], arg[1]);
     if (head == "Square") return power(arg[0], MathText{"2", Tight::Atom});
     if (head == "Root") return power(arg[0], quotient(MathText{"1", Tight::Atom}, arg[1]));
@@ -254,6 +267,8 @@ inline Result<MathText> mathjson_text(const JsonValue& v, const std::string& pat
         const MathText base = n == 2 ? arg[1] : MathText{"10", Tight::Atom};
         return quotient(MathText{"log(" + arg[0].text + ")", Tight::Atom}, MathText{"log(" + base.text + ")", Tight::Atom});
     }
+    if (head == "Lb" || head == "Lg")
+        return quotient(MathText{"log(" + arg[0].text + ")", Tight::Atom}, MathText{head == "Lb" ? "log(2)" : "log(10)", Tight::Atom});
     if (head == "Sin") return call("sin");
     if (head == "Cos") return call("cos");
     if (head == "Tan") return quotient(MathText{"sin(" + arg[0].text + ")", Tight::Atom}, MathText{"cos(" + arg[0].text + ")", Tight::Atom});
@@ -282,6 +297,119 @@ inline Result<std::pair<std::string, std::string>> mathjson_equation(const JsonV
     auto r = detail::mathjson_text(a[2], "[2]");
     if (!r) return std::unexpected(r.error());
     return std::pair{std::move(l->text), std::move(r->text)};
+}
+
+namespace detail {
+
+inline bool mathjson_is(const JsonValue& v, std::string_view head, std::size_t args) {
+    const auto& a = v.as_array();   // empty when it is not an array
+    return a.size() == args + 1 && a[0].is_string() && a[0].as_string() == head;
+}
+
+// a name a row defines: a symbol the language reads as a name, not one of its constants
+inline Result<std::string> mathjson_name(const JsonValue& v, const std::string& path) {
+    const JsonValue* sym = v.is_object() ? v.find("sym") : nullptr;
+    const JsonValue& s = sym ? *sym : v;
+    if (!s.is_string()) return mathjson_error(path, "a name is a symbol, such as x");
+    auto t = mathjson_symbol(s.as_string(), path);
+    if (!t) return std::unexpected(t.error());
+    if (t->text != s.as_string()) return mathjson_error(path, std::format("'{}' is a constant, not a name to define", s.as_string()));
+    return std::move(t->text);
+}
+
+// ["Interval", lo, hi] as the language writes it, [lo, hi]
+inline Result<std::string> mathjson_interval(const JsonValue& v, const std::string& path) {
+    if (!mathjson_is(v, "Interval", 2)) return mathjson_error(path, "an interval is written [a, b]");
+    const auto& a = v.as_array();
+    for (std::size_t k : {1u, 2u})
+        if (mathjson_is(a[k], "Open", 1)) return mathjson_error(std::format("{}[{}]", path, k), "an open end; an interval here holds its ends, [a, b]");
+    auto lo = mathjson_text(a[1], path + "[1]");
+    if (!lo) return std::unexpected(lo.error());
+    auto hi = mathjson_text(a[2], path + "[2]");
+    if (!hi) return std::unexpected(hi.error());
+    return "[" + lo->text + ", " + hi->text + "]";
+}
+
+// ["Element", x, ["Interval", a, b]] as the name and its interval
+inline Result<std::pair<std::string, std::string>> mathjson_element(const JsonValue& v, const std::string& path) {
+    if (!mathjson_is(v, "Element", 2)) return mathjson_error(path, "a name and its interval are written x \\in [a, b]");
+    auto name = mathjson_name(v.as_array()[1], path + "[1]");
+    if (!name) return std::unexpected(name.error());
+    auto ends = mathjson_interval(v.as_array()[2], path + "[2]");
+    if (!ends) return std::unexpected(ends.error());
+    return std::pair{std::move(*name), std::move(*ends)};
+}
+
+// ["Integrate", f, [limits, t, a, b]] as the language's integral f dt on [a, b]
+inline Result<std::string> mathjson_integral(const JsonValue& v, const std::string& path) {
+    const auto& a = v.as_array();
+    if (a.size() != 3) return mathjson_error(path, "an integral is written with its ends and its d, \\int_a^b f\\,dt");
+    const auto& limits = a[2].as_array();
+    if (limits.size() != 4 || !limits[0].is_string() || (limits[0].as_string() != "Tuple" && limits[0].as_string() != "Limits"))
+        return mathjson_error(path + "[2]", "an integral here has both ends, \\int_a^b");
+    auto f = mathjson_text(a[1], path + "[1]");
+    if (!f) return std::unexpected(f.error());
+    auto t = mathjson_name(limits[1], path + "[2][1]");
+    if (!t) return std::unexpected(t.error());
+    auto lo = mathjson_text(limits[2], path + "[2][2]");
+    if (!lo) return std::unexpected(lo.error());
+    auto hi = mathjson_text(limits[3], path + "[2][3]");
+    if (!hi) return std::unexpected(hi.error());
+    return std::format("integral {} d{} on [{}, {}]", f->text, *t, lo->text, hi->text);
+}
+
+} // namespace detail
+
+// A row of a LaTeX editor as one line of a document (document.hpp), or as the question a page
+// asks: `p \in [0.5, 4]` the parameter `p in [0.5, 4]`; an equation with the interval of its
+// unknown, `x^2 - p = 0, x \in [0, 10]`, the root `x: x^2 - p = 0 on [0, 10]`; `I = \int_0^1
+// f\,dt` the integral `I = integral f dt on [0, 1]` (with no name, `answer`); an equation `a = b`
+// as written; anything else an expression. Which of these a line is, and what it reads, the
+// document's reader decides, so a row means what the same line typed means.
+inline Result<std::string> mathjson_row_text(const JsonValue& row) {
+    using namespace detail;
+    if (mathjson_is(row, "Element", 2)) {
+        auto e = mathjson_element(row, "");
+        if (!e) return std::unexpected(e.error());
+        return e->first + " in " + e->second;
+    }
+    // an equation and its unknown's interval, a list the editor writes ["Delimiter", ["Sequence", ...], ","]
+    const JsonValue* list = nullptr;
+    std::string at;
+    if (mathjson_is(row, "Sequence", 2)) list = &row;
+    else if (const auto& a = row.as_array(); a.size() >= 2 && a[0].is_string() && a[0].as_string() == "Delimiter" &&
+                                              a[1].is_array() && !a[1].as_array().empty() && a[1].as_array()[0].is_string() &&
+                                              a[1].as_array()[0].as_string() == "Sequence")
+        list = &a[1], at = "[1]";
+    if (list) {
+        const auto& s = list->as_array();
+        if (s.size() != 3 || !mathjson_is(s[1], "Equal", 2) || !mathjson_is(s[2], "Element", 2))
+            return mathjson_error(at, "a row holds one statement, or an equation and its unknown's interval: x^2 = 2, x \\in [0, 2]");
+        auto eq = mathjson_equation(s[1]);
+        if (!eq) return mathjson_error(at + "[1]", eq.error().message);
+        auto e = mathjson_element(s[2], at + "[2]");
+        if (!e) return std::unexpected(e.error());
+        return std::format("{}: {} = {} on {}", e->first, eq->first, eq->second, e->second);
+    }
+    if (mathjson_is(row, "Integrate", 2)) {
+        auto i = mathjson_integral(row, "");
+        if (!i) return std::unexpected(i.error());
+        return "answer = " + *i;
+    }
+    if (mathjson_is(row, "Equal", 2)) {
+        const auto& a = row.as_array();
+        if (mathjson_is(a[2], "Integrate", 2)) {
+            auto name = mathjson_name(a[1], "[1]");
+            if (!name) return std::unexpected(name.error());
+            auto i = mathjson_integral(a[2], "[2]");
+            if (!i) return std::unexpected(i.error());
+            return *name + " = " + *i;
+        }
+        auto eq = mathjson_equation(row);
+        if (!eq) return std::unexpected(eq.error());
+        return eq->first + " = " + eq->second;
+    }
+    return mathjson_text(row);
 }
 
 } // namespace spatium::io::build
