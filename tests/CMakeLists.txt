@@ -117,6 +117,7 @@ add_executable(spatium_tests
     test_field_consing.cpp
     test_field_symbols.cpp
     test_field_net.cpp
+    test_field_mathjson.cpp
     test_field_simplify.cpp
     test_field_parse.cpp
     test_document.cpp
