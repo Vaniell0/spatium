@@ -3,7 +3,9 @@
 // gallery is written through, so a live answer and a card cannot differ. Nothing is composed on
 // the page.
 //
-//   respond(text)      the answer: evaluated, solved in closed form with its steps, or synthesised
+//   respond(text)      the answer: evaluated, solved in closed form with its steps, or synthesised;
+//                      several lines are a document and its question in the last
+//   rows(request)      the same answer for the rows of a LaTeX editor, each a formula as MathJSON
 //   evaluate(request)  a definition of a document given its value: the document as text or JSON,
 //                      the name it asks for and the parameters it chooses, one JSON object
 //   plot(request)      a value drawn as the graph of a function of one parameter: a WebGL2
@@ -65,6 +67,8 @@ const char* spatium_respond(const char* text, double tolerance) {
     return hand_back(rsc::respond(text, tolerance > 0 ? tolerance : 1e-8).dump());
 }
 
+const char* spatium_rows(const char* request) { return hand_back(rsc::respond_rows(request).dump()); }
+
 const char* spatium_evaluate(const char* request) { return hand_back(rsc::evaluate_request(request).dump()); }
 
 const char* spatium_plot(const char* request) { return hand_back(rsc::plot_request(request).dump()); }
@@ -81,6 +85,7 @@ int main() {
     for (std::string line; std::getline(std::cin, line);) {
         if (line.starts_with("preview ")) std::cout << spatium_preview(line.c_str() + 8) << "\n";
         else if (line.starts_with("evaluate ")) std::cout << spatium_evaluate(line.c_str() + 9) << "\n";
+        else if (line.starts_with("rows ")) std::cout << spatium_rows(line.c_str() + 5) << "\n";
         else if (line.starts_with("plot ")) std::cout << spatium_plot(line.c_str() + 5) << "\n";
         else std::cout << spatium_respond(line.c_str(), 0) << "\n";
     }

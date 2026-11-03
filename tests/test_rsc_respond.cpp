@@ -90,3 +90,41 @@ TEST_CASE("respond: a text that is no question is refused with the library's rea
           != std::string::npos);
     CHECK(at(rsc::respond("2x^2 - 3x - 5 = 0"), "refused").is_null());
 }
+
+TEST_CASE("respond: several lines are a document and its question", "[rsc][respond]") {
+    // a name defined above is no unknown: 3a with a = 2 + 2 is a value, not an equation to write
+    const auto twelve = rsc::respond("a = 2 + 2\n3a");
+    CHECK(at(twelve, "route").as_string() == "evaluate");
+    CHECK(at(twelve, "value").as_number() == 12);
+    // one line that is a statement, not a shorthand: answered as the same document asks for it
+    const auto root = rsc::respond("x: x^2 - 2 = 0 on [0, 2]");
+    const auto by_document = rsc::evaluate_request(R"({"document": "x: x^2 - 2 = 0 on [0, 2]", "name": "x"})");
+    CHECK(at(root, "route").as_string() == "closed form");
+    CHECK(at(root, "steps").dump() == at(by_document, "steps").dump());
+    // the cases it must fail: a line above that does not read, and a question reading an undefined name
+    const auto bad = rsc::respond("p in [1, 0.5\nx^2 - p = 0");
+    CHECK(at(bad, "route").as_string() == "document");
+    CHECK(at(bad, "refused").as_string().find("line 1") != std::string::npos);
+    CHECK(at(rsc::respond("a = 2\nb + a"), "refused").as_string().find("reads 'b'") != std::string::npos);
+}
+
+TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as", "[rsc][respond]") {
+    // as the editor's parser writes them (latex-syntax 0.151.0): p \in [0.5, 4] above x^2 - p = 0, x \in [0, 10]
+    const std::string rows = R"({"rows": [["Element", "p", ["Interval", {"num": "0.5"}, 4]],
+        ["Delimiter", ["Sequence", ["Equal", ["Subtract", ["Power", "x", 2], "p"], {"num": "0"}],
+         ["Element", "x", ["Interval", {"num": "0"}, 10]]], {"str": ","}]]})";
+    const auto by_rows = rsc::respond_rows(rows);
+    const auto by_text = rsc::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
+    CHECK(at(by_rows, "route").as_string() == "synthesis");
+    CHECK(by_rows.dump() == by_text.dump());
+    // 2x^2 - 3x - 5 = 0 as typed in the editor, and as typed in the language: the same steps
+    const auto typed = rsc::respond_rows(R"({"rows": [["Equal", ["Subtract", ["Subtract", ["InvisibleOperator", 2, ["Power", "x", 2]],
+        ["InvisibleOperator", 3, "x"]], 5], {"num": "0"}]]})");
+    CHECK(at(typed, "route").as_string() == "closed form");
+    CHECK(at(typed, "steps").dump() == at(rsc::respond("2x^2 - 3x - 5 = 0"), "steps").dump());
+    // the cases it must fail: a row the language cannot say is refused with its number, and no rows
+    const auto integral_inside = rsc::respond_rows(R"({"rows": [["Element", "p", ["Interval", 0, 1]], ["Add", "p", ["D", "p"]]]})");
+    CHECK(at(integral_inside, "row").as_number() == 2);
+    CHECK(at(integral_inside, "refused").as_string() == "row 2: at [2]: 'D' is not in the language");
+    CHECK(at(rsc::respond_rows(R"({"rows": []})"), "refused").as_string() == "the request has no rows");
+}

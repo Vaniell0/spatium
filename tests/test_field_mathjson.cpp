@@ -90,6 +90,17 @@ TEST_CASE("every function of the table reads as the text a person writes", "[io]
         {R"(2.5)", "2.5"},
         {R"(-3)", "-3"},
         {R"(["Multiply", 0.00001, "p"])", "1e-05 * p"},
+        // as the editor's parser writes them before any rewriting (latex-syntax 0.151.0, measured
+        // in a browser): 2p^2 - 3p - 5, a product with no sign, log_2, log_10 and e
+        {R"(["Subtract", ["Subtract", ["InvisibleOperator", 2, ["Power", "p", 2]], ["InvisibleOperator", 3, "p"]], 5])", "2 * p^2 - 3 * p - 5"},
+        {R"(["InvisibleOperator", 2, "Pi", "p"])", "2 * pi * p"},
+        {R"(["InvisibleOperator", ["Delimiter", ["Add", "p", 1]], ["Delimiter", ["Subtract", "p", 2]]])", "(p + 1) * (p - 2)"},
+        {R"(["Add", "p", ["InvisibleOperator", -3, "p"]])", "p - 3 * p"},
+        {R"(["Lb", "p"])", "log(p) / log(2)"},
+        {R"(["Lg", "p"])", "log(p) / log(10)"},
+        {R"(["Power", "e", ["InvisibleOperator", ["Negate", "p"], ["Power", "p", 2]]])", "exp(-p * p^2)"},
+        {R"(["Power", {"sym": "ExponentialE"}, 2])", "exp(2)"},
+        {R"(["Multiply", 2, "e"])", "2 * exp(1)"},
     };
     for (const auto& [mathjson, text] : cases) {
         INFO(mathjson);
@@ -129,6 +140,50 @@ TEST_CASE("an equation as MathLive writes it is the root a person writes", "[io]
     auto sub_by_hand = bd::read_document("x_1 in [0, 0.5]\ny: y^2 = x_1 on [0, 1]");
     REQUIRE(sub_by_hand);
     CHECK(bd::same_document(*sub, *sub_by_hand));
+}
+
+TEST_CASE("a row of the editor is a line of a document", "[io][mathjson]") {
+    // each row as the editor's parser writes it (latex-syntax 0.151.0, measured in a browser),
+    // beside the LaTeX typed and the line it reads as
+    const std::vector<std::pair<std::string, std::string>> rows{
+        {R"(["Element", "p", ["Interval", {"num": "0.5"}, 4]])", "p in [0.5, 4]"},                       // p\in[0.5,4]
+        {R"(["Delimiter", ["Sequence", ["Equal", ["Subtract", ["Power", "x", 2], "p"], {"num": "0"}],
+             ["Element", "x", ["Interval", {"num": "0"}, 10]]], {"str": ","}])", "x: x^2 - p = 0 on [0, 10]"},  // x^2-p=0,\ x\in[0,10]
+        {R"(["Equal", "I", ["Integrate", ["Power", "e", ["InvisibleOperator", ["Negate", "p"], ["Power", "t", 2]]],
+             ["Tuple", "t", 0, 1]]])", "I = integral exp(-p * t^2) dt on [0, 1]"},                      // I=\int_0^1e^{-pt^2}\,dt
+        {R"(["Equal", "a", ["Add", 2, 2]])", "a = 2 + 2"},
+        {R"(["Integrate", "x", ["Tuple", "x", 0, 1]])", "answer = integral x dx on [0, 1]"},             // \int_0^1 x\,dx
+        {R"(["Add", 2, 2])", "2 + 2"},
+    };
+    for (const auto& [row, line] : rows) {
+        INFO(row);
+        auto t = bd::mathjson_row_text(json(row));
+        REQUIRE(t);
+        CHECK(*t == line);
+    }
+    // the second route: the first three rows as a document are the document written by hand, field by field
+    std::string text;
+    for (std::size_t k = 0; k < 3; ++k) text += *bd::mathjson_row_text(json(rows[k].first)) + "\n";
+    auto doc = bd::read_document(text);
+    REQUIRE(doc);
+    auto by_hand = bd::read_document("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]\nI = integral exp(-p * t^2) dt on [0, 1]");
+    REQUIRE(by_hand);
+    CHECK(bd::same_document(*doc, *by_hand));
+
+    // the cases it must fail, each with where it stood
+    const auto refused = [](const std::string& row) {
+        auto t = bd::mathjson_row_text(json(row));
+        INFO(row);
+        REQUIRE_FALSE(t);
+        return t.error().message;
+    };
+    CHECK(refused(R"(["Element", "Pi", ["Interval", 0, 1]])") == "at [1]: 'Pi' is a constant, not a name to define");
+    CHECK(refused(R"(["Element", "p", ["Interval", ["Open", 0], 1]])").starts_with("at [2][1]: an open end"));
+    CHECK(refused(R"(["Element", "p", ["List", 0, 1]])") == "at [2]: an interval is written [a, b]");
+    CHECK(refused(R"(["Delimiter", ["Sequence", ["Element", "x", ["Interval", 0, 1]], ["Element", "y", ["Interval", 0, 1]]], {"str": ","}])")
+              .starts_with("at [1]: a row holds one statement"));
+    CHECK(refused(R"(["Integrate", "x", ["Tuple", "x"]])") == "at [2]: an integral here has both ends, \\int_a^b");
+    CHECK(refused(R"(["Equal", ["Add", "p", 1], ["Integrate", "x", ["Tuple", "x", 0, 1]]])") == "at [1]: a name is a symbol, such as x");
 }
 
 TEST_CASE("what the language cannot say is refused by name and place", "[io][mathjson]") {
