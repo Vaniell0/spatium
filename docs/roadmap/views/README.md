@@ -2,11 +2,11 @@
 
 ## Where it stands
 
-The page (`site/`) shows what the core answers and composes nothing: the solver, the gallery written by `examples/gallery.cpp`, the reference written from the reader's tables. The core it calls is the library built to WebAssembly (`site/wasm/`), held against the host on every question in `questions.txt`.
+The page (`site/`) shows what the core answers and composes nothing: windows of questions asked as rows of a LaTeX editor (MathLive) and answered live by the core in a worker, with their steps, certificates and graphs, the gallery written by `examples/gallery.cpp`, the reference written from the reader's tables. The core it calls is the library built to WebAssembly (`site/wasm/`), held against the host on every question in `questions.txt`.
 
 ## Now
 
-- the page, step one: windows over one document in a grid, input through MathLive, the graph in its window, the workspace in its link, published on GitHub Pages
+- the page, step one: the workspace in its link, published on GitHub Pages
 - testing the page by many questions, from a generator shared with the synthesis data
 
 ## Later
