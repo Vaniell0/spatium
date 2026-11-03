@@ -8,7 +8,7 @@
 <meta name="color-scheme" content="light dark">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <link rel="stylesheet" href="style.css">
 <script>
@@ -23,63 +23,35 @@
 <script type="module" src="app.js"></script>
 </head>
 <body>
-<a class="skip" href="#result">Skip to result</a>
-
 <header class="bar">
-  <a class="mark" href="#solve">spatium</a>
-  <nav class="tabs" aria-label="Sections">
-    <a href="#solve" data-tab="solve">Solve</a>
-    <a href="#gallery" data-tab="gallery">Gallery</a>
-    <a href="#reference" data-tab="reference">Reference</a>
-    <a href="#scene" data-tab="scene">Scene</a>
+  <a class="mark" href="./">spatium</a>
+  <nav class="add" aria-label="Open a window">
+    <button type="button" data-open="ask"><span aria-hidden="true">+</span> Ask</button>
+    <button type="button" data-open="ref"><span aria-hidden="true">+</span> Reference</button>
+    <button type="button" data-open="gallery"><span aria-hidden="true">+</span> Gallery</button>
   </nav>
+  <span class="core-dot" id="core-dot" title="Core loading" aria-hidden="true"></span>
+  <button class="icon" id="open-keys" type="button" aria-label="Keyboard" aria-controls="keys" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M7 14h10"/></svg>
+  </button>
   <button class="icon" id="open-settings" type="button" aria-label="Settings" aria-haspopup="dialog">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4Z"/></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6-1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4Z"/></svg>
   </button>
 </header>
 
 <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
 
-<main>
-  <section id="tab-solve" data-view="solve" hidden>
-    <form class="ask" id="ask" autocomplete="off">
-      <label class="sr" for="question">Question</label>
-      <div class="line">
-        <input id="question" name="q" spellcheck="false" autocapitalize="off"
-               placeholder="2x^2 - 3x - 5 = 0" aria-describedby="hint">
-        <button class="icon" id="open-keys" type="button" aria-label="Keyboard" aria-controls="keys" aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M7 14h10"/></svg>
-        </button>
-        <button class="icon" id="focus" type="button" aria-label="Focus" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
-        </button>
-        <button class="go" type="submit">Solve</button>
-      </div>
-      <div class="preview" id="preview" aria-live="polite"></div>
-      <p class="hint" id="hint"></p>
-    </form>
+<main class="work" id="work" aria-label="Workspace"></main>
 
-    <article class="sheet" id="result" tabindex="-1" aria-live="polite"></article>
-  </section>
-
-  <section id="tab-gallery" data-view="gallery" hidden>
-    <h1>Gallery</h1>
-    <div class="cards" id="cards"></div>
-    <article class="sheet" id="card-sheet" hidden></article>
-  </section>
-
-  <section id="tab-reference" data-view="reference" hidden>
-    <h1>Reference</h1>
-    <div id="reference"></div>
-  </section>
-
-  <section id="tab-scene" data-view="scene" hidden>
-    <h1>Scene</h1>
-    <div id="scene"></div>
-  </section>
-</main>
-
-<aside class="keys" id="keys" aria-label="Keyboard" hidden></aside>
+<section class="keys" id="keys" aria-label="Keyboard" hidden>
+  <div class="keys-head">
+    <span class="label">Keyboard</span>
+    <button class="icon small" type="button" id="close-keys" aria-label="Close keyboard">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="keys-body" id="keys-body"></div>
+</section>
 
 <dialog class="settings" id="settings" aria-labelledby="settings-title">
   <form method="dialog">

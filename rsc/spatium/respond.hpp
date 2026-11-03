@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <optional>
 #include <cmath>
 #include <expected>
 #include <format>
@@ -252,10 +253,83 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
     auto rhs = bd::detail::written(r, equation);
     if (!rhs) return refuse("closed form", rhs.error().message);
     if (!r.done()) return refuse("closed form", r.fail("the end").error().message);
+    // a new name on the left that the right does not read is a definition, f = a^2 + 1, not an equation in f
+    const std::string left(trimmed(lhs->text));
+    if (const auto right_reads = rhs->field.free_symbols(); !left.empty() && !above.find(left) &&
+        lhs->field.free_symbols() == std::vector<std::string>{left} && !std::ranges::contains(right_reads, left)) {
+        bd::Statement value;
+        value.name = left, value.value = std::move(*rhs);
+        return with_above({{std::move(value)}}, left, "evaluate");
+    }
     const auto names = unknown(lhs->field - rhs->field);
     if (names.size() != 1) return refuse("closed form", solve_closed_form(lhs->field - rhs->field, "").error().message);
     root.name = names.front(), root.value = std::move(*lhs), root.rhs = std::move(*rhs);
     return with_above({{std::move(root)}}, names.front(), "closed form");
+}
+
+// What a page draws beside an answer, as the request `plot_request` takes: a value of one
+// parameter, the document it is defined in and the parameter along the x axis. A root in closed
+// form is drawn as its equation's left side less its right along the unknown, over its real
+// roots and a margin on each side (around the vertex when it has none); a synthesised answer of
+// one expression as that expression along its parameter; a value reading one parameter as
+// itself. Anything else has no graph.
+inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& out) {
+    namespace bd = spatium::io::build;
+    const auto field = [&](std::string_view key) -> const JsonValue* {
+        for (const auto& [k, v] : out)
+            if (k == key) return &v;
+        return nullptr;
+    };
+    if (field("refused")) return std::nullopt;
+    const bd::Statement* wanted = asked.document.find(asked.wanted);
+    if (!wanted) return std::nullopt;
+    std::vector<const bd::Statement*> parameters;
+    for (const auto& d : asked.document.statements)
+        if (d.kind == bd::StatementKind::Parameter) parameters.push_back(&d);
+    const JsonValue* route = field("route");
+    const std::string how = route && route->is_string() ? route->as_string() : "";
+    const auto request = [](std::string document, std::string name, std::string along) {
+        return Object{{"document", std::move(document)}, {"name", std::move(name)}, {"along", std::move(along)}};
+    };
+    if (how == "closed form" && wanted->kind == bd::StatementKind::Root) {
+        std::vector<double> roots;
+        if (const JsonValue* v = field("values"); v && v->is_array())
+            for (const auto& x : v->as_array())
+                if (x.is_number() && std::isfinite(x.as_number())) roots.push_back(x.as_number());
+        double lo = 0, hi = 0;
+        if (!roots.empty()) {
+            const auto [a, b] = std::ranges::minmax(roots);
+            const double margin = std::max(1.0, 0.5 * (b - a));
+            lo = a - margin, hi = b + margin;
+        } else if (const JsonValue* s = field("solution"); s && s->is_object() && s->number_or("a", 0) != 0) {
+            const double a = s->number_or("a", 0), b = s->number_or("b", 0), D = s->number_or("discriminant", 0);
+            const double centre = -b / (2 * a), half = std::max(2.0, std::sqrt(std::abs(D)) / std::abs(a));
+            lo = centre - half, hi = centre + half;
+        } else {
+            return std::nullopt;
+        }
+        std::string text;
+        for (const auto& d : asked.document.statements) {
+            if (&d == wanted) break;
+            text += bd::to_text(d) + "\n";
+        }
+        const std::string name = asked.document.find("graph") ? "graph_1" : "graph";
+        text += std::format("{} in [{}, {}]\n{} = ({}) - ({})", wanted->name, lo, hi, name, wanted->value.text, wanted->rhs.text);
+        return request(std::move(text), name, wanted->name);
+    }
+    if (parameters.size() != 1) return std::nullopt;
+    const std::string& p = parameters.front()->name;
+    if (how == "synthesis") {
+        const JsonValue* pieces = field("answer");
+        if (!pieces || !pieces->is_array() || pieces->as_array().size() != 1) return std::nullopt;
+        const JsonValue& piece = pieces->as_array().front();
+        const std::string expression = piece.string_or("text", "");
+        if (piece.string_or("form", "") != "expression" || expression.empty()) return std::nullopt;
+        return request(std::format("{} in [{}, {}]\n{} = {}", p, piece.number_or("lo", 0), piece.number_or("hi", 0), wanted->name, expression),
+                       wanted->name, p);
+    }
+    if (wanted->kind == bd::StatementKind::Value) return request(bd::to_text(asked.document), wanted->name, p);
+    return std::nullopt;
 }
 
 } // namespace respond_detail
@@ -274,6 +348,7 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
         for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance})))
             out.emplace_back(std::move(k), std::move(v));
         out.emplace_back("document", bd::to_json(asked.document));
+        if (auto g = graph_of(asked, out)) out.emplace_back("graph", std::move(*g));
         return JsonValue(std::move(out));
     };
     bd::Document above;
@@ -422,6 +497,26 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
     for (float w : shader->weights) weights.push_back(static_cast<double>(w));
     Object out{{"name", name}, {"along", along}, {"interval", interval(along)}, {"vertex", shader->vertex},
                {"fragment", shader->fragment}, {"symbols", symbols}, {"weights", weights}};
+    // the heights the graph reaches over its interval, the other parameters at their middles, in
+    // the fp32 the shader computes in: where a page puts the y axis
+    if (auto pod = bd::lower(f)) {
+        const auto twin = bd::narrowed(*pod);
+        const Array along_ends = interval(along);
+        std::vector<float> middles;
+        for (const auto& s : shader->symbols) {
+            const Array ends = interval(s);
+            middles.push_back(static_cast<float>(0.5 * (ends[0].as_number() + ends[1].as_number())));
+        }
+        constexpr int samples = 256;
+        const float view[4]{static_cast<float>(along_ends[0].as_number()), 0.0f, static_cast<float>(along_ends[1].as_number()), 0.0f};
+        const float size[2]{static_cast<float>(samples), 1.0f};
+        double low = INFINITY, high = -INFINITY;
+        for (int k = 0; k < samples; ++k) {
+            const double F = bd::plot_value(twin, view, size, k, 0, middles).F;
+            if (std::isfinite(F)) low = std::min(low, F), high = std::max(high, F);
+        }
+        if (low <= high) out.emplace_back("range", Array{low, high});
+    }
     if (const JsonValue* g = json->find("grid"); g && g->is_object()) {
         const int w = static_cast<int>(g->number_or("width", 0)), h = static_cast<int>(g->number_or("height", 0));
         float view[4]{}, size[2]{static_cast<float>(w), static_cast<float>(h)};

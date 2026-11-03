@@ -128,3 +128,40 @@ TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as"
     CHECK(at(integral_inside, "refused").as_string() == "row 2: at [2]: 'D' is not in the language");
     CHECK(at(rsc::respond_rows(R"({"rows": []})"), "refused").as_string() == "the request has no rows");
 }
+
+TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][respond]") {
+    // an equation: its left side less its right along the unknown, over the roots 5/2 and -1 and a margin
+    const auto quadratic = rsc::respond("2x^2 - 3x - 5 = 0");
+    const auto& g = at(quadratic, "graph");
+    CHECK(at(g, "document").as_string() == "x in [-2.75, 4.25]\ngraph = (2x^2 - 3x - 5) - (0)");
+    // the second route: the graph drawn changes sign over its interval, as a function with those roots does
+    const auto drawn = rsc::plot_request(g.dump());
+    REQUIRE(at(drawn, "refused").is_null());
+    const auto& range = at(drawn, "range").as_array();
+    CHECK(range[0].as_number() < 0);
+    CHECK(range[1].as_number() > 0);
+    // a synthesised answer: its expression along its parameter, reaching sqrt(4) at the end
+    const auto root = rsc::respond("solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]");
+    CHECK(at(at(root, "graph"), "document").as_string() == "p in [0.5, 4]\nx = sqrt(p)");
+    const auto root_drawn = rsc::plot_request(at(root, "graph").dump());
+    const auto& r = at(root_drawn, "range").as_array();
+    REQUIRE(r.size() == 2);
+    CHECK(r[0].as_number() >= std::sqrt(0.5f) - 1e-6);
+    CHECK(r[1].as_number() <= 2.0 + 1e-6);
+    CHECK(r[1].as_number() > 1.99);
+    // the cases it must fail: a number has no graph, and neither has a refusal
+    CHECK(at(rsc::respond("2 + 2"), "graph").is_null());
+    CHECK(at(rsc::respond("x^3 - 1 = 0"), "graph").is_null());
+}
+
+TEST_CASE("respond: a new name on the left is a definition, not an equation in it", "[rsc][respond]") {
+    const auto four = rsc::respond("a = 2 + 2");
+    CHECK(at(four, "route").as_string() == "evaluate");
+    CHECK(at(four, "value").as_number() == 4);
+    // a value of one parameter, as a person writes it under the parameter, has a graph along it
+    const auto f = rsc::respond("a in [0.5, 2]\nf = a^2 + 1");
+    CHECK(at(f, "refused").is_null());
+    CHECK(at(at(f, "graph"), "along").as_string() == "a");
+    // the case it must fail: a name the right side reads is an equation in it
+    CHECK(at(rsc::respond("x = x^2 - 2"), "route").as_string() == "closed form");
+}
