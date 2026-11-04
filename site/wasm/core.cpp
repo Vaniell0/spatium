@@ -37,7 +37,7 @@ const char* hand_back(std::string s) {
 extern "C" {
 
 const char* spatium_respond(const char* text, double tolerance) {
-    return hand_back(rsc::respond(text, tolerance > 0 ? tolerance : 1e-8).dump());
+    return hand_back(rsc::respond(text, {.tolerance = tolerance > 0 ? tolerance : 1e-8}).dump());
 }
 
 const char* spatium_rows(const char* request) { return hand_back(rsc::respond_rows(request).dump()); }
