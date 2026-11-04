@@ -57,13 +57,14 @@
 
 namespace rsc {
 
-enum class Route { Evaluate, Expression, ClosedForm, Enclosed, Bracket, Integral, Synthesis };
+enum class Route { Evaluate, Expression, ClosedForm, Linear, Enclosed, Bracket, Integral, Synthesis };
 
 inline const char* route_name(Route r) {
     switch (r) {
         case Route::Evaluate: return "evaluate";
         case Route::Expression: return "expression";
         case Route::ClosedForm: return "closed form";
+        case Route::Linear: return "linear system";
         case Route::Enclosed: return "every root, proved";
         case Route::Bracket: return "root on a bracket";
         case Route::Integral: return "integral";
@@ -84,6 +85,10 @@ inline const char* route_caption(Route r) {
             return "Solved in closed form. The coefficients are read from the equation's own values and the degree "
                    "is checked at more points; the roots come from the quadratic formula in the form that keeps the "
                    "small root, and Vieta's formulas check them by a second route.";
+        case Route::Linear:
+            return "Solved by elimination. Each equation's coefficients are read from its own values and that it is "
+                   "linear is checked at more points; in fractions where every coefficient is one, so the solution "
+                   "is exact, else in doubles.";
         case Route::Enclosed:
             return "Every root on the box, each proved. The box is cut in two where it is undecided; a piece is "
                    "excluded where the equation's interval leaves out zero, and holds exactly one root where Newton's "
@@ -152,6 +157,7 @@ struct Evaluation {
     std::vector<double> values;          // the taken candidate's: a number, or the real roots a closed form keeps
     Expr written;                        // a value's expression as written, and as the function it is when free
     std::optional<ClosedForm> closed;
+    std::optional<LinearSystem> linear;   // a system's solution, every unknown's value
     std::optional<double> error;         // of an integral, as estimated
     std::optional<Answer> answer;        // of a synthesis, in pieces with their certificate
     // a number's digits proved over the reals (core/interval.hpp), or why they are not
@@ -427,6 +433,23 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
         Candidate c{Route::Integral, evaluations, {}, {}, Arithmetic::Double, {}};
         if (r.trusted()) c.values = {r.value}, out.error = r.error_estimate;
         else c.refused = std::format("the integral of {} did not converge", d->name);
+        out.candidates.push_back(std::move(c));
+        finish();
+        return out;
+    }
+
+    // a system: every unknown together, by elimination where its equations are linear
+    if (!d->also.empty()) {
+        Candidate c{Route::Linear, 0, {}, {}, Arithmetic::Double, {}};
+        std::vector<std::string> unknowns{d->name};
+        for (const auto& e : d->also) unknowns.push_back(e.name);
+        if (auto solved = solve_linear_system(u->system, unknowns, &u->system_written); !solved) {
+            c.refused = solved.error().message;
+        } else {
+            c.cost = solved->evaluations, c.values = solved->values;
+            if (!solved->exact.empty()) c.arithmetic = Arithmetic::Rational;
+            out.linear = std::move(*solved);
+        }
         out.candidates.push_back(std::move(c));
         finish();
         return out;

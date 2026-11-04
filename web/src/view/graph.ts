@@ -152,8 +152,13 @@ export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
     clearTimeout(settle);
     settle = setTimeout(() => options.onView?.([...view]), 300);
   };
+  // no closer than the doubles tell apart, and no farther than 10^15 across
   const zoom = (cx: number, cy: number, k: number) => {
-    view = [cx + (view[0] - cx) * k, cy + (view[1] - cy) * k, cx + (view[2] - cx) * k, cy + (view[3] - cy) * k];
+    const next: View = [cx + (view[0] - cx) * k, cy + (view[1] - cy) * k, cx + (view[2] - cx) * k, cy + (view[3] - cy) * k];
+    const fine = (a: number, b: number) => b - a < 64 * Math.max(Math.abs(a), Math.abs(b), 1e-300) * Number.EPSILON;
+    if (k < 1 && (fine(next[0], next[2]) || fine(next[1], next[3]))) return;
+    if (k > 1 && (next[2] - next[0] > 1e15 || next[3] - next[1] > 1e15)) return;
+    view = next;
     moved();
   };
 

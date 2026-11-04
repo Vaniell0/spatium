@@ -107,14 +107,18 @@ struct Statement {
     Written lo, hi;           // the interval of a parameter, a root or an integral; a root's may be unwritten
     std::string operation;    // a shape's operation, one of `shape_operations`
     std::vector<Written> args;   // and its arguments, a shape's by its name
+    // a system: the other unknowns of a root, each with its equation, solved together with it
+    // (`x, y: x + 2y = 5, 3x - y = 1`)
+    std::vector<Statement> also;
 };
 
 struct Document {
     std::vector<Statement> statements;
 
+    // the definition of a name: its own, or the system it is an unknown of
     const Statement* find(std::string_view name) const {
         for (const auto& d : statements)
-            if (d.name == name) return &d;
+            if (d.name == name || std::ranges::any_of(d.also, [&](const Statement& e) { return e.name == name; })) return &d;
         return nullptr;
     }
 };
@@ -187,7 +191,13 @@ inline std::vector<std::string> reads(const Statement& d) {
     switch (d.kind) {
         case StatementKind::Value: add(d.value.field, {}); break;
         case StatementKind::Parameter: add(d.lo.field, {}), add(d.hi.field, {}); break;
-        case StatementKind::Root: add(d.value.field, d.name), add(d.rhs.field, d.name), add(d.lo.field, {}), add(d.hi.field, {}); break;
+        case StatementKind::Root:
+            // its equations, less the unknowns they solve for; then its bracket
+            add(d.value.field, {}), add(d.rhs.field, {});
+            for (const auto& e : d.also) add(e.value.field, {}), add(e.rhs.field, {});
+            std::erase_if(out, [&](const std::string& n) { return n == d.name || std::ranges::any_of(d.also, [&](const Statement& e) { return e.name == n; }); });
+            add(d.lo.field, {}), add(d.hi.field, {});
+            break;
         case StatementKind::Integral: add(d.value.field, d.variable), add(d.lo.field, {}), add(d.hi.field, {}); break;
         case StatementKind::Shape:
             for (const auto& a : d.args) add(a.field, {});
@@ -206,11 +216,17 @@ inline Result<void> check(const Document& doc, const std::vector<std::size_t>& l
     for (std::size_t i = 0; i < doc.statements.size(); ++i) {
         const Statement& d = doc.statements[i];
         const auto defined_above = [&](std::string_view n) {
-            return std::ranges::any_of(doc.statements.begin(), doc.statements.begin() + static_cast<std::ptrdiff_t>(i),
-                                       [&](const Statement& e) { return e.name == n; });
+            return std::ranges::any_of(doc.statements.begin(), doc.statements.begin() + static_cast<std::ptrdiff_t>(i), [&](const Statement& e) {
+                return e.name == n || std::ranges::any_of(e.also, [&](const Statement& a) { return a.name == n; });
+            });
         };
-        if (detail::reserved_name(d.name)) return detail::doc_error(line(i), std::format("'{}' is a word of the language, not a name", d.name));
-        if (defined_above(d.name)) return detail::doc_error(line(i), std::format("'{}' is defined twice", d.name));
+        for (std::size_t k = 0; k <= d.also.size(); ++k) {
+            const std::string& n = k ? d.also[k - 1].name : d.name;
+            if (detail::reserved_name(n)) return detail::doc_error(line(i), std::format("'{}' is a word of the language, not a name", n));
+            if (defined_above(n) || (k && (n == d.name || std::ranges::any_of(d.also.begin(), d.also.begin() + static_cast<std::ptrdiff_t>(k - 1),
+                                                                                [&](const Statement& a) { return a.name == n; }))))
+                return detail::doc_error(line(i), std::format("'{}' is defined twice", n));
+        }
         if (d.kind == StatementKind::Integral) {
             if (d.variable.empty()) return detail::doc_error(line(i), "an integral names its variable by d, as in exp(-t^2) dt");
             if (d.variable == d.name || defined_above(d.variable))
@@ -220,10 +236,20 @@ inline Result<void> check(const Document& doc, const std::vector<std::size_t>& l
             for (const Written* w : {&d.lo, &d.hi})
                 if (const auto open = w->field.free_symbols(); !open.empty())
                     return detail::doc_error(line(i), std::format("an end of the parameter {} reads '{}'; it is a number", d.name, open.front()));
-        if (d.kind == StatementKind::Root) {
+        if (d.kind == StatementKind::Root && d.also.empty()) {
             const auto both = (d.value.field - d.rhs.field).free_symbols();
             if (std::ranges::find(both, d.name) == both.end())
                 return detail::doc_error(line(i), std::format("the equation of {} does not read {}", d.name, d.name));
+        }
+        // a system's unknowns are each read by one of its equations at least
+        for (std::size_t k = 0; k <= d.also.size() && !d.also.empty(); ++k) {
+            const std::string& n = k ? d.also[k - 1].name : d.name;
+            const auto reads_it = [&](const Statement& e) {
+                const auto both = (e.value.field - e.rhs.field).free_symbols();
+                return std::ranges::find(both, n) != both.end();
+            };
+            if (!reads_it(d) && std::ranges::none_of(d.also, reads_it))
+                return detail::doc_error(line(i), std::format("no equation of the system reads {}", n));
         }
         for (const auto& n : reads(d))
             if (!defined_above(n))
@@ -276,6 +302,15 @@ inline Result<Statement> read_statement(std::string_view text) {
     d.name = std::string(r.word());
     if (d.name.empty() || std::isdigit(static_cast<unsigned char>(d.name.front()))) return r.fail("a name");
     r.take_word(d.name);
+    // a system names its unknowns before the ':', and then as many equations
+    while (r.take(',')) {
+        Statement e;
+        e.kind = StatementKind::Root, e.name = std::string(r.word());
+        if (e.name.empty() || std::isdigit(static_cast<unsigned char>(e.name.front()))) return r.fail("a name");
+        r.take_word(e.name);
+        d.also.push_back(std::move(e));
+    }
+    if (!d.also.empty() && r.word() == "in") return r.fail("':', after the unknowns of a system");
     if (r.word() == "in") {
         d.kind = StatementKind::Parameter;
         auto ends = detail::interval(r, text, "in");
@@ -289,6 +324,16 @@ inline Result<Statement> read_statement(std::string_view text) {
         auto rhs = detail::written(r, text);
         if (!rhs) return std::unexpected(rhs.error());
         d.value = std::move(*lhs), d.rhs = std::move(*rhs);
+        for (Statement& e : d.also) {
+            if (!r.take(',')) return r.fail(std::format("',' and the equation of {}: a system has an equation for each unknown", e.name));
+            auto l = detail::written(r, text);
+            if (!l) return std::unexpected(l.error());
+            if (!r.take('=')) return r.fail("'='");
+            auto rr = detail::written(r, text);
+            if (!rr) return std::unexpected(rr.error());
+            e.value = std::move(*l), e.rhs = std::move(*rr);
+        }
+        if (!d.also.empty() && !r.done()) return r.fail("the end of the line: a system has as many equations as unknowns, and no bracket");
         if (!r.done()) {
             auto ends = detail::interval(r, text, "on");
             if (!ends) return std::unexpected(ends.error());
@@ -325,7 +370,7 @@ inline Result<Statement> read_statement(std::string_view text) {
             d.value = std::move(*f);
         }
     } else {
-        return r.fail("'=', ':' or 'in'");
+        return r.fail(d.also.empty() ? "'=', ':' or 'in'" : "':'");
     }
     if (!r.done()) return r.fail("the end of the line");
     return d;
@@ -361,6 +406,11 @@ inline std::string to_text(const Statement& d) {
         case StatementKind::Value: return std::format("{} = {}", d.name, d.value.text);
         case StatementKind::Parameter: return std::format("{} in [{}, {}]", d.name, d.lo.text, d.hi.text);
         case StatementKind::Root:
+            if (!d.also.empty()) {
+                std::string names = d.name, equations = d.value.text + " = " + d.rhs.text;
+                for (const auto& e : d.also) names += ", " + e.name, equations += ", " + e.value.text + " = " + e.rhs.text;
+                return names + ": " + equations;
+            }
             if (!has_bracket(d)) return std::format("{}: {} = {}", d.name, d.value.text, d.rhs.text);
             return std::format("{}: {} = {} on [{}, {}]", d.name, d.value.text, d.rhs.text, d.lo.text, d.hi.text);
         case StatementKind::Integral:
@@ -439,6 +489,11 @@ inline JsonValue to_json(const Document& doc) {
             case StatementKind::Root:
                 o.emplace_back("lhs", d.value.text), o.emplace_back("rhs", d.rhs.text);
                 if (has_bracket(d)) o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text);
+                if (!d.also.empty()) {
+                    JsonValue::ArrayType also;
+                    for (const auto& e : d.also) also.emplace_back(JsonValue::ObjectType{{"name", e.name}, {"lhs", e.value.text}, {"rhs", e.rhs.text}});
+                    o.emplace_back("also", std::move(also));
+                }
                 break;
             case StatementKind::Integral:
                 o.emplace_back("integrand", d.value.text), o.emplace_back("variable", d.variable);
@@ -485,7 +540,13 @@ inline Result<Document> document_from_json(const JsonValue& json) {
         };
         if (kind == "value") text += std::format("{} = {}\n", name, s("value"));
         else if (kind == "parameter") text += std::format("{} in [{}, {}]\n", name, s("lo"), s("hi"));
-        else if (kind == "root" && !d.find("lo") && !d.find("hi")) text += std::format("{}: {} = {}\n", name, s("lhs"), s("rhs"));
+        else if (const JsonValue* also = d.find("also"); kind == "root" && also && also->is_array()) {
+            // a system: its unknowns, then their equations, as its line writes them
+            std::string names = name, equations = s("lhs") + " = " + s("rhs");
+            for (const auto& e : also->as_array())
+                names += ", " + e.string_or("name", "?"), equations += ", " + e.string_or("lhs", "?") + " = " + e.string_or("rhs", "?");
+            text += names + ": " + equations + "\n";
+        } else if (kind == "root" && !d.find("lo") && !d.find("hi")) text += std::format("{}: {} = {}\n", name, s("lhs"), s("rhs"));
         else if (kind == "root") text += std::format("{}: {} = {} on [{}, {}]\n", name, s("lhs"), s("rhs"), s("lo"), s("hi"));
         else if (kind == "integral")
             text += std::format("{} = integral {} d{} on [{}, {}]\n", name, s("integrand"), s("variable"), s("lo"), s("hi"));
@@ -506,6 +567,7 @@ inline bool same_document(const Document& a, const Document& b) {
     if (a.statements.size() != b.statements.size()) return false;
     for (std::size_t i = 0; i < a.statements.size(); ++i) {
         const Statement &x = a.statements[i], &y = b.statements[i];
+        if (!same_document(Document{x.also}, Document{y.also})) return false;
         if (x.kind != y.kind || x.name != y.name || x.variable != y.variable || x.operation != y.operation) return false;
         const auto same = [](const Written& p, const Written& q) {
             return p.text.empty() == q.text.empty() && (p.text.empty() || same_value(p.field, q.field));

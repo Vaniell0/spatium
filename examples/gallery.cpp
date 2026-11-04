@@ -108,6 +108,8 @@ std::string gallery() {
                                      "((2.44 + 1 + 14/25) * (1/8))) / (62 + 1/20) + 1.364 / 0.124"));
     cards.push_back(card("quadratic", "2x^2 - 3x - 5 = 0"));
     cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
+    // a system: two rows of equations in two unknowns, solved together in fractions
+    cards.push_back(card("system", "x + 2y = 5\n3x - y = 1"));
     cards.push_back(card("exponent", "2^x = 8"));
     cards.push_back(card("wave", "sin(x) = 0.5 on [0, 10]"));
     cards.push_back(card("sqrt", "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"));

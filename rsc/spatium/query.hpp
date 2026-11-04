@@ -140,6 +140,9 @@ struct Unfolded {
     Expr written;
     Expr lo, hi;                     // the bracket or the limits, where written
     std::string bound;               // the name it binds itself: a root's unknown, an integral's variable
+    // a system's equations, each left side less its right, folded and as written; its unknowns
+    // are all bound
+    std::vector<Expr> system, system_written;
     std::vector<std::string> free;   // the parameters it reads and is not given, in the order it reads them
 };
 
@@ -167,15 +170,23 @@ inline spatium::Result<Unfolded> unfolded(const spatium::io::build::Document& do
         case bd::StatementKind::Root:
             out.written = unfold(d.value.field - d.rhs.field);
             out.f = unfold((d.value.field - d.rhs.field).simplified()), out.bound = d.name;
+            if (!d.also.empty()) {
+                out.system = {out.f}, out.system_written = {out.written};
+                for (const auto& e : d.also)
+                    out.system.push_back(unfold((e.value.field - e.rhs.field).simplified())), out.system_written.push_back(unfold(e.value.field - e.rhs.field));
+            }
             break;
         case bd::StatementKind::Integral: out.f = unfold(d.value.field), out.bound = d.variable; break;
         case bd::StatementKind::Parameter: out.f = unfold(Expr::symbol(d.name)); break;
         default: out.f = unfold(d.value.field); break;
     }
     out.lo = unfold(d.lo.field), out.hi = unfold(d.hi.field);
-    for (const Expr* e : {&out.f, &out.lo, &out.hi})
+    std::vector<const Expr*> read{&out.f, &out.lo, &out.hi};
+    for (const auto& e : out.system) read.push_back(&e);
+    const auto unknown = [&](const std::string& n) { return std::ranges::any_of(d.also, [&](const bd::Statement& e) { return e.name == n; }); };
+    for (const Expr* e : read)
         for (const auto& n : e->free_symbols()) {
-            if (n == out.bound || std::ranges::find(out.free, n) != out.free.end()) continue;
+            if (n == out.bound || unknown(n) || std::ranges::find(out.free, n) != out.free.end()) continue;
             const bd::Statement* p = doc.find(n);
             if (!p || p->kind != bd::StatementKind::Parameter)
                 return refuse(std::format("{} reads {}, which is not a parameter or a value", d.name, n));

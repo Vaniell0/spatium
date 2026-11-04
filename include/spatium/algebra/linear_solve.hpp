@@ -43,7 +43,7 @@ Result<Vec<T, N>> solve_direct(Matrix<T, N, N> A, Vec<T, N> b) {
         std::size_t piv = i;
         for (std::size_t k = i + 1; k < N; ++k)
             if (abs(A(k, i)) > abs(A(piv, i))) piv = k;
-        if (abs(A(piv, i)) < epsilon<T>())
+        if (!(abs(A(piv, i)) > epsilon<T>()))
             return std::unexpected(Error{ErrorCode::SingularMatrix, "singular matrix in solve_direct"});
         if (piv != i) {
             for (std::size_t c = 0; c < N; ++c) std::swap(A(i, c), A(piv, c));
@@ -81,7 +81,7 @@ Result<Matrix<T, N, N>> invert(Matrix<T, N, N> A) {
         std::size_t piv = i;
         for (std::size_t k = i + 1; k < N; ++k)
             if (abs(A(k, i)) > abs(A(piv, i))) piv = k;
-        if (abs(A(piv, i)) < epsilon<T>())
+        if (!(abs(A(piv, i)) > epsilon<T>()))
             return std::unexpected(Error{ErrorCode::SingularMatrix, "singular matrix in invert"});
         if (piv != i) {
             for (std::size_t c = 0; c < N; ++c) {

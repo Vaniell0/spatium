@@ -50,3 +50,4 @@ rows {"rows": [["Element", "p", ["Interval", {"num": "0.1"}, 4]], ["Equal", "I",
 rows {"rows": [["Element", "p", ["Interval", 0, 1]], ["Add", "p", ["D", "p"]]]}
 rows {"rows": [["Add",["Divide",["Delimiter",["Subtract",["Divide",["Divide",["Delimiter",["Subtract",{"num":"3.2"},{"num":"1.7"}]],{"num":"0.003"}],["Multiply",["Delimiter",["Subtract",["Divide",29,35],["Divide",3,7]]],["Divide",4,{"num":"0.2"}]]],["Divide",["Multiply",["Delimiter",["Subtract",["InvisibleOperator",1,["Divide",13,20]],{"num":"1.5"}]],{"num":"1.5"}],["Multiply",["Delimiter",["Add",{"num":"2.44"},["InvisibleOperator",1,["Divide",14,25]]]],["Divide",1,8]]]]],["InvisibleOperator",62,["Divide",1,20]]],["Divide",{"num":"1.364"},{"num":"0.124"}]]]}
 rows {"rows": [["Add", ["Multiply", 2, ["Power", ["Delimiter", ["Add", 3, 4]], 2]], ["Negate", ["Divide", 1, 4]]], ["Add", 1, 2]]}
+rows {"rows": [["Equal", ["Add", "x", ["Multiply", 2, "y"]], 5], ["Equal", ["Subtract", ["Multiply", 3, "x"], "y"], 1]]}

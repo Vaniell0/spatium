@@ -34,6 +34,7 @@ SPATIUM_EXPORT namespace spatium {
 
 class Rational {
 public:
+    static constexpr bool exact = true;   // a comparison threshold is zero (epsilon<Rational>)
     constexpr Rational() = default;
     template<std::integral I>
     constexpr Rational(I n) : num_(static_cast<long long>(n)) {}   // NOLINT: an integer is a fraction
