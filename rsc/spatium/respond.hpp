@@ -464,7 +464,8 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             if (e.steps.size() > 1) {
                 Array steps;
                 for (const auto& st : e.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
-                section("Steps", true, "steps", steps);
+                // folded: an exercise's chain runs to a screen or more under a value read at a glance
+                section(std::format("{} steps", e.steps.size()), false, "steps", steps);
             }
             Array facts{fact("In double", text_of(e.values.front()))};
             if (e.proved && !e.proved->exact && e.proved->digits > 0) facts.push_back(fact("Proved", e.proved->text, false, true));
@@ -602,6 +603,26 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                   {"result", result}, {"sections", sections}};
 }
 
+// How a request asks for its values to be computed: `engine`, {"arithmetic": "rational",
+// "strict": false, "tolerance": 1e-8}, each optional, a `tolerance` beside it the synthesis's
+// too; or why it names an arithmetic the engine does not have.
+inline std::expected<Engine, std::string> engine_of(const JsonValue& request) {
+    Engine engine{.tolerance = request.number_or("tolerance", 1e-8)};
+    const JsonValue* e = request.find("engine");
+    if (!e || !e->is_object()) return engine;
+    const std::string a = e->string_or("arithmetic", "double");
+    const auto known = std::ranges::find_if(arithmetics, [&](Arithmetic x) { return a == arithmetic_name(x); });
+    if (known == std::end(arithmetics)) {
+        std::string names;
+        for (Arithmetic x : arithmetics) names += std::string(names.empty() ? "" : ", ") + arithmetic_name(x);
+        return std::unexpected(std::format("the engine has no arithmetic '{}'; it has {}", a, names));
+    }
+    engine.arithmetic = *known;
+    if (const JsonValue* strict = e->find("strict"); strict && strict->is_bool()) engine.strict = strict->as_bool();
+    engine.tolerance = e->number_or("tolerance", engine.tolerance);
+    return engine;
+}
+
 } // namespace respond_detail
 
 // What a person types, answered. One line is a shorthand (`2 + 2`, `2x^2 - 3x - 5 = 0`, `solve
@@ -609,13 +630,13 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
 // document and its question: the lines above the last define names, and the last is the
 // shorthand read with them (`p in [0.5, 4]` above `solve`-less `x^2 - p = 0` asks for x as a
 // function of p), or else the document's last definition.
-inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 1e-8) {
+inline spatium::io::JsonValue respond(std::string_view text, Engine engine = {}) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
     const std::string_view all = trimmed(text);
     Object out{{"question", std::string(all)}};
     const auto answered = [&](const AskedDocument& asked) {
-        const Evaluation e = evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance});
+        const Evaluation e = evaluate(asked.document, asked.wanted, {}, engine);
         for (auto& [k, v] : evaluation_json(e)) out.emplace_back(std::move(k), std::move(v));
         out.emplace_back("document", bd::to_json(asked.document));
         // the question as the rows of a formula editor, written by the library
@@ -679,9 +700,9 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
 }
 
 // The rows of a LaTeX editor, each a formula as MathJSON, answered as the lines they read as
-// (`mathjson_row_text`): `{"rows": [...], "tolerance": 1e-8}`. The answer is the one `respond`
-// gives the same lines typed, and a row that does not read is refused with its number, `row`,
-// counted from 1.
+// (`mathjson_row_text`): `{"rows": [...]}`, computed as its `engine` asks (`engine_of`). The
+// answer is the one `respond` gives the same lines typed, and a row that does not read is
+// refused with its number, `row`, counted from 1.
 inline spatium::io::JsonValue respond_rows(std::string_view request) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -700,14 +721,14 @@ inline spatium::io::JsonValue respond_rows(std::string_view request) {
                                     {"refused", std::format("row {}: {}", k + 1, line.error().message)}});
         text += (k ? "\n" : "") + *line;
     }
-    return respond(text, json->number_or("tolerance", 1e-8));
+    const auto engine = engine_of(*json);
+    if (!engine) return JsonValue(Object{{"question", text}, {"route", "document"}, {"refused", engine.error()}});
+    return respond(text, *engine);
 }
 
 // A document given to the door as one JSON object: `document` its text or its JSON, `name` the
 // definition wanted, `chosen` the parameters given a value ({"p": 2}), and `engine`, how it is
-// computed ({"arithmetic": "rational", "strict": false, "tolerance": 1e-8}, each optional; a
-// `tolerance` beside them is the synthesis's too). The answer is `name` and the evaluation, or
-// what could not be read.
+// computed (`engine_of`). The answer is `name` and the evaluation, or what could not be read.
 inline spatium::io::JsonValue evaluate_request(std::string_view request) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -725,22 +746,11 @@ inline spatium::io::JsonValue evaluate_request(std::string_view request) {
             if (!v.is_number()) return refuse(std::format("the value chosen for {} is not a number", k));
             chosen.emplace_back(k, v.as_number());
         }
-    Engine engine{.tolerance = json->number_or("tolerance", 1e-8)};
-    if (const JsonValue* e = json->find("engine"); e && e->is_object()) {
-        const std::string a = e->string_or("arithmetic", "double");
-        const auto known = std::ranges::find_if(arithmetics, [&](Arithmetic x) { return a == arithmetic_name(x); });
-        if (known == std::end(arithmetics)) {
-            std::string names;
-            for (Arithmetic x : arithmetics) names += std::string(names.empty() ? "" : ", ") + arithmetic_name(x);
-            return refuse(std::format("the engine has no arithmetic '{}'; it has {}", a, names));
-        }
-        engine.arithmetic = *known;
-        if (const JsonValue* strict = e->find("strict"); strict && strict->is_bool()) engine.strict = strict->as_bool();
-        engine.tolerance = e->number_or("tolerance", engine.tolerance);
-    }
+    const auto engine = engine_of(*json);
+    if (!engine) return refuse(engine.error());
     const std::string name = json->string_or("name", "");
     Object out{{"name", name}};
-    for (auto& [k, v] : evaluation_json(evaluate(*doc, name, chosen, engine)))
+    for (auto& [k, v] : evaluation_json(evaluate(*doc, name, chosen, *engine)))
         out.emplace_back(std::move(k), std::move(v));
     return out;
 }

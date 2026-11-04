@@ -57,7 +57,7 @@ TEST_CASE("respond: an equation is answered in closed form with its steps", "[rs
 
 TEST_CASE("respond: a question with a parameter is answered by synthesis, with its certificate", "[rsc][respond]") {
     const std::string q = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
-    const auto r = rsc::respond(q, 1e-10);
+    const auto r = rsc::respond(q, {.tolerance = 1e-10});
     CHECK(at(r, "route").as_string() == "synthesis");
     CHECK(at(r, "answered").as_bool());
     const auto& c = at(r, "certificate");
@@ -136,6 +136,20 @@ TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as"
     CHECK(at(rsc::respond_rows(R"({"rows": []})"), "refused").as_string() == "the request has no rows");
     const auto bad_text = rsc::respond_rows(R"({"rows": [{"text": "x: x^2 - p = 0 on [0, 10]"}, {"text": "1 +"}]})");
     CHECK(at(bad_text, "refused").is_string());
+}
+
+TEST_CASE("respond: rows are computed in the arithmetic their engine names", "[rsc][respond]") {
+    // x^2 - 2 = 0 in fractions: the roots as the closed form writes them, the steps evaluate_request gives
+    const std::string row = R"(["Equal", ["Subtract", ["Power", "x", 2], 2], 0])";
+    const auto exact = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "rational"}})");
+    const auto in_double = rsc::respond_rows(R"({"rows": [)" + row + "]}");
+    const auto by_document = rsc::evaluate_request(R"({"document": "x: x^2 - 2 = 0", "name": "x", "engine": {"arithmetic": "rational"}})");
+    CHECK(at(at(exact, "sheet"), "result").as_string() == "x_{1,2} = \\pm \\sqrt{2}");
+    CHECK(at(exact, "steps").dump() == at(by_document, "steps").dump());
+    CHECK(at(at(in_double, "sheet"), "result").as_string().find("1.414213562373095") != std::string::npos);
+    // the case it must fail: an arithmetic the engine does not have is refused, naming those it has
+    const auto unknown = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "quaternion"}})");
+    CHECK(at(unknown, "refused").as_string().starts_with("the engine has no arithmetic 'quaternion'; it has double"));
 }
 
 TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][respond]") {
@@ -226,7 +240,8 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
         // the sections in the one order, each with what it shows
         std::size_t last = 0;
         for (const auto& sec : at(s, "sections").as_array()) {
-            const auto title = at(sec, "title").as_string();
+            // a number's steps are titled by their count, "18 steps"
+            const auto title = at(sec, "title").as_string().ends_with(" steps") ? std::string("Steps") : at(sec, "title").as_string();
             const auto k = std::ranges::find(order, title) - order.begin();
             REQUIRE(static_cast<std::size_t>(k) < order.size());
             CHECK(static_cast<std::size_t>(k) >= last);

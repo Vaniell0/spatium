@@ -4,7 +4,7 @@
 import { test } from "node:test";
 // @ts-ignore
 import assert from "node:assert/strict";
-import { notation } from "../src/answers.js";
+import { notation, wordBefore } from "../src/answers.js";
 
 // the editor's parser, vendored beside the page
 // @ts-ignore: a vendored module with no types
@@ -26,4 +26,14 @@ test("a decimal comma is a decimal point", () => {
 
 test("a command's own colon is left alone", () => {
   assert.equal(notation("a\\:b"), "a\\:b");
+});
+
+test("the word before the caret: a function the editor set, or letters typed one by one", () => {
+  assert.equal(wordBefore(String.raw`1+\sin`), "sin");
+  assert.equal(wordBefore(String.raw`1+\sin\left(`), "sin");
+  assert.equal(wordBefore(String.raw`2\operatorname{erf}(`), "erf");
+  assert.equal(wordBefore("3 + exp"), "exp");
+  // a single letter is a name, and after a number or an operator there is no word
+  assert.equal(wordBefore("2x"), "");
+  assert.equal(wordBefore(String.raw`x^2\cdot 3`), "");
 });

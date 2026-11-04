@@ -5,7 +5,7 @@
 import { Answers, notation, type Parse } from "./answers.js";
 import { Core, type State } from "./core.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
-import { Sheet, type Editor } from "./view/cells.js";
+import { Cards } from "./view/cells.js";
 import { $, el, math as tex } from "./view/dom.js";
 import { kindOf } from "./view/answer.js";
 
@@ -40,11 +40,10 @@ const core = new Core({
   cache: settings.cache === "on", onState: dot,
 });
 
-const editor: Editor & { parse: Parse } = {
+const editor = {
   ready: false,
-  parse: () => ["Error", "'the formula editor did not load'"],
-  toLatex: (text) => text,
-  toText: (latex) => latex,
+  parse: (() => ["Error", "'the formula editor did not load'"]) as Parse,
+  toLatex: (text: string) => text,   // a line of the language as a formula (MathLive's ascii-math reader)
 };
 
 async function loadEditor() {
@@ -59,7 +58,6 @@ async function loadEditor() {
     (window as unknown as { mathVirtualKeyboard: { container: Element } }).mathVirtualKeyboard.container = $("#keys-body")!;
     editor.parse = (latex: string) => ls.parse(notation(latex));
     editor.toLatex = ml.convertAsciiMathToLatex;
-    editor.toText = ml.convertLatexToAsciiMath;
     editor.ready = true;
   } catch (e) {
     toast(`The formula editor did not load (${e instanceof Error ? e.message : e}); cells are written as text.`, true);
@@ -90,7 +88,7 @@ async function loadData() {
 const KEPT = "spatium.document";
 
 function starting(): Doc {
-  return { preset: "calculator", cells: [math({ latex: "2x^2-3x-5=0" })] };
+  return { preset: "calculator", cells: [math({ rows: ["2x^2-3x-5=0"] })] };
 }
 
 async function fromAddress(): Promise<Doc | null> {
@@ -117,7 +115,7 @@ function fromBrowser(): Doc | null {
 
 // ── asking and keeping ──────────────────────────────────────────────────
 
-let sheet: Sheet;
+let cards: Cards;
 let answers: Answers;
 let runTimer: ReturnType<typeof setTimeout> | 0 = 0, saveTimer: ReturnType<typeof setTimeout> | 0 = 0;
 
@@ -130,15 +128,15 @@ function changed() {
 
 async function run() {
   if (!core.ready) {
-    if (core.failed) for (const c of sheet.document.cells) sheet.show(c, { refused: `the core did not load (${core.failed})` });
+    if (core.failed) for (const c of cards.document.cells) cards.show(c, { refused: `the core did not load (${core.failed})` });
     return;
   }
-  sheet.clearDerived();
-  await answers.run(sheet.document, (cell, answer, from) => sheet.show(cell, answer, from));
+  cards.clearDerived();
+  await answers.run(cards.document, (cell, answer, above, from) => cards.show(cell, answer, above, from));
 }
 
 async function save() {
-  const doc = sheet.document;
+  const doc = cards.document;
   try { localStorage.setItem(KEPT, JSON.stringify(toJSON(doc))); } catch {}
   try { history.replaceState(null, "", `#w=${await toLink(doc)}`); } catch {}
 }
@@ -155,29 +153,20 @@ async function copyLink() {
 }
 
 function usePreset(preset: Preset) {
-  sheet.document.preset = preset;
+  cards.document.preset = preset;
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-preset]")) b.setAttribute("aria-pressed", String(b.dataset.preset === preset));
   document.body.dataset.preset = preset;
-  sheet.build();
+  cards.build();
   changed();
 }
 
 // ── panels: the reference and the gallery, each line of them a cell to add ─
 
-// cells added at the end, an empty last one taken: a line of text, or a question's rows as the
-// library writes them (`question_latex`), one cell a row
-function add(written: ({ text: string } | { latex: string })[]) {
-  const doc = sheet.document;
-  const last = doc.cells.at(-1);
-  const empty = last?.kind === "math" && ("latex" in last.written ? !last.written.latex.trim() : !last.written.text.trim());
-  if (empty) doc.cells.pop();
-  let cell;
-  for (const w of written) doc.cells.push((cell = math(w)));
-  sheet.build(cell);
-  changed();
-}
-const addText = (text: string) => add([{ text }]);
-const addRows = (rows: string[] | undefined, text: string) => add(rows?.length ? rows.map((latex) => ({ latex })) : [{ text }]);
+// a question added as a card at the end: its rows as the library writes them (`question_latex`),
+// or a line of text -- on the calculator, which takes formulas only, that line as a formula
+const addRows = (rows: string[] | undefined, text: string) =>
+  cards.append([math(rows?.length ? { rows } : cards.document.preset === "calculator" && editor.ready ? { rows: [editor.toLatex(text)] } : { text })]);
+const addText = (text: string) => addRows(undefined, text);
 // a question shown as its rows, or as its text where the library wrote none
 const shownAs = (rows: string[] | undefined, text: string, cls: string) =>
   rows?.length ? el("span", { class: cls }, ...rows.map((r) => tex(r, { cls: "math" }))) : el("span", { class: cls, text });
@@ -191,12 +180,12 @@ function panel(which: "ref" | "gallery" | null) {
   if (which === "gallery") {
     // by how strongly each answer holds, in the gallery's own order of groups
     for (const g of data.groups) {
-      const cards = data.gallery.filter((c) => c.question && c.typed !== false && c.sheet?.guarantee === g.guarantee);
-      if (!cards.length) continue;
+      const picks = data.gallery.filter((c) => c.question && c.typed !== false && c.sheet?.guarantee === g.guarantee);
+      if (!picks.length) continue;
       body.append(el("h3", { text: g.title }));
-      for (const c of cards) {
+      for (const c of picks) {
         const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
-        body.append(el("button", { type: "button", class: "card", onclick: () => addRows(c.question_latex, c.question!) },
+        body.append(el("button", { type: "button", class: "pick", onclick: () => addRows(c.question_latex, c.question!) },
           shownAs(c.question_latex, c.question!, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
       }
     }
@@ -229,42 +218,18 @@ function panel(which: "ref" | "gallery" | null) {
   box.replaceChildren(body);
 }
 
-// ── completion in a line of the language, from the reference ────────────
+// ── a hint for the word under the caret, from the reference ─────────────
 
-const complete = {
-  list: null as HTMLUListElement | null,
-  update(t: HTMLTextAreaElement) {
-    const r = data.reference;
-    const at = t.selectionStart ?? t.value.length;
-    let a = at;
-    while (a > 0 && /[A-Za-z_]/.test(t.value[a - 1])) a--;
-    const before = t.value.slice(a, at);
-    this.close();
-    if (!r || !before) return;
-    const words = [...r.functions.map((f) => ({ word: f.name, insert: `${f.name}(`, caption: f.caption })),
-      ...r.constants.map((c) => ({ word: c.name, insert: c.name, caption: c.caption }))];
-    const found = words.filter((w) => w.word.startsWith(before) && w.word !== before).slice(0, 6);
-    if (!found.length) return;
-    const list = el("ul", { class: "complete", role: "listbox", "aria-label": "Completions" });
-    for (const w of found) {
-      const li = el("li", { role: "option" }, el("code", { text: w.word }), el("span", { text: w.caption }));
-      li.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        t.setRangeText(w.insert, a, at, "end");
-        t.dispatchEvent(new Event("input"));
-        this.close();
-      });
-      list.append(li);
-    }
-    const rect = t.getBoundingClientRect();
-    list.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - 368))}px`;
-    list.style.top = `${rect.bottom + 4}px`;
-    document.body.append(list);
-    this.list = list;
-    t.addEventListener("blur", () => setTimeout(() => this.close(), 120), { once: true });
-  },
-  close() { this.list?.remove(); this.list = null; },
-};
+// what the reference says of a function or a constant the word names, or begins alone
+function hint(word: string): [string, string, string] | null {
+  const r = data.reference;
+  if (!r) return null;
+  const words = [...r.functions.map((f) => ({ name: f.name, shown: `${f.name}(${f.arity === 2 ? "x, y" : "x"})`, e: f, domain: f.domain })),
+    ...r.constants.map((c) => ({ name: c.name, shown: c.name, e: c, domain: "" }))];
+  const begun = words.filter((w) => w.name.startsWith(word));
+  const w = words.find((x) => x.name === word) ?? (begun.length === 1 ? begun[0] : undefined);
+  return w ? [w.shown, w.e.caption + (w.domain ? `, for ${w.domain}` : ""), w.e.example ?? ""] : null;
+}
 
 // ── the keyboard: MathLive's own, in a window near the row being written ─
 
@@ -324,7 +289,7 @@ function wire() {
   $("#open-keys")!.addEventListener("pointerdown", (e) => e.preventDefault());
   $("#open-keys")!.addEventListener("click", () => setKeys($("#keys")!.hidden === true));
   $("#close-keys")!.addEventListener("click", () => setKeys(false));
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setKeys(false); complete.close(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setKeys(false); });
   addEventListener("resize", placeKeys);
   const dialog = $<HTMLDialogElement>("#settings")!;
   $("#open-settings")!.addEventListener("click", () => { showCoreState(); dialog.showModal(); });
@@ -336,7 +301,7 @@ function wire() {
       settings[seg.dataset.setting as keyof PageSettings] = b.value;
       saveSettings();
       applySettings();
-      if (seg.dataset.setting === "formulas") sheet.build();
+      if (seg.dataset.setting === "formulas") cards.build();
       changed();
     });
   $("#check-update")!.addEventListener("click", async () => {
@@ -350,7 +315,7 @@ function wire() {
   });
   addEventListener("hashchange", async () => {
     const doc = await fromAddress();
-    if (doc) { sheet.setDoc(doc); usePreset(doc.preset); }
+    if (doc) { cards.setDoc(doc); usePreset(doc.preset); }
   });
 }
 
@@ -363,14 +328,14 @@ await Promise.all([loadData(), loadEditor()]);
 applySettings();
 answers = new Answers(core, (latex) => editor.parse(latex));
 const doc = (await fromAddress()) ?? fromBrowser() ?? starting();
-sheet = new Sheet(doc, {
-  editor,
+cards = new Cards(doc, {
+  editor: editor.ready,
   source: () => settings.formulas === "source",
   changed,
   focused: (f) => { activeField = f; placeKeys(); },
-  completion: (t) => complete.update(t),
+  hint,
 });
-$("#sheet")!.append(sheet.root);
+$("#sheet")!.append(cards.root);
 usePreset(doc.preset);
 await coreLoaded;
 showCoreState();

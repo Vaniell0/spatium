@@ -13,8 +13,8 @@ import { type Doc, fromJSON, fromLink, graph, math, toJSON, toLink, setting, spl
 const doc: Doc = {
   preset: "canvas",
   cells: [
-    math({ latex: "p\\in[0.5,4]" }),
-    math({ latex: "x^2-p=0,\\ x\\in[0,10]" }, { numbers: "exact", digits: 17 }),
+    math({ rows: ["p\\in[0.5,4]", "x^2-p=0,\\ x\\in[0,10]"] }, { numbers: "exact" }),
+    math({ rows: ["x+2y=5", "3x-y=1"] }, { steps: false }),
     math({ text: "2x^2 - 3x - 5 = 0" }),
     graph("x", { window: [-2, -1, 5, 3] }),
   ],
@@ -32,30 +32,34 @@ test("a link reads back to the document, and zlib reads it as the same JSON", as
   assert.deepEqual(JSON.parse(inflated), toJSON(doc));
 });
 
-test("a link of the windows page is read as its cells", () => {
+test("older links are read: the windows page a cell a window, a cell of one row that row", () => {
   const old = [1, ["f", "2x^2-3x-5=0"], ["f+", "p\\in[0.5,4]", "x^2-p=0"], ["t", "2 + 2"], ["r"], ["G"], ["g", "scene"]];
   assert.deepEqual(fromJSON(old), {
     preset: "canvas",
-    cells: [math({ latex: "2x^2-3x-5=0" }), math({ latex: "p\\in[0.5,4]" }), math({ latex: "x^2-p=0" }), math({ text: "2 + 2" })],
+    cells: [math({ rows: ["2x^2-3x-5=0"] }), math({ rows: ["p\\in[0.5,4]", "x^2-p=0"] }), math({ text: "2 + 2" })],
   });
+  assert.deepEqual(fromJSON([2, "calculator", ["l", "1+1", { digits: 12, numbers: "both" }]]),
+    { preset: "calculator", cells: [math({ rows: ["1+1"] })] });
 });
 
 test("what a link cannot say is left out, and a link that is not one is refused", async () => {
-  const read = fromJSON([2, "calculator", ["l", "1+1", { digits: 7, numbers: "exact", window: [3, 0, 1, 1], steps: "yes" }], ["q", "?"], 5]);
-  assert.deepEqual(read, { preset: "calculator", cells: [math({ latex: "1+1" }, { numbers: "exact" })] });
+  const read = fromJSON([2, "calculator", ["l", ["1+1"], { digits: 7, numbers: "exact", window: [3, 0, 1, 1], steps: "yes" }], ["q", "?"],
+    ["l", []], ["l", [1]], 5]);
+  assert.deepEqual(read, { preset: "calculator", cells: [math({ rows: ["1+1"] }, { numbers: "exact" })] });
   assert.equal(fromJSON([3, "canvas"]), null);
   assert.equal(fromJSON({ cells: [] }), null);
   assert.equal(await fromLink("garbage!!"), null);
 });
 
 test("a setting left out is the preset's", () => {
-  const cell = math({ latex: "1/3" }, { digits: 6 });
-  assert.equal(setting(doc, cell, "digits"), 6);
-  assert.equal(setting(doc, cell, "numbers"), "both");
-  assert.equal(setting({ preset: "calculator", cells: [] }, math({ latex: "1" }), "steps"), true);
+  const cell = math({ rows: ["1/3"] }, { numbers: "exact" });
+  assert.equal(setting(doc, cell, "numbers"), "exact");
+  assert.equal(setting(doc, cell, "steps"), true);
+  assert.equal(setting({ preset: "calculator", cells: [] }, math({ rows: ["1"] }), "numbers"), "decimal");
 });
 
-test("a pasted text of several lines is a cell per line", () => {
+test("a pasted text of several lines is a row per line, a system's brace and all", () => {
+  assert.deepEqual(splitLines("\\begin{cases} x + 2y = 5 \\\\ 3x - y = 1 \\end{cases}"), ["x + 2y = 5", "3x - y = 1"]);
   assert.deepEqual(splitLines("$$\\begin{aligned} p &\\in [0.5, 4] \\\\ x^2 - p &= 0 \\end{aligned}$$"), ["p \\in [0.5, 4]", "x^2 - p = 0"]);
   assert.deepEqual(splitLines("a = 2\n\n3a"), ["a = 2", "3a"]);
   assert.deepEqual(splitLines("\\[ \\frac{1}{2} \\]"), ["\\frac{1}{2}"]);

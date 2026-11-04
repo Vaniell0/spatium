@@ -7,7 +7,6 @@ import type { Answer } from "../core.js";
 import { el, math } from "./dom.js";
 
 export interface Shown {
-  digits: number;
   steps: boolean;
   source: boolean;   // formulas as LaTeX source
 }
@@ -76,7 +75,7 @@ function section(sec: Section, tex: (latex: string, cls?: string, display?: bool
     const dl = el("dl", { class: "facts" });
     for (const f of sec.facts)
       dl.append(el("dt", { text: f.label }),
-        el("dd", { class: f.ok === true ? "ok" : f.ok === false ? "no" : "" }, f.latex !== undefined ? tex(f.latex) : el("span", { class: "mono", text: f.text ?? "" })));
+        el("dd", { class: f.ok === true ? "ok" : f.ok === false ? "no" : "" }, f.latex !== undefined ? tex(f.latex) : el("span", { text: f.text ?? "" })));
     body.append(dl);
   }
   if (sec.table) {
