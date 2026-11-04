@@ -107,6 +107,9 @@ struct Statement {
     Written lo, hi;           // the interval of a parameter, a root or an integral; a root's may be unwritten
     std::string operation;    // a shape's operation, one of `shape_operations`
     std::vector<Written> args;   // and its arguments, a shape's by its name
+    // a root's relation: "=" for an equation, or an inequality's "<", "<=", ">", ">=", whose
+    // solution is the set where it holds (`x: x^2 - 4 > 0`)
+    std::string relation = "=";
     // a system: the other unknowns of a root, each with its equation, solved together with it
     // (`x, y: x + 2y = 5, 3x - y = 1`)
     std::vector<Statement> also;
@@ -150,6 +153,19 @@ inline Result<Written> written(FieldReader& r, std::string_view text) {
     auto f = r.expression();
     if (!f) return std::unexpected(f.error());
     return Written{std::move(*f), std::string(trim(text.substr(from, r.position() - from)))};
+}
+
+// The relation between a root's sides: `=`, or `<`, `<=`, `>`, `>=`; none when the next is none.
+inline std::string relation(FieldReader& r) {
+    if (r.take('=')) return "=";
+    for (const char c : {'<', '>'})
+        if (r.take(c)) return r.take('=') ? std::string{c, '='} : std::string{c};
+    return {};
+}
+
+// A relation as LaTeX: \le and \ge for the two that hold at their ends.
+inline std::string relation_latex(std::string_view rel) {
+    return rel == "<=" ? "\\le" : rel == ">=" ? "\\ge" : std::string(rel);
 }
 
 // `on [a, b]` or `in [a, b]`
@@ -320,7 +336,8 @@ inline Result<Statement> read_statement(std::string_view text) {
         d.kind = StatementKind::Root;
         auto lhs = detail::written(r, text);
         if (!lhs) return std::unexpected(lhs.error());
-        if (!r.take('=')) return r.fail("'='");
+        d.relation = detail::relation(r);
+        if (d.relation.empty() || (!d.also.empty() && d.relation != "=")) return r.fail(d.also.empty() ? "'=', '<' or '>'" : "'='");
         auto rhs = detail::written(r, text);
         if (!rhs) return std::unexpected(rhs.error());
         d.value = std::move(*lhs), d.rhs = std::move(*rhs);
@@ -411,8 +428,8 @@ inline std::string to_text(const Statement& d) {
                 for (const auto& e : d.also) names += ", " + e.name, equations += ", " + e.value.text + " = " + e.rhs.text;
                 return names + ": " + equations;
             }
-            if (!has_bracket(d)) return std::format("{}: {} = {}", d.name, d.value.text, d.rhs.text);
-            return std::format("{}: {} = {} on [{}, {}]", d.name, d.value.text, d.rhs.text, d.lo.text, d.hi.text);
+            if (!has_bracket(d)) return std::format("{}: {} {} {}", d.name, d.value.text, d.relation, d.rhs.text);
+            return std::format("{}: {} {} {} on [{}, {}]", d.name, d.value.text, d.relation, d.rhs.text, d.lo.text, d.hi.text);
         case StatementKind::Integral:
             return std::format("{} = integral {} d{} on [{}, {}]", d.name, d.value.text, d.variable, d.lo.text, d.hi.text);
         case StatementKind::Shape: {
@@ -450,10 +467,11 @@ inline Result<std::string> to_latex(const Statement& d) {
             if (!l) return std::unexpected(l.error());
             auto r = tex(d.rhs);
             if (!r) return std::unexpected(r.error());
-            if (!has_bracket(d)) return std::format("{} = {}", *l, *r);
+            const std::string rel = detail::relation_latex(d.relation);
+            if (!has_bracket(d)) return std::format("{} {} {}", *l, rel, *r);
             auto on = interval(d.name);
             if (!on) return std::unexpected(on.error());
-            return std::format("{} = {}, {}", *l, *r, *on);
+            return std::format("{} {} {}, {}", *l, rel, *r, *on);
         }
         case StatementKind::Integral: {
             auto f = tex(d.value);
@@ -488,6 +506,7 @@ inline JsonValue to_json(const Document& doc) {
             case StatementKind::Parameter: o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text); break;
             case StatementKind::Root:
                 o.emplace_back("lhs", d.value.text), o.emplace_back("rhs", d.rhs.text);
+                if (d.relation != "=") o.emplace_back("relation", d.relation);
                 if (has_bracket(d)) o.emplace_back("lo", d.lo.text), o.emplace_back("hi", d.hi.text);
                 if (!d.also.empty()) {
                     JsonValue::ArrayType also;
@@ -546,8 +565,8 @@ inline Result<Document> document_from_json(const JsonValue& json) {
             for (const auto& e : also->as_array())
                 names += ", " + e.string_or("name", "?"), equations += ", " + e.string_or("lhs", "?") + " = " + e.string_or("rhs", "?");
             text += names + ": " + equations + "\n";
-        } else if (kind == "root" && !d.find("lo") && !d.find("hi")) text += std::format("{}: {} = {}\n", name, s("lhs"), s("rhs"));
-        else if (kind == "root") text += std::format("{}: {} = {} on [{}, {}]\n", name, s("lhs"), s("rhs"), s("lo"), s("hi"));
+        } else if (kind == "root" && !d.find("lo") && !d.find("hi")) text += std::format("{}: {} {} {}\n", name, s("lhs"), d.string_or("relation", "="), s("rhs"));
+        else if (kind == "root") text += std::format("{}: {} {} {} on [{}, {}]\n", name, s("lhs"), d.string_or("relation", "="), s("rhs"), s("lo"), s("hi"));
         else if (kind == "integral")
             text += std::format("{} = integral {} d{} on [{}, {}]\n", name, s("integrand"), s("variable"), s("lo"), s("hi"));
         else if (kind == "shape") {
@@ -568,7 +587,7 @@ inline bool same_document(const Document& a, const Document& b) {
     for (std::size_t i = 0; i < a.statements.size(); ++i) {
         const Statement &x = a.statements[i], &y = b.statements[i];
         if (!same_document(Document{x.also}, Document{y.also})) return false;
-        if (x.kind != y.kind || x.name != y.name || x.variable != y.variable || x.operation != y.operation) return false;
+        if (x.kind != y.kind || x.name != y.name || x.variable != y.variable || x.operation != y.operation || x.relation != y.relation) return false;
         const auto same = [](const Written& p, const Written& q) {
             return p.text.empty() == q.text.empty() && (p.text.empty() || same_value(p.field, q.field));
         };

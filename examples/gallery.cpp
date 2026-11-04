@@ -110,6 +110,8 @@ std::string gallery() {
     cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
     // a system: two rows of equations in two unknowns, solved together in fractions
     cards.push_back(card("system", "x + 2y = 5\n3x - y = 1"));
+    // an inequality: the set where it holds, by the interval method, a break where it has no value
+    cards.push_back(card("inequality", "(x - 1)/(x + 2) <= 0"));
     cards.push_back(card("exponent", "2^x = 8"));
     cards.push_back(card("wave", "sin(x) = 0.5 on [0, 10]"));
     cards.push_back(card("sqrt", "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"));

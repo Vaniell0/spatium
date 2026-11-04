@@ -14,7 +14,9 @@ export interface Shown {
 interface Step { label: string; latex: string }
 interface Fact { label: string; text?: string; latex?: string; ok?: boolean }
 interface Table { columns: string[]; rows: string[][] }
-interface Section { title: string; open: boolean; echo?: boolean; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table }
+interface Part { kind: "holds" | "fails" | "root" | "break" | "undecided"; lo: number; hi: number; text?: string }
+interface Axis { relation: string; line: boolean; parts: Part[] }
+interface Section { title: string; open: boolean; echo?: boolean; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis }
 export interface Sheet { outcome: string; guarantee: string; label: string; ok: boolean; result: string; sections: Section[] }
 
 // what an answer is and how strongly it holds, in the core's words; a card asked in code and a
@@ -83,8 +85,49 @@ function section(sec: Section, tex: (latex: string, cls?: string, display?: bool
       ...sec.table.rows.map((r) => el("tr", {}, ...r.map((c) => el("td", { text: c })))));
     body.append(el("div", { class: "scroll" }, table));
   }
+  if (sec.axis) body.append(axisView(sec.axis));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
   const d = el("details", { class: "sec" }, el("summary", { text: sec.title }), body);
   if (sec.open) d.setAttribute("open", "");
   return d;
+}
+
+// An inequality's axis as the interval method draws it: its points evenly apart (a scheme, not a
+// scale), the pieces where it holds shaded, the sign of its left side less its right over each
+// piece, a root filled where it belongs to the set and hollow where not, a break hollow.
+function axisView(a: Axis): HTMLElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = (tag: string, at: Record<string, string | number>, text?: string) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(at)) e.setAttribute(k, String(v));
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const points = a.parts.filter((p) => p.kind !== "holds" && p.kind !== "fails");
+  const step = 120, W = step * (points.length + 1), H = 72, y = 36;
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "The axis: where the inequality holds" });
+  const marks: Element[] = [];   // the points, drawn over the pieces
+  root.append(svg("line", { x1: 4, y1: y, x2: W - 4, y2: y, class: "rule" }));
+  const greater = a.relation.startsWith(">"), equal = a.relation.endsWith("=");
+  // each piece between its neighbouring points, or the axis' ends
+  let k = 0;
+  a.parts.forEach((p) => {
+    if (p.kind === "holds" || p.kind === "fails") {
+      const x0 = k * step + (k ? 0 : 4), x1 = (k + 1) * step;
+      if (p.kind === "holds") root.append(svg("rect", { x: x0, y: y - 6, width: x1 - x0, height: 12, class: "band" }));
+      root.append(svg("text", { x: (x0 + x1) / 2, y: y - 14, class: "sign" }, (p.kind === "holds") === greater ? "+" : "\u2212"));
+      return;
+    }
+    k += 1;
+    const x = k * step;
+    const filled = p.kind === "root" && equal;
+    marks.push(svg("circle", { cx: x, cy: y, r: 6, class: filled ? "pt in" : p.kind === "undecided" ? "pt open" : "pt out" }));
+    // on the scheme an end is short: its digits are in the answer and under "Ends"
+    const short = (t: string) => (t.length > 8 && !t.includes("/") ? `\u2248${Number(Number(t).toPrecision(6))}` : t);
+    const label = p.kind === "undecided" ? "?" : short(p.text ?? String((p.lo + p.hi) / 2));
+    marks.push(svg("text", { x, y: y + 28, class: "at" }, label));
+  });
+  root.append(...marks);
+  if (a.line) for (const x of [12, W - 12]) root.append(svg("text", { x, y: y + 28, class: "at" }, x < W / 2 ? "\u2212\u221e" : "\u221e"));
+  return el("div", { class: "axis" }, root as unknown as Node);
 }

@@ -202,6 +202,17 @@ details.sec > summary:focus-visible { outline: 2px solid var(--accent); outline-
 .sec-body { display: grid; gap: 8px; padding-bottom: 16px; min-width: 0; }
 .sec-body .note { margin: 0; max-width: 64ch; font-size: var(--t-label); color: var(--ink-3); }
 .facts .no { color: var(--warn); }
+/* an inequality's axis: a scheme of its points, the set shaded */
+.axis { overflow-x: auto; }
+.axis svg { display: block; overflow: visible; }
+.axis .rule { stroke: var(--ink-3); stroke-width: 1.5; }
+.axis .band { fill: var(--accent-soft); }
+.axis .pt { stroke: var(--accent); stroke-width: 2; }
+.axis .pt.in { fill: var(--accent); }
+.axis .pt.out, .axis .pt.open { fill: var(--surface); }
+.axis .pt.open { stroke: var(--ink-3); stroke-dasharray: 3 2; }
+.axis text { font: 400 16px var(--f-ui); fill: var(--ink-2); text-anchor: middle; font-variant-numeric: tabular-nums; }
+.axis .sign { font-size: 20px; fill: var(--ink); }
 .sheet-table { border-collapse: collapse; font: 400 var(--t-label)/1.4 var(--f-ui); font-variant-numeric: tabular-nums; }
 .sheet-table th { text-align: left; font: 500 var(--t-label) var(--f-ui); color: var(--ink-3); padding: 4px 16px 8px 0; border-bottom: 1px solid var(--line-faint); }
 .sheet-table td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-faint); white-space: nowrap; }
