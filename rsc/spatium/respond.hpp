@@ -556,9 +556,10 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         outcome = e.taken ? "function" : outcome;
         const JsonValue* pieces = field_of(out, "answer");
         const JsonValue* cert = field_of(out, "certificate");
-        if (e.taken && pieces && pieces->is_array() && pieces->as_array().size() == 1 && pieces->as_array().front().string_or("form", "") == "expression")
+        // one piece as its formula, an expression or a Chebyshev sum; more as how many there are
+        if (e.taken && pieces && pieces->is_array() && pieces->as_array().size() == 1)
             result = std::format("{} = {}", bd::detail::name_latex(e.name), pieces->as_array().front().string_or("latex", ""));
-        else if (e.taken) result = std::format("\\text{{{} pieces}}", e.answer->pieces.size());
+        else if (e.taken) result = std::format("\\text{{piecewise, {} pieces}}", e.answer->pieces.size());
         if (cert && cert->is_object()) {
             const double below = cert->number_or("error_below", 0);
             const bool relative = cert->string_or("norm", "") == "largest relative error";
@@ -761,6 +762,8 @@ inline spatium::io::JsonValue evaluate_request(std::string_view request) {
 // intervals so a page can give each a slider. With `grid` -- {"width", "height", "view": [x0, y0,
 // x1, y1], "slots": [...]} -- the answer also holds F at every pixel's centre as the shader's
 // check mode computes it, run in fp32 on the host: what a browser holds its WebGL2 frame against.
+// With `curve` -- {"x0", "x1", "n", "slots": [...]} -- it holds F at the centres of n columns
+// from x0 to x1 in doubles: what a page draws where it has zoomed past the steps of fp32.
 inline spatium::io::JsonValue plot_request(std::string_view request) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -850,6 +853,24 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
                 values.push_back(static_cast<double>(at.F));
             }
         out.emplace_back("values", values);
+    }
+    if (const JsonValue* c = json->find("curve"); c && c->is_object()) {
+        const double x0 = c->number_or("x0", 0), x1 = c->number_or("x1", 1);
+        const int n = std::clamp(static_cast<int>(c->number_or("n", 0)), 0, 8192);
+        auto pod = bd::lower(f);
+        if (!pod) return refuse(pod.error().message);
+        // the sliders' values, given in the shader's order, put in the program's slots by name
+        std::vector<double> slots(pod->symbols.size(), 0.0);
+        if (const JsonValue* s = c->find("slots"); s && s->is_array())
+            for (std::size_t k = 0; k < s->as_array().size() && k < shader->symbols.size(); ++k)
+                if (const auto at = std::ranges::find(pod->symbols, shader->symbols[k]); at != pod->symbols.end())
+                    slots[static_cast<std::size_t>(at - pod->symbols.begin())] = s->as_array()[k].as_number();
+        Array values;
+        for (int k = 0; k < n; ++k) {
+            const double F = bd::interpret(*pod, x0 + (k + 0.5) / n * (x1 - x0), 0.0, slots);
+            values.push_back(std::isfinite(F) ? JsonValue(F) : JsonValue(nullptr));
+        }
+        out.emplace_back("curve", values);
     }
     return out;
 }

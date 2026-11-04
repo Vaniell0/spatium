@@ -2,6 +2,8 @@
 // WebGL2. The shader computes the value at every pixel from the view it is given (`plot_view`)
 // and the other parameters (`field_symbols`), so panning, zooming and sliding a parameter are
 // new uniforms, never a new question to the core. Axes and their numbers are a 2D canvas under it.
+// Zoomed past what fp32 tells apart, the shader's curve is a staircase; there the core gives the
+// curve in doubles, a value a column (`curve`), drawn on the 2D canvas instead.
 
 import type { Answer } from "../core.js";
 import { el, number } from "./dom.js";
@@ -30,7 +32,14 @@ export interface GraphOptions {
   view?: View;                      // as the cell keeps it; the fitted view otherwise
   height: number;
   onView?: (view: View) => void;    // after a pan or a zoom settles
+  // the value at the centres of n columns of [x0, x1], in doubles, the sliders' values given
+  curve?: (at: { x0: number; x1: number; n: number; slots: number[] }) => Promise<(number | null)[] | null>;
 }
+
+// fp32's step at the numbers a view spans: a view with fewer than a few of them a pixel shows them
+const fp32Step = (a: number, b: number) => Math.max(Math.abs(a), Math.abs(b)) * 2 ** -23;
+export const pastFp32 = ([x0, y0, x1, y1]: View, w: number, h: number) =>
+  (x1 - x0) / w < 4 * fp32Step(x0, x1) || (y1 - y0) / h < 4 * fp32Step(y0, y1);
 
 export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
   const p = answer as unknown as Plot;
@@ -44,7 +53,8 @@ export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
   const plane = el("div", { class: "plane", tabindex: "0", "aria-label": "Graph: drag to pan, wheel to zoom" }, axes, gl);
   const at = el("span", { class: "at mono" });
   const fit = el("button", { type: "button", class: "quiet small", text: "Fit" });
-  fig.append(el("div", { class: "graph-bar" }, at, fit), plane);
+  const exact = el("span", { class: "at", text: "computed in double", hidden: true });
+  fig.append(el("div", { class: "graph-bar" }, at, exact, fit), plane);
 
   const ctx = gl.getContext("webgl2", { premultipliedAlpha: false, antialias: false });
   if (!ctx) {
@@ -68,6 +78,9 @@ export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
 
   let view: View = options.view ?? fitted(p);
   const held = p.symbols.map((s) => (s.interval[0] + s.interval[1]) / 2);
+  // the curve in doubles, and the view and sliders it was asked for
+  let curve: { key: string; values: (number | null)[] } | null = null;
+  let asking: ReturnType<typeof setTimeout> | 0 = 0;
 
   // the parameters the graph holds: a slider each, a uniform each
   if (p.symbols.length) {
@@ -107,10 +120,24 @@ export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
     if (p.weights.length) ctx!.uniform4fv(u("field_weights"), new Float32Array(p.weights));
     ctx!.clearColor(0, 0, 0, 0);
     ctx!.clear(ctx!.COLOR_BUFFER_BIT);
+    drawAxes(axes, view, dpr, css);
+    // past fp32, the doubles' curve for this view once it is here, the shader's until then
+    const fine = Boolean(options.curve) && pastFp32(view, w, h);
+    const key = JSON.stringify([view, held, w]);
+    exact.hidden = !(fine && curve?.key === key);
+    if (fine && curve?.key === key) {
+      drawCurve(axes, view, curve.values, dpr, css.getPropertyValue("--accent"));
+      return;
+    }
     ctx!.enable(ctx!.BLEND);
     ctx!.blendFunc(ctx!.SRC_ALPHA, ctx!.ONE_MINUS_SRC_ALPHA);
     ctx!.drawArrays(ctx!.TRIANGLES, 0, 3);
-    drawAxes(axes, view, dpr, css);
+    if (!fine) return;
+    clearTimeout(asking);
+    asking = setTimeout(async () => {
+      const values = await options.curve!({ x0: view[0], x1: view[2], n: Math.round(w), slots: [...held] });
+      if (values && JSON.stringify([view, held, w]) === key) { curve = { key, values }; paint(); }
+    }, 150);
   }
 
   // where a pixel of the plane is in the view
@@ -190,6 +217,29 @@ function ticks(a: number, b: number, pixels: number): number[] {
   return out;
 }
 
+// a tick's number with as many digits as the step between ticks needs: at 0.99999 zoomed to 1e-7
+// a tick is 0.9999901, not 0.99999 again
+function tickText(t: number, step: number): string {
+  const digits = Math.ceil(Math.log10(Math.max(Math.abs(t), step) / step)) + 1;
+  return String(Number(t.toPrecision(Math.min(17, Math.max(1, digits)))));
+}
+
+// the curve a value a column, a gap where there is none
+function drawCurve(canvas: HTMLCanvasElement, [, y0, , y1]: View, values: (number | null)[], dpr: number, ink: string) {
+  const g = canvas.getContext("2d")!, W = canvas.width, H = canvas.height;
+  g.strokeStyle = ink;
+  g.lineWidth = 1.5 * dpr;
+  g.beginPath();
+  let pen = false;
+  values.forEach((v, k) => {
+    if (v === null) { pen = false; return; }
+    const x = ((k + 0.5) / values.length) * W, y = H - ((v - y0) / (y1 - y0)) * H;
+    if (pen) g.lineTo(x, y); else g.moveTo(x, y);
+    pen = true;
+  });
+  g.stroke();
+}
+
 function drawAxes(canvas: HTMLCanvasElement, [x0, y0, x1, y1]: View, dpr: number, css: CSSStyleDeclaration) {
   const g = canvas.getContext("2d")!, W = canvas.width, H = canvas.height;
   const X = (x: number) => ((x - x0) / (x1 - x0)) * W, Y = (y: number) => H - ((y - y0) / (y1 - y0)) * H;
@@ -198,13 +248,14 @@ function drawAxes(canvas: HTMLCanvasElement, [x0, y0, x1, y1]: View, dpr: number
   g.lineWidth = dpr;
   g.strokeStyle = css.getPropertyValue("--line-faint");
   g.fillStyle = css.getPropertyValue("--ink-3");
-  for (const t of ticks(x0, x1, W / dpr)) {
+  const xs = ticks(x0, x1, W / dpr), ys = ticks(y0, y1, H / dpr);
+  for (const t of xs) {
     g.beginPath(); g.moveTo(X(t), 0); g.lineTo(X(t), H); g.stroke();
-    g.fillText(String(Number(t.toPrecision(6))), X(t) + 4 * dpr, H - 6 * dpr);
+    g.fillText(tickText(t, (x1 - x0) / Math.max(1, xs.length)), X(t) + 4 * dpr, H - 6 * dpr);
   }
-  for (const t of ticks(y0, y1, H / dpr)) {
+  for (const t of ys) {
     g.beginPath(); g.moveTo(0, Y(t)); g.lineTo(W, Y(t)); g.stroke();
-    g.fillText(String(Number(t.toPrecision(6))), 4 * dpr, Y(t) - 4 * dpr);
+    g.fillText(tickText(t, (y1 - y0) / Math.max(1, ys.length)), 4 * dpr, Y(t) - 4 * dpr);
   }
   g.strokeStyle = css.getPropertyValue("--ink-3");
   if (y0 < 0 && y1 > 0) { g.beginPath(); g.moveTo(0, Y(0)); g.lineTo(W, Y(0)); g.stroke(); }
