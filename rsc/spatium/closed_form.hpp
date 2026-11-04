@@ -20,6 +20,7 @@
 // This is the closed-form side of the calculator; a question with a parameter whose answer has
 // to be found goes to `ask` and synthesis (query.hpp).
 
+#include <spatium/algebra/linear_solve.hpp>
 #include <spatium/algebra/polynomial.hpp>
 #include <spatium/core/rational.hpp>
 #include <spatium/io/field_pod.hpp>
@@ -55,6 +56,17 @@ struct ClosedForm {
     std::optional<spatium::VietaCheck<double>> check;   // of the roots, when there are two
     std::vector<spatium::io::build::Step> steps;        // the solution, and the check last
     std::size_t evaluations = 0;                        // of the equation's field, the route's cost
+};
+
+// A system of equations, each linear in the unknowns, solved: as fractions where every
+// coefficient is one, else in doubles.
+struct LinearSystem {
+    std::vector<std::string> unknowns;
+    std::vector<double> values;                         // the solution, in the unknowns' order
+    std::vector<spatium::Rational> exact;               // the same as fractions, when the coefficients are
+    std::vector<spatium::io::build::Step> steps;        // the system as a matrix, then its solution
+    std::vector<double> residuals;                      // each equation at the solution, in doubles: the check
+    std::size_t evaluations = 0;                        // of the equations' fields, the route's cost
 };
 
 namespace closed_form_detail {
@@ -146,7 +158,133 @@ inline spatium::Result<std::array<Rational, 3>> exact_coefficients(const spatium
     return std::array<Rational, 3>{a, b, c};
 }
 
+// A x = b for A an n x n matrix of rows, by the library's elimination at the size it has
+// (solve_direct, n from 1 to 4); in fractions it is exact, and a singular A is refused.
+template<class T, std::size_t N = 1>
+spatium::Result<std::vector<T>> solved(const std::vector<std::vector<T>>& A, const std::vector<T>& b) {
+    if constexpr (N > 4) {
+        return std::unexpected(spatium::Error(spatium::ErrorCode::InvalidArgument, "a system of more than four equations"));
+    } else {
+        if (A.size() != N) return solved<T, N + 1>(A, b);
+        spatium::Matrix<T, N, N> m{};
+        spatium::Vec<T, N> v{};
+        for (std::size_t i = 0; i < N; ++i) {
+            v[i] = b[i];
+            for (std::size_t j = 0; j < N; ++j) m(i, j) = A[i][j];
+        }
+        auto x = spatium::solve_direct(m, v);
+        if (!x) return std::unexpected(spatium::Error(spatium::ErrorCode::SingularMatrix,
+                                                      "the system has no single solution: its equations are not independent"));
+        return std::vector<T>(x->data.begin(), x->data.end());
+    }
+}
+
+// The coefficients of each equation f = 0 in the unknowns, a row of A and its b = -f(0): from
+// its values at 0 and at each unit vector, checked at twice each and at each pair together (a
+// square or a product of two unknowns shows there) and at one point more. In T: Rational checks
+// by equality, a double to a tolerance.
+template<class T>
+spatium::Result<std::pair<std::vector<std::vector<T>>, std::vector<T>>> affine(const std::vector<spatium::io::build::Field<double>>& equations,
+                                                                                const std::vector<std::string>& unknowns, std::size_t& evaluations) {
+    using spatium::Error, spatium::ErrorCode;
+    namespace bd = spatium::io::build;
+    const std::size_t n = unknowns.size();
+    std::vector<std::vector<T>> A;
+    std::vector<T> b;
+    for (std::size_t k = 0; k < equations.size(); ++k) {
+        const auto pod = bd::lower(equations[k]);
+        if (!pod) return std::unexpected(pod.error());
+        if constexpr (std::is_same_v<T, Rational>)
+            if (const auto op = bd::beyond<Rational>(*pod))
+                return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("equation {} reads {}, which has no fraction", k + 1, bd::op_name(*op))));
+        const auto program = bd::converted<T>(*pod);
+        const auto at = [&](const std::vector<T>& x) {
+            std::vector<T> slots(program.symbols.size(), T(0));
+            for (std::size_t j = 0; j < n; ++j)
+                if (const auto s = std::ranges::find(program.symbols, unknowns[j]); s != program.symbols.end()) slots[static_cast<std::size_t>(s - program.symbols.begin())] = x[j];
+            return ++evaluations, bd::interpret(program, T(0), T(0), slots);
+        };
+        const auto unit = [&](std::size_t j, T by) { std::vector<T> x(n, T(0)); x[j] = by; return x; };
+        const T c = at(std::vector<T>(n, T(0)));
+        std::vector<T> row;
+        for (std::size_t j = 0; j < n; ++j) row.push_back(at(unit(j, T(1))) - c);
+        std::vector<std::vector<T>> checks;
+        for (std::size_t i = 0; i < n; ++i) {
+            checks.push_back(unit(i, T(2)));
+            for (std::size_t j = i + 1; j < n; ++j) checks.push_back(unit(i, T(1))), checks.back()[j] = T(1);
+        }
+        checks.emplace_back();
+        for (std::size_t j = 0; j < n; ++j) checks.back().push_back(T(static_cast<int>(3 * j + 2)) / T(7) - T(1));
+        for (const auto& x : checks) {
+            T want = c, got = at(x);
+            for (std::size_t j = 0; j < n; ++j) want += row[j] * x[j];
+            bool same;
+            if constexpr (std::is_same_v<T, Rational>) same = got.ok() && got == want;
+            else same = std::abs(got - want) <= 1e-12 * std::max({std::abs(got), std::abs(want), 1.0});
+            if (!same) return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("equation {} is not linear in the unknowns", k + 1)));
+        }
+        A.push_back(std::move(row)), b.push_back(T(0) - c);
+    }
+    return std::pair{std::move(A), std::move(b)};
+}
+
 } // namespace closed_form_detail
+
+// A system of equations f_k = 0, as many as unknowns, each linear in them, solved by elimination:
+// in fractions where every coefficient is one, so x + 2y = 5, 3x - y = 1 is x = 1, y = 2 exactly,
+// else in doubles. Given `exact`, the equations as written, their constants not folded.
+inline spatium::Result<LinearSystem> solve_linear_system(const std::vector<spatium::io::build::Field<double>>& equations,
+                                                         const std::vector<std::string>& unknowns,
+                                                         const std::vector<spatium::io::build::Field<double>>* exact = nullptr) {
+    using closed_form_detail::fraction_latex;
+    namespace bd = spatium::io::build;
+    if (equations.size() != unknowns.size())
+        return std::unexpected(spatium::Error(spatium::ErrorCode::InvalidArgument,
+            std::format("linear system: {} equations in {} unknowns", equations.size(), unknowns.size())));
+    LinearSystem out{unknowns, {}, {}, {}, {}, 0};
+    // the check, by a second route: each equation, as a field, at the solution
+    const auto checked = [&] {
+        for (const auto& f : equations) {
+            auto at = f;
+            for (std::size_t j = 0; j < unknowns.size(); ++j) at = at.bind(unknowns[j], bd::Field<double>(out.values[j]));
+            out.residuals.push_back(at(0.0, 0.0));
+        }
+        return out;
+    };
+    const auto matrix = [&](const auto& A, const auto& b, const auto& tex) {
+        std::string a, x, r;
+        for (std::size_t i = 0; i < A.size(); ++i) {
+            for (std::size_t j = 0; j < A[i].size(); ++j) a += (j ? " & " : "") + tex(A[i][j]);
+            const std::string end = i + 1 < A.size() ? " \\\\ " : "";
+            a += end, x += bd::detail::name_latex(unknowns[i]) + end, r += tex(b[i]) + end;
+        }
+        return std::format("\\begin{{pmatrix}} {} \\end{{pmatrix}} \\begin{{pmatrix}} {} \\end{{pmatrix}} = \\begin{{pmatrix}} {} \\end{{pmatrix}}", a, x, r);
+    };
+    const auto solution = [&](const auto& x, const auto& tex) {
+        std::string s;
+        for (std::size_t j = 0; j < x.size(); ++j) s += (j ? ",\\quad " : "") + bd::detail::name_latex(unknowns[j]) + " = " + tex(x[j]);
+        return s;
+    };
+    // in fractions first, and in doubles where they are not
+    if (auto k = closed_form_detail::affine<spatium::Rational>(exact ? *exact : equations, unknowns, out.evaluations)) {
+        auto x = closed_form_detail::solved(k->first, k->second);
+        if (!x) return std::unexpected(x.error());
+        if (std::ranges::all_of(*x, [](const spatium::Rational& r) { return r.ok(); })) {
+            out.exact = *x;
+            for (const auto& r : *x) out.values.push_back(r.to_double());
+            out.steps = {{"coefficients", matrix(k->first, k->second, fraction_latex)}, {"solution", solution(*x, fraction_latex)}};
+            return checked();
+        }
+    }
+    auto k = closed_form_detail::affine<double>(equations, unknowns, out.evaluations);
+    if (!k) return std::unexpected(k.error());
+    auto x = closed_form_detail::solved(k->first, k->second);
+    if (!x) return std::unexpected(x.error());
+    const auto number = [](double v) { return bd::detail::number_text(v, bd::detail::TextStyle::Plain); };
+    out.values = *x;
+    out.steps = {{"coefficients", matrix(k->first, k->second, number)}, {"solution", solution(*x, number)}};
+    return checked();
+}
 
 // The equation f = 0 in its one unknown, solved in closed form. Given `exact` -- the same
 // equation as written, its constants not folded into doubles -- its roots as they are too.

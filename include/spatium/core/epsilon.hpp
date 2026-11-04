@@ -18,7 +18,10 @@ SPATIUM_EXPORT namespace spatium {
 
 template<Scalar T>
 constexpr T epsilon() {
-    if constexpr (std::numeric_limits<T>::is_specialized) {
+    if constexpr (requires { requires T::exact; }) {
+        // an exact arithmetic tells zero from what is not
+        return T{0};
+    } else if constexpr (std::numeric_limits<T>::is_specialized) {
         // ~100x machine epsilon: enough for accumulated error in typical algorithms
         return std::numeric_limits<T>::epsilon() * T{128};
     } else {
