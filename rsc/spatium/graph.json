@@ -76,6 +76,7 @@
     {"id": "TransformLike", "kind": "concept", "cpp": "spatium::geometry::TransformLike", "header": "geometry/transform.hpp", "arity": 1},
     {"id": "VectorSpace", "kind": "concept", "cpp": "spatium::VectorSpace", "header": "core/concepts.hpp", "arity": 1},
     {"id": "algebra::VecLike", "kind": "concept", "cpp": "spatium::algebra::VecLike", "header": "algebra/vec_expr.hpp", "arity": 1},
+    {"id": "enclosure", "kind": "concept", "cpp": "spatium::io::build::detail::enclosure", "header": "io/field_pod.hpp", "arity": 1},
     {"id": "implicit_detail::DualEvaluable", "kind": "concept", "cpp": "spatium::implicit_detail::DualEvaluable", "header": "spaces/implicit.hpp", "arity": 2, "unary": false},
     {"id": "parametric_detail::DualEvaluable", "kind": "concept", "cpp": "spatium::parametric_detail::DualEvaluable", "header": "spaces/parametric.hpp", "arity": 2, "unary": false},
     {"id": "product_detail::VecLike", "kind": "concept", "cpp": "spatium::product_detail::VecLike", "header": "spaces/product.hpp", "arity": 1},

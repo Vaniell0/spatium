@@ -12,12 +12,13 @@ export interface Shown {
 
 interface Step { label: string; latex: string }
 interface Certificate { strength: string; norm: string; points: number; scalar: string; computed: string; error_below: number }
+interface Proved { digits: number; text: string; bound: number; exact?: boolean }
 interface Piece { lo: number; hi: number; form: string; latex: string; degree?: number; coefficients?: number[] }
 
 const COMPUTED: Record<string, string> = { wasm: "in this browser", host: "on the host, when the gallery was written" };
 
 const HOW: Record<string, string> = {
-  evaluate: "Evaluated as written, in double precision, with nothing rewritten.",
+  evaluate: "Evaluated as written, in double precision, with nothing rewritten. Then evaluated again in intervals: each number is held as it was typed, every operation rounds its ends outward, so the true value of what was written lies between them; the digits both ends round to alike are proved.",
   "closed form": "Solved in closed form. The coefficients are read from the equation's own values and the degree is checked at more points; the roots come from the quadratic formula in the form that keeps the small root, and Vieta's formulas check them by a second route.",
   synthesis: "Synthesised. The library computes the question's value at each parameter by its own solvers; the answer is the shortest expression in the parameter that matches it, searched bottom up, or a Chebyshev polynomial where none of a few terms does, and it is checked against those values on a dense grid.",
 };
@@ -25,7 +26,12 @@ const HOW: Record<string, string> = {
 export function kindOf(a: Answer): [ok: boolean, label: string] {
   if (a.route === "scene") return [false, "A scene, as LaTeX"];
   if (a.refused) return [false, a.route ? `Not answered by ${a.route}` : "Not answered"];
-  if (a.route === "evaluate") return [false, "Evaluated"];
+  if (a.route === "evaluate") {
+    const p = a.proved as Proved | undefined;
+    if (!p) return [false, "Evaluated"];
+    if (p.exact) return [true, "Exact"];
+    return p.digits > 0 ? [true, `Proved to ${p.digits} digit${p.digits === 1 ? "" : "s"}`] : [false, `Evaluated; no digit proved, within ${decadeText(p.bound)} of zero`];
+  }
   if (a.route === "expression") return [false, `A function of ${a.reads}, as written`];
   if (a.route === "closed form") {
     const check = a.check as { holds?: boolean } | undefined;
@@ -93,7 +99,11 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
     return out;
   }
   if (a.route === "evaluate") {
-    out.append(tex(String(a.latex), "big", true), facts([["Value", el("span", { class: "mono", text: number(a.value, shown.digits) })]]));
+    const p = a.proved as Proved | undefined;
+    const rows: [string, Node][] = [["Value", el("span", { class: "mono", text: number(a.value, shown.digits) })]];
+    if (p && p.digits > 0 && !p.exact) rows.push(["Proved", el("span", { class: "mono", text: p.text })]);
+    else if (!p && a.unproved) rows.push(["Not proved", el("span", { text: String(a.unproved) })]);
+    out.append(tex(String(a.latex), "big", true), facts(rows));
     const h = how(a.route);
     if (h) out.append(h);
     return out;

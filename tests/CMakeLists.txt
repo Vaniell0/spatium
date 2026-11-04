@@ -172,6 +172,7 @@ if(SPATIUM_BOOST)
     target_link_libraries(symmetry_sweep PRIVATE spatium_core)
     target_sources(spatium_tests PRIVATE
         test_precision.cpp
+        test_interval.cpp
     )
 endif()
 

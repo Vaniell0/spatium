@@ -318,6 +318,52 @@ TEST_CASE("evaluate: a value is computed in the engine's arithmetic, each held a
 #endif
 }
 
+TEST_CASE("evaluate: a number's digits are proved over the reals, and held against fifty digits", "[rsc][evaluate][proved]") {
+    const auto d = doc("a = (3 + 7/12 - (2 + 11/18)) / (19/84)\nb = 0.1 * 3\ns = sqrt(2) + exp(1) * sin(1/3)\n"
+                       "z = sin(3.141592653589793)\nfour = 2 + 2\nr = sqrt(0.1 * 3 - 0.3)");
+    const auto in = [&](const char* name, rsc::Arithmetic a = rsc::Arithmetic::Double) {
+        return rsc::evaluate(d, name, {}, rsc::Engine{.arithmetic = a});
+    };
+    for (const char* name : {"a", "b", "s"}) {
+        INFO(name);
+        const auto e = in(name);
+        REQUIRE(e.proved);
+        CHECK(e.proved->digits >= 14);
+        // the pair: the proved digits are fifty digits' own, to half a unit of the last
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+        const auto deep = in(name, rsc::Arithmetic::Real50);
+        REQUIRE(deep.proved);
+        CHECK(deep.proved->digits >= 45);
+        const spatium::Real50 proved(e.proved->text), truth(deep.proved->text);
+        CHECK(abs(proved - truth) <= spatium::Real50(5) * pow(spatium::Real50(10), -e.proved->digits) * abs(truth));
+#endif
+    }
+    // the case a double must fail: sin of the decimal written is 2.38e-16, a double says 1.22e-16,
+    // and the interval proves no digit of it, only that it is within 6e-16 of zero
+    const auto z = in("z");
+    CHECK(close(z.values.front(), 1.2246467991473532e-16, 1e-15));
+    REQUIRE(z.proved);
+    CHECK(z.proved->digits == 0);
+    CHECK(z.proved->bound < 6e-16);
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+    const auto z50 = in("z", rsc::Arithmetic::Real50);
+    REQUIRE(z50.proved);
+    // pi less its first sixteen digits; fifty digits of the argument leave about thirty-three of it
+    CHECK(z50.proved->text.starts_with("2.384626433832795028841971693"));
+    CHECK(z50.proved->text.ends_with("e-16"));
+    CHECK(z50.proved->digits >= 30);
+#endif
+    // an exact sum is one number; a root of what is zero over the reals but not in a double is not proved
+    CHECK(in("four").proved->exact);
+    const auto r = in("r");
+    CHECK(r.values.front() > 0);
+    CHECK_FALSE(r.proved);
+    CHECK(contains(r.unproved, "below zero"));
+    // and the page reads it
+    const auto json = rsc::respond("2 + 2");
+    CHECK(contains(json.dump(), "\"proved\""));
+}
+
 TEST_CASE("evaluate: the engine as JSON, beside the document", "[rsc][evaluate][engine]") {
     const auto ask = [](std::string_view engine) {
         return rsc::evaluate_request(std::string(R"({"document": "a = 1/3 + 1/6 - 1", "name": "a", "engine": )") +

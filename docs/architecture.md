@@ -232,7 +232,7 @@ All types work with arbitrary precision without changing a single line.
 ## Module Map
 
 ```
-core/                                   — concepts, error, verify, precision, epsilon
+core/                                   — concepts, error, verify, precision, epsilon, interval
   concepts.hpp          161 lines        14 space concepts (Set through Surface)
   error.hpp              56 lines        ErrorCode, Error, Result<T>
   verify.hpp            189 lines        verify_metric(), verify_inner_product(), verify_exp_log()

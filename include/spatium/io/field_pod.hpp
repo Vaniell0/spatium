@@ -289,6 +289,9 @@ namespace detail {
 using std::sqrt, std::sin, std::cos, std::log, std::exp;
 template<class T>
 concept transcendental = requires(T a) { sqrt(a); sin(a); cos(a); log(a); exp(a); };
+// An arithmetic of enclosures (core/interval.hpp): two ends and a three-valued order.
+template<class T>
+concept enclosure = requires(const T& x) { x.lo; x.hi; less(x, x); };
 } // namespace detail
 
 // The ops an arithmetic with nothing but + - * / and order computes.
@@ -303,12 +306,23 @@ inline bool exact_op(Op o) {
     }
 }
 
+namespace detail {
+// The ops an interval encloses (core/interval.hpp): the exact ones and the functions it bounds. A
+// noise, a gather, a net computes on numbers an interval does not hold, so it is refused there.
+inline bool enclosed_op(Op o) {
+    return exact_op(o) || o == Op::Sin || o == Op::Cos || o == Op::Sqrt || o == Op::Log || o == Op::Exp ||
+           o == Op::Pow;
+}
+} // namespace detail
+
 // The first op of `f` that arithmetic T cannot compute, if any.
 template<Scalar T>
 std::optional<Op> beyond(const PodField<double>& f) {
-    if constexpr (!detail::transcendental<T>)
+    constexpr bool enclosure = detail::enclosure<T>;
+    if constexpr (!detail::transcendental<T> || enclosure)
         for (const auto& n : f.ops)
-            if (!exact_op(static_cast<Op>(n.code))) return static_cast<Op>(n.code);
+            if (!(enclosure ? detail::enclosed_op(static_cast<Op>(n.code)) : exact_op(static_cast<Op>(n.code))))
+                return static_cast<Op>(n.code);
     return std::nullopt;
 }
 
@@ -354,7 +368,18 @@ namespace detail {
 template<Scalar T>
 T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const T* points, const T* weights,
                const FieldInputs<T>& in) {
-    switch (static_cast<Op>(n.code)) {
+    // what an enclosure does not hold, `beyond` refuses before it runs; were it run, the whole line
+    if constexpr (detail::enclosure<T>) {
+        switch (static_cast<Op>(n.code)) {
+            case Op::Sin:  return sin(s[n.a]);
+            case Op::Cos:  return cos(s[n.a]);
+            case Op::Sqrt: return sqrt(s[n.a]);
+            case Op::Log:  return log(s[n.a]);
+            case Op::Exp:  return exp(s[n.a]);
+            case Op::Pow:  return pow(s[n.a], s[n.b]);
+            default:       return T::entire();
+        }
+    } else switch (static_cast<Op>(n.code)) {
         case Op::Sin:  { using std::sin; return sin(s[n.a]); }
         case Op::Cos:  { using std::cos; return cos(s[n.a]); }
         case Op::Sqrt: { using std::sqrt; return sqrt(s[n.a]); }
