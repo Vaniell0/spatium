@@ -279,6 +279,31 @@ TEST_CASE("plot: a value is drawn along one parameter, the others its shader's s
     (void)text;
 }
 
+TEST_CASE("plot: zoomed past fp32's steps, the curve comes in doubles", "[rsc][plot]") {
+    // f = 1 - x^2 / 100000 near x = 0.5 is 0.9999975: on a view 1e-4 wide fp32 holds a few of its
+    // values, so the shader's curve is a staircase, and the doubles hold one for each column
+    const std::string doc = R"({"document": "x in [0, 1]\nf = 1 - x^2 / 100000", "name": "f", "along": "x")";
+    const auto grid = rsc::plot_request(doc + R"(, "grid": {"width": 64, "height": 1, "view": [0.5, 0.5, 0.5001, 0.5]}})");
+    const auto curve = rsc::plot_request(doc + R"(, "curve": {"x0": 0.5, "x1": 0.5001, "n": 64}})");
+    const auto distinct = [](const spatium::io::JsonValue& values) {
+        std::vector<double> v;
+        for (const auto& x : values.as_array()) v.push_back(x.as_number());
+        std::ranges::sort(v);
+        return static_cast<std::size_t>(std::ranges::unique(v).begin() - v.begin());
+    };
+    REQUIRE(curve.find("curve")->as_array().size() == 64);
+    CHECK(distinct(*grid.find("values")) < 8);
+    CHECK(distinct(*curve.find("curve")) == 64);
+    // each the value at its column's centre, against the expression computed here
+    for (int k = 0; k < 64; ++k) {
+        const double x = 0.5 + (k + 0.5) / 64 * 0.0001;
+        CHECK(curve.find("curve")->as_array()[static_cast<std::size_t>(k)].as_number() == 1 - x * x / 100000);
+    }
+    // a slider's value reaches the program: a * x with a = 3
+    const auto slid = rsc::plot_request(R"({"document": "a in [1, 4]\nx in [0, 1]\nf = a * x", "name": "f", "along": "x", "curve": {"x0": 0, "x1": 1, "n": 2, "slots": [3]}})");
+    CHECK(slid.find("curve")->as_array()[1].as_number() == 3 * 0.75);
+}
+
 TEST_CASE("evaluate: a value is computed in the engine's arithmetic, each held against a double", "[rsc][evaluate][engine]") {
     const auto d = doc("a = 1/3 + 1/6\nb = 0.1 * 3\nc = abs(2 - 7) + min(1/4, 2) * 2^3\ns = sqrt(2) + 1\n"
                        "big = 2^62 * 4\nnone = 1 / (2 - 2)");

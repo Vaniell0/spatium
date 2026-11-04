@@ -46,6 +46,18 @@ export class Answers {
   // the same object from run to run, so a view and the core's queue know it again.
   private derived = new WeakMap<Cell, Cell>();
 
+  // each graph's request, and a key of its own for the curves it asks, so a newer curve takes an
+  // older one's place without taking the graph's
+  private drawn = new WeakMap<Cell, { request: object; key: object }>();
+
+  // the graph's value at the centres of n columns of [x0, x1], in doubles (plot_request's `curve`)
+  async curve(cell: Cell, at: { x0: number; x1: number; n: number; slots: number[] }): Promise<(number | null)[] | null> {
+    const d = this.drawn.get(cell);
+    if (!d) return null;
+    const a = await this.core.ask(d.key, "plot", JSON.stringify({ ...d.request, curve: at }));
+    return Array.isArray(a?.curve) ? (a.curve as (number | null)[]) : null;
+  }
+
   // The answer of every cell, in order, as each arrives: `shown` is called once per cell, with
   // null for a cell that has nothing to ask, `above` the rows asked before the cell's own (a
   // refused `row` counts them), and `from` the cell a derived one follows.
@@ -58,6 +70,7 @@ export class Answers {
       const of = answers.get(cell.of);
       const request = of?.graph as { document: string } | undefined;
       if (!request) { shown(cell, of ? { refused: `${cell.of} has no graph` } : null, 0, from); return true; }
+      this.drawn.set(cell, { request, key: this.drawn.get(cell)?.key ?? {} });
       const drawn = await this.asked(cell, "plot", JSON.stringify(request));
       if (drawn === null) return false;   // a newer run took this one's place
       shown(cell, drawn, 0, from);

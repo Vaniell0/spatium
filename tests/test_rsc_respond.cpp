@@ -198,6 +198,15 @@ TEST_CASE("respond: an inequality is the set where it holds, by the interval met
     CHECK(rsc::respond("x + y > 0").string_or("refused", "").find("one unknown") != std::string::npos);
 }
 
+TEST_CASE("respond: a synthesis of one piece is its formula, of more how many", "[rsc][respond][sheet]") {
+    // the error function has no closed form here: one Chebyshev piece, written as its sum
+    const auto one = rsc::respond("x in [0.25, 3]\nE = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]");
+    REQUIRE(at(one, "answer").as_array().size() == 1);
+    CHECK(at(at(one, "sheet"), "result").as_string().starts_with("E = \\sum_{k=0}"));
+    // the case it must not be: a count of one
+    CHECK(at(at(one, "sheet"), "result").as_string().find("pieces") == std::string::npos);
+}
+
 TEST_CASE("respond: rows are computed in the arithmetic their engine names", "[rsc][respond]") {
     // x^2 - 2 = 0 in fractions: the roots as the closed form writes them, the steps evaluate_request gives
     const std::string row = R"(["Equal", ["Subtract", ["Power", "x", 2], 2], 0])";
