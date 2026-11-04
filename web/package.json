@@ -1,0 +1,10 @@
+{
+  "name": "spatium",
+  "private": true,
+  "description": "The page's side of spatium: the document of cells, its link, and the core it asks.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "tsc -p . && node --test ../site/pkg/test/*.test.js"
+  }
+}
