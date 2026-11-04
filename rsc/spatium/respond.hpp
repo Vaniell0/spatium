@@ -628,28 +628,45 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
         out.emplace_back("sheet", sheet_of(e, wanted ? wanted->kind : bd::StatementKind::Value, out));
         return JsonValue(std::move(out));
     };
+    // the rows above the last, each a line of the document: a statement as written, or a row a
+    // page writes as no statement -- an expression, an equation -- as the same shorthand the last
+    // row is, an expression named answer_k by its row so a row below can read it
     bd::Document above;
     std::string_view q = all;
     if (const auto nl = all.rfind('\n'); nl != std::string_view::npos) {
-        auto doc = bd::read_document(all.substr(0, nl));
-        if (!doc) {
-            out.emplace_back("route", "document");
-            out.emplace_back("refused", doc.error().message);
-            return JsonValue(std::move(out));
+        std::string_view rest = all.substr(0, nl);
+        for (std::size_t k = 1; !rest.empty(); ++k) {
+            const auto end = rest.find('\n');
+            const std::string_view line = trimmed(rest.substr(0, end));
+            rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
+            if (line.empty() || line.starts_with('#')) continue;
+            const auto refuse = [&](std::string why) {
+                out.emplace_back("route", "document");
+                out.emplace_back("refused", std::format("line {}: {}", k, why));
+                return JsonValue(std::move(out));
+            };
+            if (auto doc = bd::read_document(bd::to_text(above) + std::string(line))) {
+                above = std::move(*doc);
+                continue;
+            }
+            auto row = shorthand(line, above);
+            if (!row.asked) return refuse(row.asked.error().second);
+            bd::Statement st = row.asked->document.statements.back();
+            if (st.name == "answer") st.name = std::format("answer_{}", k);
+            above.statements.push_back(std::move(st));
         }
-        above = std::move(*doc);
         q = trimmed(all.substr(nl + 1));
     }
     auto s = shorthand(q, above);
     if (s.asked) return answered(*s.asked);
     // a shorthand that does not read, but a document that does
-    if (auto whole = bd::read_document(all); whole && !whole->statements.empty()) {
+    if (auto whole = bd::read_document(bd::to_text(above) + std::string(q)); whole && !whole->statements.empty()) {
         std::string wanted = whole->statements.back().name;
         return answered({std::move(*whole), std::move(wanted)});
     }
     // a line in a document's own words, a name and ':' or 'in', is refused as the document refuses it
     if (q.find(':') != std::string_view::npos || q.find(" in ") != std::string_view::npos) {
-        if (auto whole = bd::read_document(all); !whole) {
+        if (auto whole = bd::read_document(bd::to_text(above) + std::string(q)); !whole) {
             out.emplace_back("route", "document");
             out.emplace_back("refused", whole.error().message);
             return JsonValue(std::move(out));

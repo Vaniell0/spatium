@@ -243,3 +243,16 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
                 if (at(f, "label").as_string() == "Every real root, proved") held = at(f, "ok").as_bool();
     CHECK(held);
 }
+
+TEST_CASE("respond: rows above the last are rows of the page, an expression among them", "[rsc][respond][rows]") {
+    // a row below an expression is answered: the expression is a statement of its own, answer_1
+    CHECK(at(at(rsc::respond("2(3 + 4)^2 - 1/4\n1 + 2"), "sheet"), "result").as_string() == "3");
+    CHECK(at(at(rsc::respond("2(3 + 4)^2 - 1/4\nanswer_1 + 1"), "sheet"), "result").as_string() == "\\frac{395}{4} = 98.75");
+    // an equation above, then a parameter and a root in a document's own words
+    const auto below = rsc::respond("2x^2 - 3x - 5 = 0\np in [0.5, 4]\ny: y^2 - p = 0 on [0, 10]");
+    CHECK(at(at(below, "sheet"), "result").as_string() == "y = \\sqrt{p}");
+    // the cases it must refuse, by the row they are on
+    CHECK(at(rsc::respond("1 +\n2 + 2"), "refused").as_string().starts_with("line 1: parse: at column 4"));
+    CHECK(at(rsc::respond("p in [0.5, 4]\nx: x^2 - q = 0 on [0, 10]"), "refused").as_string() ==
+          "line 2: x reads 'q', which no line above defines");
+}
