@@ -46,20 +46,23 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace rsc {
 
-enum class Route { Evaluate, Expression, ClosedForm, Bracket, Integral, Synthesis };
+enum class Route { Evaluate, Expression, ClosedForm, Enclosed, Bracket, Integral, Synthesis };
 
 inline const char* route_name(Route r) {
     switch (r) {
         case Route::Evaluate: return "evaluate";
         case Route::Expression: return "expression";
         case Route::ClosedForm: return "closed form";
+        case Route::Enclosed: return "every root, proved";
         case Route::Bracket: return "root on a bracket";
         case Route::Integral: return "integral";
         case Route::Synthesis: return "synthesis";
@@ -125,6 +128,9 @@ struct Evaluation {
     // a number's digits proved over the reals (core/interval.hpp), or why they are not
     std::optional<spatium::Proved> proved;
     std::string unproved;
+    // an equation's roots on its bracket, or on the doubles' whole range: each proved alone in its
+    // interval, and where one may still be
+    std::optional<spatium::Roots<double>> enclosed;
     std::string parameter;               // the name the answer's pieces read as U
 
     // the route of the value, or of the first refusal when there is none
@@ -241,6 +247,43 @@ inline void prove(const Expr& f, Arithmetic a, Evaluation& out) {
     prove<double>(*pod, out);
 }
 
+// The roots of a field of one unknown on a box, each proved: computed in an interval and in a dual
+// number of intervals, which the lowered program runs in unchanged.
+inline Candidate enclosed_roots(const Expr& f, spatium::Interval<double> box, Evaluation& out) {
+    namespace bd = spatium::io::build;
+    using I = spatium::Interval<double>;
+    using D = spatium::Dual<I>;
+    Candidate c{Route::Enclosed, 0, {}, {}, Arithmetic::Double, {}};
+    const auto pod = bd::lower(f);
+    if (!pod) {
+        c.refused = pod.error().message;
+        return c;
+    }
+    if (const auto op = bd::beyond<I>(*pod)) {
+        c.refused = std::format("an interval has no {} in it", bd::op_name(*op));
+        return c;
+    }
+    const auto in_interval = bd::converted<I>(*pod);
+    const auto in_dual = bd::converted<D>(*pod);
+    const auto field = [&]<class X>(const X& x) {
+        if constexpr (std::is_same_v<X, I>) return bd::interpret(in_interval, x, I{0});
+        else return bd::interpret(in_dual, x, D{I{0}});
+    };
+    auto found = spatium::roots_on(field, box);
+    c.cost = found.evaluations;
+    for (const I& r : found.roots) c.values.push_back(r.mid());
+    const auto range = [](const I& x) { return std::format("[{}, {}]", shortest(x.lo), shortest(x.hi)); };
+    if (found.roots.empty()) {
+        if (found.complete()) c.refused = std::format("no real root on {}: every piece of it is proved to hold none", range(box));
+        else {
+            c.refused = std::format("no root proved on {}; one may lie in {}", range(box), range(found.undecided.front()));
+            if (found.undecided.size() > 1) c.refused += std::format(" or {} more pieces", found.undecided.size() - 1);
+        }
+    }
+    out.enclosed = std::move(found);
+    return c;
+}
+
 } // namespace detail
 
 // The route whose value is taken: the first, in the order of preference, that gives one.
@@ -283,9 +326,12 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
             out.values = out.candidates[*out.taken].values;
             return;
         }
-        for (const auto& c : out.candidates)
+        // each refusal under its route's name, unless it already starts with it
+        for (const auto& c : out.candidates) {
+            const std::string name = std::string(route_name(c.route)) + ": ";
             out.refused += std::string(out.refused.empty() ? "" : "; ") +
-                           (out.candidates.size() > 1 ? std::string(route_name(c.route)) + ": " : "") + c.refused;
+                           (out.candidates.size() > 1 && !c.refused.starts_with(name) ? name : "") + c.refused;
+        }
     };
 
     if (d->kind == bd::StatementKind::Value || d->kind == bd::StatementKind::Parameter) {
@@ -347,7 +393,6 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
         Candidate c{Route::ClosedForm, 0, {}, {}, Arithmetic::Double, {}};
         if (auto solved = solve_closed_form(u->f, d->name, exact ? &u->written : nullptr); !solved) {
             c.refused = solved.error().message;
-            if (!bracket) c.refused += std::format(", so {} needs a bracket, as in {}: ... on [a, b]", d->name, d->name);
         } else {
             c.cost = solved->evaluations;
             for (const auto& z : solved->solution.roots)
@@ -370,6 +415,13 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
         }
         out.candidates.push_back(std::move(c));
     }
+    // every root on the bracket, or on the doubles' whole range without one, each proved; in
+    // intervals of doubles, so not where a strict engine asks for another arithmetic alone
+    if (!engine.strict || engine.arithmetic == Arithmetic::Double)
+        out.candidates.push_back(detail::enclosed_roots(
+            of_u, bracket ? spatium::Interval<double>{lo, hi}
+                          : spatium::Interval<double>{-std::numeric_limits<double>::max(), std::numeric_limits<double>::max()},
+            out));
     if (bracket) {
         evaluations = 0;
         const auto root = spatium::find_root(field, lo, hi);

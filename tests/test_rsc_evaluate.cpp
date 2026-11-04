@@ -70,13 +70,18 @@ TEST_CASE("evaluate: a root is a function of its parameter with nothing chosen, 
     CHECK(close(two.values.front(), std::sqrt(2.0), 1e-15));
     // the closed form's steps are counted: three values for the coefficients, five to check the degree
     CHECK(two.candidates[0].cost == 8);
-    // the root on the same bracket is the second route, and agrees
-    REQUIRE(two.candidates.size() == 2);
-    CHECK(two.candidates[1].route == rsc::Route::Bracket);
-    CHECK(two.candidates[1].refused.empty());
-    CHECK(two.candidates[1].cost > 0);
-    REQUIRE(two.candidates[1].values.size() == 1);
-    CHECK(close(two.candidates[1].values.front(), two.values.front(), 1e-15));
+    // the root on the same bracket by two more routes, proved and bisected, and they agree
+    REQUIRE(two.candidates.size() == 3);
+    for (std::size_t k : {1u, 2u}) {
+        CHECK(two.candidates[k].refused.empty());
+        CHECK(two.candidates[k].cost > 0);
+        REQUIRE(two.candidates[k].values.size() == 1);
+        CHECK(close(two.candidates[k].values.front(), two.values.front(), 1e-15));
+    }
+    CHECK(two.candidates[1].route == rsc::Route::Enclosed);
+    CHECK(two.candidates[2].route == rsc::Route::Bracket);
+    REQUIRE(two.enclosed);
+    CHECK(two.enclosed->roots.front().contains(two.values.front()));
     taken_is_first_with_a_value(two);
     // the function at the chosen value is the number, to the synthesis's tolerance
     for (double p : {0.5, 1.3, 2.0, 3.7, 4.0}) {
@@ -125,7 +130,7 @@ TEST_CASE("evaluate: a value is a number, or its own expression when it reads a 
     CHECK(rsc::evaluate(d, "r").values == std::vector<double>{0.5});
 }
 
-TEST_CASE("evaluate: a root with no bracket is solved in closed form, or refused for want of one", "[rsc][evaluate]") {
+TEST_CASE("evaluate: a root with no bracket is solved in closed form, or proved on the doubles' whole range", "[rsc][evaluate]") {
     const auto d = doc("x: 2x^2 - 3x - 5 = 0\ny: y^3 - 1 = 0\nz: z^3 - 1 = 0 on [0, 2]");
     // the line without a bracket reads and prints back as written, as text and as JSON
     CHECK(bd::to_text(d) == "x: 2x^2 - 3x - 5 = 0\ny: y^3 - 1 = 0\nz: z^3 - 1 = 0 on [0, 2]\n");
@@ -136,18 +141,34 @@ TEST_CASE("evaluate: a root with no bracket is solved in closed form, or refused
     const auto x = rsc::evaluate(d, "x");
     REQUIRE(x.route() == rsc::Route::ClosedForm);
     CHECK(x.values == std::vector<double>{2.5, -1.0});
-    CHECK(x.candidates.size() == 1);
+    // the second path: the same two roots, each proved alone in its interval, on the whole line
+    REQUIRE(x.candidates.size() == 2);
+    REQUIRE(x.enclosed);
+    REQUIRE(x.enclosed->roots.size() == 2);
+    // where 2x^2 overflows a double there is no telling: only there, past a quarter of the largest double, nothing is proved
+    REQUIRE(x.enclosed->undecided.size() == 1);
+    CHECK(x.enclosed->undecided.front().lo > 4e307);
+    CHECK(x.enclosed->roots[0].contains(-1.0));
+    CHECK(x.enclosed->roots[1].contains(2.5));
 
+    // a cubic has no closed form here: its one real root is proved, and the line holds no other
     const auto y = rsc::evaluate(d, "y");
-    CHECK_FALSE(y.taken);
-    CHECK(contains(y.refused, "degree at most two"));
-    CHECK(contains(y.refused, "y needs a bracket"));
+    REQUIRE(y.route() == rsc::Route::Enclosed);
+    CHECK(contains(y.candidates.front().refused, "degree at most two"));
+    REQUIRE(y.values.size() == 1);
+    REQUIRE(y.enclosed);
+    CHECK(y.enclosed->complete());
+    CHECK(y.enclosed->roots.front().contains(1.0));
+    CHECK(spatium::proved(y.enclosed->roots.front()).digits >= 15);
 
+    // on a bracket, the proof and the bisection agree
     const auto z = rsc::evaluate(d, "z");
-    REQUIRE(z.route() == rsc::Route::Bracket);
+    REQUIRE(z.route() == rsc::Route::Enclosed);
     CHECK_FALSE(z.candidates.front().refused.empty());
     REQUIRE(z.values.size() == 1);
     CHECK(close(z.values.front(), 1.0, 1e-15));
+    REQUIRE(z.candidates.back().route == rsc::Route::Bracket);
+    CHECK(z.enclosed->roots.front().contains(z.candidates.back().values.front()));
     taken_is_first_with_a_value(z);
 
     // what needs a bracket says so: a question, and a scene
@@ -214,7 +235,7 @@ TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", 
     CHECK(a.dump() == b.dump());
     REQUIRE(a.find("values"));
     CHECK(close(a.find("values")->as_array().front().as_number(), std::sqrt(2.0), 1e-15));
-    CHECK(a.find("candidates")->as_array().size() == 2);
+    CHECK(a.find("candidates")->as_array().size() == 3);
     // and a request that is not one says why
     CHECK(contains(rsc::evaluate_request("[1]").string_or("refused", ""), "not a JSON object"));
     CHECK(contains(rsc::evaluate_request(R"({"name": "x"})").string_or("refused", ""), "no document"));
@@ -362,6 +383,48 @@ TEST_CASE("evaluate: a number's digits are proved over the reals, and held again
     // and the page reads it
     const auto json = rsc::respond("2 + 2");
     CHECK(contains(json.dump(), "\"proved\""));
+}
+
+TEST_CASE("evaluate: every root of an equation on its box, each proved alone, from the question line", "[rsc][evaluate]") {
+    const auto d = doc("x: 2^x = 8\nw: sin(w) = 0.5 on [0, 10]\nn: n^2 + 1 = 0\nt: t^4 = 0 on [-1, 1]\ns: less(s, 0.5) - 0.5 = 0 on [0, 1]");
+    // no closed form for a power: its one root on the whole line, proved to the double's digits
+    const auto x = rsc::evaluate(d, "x");
+    REQUIRE(x.route() == rsc::Route::Enclosed);
+    REQUIRE(x.enclosed);
+    CHECK(x.enclosed->complete());
+    REQUIRE(x.enclosed->roots.size() == 1);
+    CHECK(spatium::proved(x.enclosed->roots.front()).text == "3.000000000000000");
+    CHECK(x.enclosed->box.hi == std::numeric_limits<double>::max());
+    // four on the bracket, against their closed forms pi/6 + 2 pi k and 5 pi/6 + 2 pi k
+    const auto w = rsc::evaluate(d, "w");
+    REQUIRE(w.route() == rsc::Route::Enclosed);
+    REQUIRE(w.values.size() == 4);
+    const double pi = std::numbers::pi, at[4] = {pi / 6, 5 * pi / 6, 13 * pi / 6, 17 * pi / 6};
+    for (int k = 0; k < 4; ++k) CHECK(close(w.values[k], at[k], 1e-14));
+    // none real: the closed form's two are complex, and the proof agrees that the line holds none
+    const auto n = rsc::evaluate(d, "n");
+    REQUIRE(n.route() == rsc::Route::ClosedForm);
+    CHECK(n.values.empty());
+    REQUIRE(n.candidates.size() == 2);
+    CHECK(contains(n.candidates[1].refused, "every piece of it is proved to hold none"));
+    // a fourfold root is not proved, nor found by a sign it does not change, and the refusal says where it may be
+    const auto t = rsc::evaluate(d, "t");
+    CHECK_FALSE(t.taken);
+    CHECK(contains(t.refused, "no root proved on [-1, 1]; one may lie in"));
+    // a jump across zero is no root: the bisection lands on it, the proof leaves it undecided
+    const auto s = rsc::evaluate(d, "s");
+    REQUIRE(s.route() == rsc::Route::Bracket);
+    CHECK(close(s.values.front(), 0.5, 1e-15));
+    REQUIRE(s.enclosed);
+    CHECK(s.enclosed->roots.empty());
+    REQUIRE(s.enclosed->undecided.size() == 1);
+    CHECK(s.enclosed->undecided.front().contains(0.5));
+    CHECK(s.enclosed->undecided.front().width() < 1e-8);
+    // and the page reads it, from the question line with its box
+    const auto json = rsc::respond("sin(w) = 0.5 on [0, 10]").dump();
+    CHECK(contains(json, "every root, proved"));
+    CHECK(contains(json, "\"enclosed\""));
+    CHECK(contains(json, "\"complete\""));
 }
 
 TEST_CASE("evaluate: the engine as JSON, beside the document", "[rsc][evaluate][engine]") {

@@ -126,6 +126,14 @@ inline std::string number_latex(const Candidate& c, double value) {
     return c.text;
 }
 
+// A number's proved digits: how far from zero only where none is proved, since elsewhere that is
+// the value's last digits.
+inline spatium::io::JsonValue::ObjectType proved_json(const spatium::Proved& p) {
+    using namespace respond_detail;
+    if (p.digits == 0) return {{"digits", 0}, {"bound", decade_above(p.bound)}};
+    return {{"digits", p.digits}, {"text", p.text}, {"exact", p.exact}};
+}
+
 inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, std::size_t written = 2) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -142,12 +150,7 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             out.emplace_back("value", e.values.front());
             if (!c.text.empty()) out.emplace_back("text", c.text);
             out.emplace_back("latex", *bd::to_latex(e.written) + " = " + number_latex(c, e.values.front()));
-            // how far from zero only where no digit is proved: elsewhere it is the value's last digits
-            if (e.proved && e.proved->digits == 0)
-                out.emplace_back("proved", Object{{"digits", 0}, {"bound", decade_above(e.proved->bound)}});
-            else if (e.proved)
-                out.emplace_back("proved", Object{{"digits", e.proved->digits}, {"text", e.proved->text},
-                                                  {"exact", e.proved->exact}});
+            if (e.proved) out.emplace_back("proved", proved_json(*e.proved));
             else if (!e.unproved.empty())
                 out.emplace_back("unproved", e.unproved);
             break;
@@ -178,6 +181,25 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             out.emplace_back("values", values);
             break;
         }
+        case Route::Enclosed: {
+            // each root as its proved digits, or within a bound of zero where none is proved
+            Array values;
+            for (double v : e.values) values.push_back(v);
+            std::string latex;
+            const auto& roots = e.enclosed->roots;
+            for (std::size_t k = 0; k < roots.size(); ++k) {
+                const auto p = spatium::proved(roots[k]);
+                const std::string name = roots.size() == 1 ? e.name : std::format("{}_{{{}}}", e.name, k + 1);
+                latex += (k ? ",\\quad " : "") +
+                         (p.digits > 0 ? name + " = " + p.text
+                                       : std::format("\\left|{}\\right| \\le {}", name,
+                                                     bd::detail::number_text(decade_above(p.bound), bd::detail::TextStyle::Latex)));
+            }
+            out.emplace_back("unknown", e.name);
+            out.emplace_back("values", values);
+            out.emplace_back("latex", latex);
+            break;
+        }
         case Route::Bracket: out.emplace_back("value", e.values.front()); break;
         case Route::Integral:
             out.emplace_back("value", e.values.front());
@@ -186,6 +208,20 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
         case Route::Synthesis:
             for (auto& [k, v] : answer_json(*e.answer, e.parameter, written)) out.emplace_back(std::move(k), std::move(v));
             break;
+    }
+    // the roots on the box searched, each proved alone in its interval, whichever route was taken
+    if (e.enclosed) {
+        const auto& f = *e.enclosed;
+        Array roots, undecided;
+        for (const auto& r : f.roots) {
+            auto p = proved_json(spatium::proved(r));
+            p.emplace_back("lo", r.lo);
+            p.emplace_back("hi", r.hi);
+            roots.push_back(std::move(p));
+        }
+        for (const auto& u : f.undecided) undecided.push_back(Array{u.lo, u.hi});
+        out.emplace_back("enclosed", Object{{"box", Array{f.box.lo, f.box.hi}}, {"roots", roots},
+                                            {"undecided", undecided}, {"complete", f.complete()}});
     }
     Array candidates;
     for (std::size_t i = 0; i < e.candidates.size(); ++i) {
@@ -251,8 +287,8 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
         value.name = "answer", value.value = {*f, std::string(expression)};
         return with_above({{std::move(value)}}, "answer", "evaluate");
     }
-    // the root of the equation in its one unknown, with no bracket: solved in closed form
-    bd::FieldReader r(equation, "", "");
+    // the roots of the equation in its one unknown: in closed form, and proved on its bracket or the whole line
+    bd::FieldReader r(equation, "", "", {"on"});
     bd::Statement root;
     root.kind = bd::StatementKind::Root;
     auto lhs = bd::detail::written(r, equation);
@@ -260,7 +296,13 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
     if (!r.take('=')) return refuse("closed form", r.fail("'='").error().message);
     auto rhs = bd::detail::written(r, equation);
     if (!rhs) return refuse("closed form", rhs.error().message);
-    if (!r.done()) return refuse("closed form", r.fail("the end").error().message);
+    // on [a, b]: the box its roots are sought on, as in a document
+    if (!r.done()) {
+        auto ends = bd::detail::interval(r, equation, "on");
+        if (!ends) return refuse("closed form", ends.error().message);
+        std::tie(root.lo, root.hi) = std::move(*ends);
+        if (!r.done()) return refuse("closed form", r.fail("the end").error().message);
+    }
     // a new name on the left that the right does not read is a definition, f = a^2 + 1, not an equation in f
     const std::string left(trimmed(lhs->text));
     if (const auto right_reads = rhs->field.free_symbols(); !left.empty() && !above.find(left) &&
@@ -299,7 +341,7 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& 
     const auto request = [](std::string document, std::string name, std::string along) {
         return Object{{"document", std::move(document)}, {"name", std::move(name)}, {"along", std::move(along)}};
     };
-    if (how == "closed form" && wanted->kind == bd::StatementKind::Root) {
+    if ((how == "closed form" || how == "every root, proved") && wanted->kind == bd::StatementKind::Root) {
         std::vector<double> roots;
         if (const JsonValue* v = field("values"); v && v->is_array())
             for (const auto& x : v->as_array())

@@ -289,9 +289,20 @@ namespace detail {
 using std::sqrt, std::sin, std::cos, std::log, std::exp;
 template<class T>
 concept transcendental = requires(T a) { sqrt(a); sin(a); cos(a); log(a); exp(a); };
-// An arithmetic of enclosures (core/interval.hpp): two ends and a three-valued order.
+// An arithmetic of enclosures (core/interval.hpp): two ends and a three-valued order; and one whose
+// value and derivative are enclosures, a dual number of intervals, which encloses what f' is too.
 template<class T>
 concept enclosure = requires(const T& x) { x.lo; x.hi; less(x, x); };
+template<class T>
+concept encloses = enclosure<T> || requires(const T& x) {
+    x.deriv;
+    requires enclosure<std::remove_cvref_t<decltype(x.value)>>;
+};
+// What an enclosure says of a value it cannot compute: any number.
+template<encloses T> T unbounded() {
+    if constexpr (enclosure<T>) return T::entire();
+    else return {unbounded<std::remove_cvref_t<decltype(T{}.value)>>(), unbounded<std::remove_cvref_t<decltype(T{}.value)>>()};
+}
 } // namespace detail
 
 // The ops an arithmetic with nothing but + - * / and order computes.
@@ -318,7 +329,7 @@ inline bool enclosed_op(Op o) {
 // The first op of `f` that arithmetic T cannot compute, if any.
 template<Scalar T>
 std::optional<Op> beyond(const PodField<double>& f) {
-    constexpr bool enclosure = detail::enclosure<T>;
+    constexpr bool enclosure = detail::encloses<T>;
     if constexpr (!detail::transcendental<T> || enclosure)
         for (const auto& n : f.ops)
             if (!(enclosure ? detail::enclosed_op(static_cast<Op>(n.code)) : exact_op(static_cast<Op>(n.code))))
@@ -333,6 +344,8 @@ template<Scalar T>
 T from_double(double x) {
     if constexpr (std::is_floating_point_v<T>) {
         return static_cast<T>(x);
+    } else if constexpr (requires { T::constant(from_double<std::remove_cvref_t<decltype(T{}.value)>>(x)); }) {
+        return T::constant(from_double<std::remove_cvref_t<decltype(T{}.value)>>(x));   // a dual number's value, as its own
     } else if constexpr (std::constructible_from<T, const char*>) {
         char buf[32];
         const auto [end, ec] = std::to_chars(buf, buf + sizeof buf - 1, x);
@@ -369,7 +382,7 @@ template<Scalar T>
 T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const T* points, const T* weights,
                const FieldInputs<T>& in) {
     // what an enclosure does not hold, `beyond` refuses before it runs; were it run, the whole line
-    if constexpr (detail::enclosure<T>) {
+    if constexpr (detail::encloses<T>) {
         switch (static_cast<Op>(n.code)) {
             case Op::Sin:  return sin(s[n.a]);
             case Op::Cos:  return cos(s[n.a]);
@@ -377,7 +390,7 @@ T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const 
             case Op::Log:  return log(s[n.a]);
             case Op::Exp:  return exp(s[n.a]);
             case Op::Pow:  return pow(s[n.a], s[n.b]);
-            default:       return T::entire();
+            default:       return detail::unbounded<T>();
         }
     } else switch (static_cast<Op>(n.code)) {
         case Op::Sin:  { using std::sin; return sin(s[n.a]); }

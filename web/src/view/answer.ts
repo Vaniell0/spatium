@@ -13,6 +13,7 @@ export interface Shown {
 interface Step { label: string; latex: string }
 interface Certificate { strength: string; norm: string; points: number; scalar: string; computed: string; error_below: number }
 interface Proved { digits: number; text: string; bound: number; exact?: boolean }
+interface Enclosed { box: [number, number]; roots: (Proved & { lo: number; hi: number })[]; undecided: [number, number][]; complete: boolean }
 interface Piece { lo: number; hi: number; form: string; latex: string; degree?: number; coefficients?: number[] }
 
 const COMPUTED: Record<string, string> = { wasm: "in this browser", host: "on the host, when the gallery was written" };
@@ -20,12 +21,16 @@ const COMPUTED: Record<string, string> = { wasm: "in this browser", host: "on th
 const HOW: Record<string, string> = {
   evaluate: "Evaluated as written, in double precision, with nothing rewritten. Then evaluated again in intervals: each number is held as it was typed, every operation rounds its ends outward, so the true value of what was written lies between them; the digits both ends round to alike are proved.",
   "closed form": "Solved in closed form. The coefficients are read from the equation's own values and the degree is checked at more points; the roots come from the quadratic formula in the form that keeps the small root, and Vieta's formulas check them by a second route.",
+  "every root, proved": "Every root on the box, each proved. The box is cut in two where it is undecided; a piece is excluded where the equation's interval leaves out zero, and holds exactly one root where Newton's step in intervals, with the derivative enclosed by a dual number, lands inside it. Where the derivative may vanish, at a double root, nothing is proved and the piece is shown as undecided. With no bracket the box is every double.",
   synthesis: "Synthesised. The library computes the question's value at each parameter by its own solvers; the answer is the shortest expression in the parameter that matches it, searched bottom up, or a Chebyshev polynomial where none of a few terms does, and it is checked against those values on a dense grid.",
 };
 
 export function kindOf(a: Answer): [ok: boolean, label: string] {
   if (a.route === "scene") return [false, "A scene, as LaTeX"];
-  if (a.refused) return [false, a.route ? `Not answered by ${a.route}` : "Not answered"];
+  if (a.refused) {
+    const tried = ((a.candidates ?? []) as { route: string }[]).length;
+    return [false, a.route && tried <= 1 ? `Not answered by ${a.route}` : "Not answered"];
+  }
   if (a.route === "evaluate") {
     const p = a.proved as Proved | undefined;
     if (!p) return [false, "Evaluated"];
@@ -33,6 +38,12 @@ export function kindOf(a: Answer): [ok: boolean, label: string] {
     return p.digits > 0 ? [true, `Proved to ${p.digits} digit${p.digits === 1 ? "" : "s"}`] : [false, `Evaluated; no digit proved, within ${decadeText(p.bound)} of zero`];
   }
   if (a.route === "expression") return [false, `A function of ${a.reads}, as written`];
+  if (a.route === "every root, proved") {
+    const e = a.enclosed as Enclosed;
+    const n = e.roots.length;
+    const roots = `${n} root${n === 1 ? "" : "s"} proved`;
+    return e.complete ? [true, `${roots}, and no other on the box`] : [true, `${roots}; elsewhere undecided`];
+  }
   if (a.route === "closed form") {
     const check = a.check as { holds?: boolean } | undefined;
     return check?.holds ? [true, "Closed form, checked by Vieta's formulas"] : [false, "Closed form"];
@@ -122,10 +133,25 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
       out.append(chain);
     }
     const check = a.check as { by: string; holds: boolean; error_below: number } | undefined;
-    if (check) out.append(facts([
+    const rows: [string, Node][] = [];
+    if (check) rows.push(
       ["Check", el("span", { class: check.holds ? "ok" : "", text: `${check.by} ${check.holds ? "hold" : "do not hold"}` })],
-      [check.error_below ? "Relative error below" : "Error", decade(check.error_below)],
-    ]));
+      [check.error_below ? "Relative error below" : "Error", decade(check.error_below)]);
+    // the real roots again, by a second route: each proved in intervals
+    const e = a.enclosed as Enclosed | undefined;
+    if (e && e.roots.length) rows.push(["Proved", el("span", { class: "mono", text: e.roots.map((r) => r.digits > 0 ? r.text : "0").join(", ") })]);
+    if (rows.length) out.append(facts(rows));
+    const h = how(a.route);
+    if (h) out.append(h);
+    return out;
+  }
+  if (a.route === "every root, proved") {
+    const e = a.enclosed as Enclosed;
+    const span = (lo: number, hi: number) => `[${number(lo, shown.digits)}, ${number(hi, shown.digits)}]`;
+    const rows: [string, Node][] = [["Searched", el("span", { class: "mono", text: span(e.box[0], e.box[1]) })]];
+    e.roots.forEach((r, k) => rows.push([`Root ${k + 1}`, el("span", { class: "mono", text: r.digits > 0 ? `${r.exact ? "exact" : `${r.digits} digits`}, in ${span(r.lo, r.hi)}` : `within ${decadeText(r.bound)} of zero` })]));
+    for (const [lo, hi] of e.undecided) rows.push(["Undecided", el("span", { class: "mono", text: span(lo, hi) })]);
+    out.append(tex(String(a.latex), "big accent", true), facts(rows));
     const h = how(a.route);
     if (h) out.append(h);
     return out;
