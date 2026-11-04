@@ -9,7 +9,7 @@ import { type Cell, type Doc, graph, math, presets, setting, splitLines } from "
 import { nameOf, wordBefore } from "../answers.js";
 import { answerView } from "./answer.js";
 import { el } from "./dom.js";
-import { graphView, type View } from "./graph.js";
+import { graphView, type GraphOptions, type View } from "./graph.js";
 
 export interface CardsHost {
   editor: boolean;                    // the formula editor loaded; without it a card is written as text
@@ -17,6 +17,7 @@ export interface CardsHost {
   changed(): void;                    // the document changed: ask again and keep it
   focused(field: HTMLElement): void;  // a row took the focus (the keyboard goes there)
   hint(word: string): [name: string, caption: string, example: string] | null;  // what the reference says of a word
+  curve: (cell: Cell) => GraphOptions["curve"];                                 // a graph's curve in doubles
 }
 
 type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string;
@@ -63,7 +64,7 @@ export class Cards {
   show(cell: Cell, answer: Answer | null, above = 0, from?: Cell) {
     if (from) {
       const slot = this.shown.get(from)?.box.querySelector(".also");
-      if (slot && answer) slot.replaceChildren(graphView(answer, { height: 260 }));
+      if (slot && answer) slot.replaceChildren(graphView(answer, { height: 260, curve: this.host.curve(cell) }));
       return;
     }
     const s = this.shown.get(cell);
@@ -78,7 +79,7 @@ export class Cards {
     s.box.querySelectorAll(".rows > *").forEach((f, k) => f.classList.toggle("bad", k === bad));
     if (!answer) { out.replaceChildren(); return; }
     if (cell.kind === "graph") {
-      out.replaceChildren(graphView(answer, { view: cell.settings.window as View | undefined, height: 260,
+      out.replaceChildren(graphView(answer, { view: cell.settings.window as View | undefined, height: 260, curve: this.host.curve(cell),
         onView: (v) => { cell.settings.window = v; this.host.changed(); } }));
       return;
     }
