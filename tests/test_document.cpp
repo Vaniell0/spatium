@@ -86,57 +86,70 @@ TEST_CASE("document: refused with the line, and the column for a parse error", "
     CHECK(message("x = 1 2") == "line 1: parse: at column 7, expected the end of the line, found '2'");
 }
 
-TEST_CASE("ask: a question read through its document is the question read word by word", "[document][rsc]") {
-    // every question the gallery and the reference ask, and the forms around them
-    const std::vector<std::string> questions{
-        "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]",
-        "solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]",
-        "solve x^3 = p for x in [0, 3], p in [1, 8]",
-        "solve x - cos(p * x) for x in [0, 2], p in [0.5, 1]",
-        "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]",
-        "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]",
-        "integrate sin(t)/t for t in [0, x], x in [0.5, 6]",
-        "integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]",
-        "integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]",
-        "integrate t for t in [p, 2 p], p in [1, 2]",
-    };
-    const auto same_bound = [](const std::optional<rsc::Expr>& a, const std::optional<rsc::Expr>& b) {
-        return a.has_value() == b.has_value() && (!a || bd::same_value(*a, *b));
-    };
-    for (const auto& q : questions) {
-        INFO(q);
-        const auto by_words = rsc::detail::ask_by_words(q);
-        const auto by_document = rsc::ask(q);
-        REQUIRE(by_words.has_value());
-        REQUIRE(by_document.has_value());
-        CHECK(by_words->ask == by_document->ask);
-        CHECK(bd::same_value(by_words->f, by_document->f));
-        CHECK(by_words->unknown == by_document->unknown);
-        CHECK(by_words->parameter == by_document->parameter);
-        CHECK(by_words->x_lo == by_document->x_lo);
-        CHECK(by_words->x_hi == by_document->x_hi);
-        CHECK(same_bound(by_words->x_lo_at, by_document->x_lo_at));
-        CHECK(same_bound(by_words->x_hi_at, by_document->x_hi_at));
-        CHECK(by_words->p_lo == by_document->p_lo);
-        CHECK(by_words->p_hi == by_document->p_hi);
+TEST_CASE("query_of: every question the gallery asks, written as a document", "[document][rsc]") {
+    struct Asked { const char* document; const char* wanted; rsc::Ask ask; const char* unknown; const char* parameter;
+                   double x_lo, x_hi, p_lo, p_hi; bool bound_reads_parameter; };
+    for (const Asked& a : std::initializer_list<Asked>{
+             {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x", rsc::Ask::Solve, "x", "p", 0, 10, 0.5, 4, false},
+             {"p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]", "x", rsc::Ask::Solve, "x", "p", 0, 10, 0.5, 4, false},
+             {"p in [1, 8]\nx: x^3 = p on [0, 3]", "x", rsc::Ask::Solve, "x", "p", 0, 3, 1, 8, false},
+             {"p in [0.5, 1]\nx: x - cos(p * x) = 0 on [0, 2]", "x", rsc::Ask::Solve, "x", "p", 0, 2, 0.5, 1, false},
+             {"p in [0, 3]\nI = integral exp(p * log(x)) dx on [0, 1]", "I", rsc::Ask::Integrate, "x", "p", 0, 1, 0, 3, false},
+             {"p in [0.1, 4]\nI = integral exp(-p * x^2) dx on [0, 1]", "I", rsc::Ask::Integrate, "x", "p", 0, 1, 0.1, 4, false},
+             {"x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]", "Si", rsc::Ask::Integrate, "t", "x", 0, 0, 0.5, 6, true},
+             {"p in [1, 2]\nI = integral t dt on [p, 2 p]", "I", rsc::Ask::Integrate, "t", "p", 0, 0, 1, 2, true},
+         }) {
+        INFO(a.document);
+        const auto doc = bd::read_document(a.document);
+        REQUIRE(doc.has_value());
+        const auto q = rsc::query_of(*doc, a.wanted);
+        REQUIRE(q.has_value());
+        CHECK(q->ask == a.ask);
+        CHECK(q->unknown == a.unknown);
+        CHECK(q->parameter == a.parameter);
+        CHECK(q->p_lo == a.p_lo);
+        CHECK(q->p_hi == a.p_hi);
+        CHECK((q->x_lo_at.has_value() || q->x_hi_at.has_value()) == a.bound_reads_parameter);
+        if (!a.bound_reads_parameter) {
+            CHECK(q->x_lo == a.x_lo);
+            CHECK(q->x_hi == a.x_hi);
+        }
     }
-    // both refuse what neither can ask
-    for (const char* bad : {"solve x^2 - p = 0 for x in [0, 10]", "solve x^2 - p = 0 for x in [0, 10], x in [0, 4]",
-                            "solve x^2 - p = 0 for x in [0, 10], p in [4, 1]", "integrate t for t in [p, 0], p in [1, 2]",
-                            "find x"}) {
-        INFO(bad);
-        CHECK_FALSE(rsc::detail::ask_by_words(bad).has_value());
-        CHECK_FALSE(rsc::ask(bad).has_value());
-    }
-    // a name nothing defines is refused when the question is read, where the word reader let it
-    // through to the answer
-    const auto open = rsc::ask("solve x^2 - q = 0 for x in [0, 10], p in [0.5, 4]");
+    // what a document cannot ask is refused when it is read: a name nothing defines, an interval backwards
+    const auto open = bd::read_document("p in [0.5, 4]\nx: x^2 - q = 0 on [0, 10]");
     REQUIRE_FALSE(open.has_value());
-    CHECK(open.error().message == "x reads 'q', which no line above defines");
-    // an error names the column of what was typed, not of the document it became
-    const auto e = rsc::ask("solve x^2 - = 0 for x in [0, 10], p in [0.5, 4]");
-    REQUIRE_FALSE(e.has_value());
-    CHECK(e.error().message.starts_with("parse: at column 13,"));
+    CHECK(open.error().message.find("reads 'q', which no line above defines") != std::string::npos);
+    const auto backwards = bd::read_document("p in [4, 1]\nx: x^2 - p = 0 on [0, 10]");
+    REQUIRE(backwards.has_value());
+    CHECK(rsc::query_of(*backwards, "x").error().message == "p in [4, 1] is empty");
+    // and a question with no parameter left free is a number, not a function: no Query
+    const auto fixed = bd::read_document("x: x^2 - 2 = 0 on [0, 10]");
+    REQUIRE(fixed.has_value());
+    CHECK_FALSE(rsc::query_of(*fixed, "x").has_value());
+}
+
+TEST_CASE("to_latex: a statement as the row of a formula editor", "[document]") {
+    const auto doc = bd::read_document(
+        "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]\ny: 2y^2 - 3y - 5 = 0\na = 2 * p + 1\nI = integral sin(t)/t dt on [0, p]");
+    REQUIRE(doc.has_value());
+    std::vector<std::string> rows;
+    for (const auto& d : doc->statements) {
+        const auto row = bd::to_latex(d);
+        REQUIRE(row.has_value());
+        rows.push_back(*row);
+    }
+    for (const auto& r : rows) INFO(r);
+    CHECK(rows[0] == "p \\in \\left[0.5, 4\\right]");
+    CHECK(rows[1].ends_with(", x \\in \\left[0, 10\\right]"));
+    CHECK(rows[1].starts_with("x^{2} - p = 0"));
+    CHECK(rows[2].find("\\in") == std::string::npos);
+    CHECK(rows[3].starts_with("a = "));
+    CHECK(rows[4].starts_with("I = \\int_{0}^{p} "));
+    CHECK(rows[4].ends_with("\\,dt"));
+    // a shape is a scene's and has no row
+    const auto scene = bd::read_document("S = sphere(1)");
+    REQUIRE(scene.has_value());
+    CHECK_FALSE(bd::to_latex(scene->statements.front()).has_value());
 }
 
 TEST_CASE("query_of: a document's root with the values it reads put in place", "[document][rsc]") {

@@ -37,8 +37,9 @@ using spatium::io::JsonValue;
 using Object = JsonValue::ObjectType;
 using Array = JsonValue::ArrayType;
 
-// a card is the library's own answer to its question, with an id the page links to; at the
-// tolerance a live answer has, since the question's text is all the page sends
+// a card is the library's own answer to its question, a document, with an id the page links to;
+// at the tolerance a live answer has. The page shows the question as the rows the library writes
+// (`question_latex`), and opens a card as those rows
 JsonValue card(std::string id, std::string question) {
     auto out = rsc::respond(question);
     Object card{{"id", std::move(id)}};
@@ -81,15 +82,16 @@ std::string gallery() {
     cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
     cards.push_back(card("exponent", "2^x = 8"));
     cards.push_back(card("wave", "sin(x) = 0.5 on [0, 10]"));
-    cards.push_back(card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]"));
-    cards.push_back(card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]"));
-    cards.push_back(card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]"));
+    cards.push_back(card("sqrt", "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"));
+    cards.push_back(card("power", "p in [0, 3]\nI = integral exp(p * log(x)) dx on [0, 1]"));
+    cards.push_back(card("gauss", "p in [0.1, 4]\nI = integral exp(-p * x^2) dx on [0, 1]"));
     // functions known by a name the library does not have: the sine integral, the error function
-    // and the Fresnel integral, each an integral up to the parameter, answered as pieces
-    cards.push_back(card("si", "integrate sin(t)/t for t in [0, x], x in [0.5, 6]"));
-    cards.push_back(card("erf", "integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]"));
-    cards.push_back(card("fresnel", "integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]"));
-    cards.push_back(card("refused", "solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]"));
+    // and the Fresnel integral, each an integral up to the parameter, answered as pieces; named by
+    // a letter, since a formula editor reads \mathrm{erf} as its own function, not as a name
+    cards.push_back(card("si", "x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]"));
+    cards.push_back(card("erf", "x in [0.25, 3]\nE = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]"));
+    cards.push_back(card("fresnel", "x in [0.25, 2]\nC = integral cos(pi * t^2 / 2) dt on [0, x]"));
+    cards.push_back(card("refused", "p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]"));
     {
         // the volume under a triangle down to z = 0 as a function of one vertex's height, which
         // the library computes as an integral and synthesis writes as 1/6 p + 1

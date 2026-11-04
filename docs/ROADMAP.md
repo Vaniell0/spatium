@@ -24,7 +24,7 @@ The library is read bottom up, and each layer reads only the one below it. This 
 | 4. Lowering | what a computed document becomes: text, LaTeX, GLSL for Vulkan compute (std430) and for WebGL2 (GLSL ES 3.00, a symbol read from a uniform slot, so a moved number is new data and not a new shader), the graph of a function as a WebGL2 shader, a picture from the CPU ray tracer | `io/field_text.hpp`, `io/trace_text.hpp`, `io/field_pod.hpp`, `io/field_glsl.hpp`, `io/plot_glsl.hpp`, `render/`, `render/gpu/` ([`gpu.md`](gpu.md)) | [lowering](roadmap/lowering/) |
 | 5. Views | the page: windows over one document, showing what the core answers and composing nothing | `site/` | [views](roadmap/views/) |
 
-A question typed into the calculator is a document of one statement: `solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]` is read as the parameter and the root it asks for, and answered by layer 3. There is no second language for questions.
+A question is a document: the rows of the formula editor (`p \in [0.5, 4]`, `x^2 - p = 0, x \in [0, 10]`) are its lines (`p in [0.5, 4]`, `x: x^2 - p = 0 on [0, 10]`), answered by layer 3, and every answer gives the question back as the rows the library writes. There is no second language for questions.
 
 What crosses out of the library is the document, as text or JSON; there is no C ABI. The boundary and the rules of lowering (structure is code, numbers are data) are [`gpu-abi-design.md`](gpu-abi-design.md).
 

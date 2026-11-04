@@ -6,6 +6,7 @@
 // integral whose closed form needs a function the operations do not have takes pieces.
 
 #include <rsc/spatium/query.hpp>
+#include <spatium/io/document.hpp>
 #include <spatium/io/field_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -20,6 +21,13 @@ using Catch::Matchers::WithinAbs;
 using rsc::Expr;
 
 namespace {
+
+// The question a document asks of its last name, as a page asks it.
+spatium::Result<rsc::Query> question_of(std::string_view document) {
+    const auto doc = spatium::io::build::read_document(document);
+    if (!doc) return std::unexpected(doc.error());
+    return rsc::query_of(*doc, doc->statements.back().name);
+}
 
 // The answer's value at a parameter: the piece that holds it.
 double at(const rsc::Answer& a, double p) {
@@ -117,60 +125,56 @@ TEST_CASE("query: a symbol the question reads but does not name is refused by na
     CHECK(r.refused.find("'a'") != std::string::npos);
 }
 
-TEST_CASE("query: a question typed as text is the question built in code", "[rsc][query]") {
-    // the text names the unknown and the parameter; the answer is the one asked in code with the
-    // same symbols, to the last bit
-    auto asked = rsc::ask("solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]");
-    REQUIRE(asked.has_value());
-    CHECK(asked->ask == rsc::Ask::Solve);
-    CHECK(asked->unknown == "x");
-    CHECK(asked->parameter == "p");
-    CHECK((asked->x_lo == 0 && asked->x_hi == 10 && asked->p_lo == 0.5 && asked->p_hi == 4));
-    CHECK(*spatium::io::build::to_text(asked->f) == "x^2 - p");
-    asked->tolerance = 1e-10;
+TEST_CASE("query: a question written as a document is the question built in code", "[rsc][query]") {
+    // the document names the unknown and the parameter; the answer is the one asked in code with
+    // the same symbols, to the last bit
+    auto question = question_of("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
+    REQUIRE(question.has_value());
+    CHECK(question->ask == rsc::Ask::Solve);
+    CHECK(question->unknown == "x");
+    CHECK(question->parameter == "p");
+    CHECK((question->x_lo == 0 && question->x_hi == 10 && question->p_lo == 0.5 && question->p_hi == 4));
+    CHECK(*spatium::io::build::to_text(question->f) == "x^2 - p");
+    question->tolerance = 1e-10;
     const Expr x = Expr::symbol("x"), p = Expr::symbol("p");
     const rsc::Query built{.ask = rsc::Ask::Solve, .f = x * x - p, .unknown = "x", .parameter = "p", .x_lo = 0,
                            .x_hi = 10, .p_lo = 0.5, .p_hi = 4, .tolerance = 1e-10};
-    const auto a = rsc::answer(*asked), b = rsc::answer(built);
+    const auto a = rsc::answer(*question), b = rsc::answer(built);
     REQUIRE(a.answered);
     REQUIRE(a.pieces.size() == b.pieces.size());
     for (double v : {0.5, 1.0, 2.25, 3.7})
         CHECK(std::bit_cast<std::uint64_t>(at(a, v)) == std::bit_cast<std::uint64_t>(at(b, v)));
 
     // an integral, an equation with a right side, and a bound that is an expression in no name
-    const auto in = rsc::ask("integrate exp(p * log(x)) for x in [0, 1], p in [0, 4]");
+    const auto in = question_of("p in [0, 4]\nI = integral exp(p * log(x)) dx on [0, 1]");
     REQUIRE(in.has_value());
     CHECK(in->ask == rsc::Ask::Integrate);
     CHECK((in->unknown == "x" && in->parameter == "p"));
-    const auto eq = rsc::ask("solve x * x = p for x in [0, sqrt(2) * 10], p in [1 / 3, 4]");
+    const auto eq = question_of("p in [1 / 3, 4]\nx: x * x = p on [0, sqrt(2) * 10]");
     REQUIRE(eq.has_value());
     CHECK(*spatium::io::build::to_text(eq->f) == "x^2 - p");
     CHECK(eq->x_hi == std::sqrt(2.0) * 10);
     CHECK(eq->p_lo == 1.0 / 3);
 }
 
-TEST_CASE("query: a text that is not a question is refused, and says where", "[rsc][query]") {
-    const auto refused = [](std::string_view text) {
-        const auto q = rsc::ask(text);
-        INFO(text);
+TEST_CASE("query: a document that asks no function of a parameter is refused, and says why", "[rsc][query]") {
+    const auto refused = [](std::string_view document) {
+        const auto q = question_of(document);
+        INFO(document);
         REQUIRE_FALSE(q.has_value());
         return q.error().message;
     };
-    CHECK(refused("find x^2 - p for x in [0, 1], p in [0, 1]").find("'solve' or 'integrate'") != std::string::npos);
-    CHECK(refused("solve x^2 - p over x in [0, 1], p in [0, 1]").find("'=' or 'for', found 'over'") != std::string::npos);
-    CHECK(refused("integrate x = p for x in [0, 1], p in [0, 1]").find("'for', found '='") != std::string::npos);
-    CHECK(refused("solve x - p for x in [0, 1]").find("the parameter the answer is a function of") != std::string::npos);
-    CHECK(refused("solve x - p for x in [1, 0], p in [0, 1]") == "ask: x in [1, 0] is empty");
-    CHECK(refused("solve x - p for x in [0, a], p in [0, 1]").find("x reads 'a', which no line above defines") != std::string::npos);
-    CHECK(refused("solve x - p for x in [0, 1], x in [0, 1]").find("named twice") != std::string::npos);
-    CHECK(refused("solve x - p for x in [0, 1], p in [0, 1] please").find("the end, found 'please'") != std::string::npos);
-    CHECK(refused("solve x - for x in [0, 1], p in [0, 1]").find("parse: at column 11") != std::string::npos);
+    CHECK(refused("x: x - 1 = 0 on [0, 2]").find("parameter") != std::string::npos);
+    CHECK(refused("p in [0, 1]\nx: x - p = 0 on [1, 0]").find("empty") != std::string::npos);
+    CHECK(refused("p in [0, 1]\nx: x - p = 0 on [0, a]").find("x reads 'a', which no line above defines") != std::string::npos);
+    CHECK(refused("p in [0, 1]\np in [0, 2]").find("p") != std::string::npos);
+    CHECK(refused("p in [0, 1]\nx: x - = 0 on [0, 1]").find("line 2: parse: at column 8") != std::string::npos);
 }
 
 TEST_CASE("query: a limit that moves with the parameter, and special functions as integrals", "[rsc][query]") {
     // Si(x) = integral of sin(t)/t over [0, x]: the parameter is the upper limit. Its reference,
     // the library's integral, is held against the series sum (-1)^n x^(2n+1) / ((2n+1)(2n+1)!)
-    const auto si = rsc::ask("integrate sin(t)/t for t in [0, x], x in [0.5, 6]");
+    const auto si = question_of("x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]");
     REQUIRE(si.has_value());
     CHECK((si->x_lo == 0 && si->x_hi_at.has_value() && !si->x_lo_at.has_value()));
     const auto series = [](double x) {
@@ -191,14 +195,14 @@ TEST_CASE("query: a limit that moves with the parameter, and special functions a
     holds(a, 0.5, 6, series, 1e-8);
 
     // erf(x) = 2 / sqrt(pi) times the integral of exp(-t^2) over [0, x], held against std::erf
-    const auto erf = rsc::ask("integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]");
+    const auto erf = question_of("x in [0.25, 3]\nerf = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]");
     REQUIRE(erf.has_value());
     const rsc::Query erf_bound = rsc::bound(*erf);
     for (double x : {0.25, 0.5, 1.0, 2.0, 3.0})
         CHECK_THAT(rsc::reference(erf_bound, x), WithinAbs(std::erf(x), 1e-15));
 
     // the Fresnel integral C(x), held against its series sum (-1)^n (pi/2)^(2n) x^(4n+1) / ((2n)! (4n+1))
-    const auto fresnel = rsc::ask("integrate cos(pi * t^2 / 2) for t in [0, x], x in [0.25, 2]");
+    const auto fresnel = question_of("x in [0.25, 2]\nC = integral cos(pi * t^2 / 2) dt on [0, x]");
     REQUIRE(fresnel.has_value());
     const auto c_series = [](double x) {
         double sum = 0, term = x;   // (pi/2)^(2n) x^(4n+1) / (2n)!
@@ -215,10 +219,10 @@ TEST_CASE("query: a limit that moves with the parameter, and special functions a
 
     // the cases it must fail: a bound reading another name, a parameter's bound reading one, and an
     // interval that is empty somewhere the answer is wanted
-    CHECK(rsc::ask("integrate t for t in [0, y], x in [0, 1]").error().message.find("I reads 'y', which no line above defines") !=
+    CHECK(question_of("x in [0, 1]\nI = integral t dt on [0, y]").error().message.find("I reads 'y', which no line above defines") !=
           std::string::npos);
-    CHECK(rsc::ask("integrate t for t in [0, x], x in [0, y]").error().message.find("an end of the parameter x reads 'y'") !=
+    CHECK(question_of("x in [0, y]\nI = integral t dt on [0, x]").error().message.find("x reads 'y'") !=
           std::string::npos);
-    CHECK(rsc::ask("integrate t for t in [1, x], x in [0, 2]").error().message.find("is empty at x = 0") !=
+    CHECK(question_of("x in [0, 2]\nI = integral t dt on [1, x]").error().message.find("is empty at x = 0") !=
           std::string::npos);
 }

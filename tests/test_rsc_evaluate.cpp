@@ -205,7 +205,7 @@ TEST_CASE("evaluate: what is not asked well is refused, by name", "[rsc][evaluat
 TEST_CASE("evaluate: the calculator's shorthand is the document line it stands for", "[rsc][evaluate]") {
     // the shorthand adds what it was read as and the graph a page draws of it
     const auto drop = [](JsonValue v) {
-        constexpr std::array<std::string_view, 3> added{"question", "document", "graph"};
+        constexpr std::array<std::string_view, 4> added{"question", "document", "question_latex", "graph"};
         JsonValue::ObjectType kept;
         for (const auto& [k, x] : v.as_object())
             if (!std::ranges::contains(added, k)) kept.emplace_back(k, x);
@@ -216,7 +216,7 @@ TEST_CASE("evaluate: the calculator's shorthand is the document line it stands f
     };
     CHECK(drop(rsc::respond("2x^2 - 3x - 5 = 0")) == line("x: 2x^2 - 3x - 5 = 0", "x"));
     CHECK(drop(rsc::respond("2 + 2")) == line("answer = 2 + 2", "answer"));
-    CHECK(drop(rsc::respond("solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]")) ==
+    CHECK(drop(rsc::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]")) ==
           line("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x"));
     // the answer carries the document it was read as
     const auto r = rsc::respond("(y - 1)(y + 2) = 4 - y");

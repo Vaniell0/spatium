@@ -15,20 +15,14 @@ sin(x) = 0.5 on [0, 10]
 exp(x) = x + 2
 cos(x) = x
 x^4 = 0
-solve abs(x - 1) - p = 0 for x in [1, 10], p in [0.5, 4]
-solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]
-integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]
-integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]
-solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]
-solve x^2 + p = 0 for x in [0, 10], p in [-1, 0]
-integrate sin(t)/t for t in [0, x], x in [0.5, 6]
-integrate 2 / sqrt(pi) * exp(-t^2) for t in [0, x], x in [0.25, 3]
-preview 2x^2 - 3
-preview 2x^2 - 3 =
-preview solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]
-preview sin(x
-preview tan(x)
-preview solve x^2 - = 0 for x in [0, 10], p in [0.5, 4]
+rows {"rows": [{"text": "p in [0.5, 4]"}, {"text": "x: abs(x - 1) - p = 0 on [1, 10]"}]}
+rows {"rows": [{"text": "p in [0.5, 4]"}, {"text": "x: x^2 - p = 0 on [0, 10]"}]}
+rows {"rows": [{"text": "p in [0, 3]"}, {"text": "I = integral exp(p * log(x)) dx on [0, 1]"}]}
+rows {"rows": [{"text": "p in [0.1, 4]"}, {"text": "I = integral exp(-p * x^2) dx on [0, 1]"}]}
+rows {"rows": [{"text": "p in [0.5, 4]"}, {"text": "x: x^2 + p = 0 on [0, 10]"}]}
+rows {"rows": [{"text": "p in [-1, 0]"}, {"text": "x: x^2 + p = 0 on [0, 10]"}]}
+rows {"rows": [{"text": "x in [0.5, 6]"}, {"text": "Si = integral sin(t)/t dt on [0, x]"}]}
+rows {"rows": [{"text": "x in [0.25, 3]"}, {"text": "E = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]"}]}
 evaluate {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x"}
 evaluate {"document": "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "name": "x", "chosen": {"p": 2}}
 evaluate {"document": {"statements": [{"name": "y", "kind": "root", "lhs": "y^3 - 1", "rhs": "0", "lo": "0", "hi": "2"}]}, "name": "y"}

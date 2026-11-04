@@ -27,13 +27,14 @@ using spatium::io::JsonValue;
 using Object = JsonValue::ObjectType;
 using Array = JsonValue::ArrayType;
 
-// what the library makes of an example: its LaTeX and its value to twelve digits (the last ones
-// are the libm's, and the page shows as many as its setting says), or its route
+// what the library makes of an example: its LaTeX, the rows a page opens it as, and its value to
+// twelve digits (the last ones are the libm's, and the page shows as many as its setting says), or
+// its route
 JsonValue answered(std::string_view example) {
     const JsonValue r = rsc::respond(example);
     Object out;
     for (const auto& [k, v] : r.as_object()) {
-        if (k == "route" || k == "refused") out.emplace_back(k, v);
+        if (k == "route" || k == "refused" || k == "question_latex") out.emplace_back(k, v);
         if (k == "value") out.emplace_back("value", std::format("{:.12g}", v.as_number()));
     }
     if (const auto f = bd::parse(example); f && std::string_view(example).find('=') == std::string_view::npos)
@@ -52,17 +53,18 @@ std::string reference() {
                                    {"example", std::string(o.example)}, {"answer", answered(o.example)}});
     for (const auto& c : bd::constants)
         constants.push_back(Object{{"name", std::string(c.name)}, {"caption", std::string(c.caption)}});
-    // the four kinds of question, each with an example the library answers
+    // the kinds of question, each written as the rows of a formula editor (`form`, LaTeX), with an
+    // example the library answers; the page opens an example as the rows the answer gives back
     struct Kind { const char* form; const char* caption; const char* example; };
-    for (const Kind& k : {Kind{"an expression", "evaluated, as a calculator does", "2(3 + 4)^2 - 1/4"},
-                          Kind{"f = g", "an equation in one unknown of degree at most two, solved in closed form with "
-                                        "its steps and checked by Vieta's formulas", "2x^2 - 3x - 5 = 0"},
-                          Kind{"solve f = g for x in [a, b], p in [c, d]",
-                               "the root on [a, b] as a function of the parameter p, synthesised and certified",
-                               "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]"},
-                          Kind{"integrate f for t in [a, b], p in [c, d]",
-                               "the integral as a function of p; a limit may be p itself",
-                               "integrate sin(t)/t for t in [0, x], x in [0.5, 6]"}})
+    for (const Kind& k : {Kind{"f", "an expression, evaluated, its digits proved", "2(3 + 4)^2 - 1/4"},
+                          Kind{"f = g", "an equation in one unknown: in closed form with its steps where it is a quadratic, "
+                                        "and every real root proved", "2x^2 - 3x - 5 = 0"},
+                          Kind{"f = g,\\ x \\in [a, b]", "every root on the interval, each proved alone in its own",
+                               "x: sin(x) = 0.5 on [0, 10]"},
+                          Kind{"p \\in [c, d]", "a parameter: a row below that reads it is answered as a function of p, "
+                                              "synthesised and certified", "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"},
+                          Kind{"I = \\int_a^b f\\,dt", "an integral; a limit may be a parameter above",
+                               "x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]"}})
         questions.push_back(Object{{"form", k.form}, {"caption", k.caption}, {"example", k.example},
                                    {"answer", answered(k.example)}});
     std::string out = "{\n";

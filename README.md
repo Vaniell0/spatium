@@ -111,8 +111,8 @@ a second rule as a witness (`integrate`); limits and infinity as arithmetic
 **Synthesis, which is not a general symbolic engine.** `rsc/` does not
 rewrite expressions: there is no symbolic differentiation, integration or
 simplification beyond rewrites that change no bit. A question with a free
-parameter -- `rsc::ask("solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]")`
--- is given its meaning by the solvers above, number by number, and the
+parameter -- the rows `p ∈ [0.5, 4]` and `x² − p = 0, x ∈ [0, 10]`, the
+document `p in [0.5, 4]` and `x: x^2 - p = 0 on [0, 10]` -- is given its meaning by the solvers above, number by number, and the
 answer is an expression in the parameter found by searching the operations
 bottom up and certified against that meaning on a dense grid (a sampled
 certificate today, not an interval bound). Where the operations hold a
