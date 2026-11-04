@@ -70,6 +70,29 @@ TEST_CASE("document: printed back as written, and read back the same through tex
     CHECK_FALSE(bd::same_document(*doc, *other));
 }
 
+TEST_CASE("document: a system names its unknowns, then an equation each", "[document]") {
+    const char* text = "a = 2\nx, y: x + a*y = 5, 3*x - y = 1\n";
+    const auto doc = bd::read_document(text);
+    REQUIRE(doc.has_value());
+    CHECK(bd::to_text(*doc) == text);
+    // each unknown is found, and is the system's; a line below may read it
+    REQUIRE(doc->find("y") != nullptr);
+    CHECK(doc->find("y") == doc->find("x"));
+    CHECK(doc->find("y")->also.front().value.text == "3*x - y");
+    const auto from_json = bd::document_from_json(bd::to_json(*doc));
+    REQUIRE(from_json.has_value());
+    CHECK(bd::same_document(*doc, *from_json));
+    // the cases it must fail: an equation short, a name twice, an unknown no equation reads, a
+    // different equation a different document
+    const auto message = [](const char* t) { const auto d = bd::read_document(t); return d ? std::string("(read)") : d.error().message; };
+    CHECK(message("x, y: x + y = 1").starts_with("line 1: parse:"));
+    CHECK(message("x, x: x = 1, x = 2") == "line 1: 'x' is defined twice");
+    CHECK(message("x, y: x = 1, x = 2") == "line 1: no equation of the system reads y");
+    const auto other = bd::read_document("a = 2\nx, y: x + a*y = 5, 3*x - y = 2\n");
+    REQUIRE(other.has_value());
+    CHECK_FALSE(bd::same_document(*doc, *other));
+}
+
 TEST_CASE("document: refused with the line, and the column for a parse error", "[document]") {
     const auto message = [](const char* text) {
         const auto d = bd::read_document(text);

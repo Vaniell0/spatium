@@ -187,6 +187,21 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             out.emplace_back("values", values);
             break;
         }
+        case Route::Linear: {
+            const auto& l = *e.linear;
+            Array steps;
+            for (const auto& s : l.steps) steps.push_back(Object{{"label", s.label}, {"latex", s.latex}});
+            Object solution;
+            for (std::size_t j = 0; j < l.unknowns.size(); ++j) solution.emplace_back(l.unknowns[j], l.values[j]);
+            out.emplace_back("steps", steps);
+            out.emplace_back("solution", solution);
+            if (!l.exact.empty()) {
+                Object exact;
+                for (std::size_t j = 0; j < l.unknowns.size(); ++j) exact.emplace_back(l.unknowns[j], l.exact[j].text());
+                out.emplace_back("exact", exact);
+            }
+            break;
+        }
         case Route::Enclosed: {
             // each root as its proved digits, or within a bound of zero where none is proved
             Array values;
@@ -520,6 +535,22 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             if (complete) label += e.values.empty() ? "; no real root" : "; no other real root";
             break;
         }
+        case Route::Linear: {
+            const auto& l = *e.linear;
+            outcome = "system";
+            const bool exact = !l.exact.empty();
+            guarantee = exact ? "exact" : "computed", ok = exact;
+            label = exact ? "Exact, by elimination in fractions" : "By elimination in doubles";
+            result = l.steps.back().latex;
+            Array steps;
+            for (const auto& st : l.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+            section("Steps", true, "steps", steps);
+            std::string residuals;
+            for (double r : l.residuals) residuals += (residuals.empty() ? "" : ", ") + text_of(r);
+            const bool holds = std::ranges::all_of(l.residuals, [](double r) { return std::abs(r) <= 1e-12; });
+            section("Check", !holds, "facts", Array{fact("Each equation at the solution, left less right", residuals, false, holds)});
+            break;
+        }
         case Route::Enclosed: {
             outcome = "roots";
             const auto& f = *e.enclosed;
@@ -623,6 +654,34 @@ inline std::expected<Engine, std::string> engine_of(const JsonValue& request) {
     return engine;
 }
 
+// Lines that are each an equation, two or more, reading as many unknowns as there are lines,
+// written as the system they are: `x, y: x + 2y = 5, 3x - y = 1`, asked for its first unknown.
+inline std::optional<AskedDocument> system_of(std::string_view text) {
+    namespace bd = spatium::io::build;
+    std::vector<std::string> names, equations;
+    while (!text.empty()) {
+        const auto end = text.find('\n');
+        const std::string_view line = trimmed(text.substr(0, end));
+        text = end == std::string_view::npos ? std::string_view{} : text.substr(end + 1);
+        if (line.empty() || line.starts_with('#')) continue;
+        bd::FieldReader r(line, "", "");
+        auto lhs = r.expression();
+        if (!lhs || !r.take('=')) return std::nullopt;
+        auto rhs = r.expression();
+        if (!rhs || !r.done()) return std::nullopt;
+        for (auto& n : (*lhs - *rhs).free_symbols())
+            if (std::ranges::find(names, n) == names.end()) names.push_back(std::move(n));
+        equations.emplace_back(line);
+    }
+    if (equations.size() < 2 || names.size() != equations.size()) return std::nullopt;
+    std::string line;
+    for (std::size_t k = 0; k < names.size(); ++k) line += (k ? ", " : "") + names[k];
+    for (std::size_t k = 0; k < equations.size(); ++k) line += (k ? ", " : ": ") + equations[k];
+    auto doc = bd::read_document(line);
+    if (!doc) return std::nullopt;
+    return AskedDocument{std::move(*doc), names.front()};
+}
+
 } // namespace respond_detail
 
 // What a person types, answered. One line is a shorthand (`2 + 2`, `2x^2 - 3x - 5 = 0`, `solve
@@ -641,8 +700,11 @@ inline spatium::io::JsonValue respond(std::string_view text, Engine engine = {})
         out.emplace_back("document", bd::to_json(asked.document));
         // the question as the rows of a formula editor, written by the library
         Array rows;
-        for (const auto& d : asked.document.statements)
+        for (const auto& d : asked.document.statements) {
             if (auto row = bd::to_latex(d)) rows.push_back(*row);
+            for (const auto& e : d.also)   // a system: an equation a row, as a card writes them
+                if (auto row = bd::to_latex(e)) rows.push_back(*row);
+        }
         out.emplace_back("question_latex", rows);
         if (auto g = graph_of(asked, out)) out.emplace_back("graph", std::move(*g));
         const bd::Statement* wanted = asked.document.find(asked.wanted);
@@ -653,6 +715,9 @@ inline spatium::io::JsonValue respond(std::string_view text, Engine engine = {})
     // page writes as no statement -- an expression, an equation -- as the same shorthand the last
     // row is, an expression named answer_k by its row so a row below can read it
     bd::Document above;
+    // rows that are all equations, as many as the unknowns they read: one system, every unknown
+    // solved together (`x + 2y = 5` above `3x - y = 1`)
+    if (auto system = system_of(all)) return answered(*system);
     std::string_view q = all;
     if (const auto nl = all.rfind('\n'); nl != std::string_view::npos) {
         std::string_view rest = all.substr(0, nl);

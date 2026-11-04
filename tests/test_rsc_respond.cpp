@@ -138,6 +138,33 @@ TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as"
     CHECK(at(bad_text, "refused").is_string());
 }
 
+TEST_CASE("respond: rows that are equations in as many unknowns are one system", "[rsc][respond]") {
+    // in fractions: x = 1, y = 2 exactly, and each equation holds at it
+    const auto r = rsc::respond("x + 2y = 5\n3x - y = 1");
+    CHECK(at(r, "route").as_string() == "linear system");
+    CHECK(at(at(r, "exact"), "y").as_string() == "2");
+    const auto& s = at(r, "sheet");
+    CHECK(at(s, "outcome").as_string() == "system");
+    CHECK(at(s, "guarantee").as_string() == "exact");
+    CHECK(at(s, "result").as_string() == "x = 1,\\quad y = 2");
+    CHECK(at(r, "question_latex").as_array().size() == 2);
+    // the same rows from the editor, and the same system written as a document's line
+    const auto rows = rsc::respond_rows(R"({"rows": [["Equal", ["Add", "x", ["Multiply", 2, "y"]], 5], ["Equal", ["Subtract", ["Multiply", 3, "x"], "y"], 1]]})");
+    CHECK(at(rows, "sheet").dump() == s.dump());
+    CHECK(at(rsc::respond("x, y: x + 2y = 5, 3x - y = 1"), "sheet").dump() == s.dump());
+    // fractions where they are: 1/3 is a third, not its double
+    CHECK(at(at(rsc::respond("3x + y = 1\nx - y = 0"), "exact"), "x").as_string() == "1/4");
+    // a coefficient with no fraction, sqrt(2): in doubles, checked by putting the solution back
+    const auto in_double = rsc::respond("sqrt(2) x + y = 1\nx - y = 0");
+    CHECK(at(at(in_double, "sheet"), "guarantee").as_string() == "computed");
+    CHECK(std::abs(at(at(in_double, "solution"), "x").as_number() - 1 / (std::sqrt(2.0) + 1)) < 1e-15);
+    // the cases it must fail: an equation that is not linear, and equations that are not independent
+    CHECK(at(rsc::respond("x^2 + y = 1\nx - y = 0"), "refused").as_string() == "equation 1 is not linear in the unknowns");
+    CHECK(at(rsc::respond("x + y = 1\n2x + 2y = 2"), "refused").as_string().find("not independent") != std::string::npos);
+    // rows in more names than equations stay rows of a document
+    CHECK(at(rsc::respond("x + y = 1\nx - y = z"), "route").as_string() != "linear system");
+}
+
 TEST_CASE("respond: rows are computed in the arithmetic their engine names", "[rsc][respond]") {
     // x^2 - 2 = 0 in fractions: the roots as the closed form writes them, the steps evaluate_request gives
     const std::string row = R"(["Equal", ["Subtract", ["Power", "x", 2], 2], 0])";
@@ -225,6 +252,7 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
              {"2x^2 - 3x - 5 = 0", "roots", "proved", "Closed form, checked by Vieta's formulas", true},
              {"2^x = 8", "roots", "complete", "1 root proved, and no other on the box", true},
              {"x: sin(x) = 0.5 on [0, 10]", "roots", "complete", "4 roots proved, and no other on the box", true},
+             {"x + 2y = 5\n3x - y = 1", "system", "exact", "Exact, by elimination in fractions", true},
              {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "function", "sampled", "Certified, relative error below 10⁻¹⁵", true},
              {"I = integral exp(-t^2) dt on [0, 1]", "number", "estimated", "An integral, error below 10⁻¹⁶ (estimated)", true},
              {"p in [1, 2]", "parameter", "exact", "Parameter", false},
