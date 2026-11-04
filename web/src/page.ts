@@ -72,8 +72,8 @@ interface Reference {
   constants: { name: string; caption: string; example?: string }[];
   questions: { form: string; caption: string; example?: string; answer?: { question_latex?: string[] } }[];
 }
-interface Card { id: string; question?: string; question_latex?: string[]; typed?: boolean; route?: string; refused?: string }
-const data: { gallery: Card[]; reference: Reference | null } = { gallery: [], reference: null };
+interface Card { id: string; question?: string; question_latex?: string[]; typed?: boolean; route?: string; refused?: string; sheet?: { guarantee: string } }
+const data: { gallery: Card[]; groups: { guarantee: string; title: string }[]; reference: Reference | null } = { gallery: [], groups: [], reference: null };
 
 async function loadData() {
   const [g, r] = await Promise.all([
@@ -81,6 +81,7 @@ async function loadData() {
     fetch("data/reference.json").then((x) => x.json()).catch(() => null),
   ]);
   data.gallery = g.cards;
+  data.groups = g.groups ?? [];
   data.reference = r;
 }
 
@@ -188,11 +189,16 @@ function panel(which: "ref" | "gallery" | null) {
   box.hidden = false;
   const body = el("div", { class: "panel-body" });
   if (which === "gallery") {
-    for (const c of data.gallery) {
-      if (!c.question || c.typed === false) continue;
-      const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
-      body.append(el("button", { type: "button", class: "card", onclick: () => addRows(c.question_latex, c.question!) },
-        shownAs(c.question_latex, c.question, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
+    // by how strongly each answer holds, in the gallery's own order of groups
+    for (const g of data.groups) {
+      const cards = data.gallery.filter((c) => c.question && c.typed !== false && c.sheet?.guarantee === g.guarantee);
+      if (!cards.length) continue;
+      body.append(el("h3", { text: g.title }));
+      for (const c of cards) {
+        const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
+        body.append(el("button", { type: "button", class: "card", onclick: () => addRows(c.question_latex, c.question!) },
+          shownAs(c.question_latex, c.question!, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
+      }
     }
   } else {
     const r = data.reference;

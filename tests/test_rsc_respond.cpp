@@ -200,3 +200,46 @@ TEST_CASE("respond: an exercise as a page of problems writes it, exact, with its
     CHECK(at(steps[16], "latex").as_string() == "\\frac{1.364}{0.124} = 11");
     CHECK(at(steps.back(), "latex").as_string() == "1 + 11 = 12");
 }
+
+TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc][respond][sheet]") {
+    struct Want { const char* question; const char* outcome; const char* guarantee; const char* label; bool ok; };
+    const std::vector<std::string> order{"Input", "Steps", "Roots", "Certificate", "Check", "Pieces", "Properties", "How it was found"};
+    for (const Want& w : std::initializer_list<Want>{
+             {"2(3 + 4)^2 - 1/4", "number", "exact", "Exact", true},
+             {"sqrt(2) + 1", "number", "proved", "Proved to 16 digits", true},
+             {"10^20 + 1 - 10^20", "number", "none", "Evaluated; no digit proved, within 10⁴ of zero", false},
+             {"2x^2 - 3x - 5 = 0", "roots", "proved", "Closed form, checked by Vieta's formulas", true},
+             {"2^x = 8", "roots", "complete", "1 root proved, and no other on the box", true},
+             {"x: sin(x) = 0.5 on [0, 10]", "roots", "complete", "4 roots proved, and no other on the box", true},
+             {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "function", "sampled", "Certified, relative error below 10⁻¹⁵", true},
+             {"I = integral exp(-t^2) dt on [0, 1]", "number", "estimated", "An integral, error below 10⁻¹⁶ (estimated)", true},
+             {"p in [1, 2]", "parameter", "exact", "Parameter", false},
+             {"x^4 = 0", "refused", "none", "Not answered", false},
+         }) {
+        INFO(w.question);
+        const auto r = rsc::respond(w.question);
+        const auto& s = at(r, "sheet");
+        CHECK(at(s, "outcome").as_string() == w.outcome);
+        CHECK(at(s, "guarantee").as_string() == w.guarantee);
+        CHECK(at(s, "label").as_string() == w.label);
+        CHECK(at(s, "ok").as_bool() == w.ok);
+        // the sections in the one order, each with what it shows
+        std::size_t last = 0;
+        for (const auto& sec : at(s, "sections").as_array()) {
+            const auto title = at(sec, "title").as_string();
+            const auto k = std::ranges::find(order, title) - order.begin();
+            REQUIRE(static_cast<std::size_t>(k) < order.size());
+            CHECK(static_cast<std::size_t>(k) >= last);
+            last = static_cast<std::size_t>(k);
+            CHECK((sec.find("rows") || sec.find("steps") || sec.find("facts") || sec.find("table")));
+        }
+    }
+    // the closed form's roots, each inside an interval the second route proved to hold one
+    const auto q = at(rsc::respond("2x^2 - 3x - 5 = 0"), "sheet");
+    bool held = false;
+    for (const auto& sec : at(q, "sections").as_array())
+        if (at(sec, "title").as_string() == "Check")
+            for (const auto& f : at(sec, "facts").as_array())
+                if (at(f, "label").as_string() == "Every real root, proved") held = at(f, "ok").as_bool();
+    CHECK(held);
+}

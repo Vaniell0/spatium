@@ -381,6 +381,216 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& 
     return std::nullopt;
 }
 
+
+// ── The answer as one sheet ───────────────────────────────────────
+//
+// Every answer, whatever route gave it, as the same sheet a page draws (`sheet`): what it is
+// (`outcome`: a number, roots, a function, none, a parameter, or refused), how strongly it holds
+// (`guarantee`: exact, proved digits, proved complete, estimated, sampled, computed, none) with
+// the line that says so (`label`), the result in one line of LaTeX, and its sections in one order
+// -- Input, Steps, Roots, Check, Properties, How it was found -- each a list of steps, of facts or
+// a table, with whether it starts open. A page draws three shapes and never asks which route
+// answered; a route's own fields stay beside it as the record.
+
+inline const JsonValue* field_of(const Object& o, std::string_view key) {
+    for (const auto& [k, v] : o)
+        if (k == key) return &v;
+    return nullptr;
+}
+
+inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind kind, const Object& out) {
+    namespace bd = spatium::io::build;
+    Array sections;
+    const auto section = [&](std::string title, bool open, std::string shape, JsonValue body, Object extra = {}) {
+        Object o{{"title", std::move(title)}, {"open", open}, {std::move(shape), std::move(body)}};
+        for (auto& kv : extra) o.push_back(std::move(kv));
+        sections.push_back(std::move(o));
+    };
+    const auto fact = [](std::string label, std::string value, bool latex = false, std::optional<bool> ok = std::nullopt) {
+        Object f{{"label", std::move(label)}, {latex ? "latex" : "text", std::move(value)}};
+        if (ok) f.emplace_back("ok", *ok);
+        return JsonValue(f);
+    };
+    const auto text_of = [](double v) { return bd::detail::number_text(v, bd::detail::TextStyle::Plain); };
+    // a power of ten as LaTeX, for a fact, and as text with raised digits, 10⁻¹⁵, for a label
+    const auto decade_text = [](double v) {
+        return v > 0 ? std::format("10^{{{}}}", static_cast<int>(std::lround(std::log10(v)))) : std::string("0");
+    };
+    const auto decade_label = [](double v) {
+        if (!(v > 0)) return std::string("0");
+        static constexpr const char* raised[] = {"⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"};
+        std::string out = "10";
+        for (char c : std::to_string(static_cast<int>(std::lround(std::log10(v))))) out += c == '-' ? "⁻" : raised[c - '0'];
+        return out;
+    };
+    std::string outcome = "number", guarantee = "computed", label, result;
+    bool ok = true;
+    // Input: the rows the question was asked as
+    if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty())
+        section("Input", true, "rows", *rows, Object{{"echo", true}});   // the question again, which a cell already shows
+    const JsonValue* latex = field_of(out, "latex");
+    if (latex && latex->is_string()) result = latex->as_string();
+    const std::optional<Route> route = e.route();
+
+    if (!e.taken) {
+        outcome = "refused", guarantee = "none", ok = false;
+        label = route && e.candidates.size() <= 1 ? std::format("Not answered by {}", route_name(*route)) : "Not answered";
+        result.clear();
+        // a synthesis that answered on part of the interval still shows its pieces below
+    }
+    if (kind == spatium::io::build::StatementKind::Parameter && e.taken) {
+        outcome = "parameter", guarantee = "exact", label = "Parameter", ok = false;
+        if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty())
+            result = rows->as_array().back().as_string();
+    } else if (e.taken) switch (*route) {
+        case Route::Evaluate: {
+            if (e.proved && e.proved->exact) guarantee = "exact", label = "Exact";
+            else if (e.proved && e.proved->digits > 0)
+                guarantee = "proved", label = std::format("Proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
+            else if (e.proved)
+                guarantee = "none", ok = false, label = std::format("Evaluated; no digit proved, within {} of zero", decade_label(e.proved->bound));
+            else guarantee = "computed", ok = false, label = "Evaluated in double";
+            if (e.steps.size() > 1) {
+                Array steps;
+                for (const auto& st : e.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+                section("Steps", true, "steps", steps);
+            }
+            Array facts{fact("In double", text_of(e.values.front()))};
+            if (e.proved && !e.proved->exact && e.proved->digits > 0) facts.push_back(fact("Proved", e.proved->text, false, true));
+            if (!e.proved && !e.unproved.empty()) facts.push_back(fact("Not proved", e.unproved, false, false));
+            section("Check", false, "facts", facts);
+            break;
+        }
+        case Route::Expression: {
+            outcome = "function", guarantee = "exact", ok = false;
+            label = std::format("A function of {}, as written", e.free.empty() ? std::string("its parameter") : e.free.front());
+            break;
+        }
+        case Route::ClosedForm: {
+            outcome = "roots";
+            const auto& c = *e.closed;
+            std::vector<bd::Step> chain, checks;
+            for (const auto& st : c.steps) (st.label.starts_with("check") ? checks : chain).push_back(st);
+            const auto named = std::ranges::find_if(chain, [](const bd::Step& st) { return st.label == "roots" || st.label == "root"; });
+            result = named != chain.end() ? named->latex : (chain.empty() ? result : chain.back().latex);
+            Array steps;
+            for (const auto& st : chain) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+            section("Steps", true, "steps", steps);
+            Array facts;
+            const bool vieta = c.check && c.check->error <= 1e-12;
+            for (const auto& st : checks) facts.push_back(fact("Vieta's formulas", st.latex, true, vieta));
+            // the second route: each root of the formula inside an interval proved to hold one
+            bool agree = false, complete = false;
+            if (e.enclosed) {
+                std::string roots;
+                for (const auto& r : e.enclosed->roots) {
+                    const auto p = spatium::proved(r);
+                    roots += (roots.empty() ? "" : ", ") + (p.digits > 0 ? std::format("{} ({} digits)", p.text, p.digits) : std::string("0"));
+                }
+                agree = e.enclosed->roots.size() == e.values.size() &&
+                        std::ranges::all_of(e.values, [&](double v) {
+                            return std::ranges::any_of(e.enclosed->roots, [&](const auto& r) {
+                                return std::nextafter(r.lo, -INFINITY) <= v && v <= std::nextafter(r.hi, INFINITY);
+                            });
+                        });
+                complete = agree && e.enclosed->complete();
+                facts.push_back(fact("Every real root, proved", roots.empty() ? std::string("none") : roots, false, agree));
+                for (const auto& u : e.enclosed->undecided)
+                    facts.push_back(fact("Undecided", std::format("[{}, {}]", text_of(u.lo), text_of(u.hi)), false, false));
+            }
+            const bool proved_all = agree;
+            section("Check", true, "facts", facts);
+            Array props{fact("Discriminant", text_of(c.solution.discriminant))};
+            section("Properties", false, "facts", props);
+            // proved digits are of real roots; complex ones are computed, and checked by Vieta's formulas
+            guarantee = c.exact ? "exact" : proved_all && !e.values.empty() ? "proved" : "computed";
+            label = vieta ? "Closed form, checked by Vieta's formulas" : "Closed form";
+            if (complete) label += e.values.empty() ? "; no real root" : "; no other real root";
+            break;
+        }
+        case Route::Enclosed: {
+            outcome = "roots";
+            const auto& f = *e.enclosed;
+            const std::size_t n = f.roots.size();
+            guarantee = f.complete() ? "complete" : "proved";
+            label = std::format("{} root{} proved{}", n, n == 1 ? "" : "s", f.complete() ? ", and no other on the box" : "; elsewhere undecided");
+            Array rows;
+            for (const auto& r : f.roots) {
+                const auto p = spatium::proved(r);
+                rows.push_back(Array{p.digits > 0 ? p.text : std::string("0"), p.digits > 0 ? std::to_string(p.digits) : std::string("-"),
+                                     std::format("[{}, {}]", text_of(r.lo), text_of(r.hi))});
+            }
+            section("Roots", true, "table", Object{{"columns", Array{"root", "digits", "interval"}}, {"rows", rows}});
+            const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
+            Array facts{fact("Searched", line ? std::string("every double") : std::format("[{}, {}]", text_of(f.box.lo), text_of(f.box.hi)))};
+            for (const auto& u : f.undecided) facts.push_back(fact("Undecided", std::format("[{}, {}]", text_of(u.lo), text_of(u.hi)), false, false));
+            section("Properties", false, "facts", facts);
+            break;
+        }
+        case Route::Bracket: {
+            result = std::format("{} = {}", bd::detail::name_latex(e.name), bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex));
+            guarantee = "computed", label = "A root on its bracket, by bisection to the last bit";
+            break;
+        }
+        case Route::Integral: {
+            result = std::format("{} = {}", bd::detail::name_latex(e.name), bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex));
+            guarantee = "estimated", label = std::format("An integral, error below {} (estimated)", decade_label(e.error ? *e.error : 0));
+            break;
+        }
+        case Route::Synthesis: break;
+    }
+    // a synthesis, answered or in part: its pieces and their certificate
+    if (route == Route::Synthesis && e.answer) {
+        outcome = e.taken ? "function" : outcome;
+        const JsonValue* pieces = field_of(out, "answer");
+        const JsonValue* cert = field_of(out, "certificate");
+        if (e.taken && pieces && pieces->is_array() && pieces->as_array().size() == 1 && pieces->as_array().front().string_or("form", "") == "expression")
+            result = std::format("{} = {}", bd::detail::name_latex(e.name), pieces->as_array().front().string_or("latex", ""));
+        else if (e.taken) result = std::format("\\text{{{} pieces}}", e.answer->pieces.size());
+        if (cert && cert->is_object()) {
+            const double below = cert->number_or("error_below", 0);
+            const bool relative = cert->string_or("norm", "") == "largest relative error";
+            if (e.taken) {
+                guarantee = "sampled";
+                label = below > 0 ? std::format("Certified, {}error below {}", relative ? "relative " : "", decade_label(below)) : "Certified, exact on the grid";
+            }
+            section("Certificate", true, "facts",
+                    Array{fact("Strength", std::format("{}, on {} points", cert->string_or("strength", ""), cert->number_or("points", 0))),
+                          fact(relative ? "Relative error below" : "Absolute error below", decade_text(below), true),
+                          fact("Scalar", cert->string_or("scalar", ""))});
+        }
+        if (pieces && pieces->is_array() && pieces->as_array().size() > 1) {
+            Array rows;
+            for (const auto& pc : pieces->as_array())
+                rows.push_back(Array{std::format("[{}, {}]", text_of(pc.number_or("lo", 0)), text_of(pc.number_or("hi", 0))),
+                                     pc.string_or("form", ""), pc.string_or("text", pc.string_or("latex", ""))});
+            section("Pieces", false, "table", Object{{"columns", Array{"on", "form", "expression"}}, {"rows", rows}});
+        }
+    }
+    // a refusal no route was tried for says why here; one with routes says it route by route below
+    if (outcome == "refused" && e.candidates.empty()) section("Check", true, "facts", Array{fact("Why", e.refused, false, false)});
+    // How it was found: every route tried, its cost and what it gave or why not
+    Array rows;
+    for (std::size_t i = 0; i < e.candidates.size(); ++i) {
+        const Candidate& c = e.candidates[i];
+        std::string gave = c.refused;
+        if (gave.empty() && c.route == Route::Synthesis && e.answer)
+            gave = e.answer->pieces.size() == 1 && e.answer->pieces.front().form == Form::Expression
+                       ? *bd::to_text(e.answer->pieces.front().expr, e.parameter) : std::format("{} pieces", e.answer->pieces.size());
+        else if (gave.empty()) {
+            for (double v : c.values) gave += (gave.empty() ? "" : ", ") + text_of(v);
+            if (!c.text.empty()) gave = c.text;
+            if (gave.empty() && c.route == Route::ClosedForm) gave = "no real root";
+        }
+        rows.push_back(Array{std::string(route_name(c.route)) + (e.taken == i ? ", taken" : ""), std::to_string(c.cost), gave});
+    }
+    if (!rows.empty())
+        section("How it was found", false, "table", Object{{"columns", Array{"route", "cost", "gave"}}, {"rows", rows}},
+                route ? Object{{"note", route_caption(*route)}} : Object{});
+    return Object{{"outcome", outcome}, {"guarantee", guarantee}, {"label", label}, {"ok", ok},
+                  {"result", result}, {"sections", sections}};
+}
+
 } // namespace respond_detail
 
 // What a person types, answered. One line is a shorthand (`2 + 2`, `2x^2 - 3x - 5 = 0`, `solve
@@ -394,8 +604,8 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
     const std::string_view all = trimmed(text);
     Object out{{"question", std::string(all)}};
     const auto answered = [&](const AskedDocument& asked) {
-        for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance})))
-            out.emplace_back(std::move(k), std::move(v));
+        const Evaluation e = evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance});
+        for (auto& [k, v] : evaluation_json(e)) out.emplace_back(std::move(k), std::move(v));
         out.emplace_back("document", bd::to_json(asked.document));
         // the question as the rows of a formula editor, written by the library
         Array rows;
@@ -403,6 +613,8 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
             if (auto row = bd::to_latex(d)) rows.push_back(*row);
         out.emplace_back("question_latex", rows);
         if (auto g = graph_of(asked, out)) out.emplace_back("graph", std::move(*g));
+        const bd::Statement* wanted = asked.document.find(asked.wanted);
+        out.emplace_back("sheet", sheet_of(e, wanted ? wanted->kind : bd::StatementKind::Value, out));
         return JsonValue(std::move(out));
     };
     bd::Document above;

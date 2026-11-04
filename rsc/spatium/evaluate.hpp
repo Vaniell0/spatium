@@ -72,6 +72,33 @@ inline const char* route_name(Route r) {
     return "?";
 }
 
+// How a route finds its value, in words a page shows under "How it was found".
+inline const char* route_caption(Route r) {
+    switch (r) {
+        case Route::Evaluate:
+            return "Evaluated as written, with nothing rewritten: in fractions where every operation is one on "
+                   "fractions, else in intervals, each number held as it was typed and every operation rounding "
+                   "outward, so the true value lies between the ends; the digits both ends share are proved.";
+        case Route::Expression: return "The expression as written, a function of the parameter it reads.";
+        case Route::ClosedForm:
+            return "Solved in closed form. The coefficients are read from the equation's own values and the degree "
+                   "is checked at more points; the roots come from the quadratic formula in the form that keeps the "
+                   "small root, and Vieta's formulas check them by a second route.";
+        case Route::Enclosed:
+            return "Every root on the box, each proved. The box is cut in two where it is undecided; a piece is "
+                   "excluded where the equation's interval leaves out zero, and holds exactly one root where Newton's "
+                   "step in intervals, with the derivative enclosed by a dual number, lands inside it. Where the "
+                   "derivative may vanish, at a double root, nothing is proved. With no bracket the box is every double.";
+        case Route::Bracket: return "A root where the equation changes sign on its bracket, by bisection to the last bit.";
+        case Route::Integral: return "The integral by the library's quadrature, its error estimated, not proved.";
+        case Route::Synthesis:
+            return "Synthesised. The library computes the question's value at each parameter by its own solvers; the "
+                   "answer is the shortest expression in the parameter that matches it, searched bottom up, or a "
+                   "Chebyshev polynomial where none of a few terms does, checked against those values on a dense grid.";
+    }
+    return "";
+}
+
 enum class Arithmetic { Double, Float, Rational, Decimal, Real50 };
 
 inline const char* arithmetic_name(Arithmetic a) {

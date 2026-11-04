@@ -2,7 +2,8 @@
 // and the answers must agree -- the same JSON, numbers to 1e-9 of their size (the WebAssembly
 // build has its own libm, musl's, whose last digits differ from glibc's), numbers inside a string
 // likewise and the rest of the string exactly, a row of numbers at the scale of its largest, and
-// `computed` and a route's `cost` the only fields allowed to differ: a root found to the last bit
+// `computed` and a route's `cost` (a candidate's, and the cost column of a sheet's table) the only
+// fields allowed to differ: a root found to the last bit
 // takes as many evaluations as the libm's last digits lead it to. A graph's numbers are its fp32
 // twin, the device's, and are compared to four float steps of their scale (2^-22): musl's tanhf
 // and glibc's differ in a float's last bit.
@@ -49,6 +50,12 @@ function agree(a, b, where) {
     return true;
   }
   if (a && b && typeof a === 'object' && typeof b === 'object') {
+    // a sheet's table of routes: the cost column counts evaluations, as a candidate's cost does
+    if (Array.isArray(a.columns) && Array.isArray(a.rows) && a.columns.includes('cost')) {
+      const skip = a.columns.indexOf('cost');
+      const drop = t => ({ columns: t.columns.filter((_, i) => i !== skip), rows: (t.rows ?? []).map(r => r.filter((_, i) => i !== skip)) });
+      return agree(drop(a), drop(b), where);
+    }
     const keys = Object.keys(a);
     if (keys.join() !== Object.keys(b).join()) return `${where}: keys ${keys} vs ${Object.keys(b)}`;
     for (const k of keys) {
