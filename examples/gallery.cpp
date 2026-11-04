@@ -78,6 +78,9 @@ JsonValue card(std::string id, std::string question) {
 std::string gallery() {
     std::vector<JsonValue> cards;
     cards.push_back(card("arithmetic", "2(3 + 4)^2 - 1/4"));
+    // an exercise as a page of problems sets it (mixed numbers 1 13/20 written 1 + 13/20): exact, step by step
+    cards.push_back(card("exercise", "((3.2 - 1.7) / 0.003 / ((29/35 - 3/7) * 4 / 0.2) - (1 + 13/20 - 1.5) * 1.5 / "
+                                     "((2.44 + 1 + 14/25) * (1/8))) / (62 + 1/20) + 1.364 / 0.124"));
     cards.push_back(card("quadratic", "2x^2 - 3x - 5 = 0"));
     cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
     cards.push_back(card("exponent", "2^x = 8"));

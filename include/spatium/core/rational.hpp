@@ -96,6 +96,30 @@ public:
     constexpr bool ok() const { return den_ != 0; }
 
     double to_double() const { return ok() ? static_cast<double>(num_) / static_cast<double>(den_) : std::nan(""); }
+    // The decimal it is, where that decimal ends -- a denominator of twos and fives only: 391/4 is
+    // 97.75, 3/10 is 0.3 -- worked out in integers, never through a double. None for 1/3.
+    std::optional<std::string> decimal() const {
+        if (!ok()) return std::nullopt;
+        long long d = den_;
+        int twos = 0, fives = 0;
+        while (d % 2 == 0) d /= 2, ++twos;
+        while (d % 5 == 0) d /= 5, ++fives;
+        if (d != 1) return std::nullopt;
+        const int places = twos > fives ? twos : fives;
+        if (places > 19) return std::nullopt;   // past 128 bits once scaled; such a decimal is no one's answer
+        __int128 scaled = num_ < 0 ? -__int128(num_) : __int128(num_);
+        for (int k = 0; k < places; ++k) scaled *= 10;
+        scaled /= den_;
+        std::string digits;
+        do digits.insert(digits.begin(), static_cast<char>('0' + static_cast<int>(scaled % 10))), scaled /= 10;
+        while (scaled > 0);
+        if (places > 0) {
+            if (digits.size() <= static_cast<std::size_t>(places)) digits.insert(0, static_cast<std::size_t>(places) + 1 - digits.size(), '0');
+            digits.insert(digits.size() - static_cast<std::size_t>(places), ".");
+        }
+        return (num_ < 0 ? "-" : "") + digits;
+    }
+
     // `21/4`, `-3`, or `spoiled`
     std::string text() const {
         if (!ok()) return "spoiled";

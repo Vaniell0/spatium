@@ -33,7 +33,8 @@
 //
 // A symbol is written {"sym": "x"}, or as a bare string inside a formula; a field of a document
 // that is a bare string is the text of the language. What the editor's own parser writes before
-// any rewriting is read too: a product written without a sign (`2x`, `InvisibleOperator`), the
+// any rewriting is read too: a product written without a sign (`2x`, `InvisibleOperator`) and a
+// mixed number (`1\frac{13}{20}`, the same head before a fraction of whole numbers), the
 // logarithms in base 2 and 10 (`Lb`, `Lg`), and `e` as the number e.
 //
 // A row of the editor is one line of a document (`mathjson_row_text`): `p \in [0.5, 4]` a
@@ -248,6 +249,20 @@ inline Result<MathText> mathjson_text(const JsonValue& v, const std::string& pat
     }
     if (head == "Subtract") return MathText{wrapped(arg[0], Tight::Sum) + " - " + wrapped(arg[1], Tight::Product), Tight::Sum};
     if (head == "Negate") return MathText{"-" + wrapped(arg[0], Tight::Power), Tight::Minus};
+    // a whole number written right before a fraction of whole numbers is a mixed number, 1 13/20,
+    // as a page of exercises writes it: the sum, not the product the bare juxtaposition would be
+    const auto whole = [](const JsonValue& x) {
+        const JsonValue* num = x.is_object() ? x.find("num") : &x;
+        if (num && num->is_string()) {
+            const auto& t = num->as_string();
+            return !t.empty() && std::ranges::all_of(t, [](char c) { return c >= '0' && c <= '9'; });
+        }
+        return num && num->is_number() && num->as_number() >= 0 && std::floor(num->as_number()) == num->as_number();
+    };
+    if (head == "InvisibleOperator" && n == 2 && whole(a[1]) && a[2].is_array() && a[2].as_array().size() == 3 &&
+        a[2].as_array()[0].is_string() && (a[2].as_array()[0].as_string() == "Divide" || a[2].as_array()[0].as_string() == "Rational") &&
+        whole(a[2].as_array()[1]) && whole(a[2].as_array()[2]))
+        return MathText{"(" + arg[0].text + " + " + arg[1].text + ")", Tight::Atom};
     if (head == "Multiply" || head == "InvisibleOperator") {
         std::string s = wrapped(arg[0], Tight::Product);
         for (int k = 1; k < n; ++k) s += " * " + wrapped(arg[k], Tight::Minus);

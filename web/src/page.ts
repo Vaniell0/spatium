@@ -2,7 +2,7 @@
 // -- answered live by the core in a worker. It keeps the document in its address (#w=) and in
 // the browser, and shows the JSON the core and the library's files hold; it composes nothing.
 
-import { Answers, type Parse } from "./answers.js";
+import { Answers, notation, type Parse } from "./answers.js";
 import { Core, type State } from "./core.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
 import { Sheet, type Editor } from "./view/cells.js";
@@ -57,7 +57,7 @@ async function loadEditor() {
     ml.MathfieldElement.soundsDirectory = null;
     ml.MathfieldElement.computeEngine = null;
     (window as unknown as { mathVirtualKeyboard: { container: Element } }).mathVirtualKeyboard.container = $("#keys-body")!;
-    editor.parse = ls.parse;
+    editor.parse = (latex: string) => ls.parse(notation(latex));
     editor.toLatex = ml.convertAsciiMathToLatex;
     editor.toText = ml.convertLatexToAsciiMath;
     editor.ready = true;

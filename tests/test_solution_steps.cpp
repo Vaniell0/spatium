@@ -8,14 +8,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <rsc/spatium/closed_form.hpp>
+#include <rsc/spatium/evaluate.hpp>
 #include <spatium/algebra/polynomial.hpp>
 #include <spatium/io/steps_text.hpp>
 
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <random>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -154,4 +157,47 @@ TEST_CASE("solution steps: a minus is written once", "[io][steps]") {
     // the case it must fail: a positive 2a and a nonzero b are written as they are
     CHECK(steps(1, -2, -3)[3].latex == "x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a} = \\frac{2 \\pm \\sqrt{16}}{2}");
     CHECK(steps(2, 3, -5)[3].latex == "x_{1,2} = \\frac{-b \\pm \\sqrt{D}}{2a} = \\frac{-3 \\pm \\sqrt{49}}{4}");
+}
+
+TEST_CASE("evaluation steps: a number's computation, an operation a step, as it ran", "[steps][evaluate]") {
+    namespace bd = spatium::io::build;
+    const auto steps = [](std::string_view text) {
+        const auto f = bd::parse(text, "", "");
+        REQUIRE(f.has_value());
+        const auto s = bd::evaluation_steps(*f);
+        REQUIRE(s.has_value());
+        std::vector<std::string> latex;
+        for (const auto& st : *s) latex.push_back(st.latex);
+        return latex;
+    };
+    // each operation on the values of what it reads; a fraction as written is no step
+    CHECK(steps("2(3 + 4)^2 - 1/4") ==
+          std::vector<std::string>{"3 + 4 = 7", "7^{2} = 49", "2 \\cdot 49 = 98", "98 - \\frac{1}{4} = \\frac{391}{4} = 97.75"});
+    // decimals as written, the sum as the fraction it is: no double's 0.30000000000000004
+    CHECK(steps("0.1 + 0.2") == std::vector<std::string>{"0.1 + 0.2 = \\frac{3}{10} = 0.3"});
+    // a power the reader made a chain of products is one step; a name stays a name
+    CHECK(steps("10^20 + 1 - 10^20").front() == "10^{20} = 100000000000000000000");
+    CHECK(steps("sin(pi/6) + cos(0)").front().starts_with("\\frac{\\pi}{6} \\approx 0.52359877559829"));
+    // the case it must not hide: 10^20 + 1 - 10^20 is 1, past a fraction of 64 bits, and a double's
+    // interval holds it only within 10^5 of zero, which the step says instead of a digit
+    CHECK(steps("10^20 + 1 - 10^20").back().ends_with("\\approx 0 \\pm 10^{5}"));
+    // a root is not a fraction: from there on the digits an interval proves, written with \approx
+    for (const auto& s : steps("sqrt(2) * 3 - 1/3")) CHECK(s.find("\\approx") != std::string::npos);
+
+    // the second path: the chain's last value is the fraction the rational engine computes
+    for (const char* q : {"2(3 + 4)^2 - 1/4", "(3 + 7/12 - (2 + 11/18)) / (19/84)", "abs(2 - 7) + abs(-1/4)", "0.1 + 0.2"}) {
+        INFO(q);
+        const auto doc = bd::read_document(std::string("a = ") + q);
+        REQUIRE(doc.has_value());
+        const auto e = rsc::evaluate(*doc, "a", {}, rsc::Engine{.arithmetic = rsc::Arithmetic::Rational});
+        REQUIRE(e.taken);
+        const std::string text = e.candidates[*e.taken].text;   // 391/4
+        const auto slash = text.find('/');
+        const std::string fraction = slash == std::string::npos ? text
+            : std::format("\\frac{{{}}}{{{}}}", text.substr(0, slash), text.substr(slash + 1));
+        const std::string last = steps(q).back();
+        CHECK(last.find("= " + fraction) != std::string::npos);
+        // and the evaluation carries the same chain
+        CHECK(e.steps.size() == steps(q).size());
+    }
 }
