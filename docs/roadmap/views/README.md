@@ -6,7 +6,7 @@ The page (`site/`), published at `vaniell0.github.io/spatium/` from each commit 
 
 ## Now
 
-- the page, step two: sliders for the parameters a graph holds at their middles, graphs of answers in pieces, the exact view
+- the page as a beta: free cells on the canvas with wires, a scene cell from the TypeScript builder, the gallery of renders
 - testing the page by many questions, from a generator shared with the synthesis data
 
 ## Later
