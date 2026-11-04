@@ -51,14 +51,12 @@ TEST_CASE("respond: an equation is answered in closed form with its steps", "[rs
         CHECK(at(steps[i], "label").as_string() == direct->steps[i].label);
         CHECK(at(steps[i], "latex").as_string() == direct->steps[i].latex);
     }
-    // the word solve in front changes nothing but the question as typed
-    const auto worded = rsc::respond("  solve 2x^2 - 3x - 5 = 0 ");
-    CHECK(at(worded, "question").as_string() == "solve 2x^2 - 3x - 5 = 0");
-    CHECK(at(worded, "steps").dump() == at(r, "steps").dump());
+    // the question back as the row of a formula editor, written by the library
+    CHECK(at(r, "question_latex").as_array().front().as_string() == "2x^{2} - 3x - 5 = 0");
 }
 
 TEST_CASE("respond: a question with a parameter is answered by synthesis, with its certificate", "[rsc][respond]") {
-    const std::string q = "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]";
+    const std::string q = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
     const auto r = rsc::respond(q, 1e-10);
     CHECK(at(r, "route").as_string() == "synthesis");
     CHECK(at(r, "answered").as_bool());
@@ -70,7 +68,9 @@ TEST_CASE("respond: a question with a parameter is answered by synthesis, with i
     CHECK(at(at(r, "answer").as_array().front(), "latex").as_string() == "\\sqrt{p}");
 
     // the bound is above every piece's error, and not ten times the largest
-    auto asked = rsc::ask(q);
+    const auto doc = spatium::io::build::read_document(q);
+    REQUIRE(doc.has_value());
+    auto asked = rsc::query_of(*doc, "x");
     REQUIRE(asked.has_value());
     asked->tolerance = 1e-10;
     const auto a = rsc::answer(*asked);
@@ -88,8 +88,8 @@ TEST_CASE("respond: a text that is no question is refused with the library's rea
     CHECK(fourfold.find("degree at most two") != std::string::npos);
     CHECK(fourfold.find("one may lie in") != std::string::npos);
     CHECK(at(rsc::respond("hello"), "refused").as_string().find("reads 'hello'") != std::string::npos);
-    CHECK(at(rsc::respond("solve x - p for x in [0, 1]"), "refused").as_string().find("parameter") != std::string::npos);
-    CHECK(at(rsc::respond("solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]"), "refused").as_string().find("no value")
+    CHECK(at(rsc::respond("x: x - p = 0 on [0, 1]"), "refused").as_string().find("'p'") != std::string::npos);
+    CHECK(at(rsc::respond("p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]"), "refused").as_string().find("no value")
           != std::string::npos);
     CHECK(at(rsc::respond("2x^2 - 3x - 5 = 0"), "refused").is_null());
 }
@@ -150,7 +150,7 @@ TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][resp
     CHECK(range[0].as_number() < 0);
     CHECK(range[1].as_number() > 0);
     // a synthesised answer: its expression along its parameter, reaching sqrt(4) at the end
-    const auto root = rsc::respond("solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]");
+    const auto root = rsc::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
     CHECK(at(at(root, "graph"), "document").as_string() == "p in [0.5, 4]\nx = sqrt(p)");
     const auto root_drawn = rsc::plot_request(at(root, "graph").dump());
     const auto& r = at(root_drawn, "range").as_array();

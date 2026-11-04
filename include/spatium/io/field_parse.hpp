@@ -96,10 +96,10 @@ inline constexpr std::array<Constant, 3> constants{{
 
 // The reader itself, for a text in which a field is one part: it reads an expression from where
 // it stands up to the first thing that cannot continue it, and a caller reads the words around
-// it (a question's `solve ... for x in [0, 1]` is read this way).
+// it (a document line's `x: ... on [0, 1]` is read this way).
 class FieldReader {
 public:
-    // `reserved` are words of the surrounding text (a question's `for` and `in`), which are not names
+    // `reserved` are words of the surrounding text (a document line's `in` and `on`), which are not names
     FieldReader(std::string_view text, std::string u, std::string v, std::vector<std::string> reserved = {})
         : s_(text), u_(std::move(u)), v_(std::move(v)), reserved_(std::move(reserved)) {}
 

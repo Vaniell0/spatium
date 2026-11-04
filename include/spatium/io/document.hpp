@@ -374,6 +374,51 @@ inline std::string to_text(const Statement& d) {
     return {};
 }
 
+// A definition as the row of a formula editor that reads back as it (`mathjson_row_text`): the
+// question a page shows is the library's own, `p \in [0.5, 4]`, `x^{2} - p = 0, x \in [0, 10]`,
+// `I = \int_{0}^{1} f\,dt`. A shape is a scene's, and has no row.
+inline Result<std::string> to_latex(const Statement& d) {
+    const auto tex = [](const Written& w) { return to_latex(w.field); };
+    // a row the editor wrote with no name is read as `answer`, and written back with none
+    const std::string named = d.name == "answer" ? std::string() : detail::name_latex(d.name) + " = ";
+    const auto interval = [&](const std::string& name) -> Result<std::string> {
+        auto lo = tex(d.lo);
+        if (!lo) return std::unexpected(lo.error());
+        auto hi = tex(d.hi);
+        if (!hi) return std::unexpected(hi.error());
+        return std::format("{} \\in \\left[{}, {}\\right]", detail::name_latex(name), *lo, *hi);
+    };
+    switch (d.kind) {
+        case StatementKind::Parameter: return interval(d.name);
+        case StatementKind::Value: {
+            auto v = tex(d.value);
+            if (!v) return std::unexpected(v.error());
+            return named + *v;
+        }
+        case StatementKind::Root: {
+            auto l = tex(d.value);
+            if (!l) return std::unexpected(l.error());
+            auto r = tex(d.rhs);
+            if (!r) return std::unexpected(r.error());
+            if (!has_bracket(d)) return std::format("{} = {}", *l, *r);
+            auto on = interval(d.name);
+            if (!on) return std::unexpected(on.error());
+            return std::format("{} = {}, {}", *l, *r, *on);
+        }
+        case StatementKind::Integral: {
+            auto f = tex(d.value);
+            if (!f) return std::unexpected(f.error());
+            auto lo = tex(d.lo);
+            if (!lo) return std::unexpected(lo.error());
+            auto hi = tex(d.hi);
+            if (!hi) return std::unexpected(hi.error());
+            return std::format("{}\\int_{{{}}}^{{{}}} {}\\,d{}", named, *lo, *hi, *f, detail::name_latex(d.variable));
+        }
+        case StatementKind::Shape: break;
+    }
+    return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("{} is a shape, which a scene shows, not a row", d.name)));
+}
+
 inline std::string to_text(const Document& doc) {
     std::string out;
     for (const auto& d : doc.statements) out += to_text(d) + "\n";

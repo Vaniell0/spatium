@@ -234,6 +234,8 @@ details summary { cursor: pointer; }
 .card:hover { background: var(--raised); box-shadow: 0 0 0 1px var(--line); }
 .card .q { font: 400 var(--t-label)/1.5 var(--f-mono); color: var(--ink); overflow-wrap: anywhere; }
 .card .q.said { font-family: var(--f-ui); }
+.asked { display: grid; gap: 2px; justify-items: start; min-width: 0; }
+.asked .math { overflow-x: auto; max-width: 100%; }
 .card .a { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-width: 0; }
 .card .a .math { max-width: 100%; }
 .card .a .math .katex { font-size: 1.05em; }

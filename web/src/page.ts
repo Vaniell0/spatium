@@ -6,7 +6,7 @@ import { Answers, type Parse } from "./answers.js";
 import { Core, type State } from "./core.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
 import { Sheet, type Editor } from "./view/cells.js";
-import { $, el } from "./view/dom.js";
+import { $, el, math as tex } from "./view/dom.js";
 import { kindOf } from "./view/answer.js";
 
 // ── settings of the page (a cell's own are in the document) ─────────────
@@ -70,9 +70,9 @@ interface Reference {
   functions: { name: string; arity: number; caption: string; domain: string; example?: string }[];
   operators: { written: string; caption: string; example?: string }[];
   constants: { name: string; caption: string; example?: string }[];
-  questions: { form: string; caption: string; example?: string }[];
+  questions: { form: string; caption: string; example?: string; answer?: { question_latex?: string[] } }[];
 }
-interface Card { id: string; question?: string; typed?: boolean; route?: string; refused?: string }
+interface Card { id: string; question?: string; question_latex?: string[]; typed?: boolean; route?: string; refused?: string }
 const data: { gallery: Card[]; reference: Reference | null } = { gallery: [], reference: null };
 
 async function loadData() {
@@ -163,16 +163,23 @@ function usePreset(preset: Preset) {
 
 // ── panels: the reference and the gallery, each line of them a cell to add ─
 
-function addText(text: string) {
+// cells added at the end, an empty last one taken: a line of text, or a question's rows as the
+// library writes them (`question_latex`), one cell a row
+function add(written: ({ text: string } | { latex: string })[]) {
   const doc = sheet.document;
   const last = doc.cells.at(-1);
   const empty = last?.kind === "math" && ("latex" in last.written ? !last.written.latex.trim() : !last.written.text.trim());
   if (empty) doc.cells.pop();
-  const cell = math({ text });
-  doc.cells.push(cell);
+  let cell;
+  for (const w of written) doc.cells.push((cell = math(w)));
   sheet.build(cell);
   changed();
 }
+const addText = (text: string) => add([{ text }]);
+const addRows = (rows: string[] | undefined, text: string) => add(rows?.length ? rows.map((latex) => ({ latex })) : [{ text }]);
+// a question shown as its rows, or as its text where the library wrote none
+const shownAs = (rows: string[] | undefined, text: string, cls: string) =>
+  rows?.length ? el("span", { class: cls }, ...rows.map((r) => tex(r, { cls: "math" }))) : el("span", { class: cls, text });
 
 function panel(which: "ref" | "gallery" | null) {
   const box = $("#panel")!;
@@ -184,8 +191,8 @@ function panel(which: "ref" | "gallery" | null) {
     for (const c of data.gallery) {
       if (!c.question || c.typed === false) continue;
       const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
-      body.append(el("button", { type: "button", class: "card", onclick: () => addText(c.question!) },
-        el("span", { class: "q", text: c.question }), el("span", { class: ok ? "kind ok" : "kind", text: label })));
+      body.append(el("button", { type: "button", class: "card", onclick: () => addRows(c.question_latex, c.question!) },
+        shownAs(c.question_latex, c.question, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
     }
   } else {
     const r = data.reference;
@@ -198,7 +205,12 @@ function panel(which: "ref" | "gallery" | null) {
           e.example ? el("button", { type: "button", class: "ex", text: e.example, onclick: () => addText(e.example!) }) : null));
     if (!r) list.append(el("p", { class: "state", text: "The reference did not load." }));
     else list.append(
-      el("h3", { text: "Questions" }), ...r.questions.map((q) => entry(q.form, q)),
+      el("h3", { text: "Questions" }), ...r.questions.map((q) =>
+        el("div", { class: "entry", "data-find": `${q.form} ${q.caption}`.toLowerCase() },
+          el("div", { class: "name" }, tex(q.form, { cls: "math" })),
+          el("div", {}, el("p", { class: "caption", text: q.caption }),
+            q.example ? el("button", { type: "button", class: "ex", onclick: () => addRows(q.answer?.question_latex, q.example!) },
+              shownAs(q.answer?.question_latex, q.example, "asked")) : null))),
       el("h3", { text: "Functions" }), ...r.functions.map((f) => entry(`${f.name}(${f.arity === 2 ? "x, y" : "x"})`, f, f.domain)),
       el("h3", { text: "Operators" }), ...r.operators.map((o) => entry(o.written, o)),
       el("h3", { text: "Constants" }), ...r.constants.map((c) => entry(c.name, c)));

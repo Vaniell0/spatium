@@ -2,14 +2,16 @@
 
 // A question typed as text, and the answer as the JSON a page reads.
 //
-// What a person types into the calculator is a shorthand for a document of one definition, and
-// `respond` writes it out and evaluates it (evaluate.hpp): `2 + 2` is the value `answer = 2 + 2`,
-// `2x^2 - 3x - 5 = 0` the root `x: 2x^2 - 3x - 5 = 0`, solved in closed form with its steps, and
-// `solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]` the parameter and the root it asks for,
-// synthesised with its certificate. A text that is none of these is refused with the reason,
-// which is the library's own (a parse error says its column). The answer carries the document it
-// was read as and every route that was tried, so it is a whole record of what was asked and how
-// it was answered. The page composes nothing: what it shows of an answer is in this JSON, and the
+// A question is a document: the rows of a formula editor, each a line of it (`respond_rows`;
+// `p \in [0.5, 4]` the parameter `p in [0.5, 4]`, `x^2 - p = 0, x \in [0, 10]` the root
+// `x: x^2 - p = 0 on [0, 10]`), or its lines typed. One line that is not a statement is a
+// shorthand `respond` writes out and evaluates (evaluate.hpp): `2 + 2` is the value
+// `answer = 2 + 2`, `2x^2 - 3x - 5 = 0` the root `x: 2x^2 - 3x - 5 = 0`. A row reading a
+// parameter above is answered as a function of it, synthesised with its certificate. A text that
+// is none of these is refused with the reason, which is the library's own (a parse error says its
+// column). The answer gives the question back as rows the library writes (`question_latex`),
+// carries the document it was read as and every route that was tried, so it is a whole record of
+// what was asked and how it was answered. The page composes nothing: what it shows of an answer is in this JSON, and the
 // gallery is written by the same function, so a card and a live answer cannot differ.
 //
 // `evaluate_request` is the same door for a document a page or a builder writes: the document as
@@ -53,15 +55,6 @@ inline std::string_view trimmed(std::string_view s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
     return s;
-}
-
-inline bool has_word(std::string_view s, std::string_view w) {
-    for (std::size_t at = s.find(w); at != std::string_view::npos; at = s.find(w, at + 1)) {
-        const bool before = at == 0 || std::isspace(static_cast<unsigned char>(s[at - 1]));
-        const bool after = at + w.size() == s.size() || std::isspace(static_cast<unsigned char>(s[at + w.size()]));
-        if (before && after) return true;
-    }
-    return false;
 }
 
 } // namespace respond_detail
@@ -266,15 +259,8 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
             if (!above.find(n)) open.push_back(std::move(n));
         return open;
     };
-    if (has_word(q, "for")) {
-        auto asked = question_document(q);
-        if (!asked) return refuse("synthesis", asked.error().message);
-        return with_above(std::move(asked->document), std::move(asked->wanted), "synthesis");
-    }
-    // an equation, with or without the word solve in front
-    std::string_view equation = q;
-    if (equation.starts_with("solve") && (equation.size() == 5 || std::isspace(static_cast<unsigned char>(equation[5]))))
-        equation = trimmed(equation.substr(5));
+    // an equation, or an expression
+    const std::string_view equation = q;
     // no '=' but at the end (2 + 2 =): an expression to evaluate, as a calculator does
     if (const auto eq = equation.find('='); eq == std::string_view::npos || trimmed(equation.substr(eq + 1)).empty()) {
         const std::string_view expression = trimmed(equation.substr(0, eq));
@@ -398,6 +384,11 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
         for (auto& [k, v] : evaluation_json(evaluate(asked.document, asked.wanted, {}, Engine{.tolerance = tolerance})))
             out.emplace_back(std::move(k), std::move(v));
         out.emplace_back("document", bd::to_json(asked.document));
+        // the question as the rows of a formula editor, written by the library
+        Array rows;
+        for (const auto& d : asked.document.statements)
+            if (auto row = bd::to_latex(d)) rows.push_back(*row);
+        out.emplace_back("question_latex", rows);
         if (auto g = graph_of(asked, out)) out.emplace_back("graph", std::move(*g));
         return JsonValue(std::move(out));
     };
@@ -419,6 +410,14 @@ inline spatium::io::JsonValue respond(std::string_view text, double tolerance = 
     if (auto whole = bd::read_document(all); whole && !whole->statements.empty()) {
         std::string wanted = whole->statements.back().name;
         return answered({std::move(*whole), std::move(wanted)});
+    }
+    // a line in a document's own words, a name and ':' or 'in', is refused as the document refuses it
+    if (q.find(':') != std::string_view::npos || q.find(" in ") != std::string_view::npos) {
+        if (auto whole = bd::read_document(all); !whole) {
+            out.emplace_back("route", "document");
+            out.emplace_back("refused", whole.error().message);
+            return JsonValue(std::move(out));
+        }
     }
     // refused under the route the shorthand asked for
     out.emplace_back("route", s.asked.error().first);

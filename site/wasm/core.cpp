@@ -3,15 +3,14 @@
 // gallery is written through, so a live answer and a card cannot differ. Nothing is composed on
 // the page.
 //
-//   respond(text)      the answer: evaluated, solved in closed form with its steps, or synthesised;
-//                      several lines are a document and its question in the last
+//   respond(text)      the answer: evaluated, solved, or synthesised; several lines are a
+//                      document and its question in the last
 //   rows(request)      the same answer for the rows of a LaTeX editor, each a formula as MathJSON
 //   evaluate(request)  a definition of a document given its value: the document as text or JSON,
 //                      the name it asks for and the parameters it chooses, one JSON object
 //   plot(request)      a value drawn as the graph of a function of one parameter: a WebGL2
 //                      shader whose slots are the other parameters, and with a grid, F at each
 //                      pixel as the shader's check mode computes it, in fp32
-//   preview(text)      the question as LaTeX while it is typed, or the parse error and its column
 //
 // Built by build.sh with Emscripten; check.mjs holds it against the host build of the same calls.
 
@@ -33,32 +32,6 @@ const char* hand_back(std::string s) {
     return last.c_str();
 }
 
-// The question as it is typed, as LaTeX: the expression, or each side of an equation, or the
-// part before " for " of a question with a parameter. A parse error says its column, which the
-// page underlines.
-spatium::io::JsonValue preview(std::string_view text) {
-    namespace bd = spatium::io::build;
-    using Object = spatium::io::JsonValue::ObjectType;
-    // the leading word is blanked rather than cut, so the column an error names is the column
-    // in the text as typed
-    std::string body(text);
-    for (std::string_view word : {"solve ", "integrate "})
-        if (body.starts_with(word)) body.replace(0, word.size(), word.size(), ' ');
-    if (const auto at = body.find(" for "); at != std::string::npos) body.resize(at);
-    bd::FieldReader r(body, "", "");
-    auto lhs = r.expression();
-    if (!lhs) return Object{{"error", lhs.error().message}};
-    std::string latex = *bd::to_latex(*lhs);
-    if (r.take('=')) {
-        if (r.done()) return Object{{"latex", latex + " ="}};
-        auto rhs = r.expression();
-        if (!rhs) return Object{{"error", rhs.error().message}};
-        latex += " = " + *bd::to_latex(*rhs);
-    }
-    if (!r.done()) return Object{{"error", r.fail("an operator or the end").error().message}};
-    return Object{{"latex", latex}};
-}
-
 } // namespace
 
 extern "C" {
@@ -73,7 +46,6 @@ const char* spatium_evaluate(const char* request) { return hand_back(rsc::evalua
 
 const char* spatium_plot(const char* request) { return hand_back(rsc::plot_request(request).dump()); }
 
-const char* spatium_preview(const char* text) { return hand_back(preview(text).dump()); }
 
 }
 
@@ -83,8 +55,7 @@ const char* spatium_preview(const char* text) { return hand_back(preview(text).d
 #include <iostream>
 int main() {
     for (std::string line; std::getline(std::cin, line);) {
-        if (line.starts_with("preview ")) std::cout << spatium_preview(line.c_str() + 8) << "\n";
-        else if (line.starts_with("evaluate ")) std::cout << spatium_evaluate(line.c_str() + 9) << "\n";
+        if (line.starts_with("evaluate ")) std::cout << spatium_evaluate(line.c_str() + 9) << "\n";
         else if (line.starts_with("rows ")) std::cout << spatium_rows(line.c_str() + 5) << "\n";
         else if (line.starts_with("plot ")) std::cout << spatium_plot(line.c_str() + 5) << "\n";
         else std::cout << spatium_respond(line.c_str(), 0) << "\n";

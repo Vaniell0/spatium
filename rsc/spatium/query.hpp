@@ -17,9 +17,8 @@
 //
 // The answer's field reads the parameter as U, its own variable.
 //
-// A question can also be written as text, the way a person types it: `ask` reads
-// `solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]` (or `integrate exp(p * log(x)) for x in
-// [0, 1], p in [0, 4]`) into the Query with those names, so what it answers is the question
+// A question is also a document (`query_of`): the parameter `p in [0.5, 4]` and the root
+// `x: x^2 - p = 0 on [0, 10]` are the Query with those names, so what it answers is the question
 // built in code from the same symbols, to the last bit.
 
 #include <rsc/spatium/synthesis.hpp>
@@ -119,159 +118,12 @@ inline Answer answer(const Query& asked) {
     return out;
 }
 
-// `solve f [= g] for x in [a, b], p in [c, d]` or `integrate f for x in [a, b], p in [c, d]`:
-// the first name is the unknown (or the variable of integration) on its bracket, the second the
-// parameter on the interval where the answer is wanted. An equation f = g is f - g, rewritten
-// only where no value changes (so f = 0 is f). A bound is a number, or an expression in no name
-// (sqrt(2), 1 / 3, pi); a bound of the unknown may read the parameter, so `integrate sin(t) / t
-// for t in [0, x], x in [0.5, 10]` is the sine integral Si(x). The rest of the Query keeps its
-// defaults.
-namespace detail {
-
-// The question read word by word into a Query, as `ask` read it before a question became a
-// document: kept as the independent second path the document route is held against.
-inline spatium::Result<Query> ask_by_words(std::string_view text) {
-    using spatium::Error, spatium::ErrorCode;
-    spatium::io::build::FieldReader r(text, "", "", {"solve", "integrate", "for", "in"});   // every other name is a symbol
-    Query q;
-    if (r.take_word("solve")) q.ask = Ask::Solve;
-    else if (r.take_word("integrate")) q.ask = Ask::Integrate;
-    else return r.fail("'solve' or 'integrate'");
-    auto f = r.expression();
-    if (!f) return std::unexpected(f.error());
-    if (q.ask == Ask::Solve && r.take('=')) {
-        auto g = r.expression();
-        if (!g) return std::unexpected(g.error());
-        f = (std::move(*f) - *g).simplified();
-    }
-    q.f = std::move(*f);
-    if (!r.take_word("for")) return r.fail(q.ask == Ask::Solve ? "'=' or 'for'" : "'for'");
-
-    // a bound is an expression; one of the unknown's bounds may read the parameter, named after it
-    const auto bound_of = [&]() -> spatium::Result<Expr> { return r.expression(); };
-    const auto number = [](const Expr& e) { return e(0.0, 0.0); };
-    Expr ulo, uhi;
-    if (const std::string name(r.word()); name.empty()) return r.fail("a name");
-    else {
-        q.unknown = name;
-        r.take_word(name);
-    }
-    if (!r.take_word("in")) return r.fail("'in'");
-    if (!r.take('[')) return r.fail("'['");
-    if (auto a = bound_of(); !a) return std::unexpected(a.error()); else ulo = *a;
-    if (!r.take(',')) return r.fail("','");
-    if (auto b = bound_of(); !b) return std::unexpected(b.error()); else uhi = *b;
-    if (!r.take(']')) return r.fail("']'");
-    if (!r.take(',')) return r.fail("',' and the parameter the answer is a function of");
-    if (const std::string name(r.word()); name.empty()) return r.fail("a name");
-    else {
-        q.parameter = name;
-        r.take_word(name);
-    }
-    if (!r.take_word("in")) return r.fail("'in'");
-    if (!r.take('[')) return r.fail("'['");
-    Expr plo, phi;
-    if (auto a = bound_of(); !a) return std::unexpected(a.error()); else plo = *a;
-    if (!r.take(',')) return r.fail("','");
-    if (auto b = bound_of(); !b) return std::unexpected(b.error()); else phi = *b;
-    if (!r.take(']')) return r.fail("']'");
-    if (q.parameter == q.unknown)
-        return std::unexpected(Error(ErrorCode::ParseError,
-            "ask: '" + q.unknown + "' is named twice, as the unknown and as the parameter"));
-    for (const Expr* e : {&plo, &phi})
-        if (const auto open = e->free_symbols(); !open.empty())
-            return std::unexpected(Error(ErrorCode::ParseError,
-                "ask: a bound of " + q.parameter + " reads the name '" + open.front() + "'; it is a number"));
-    for (const Expr* e : {&ulo, &uhi})
-        for (const auto& name : e->free_symbols())
-            if (name != q.parameter)
-                return std::unexpected(Error(ErrorCode::ParseError,
-                    "ask: a bound of " + q.unknown + " reads the name '" + name + "'; it may read only the parameter " +
-                    q.parameter));
-    q.p_lo = number(plo), q.p_hi = number(phi);
-    if (!(q.p_lo < q.p_hi))
-        return std::unexpected(Error(ErrorCode::ParseError,
-            std::format("ask: {} in [{}, {}] is empty", q.parameter, q.p_lo, q.p_hi)));
-    const auto at = [&](const Expr& e, double p) { return e.bind(q.parameter, Expr(p))(0.0, 0.0); };
-    if (ulo.free_symbols().empty()) q.x_lo = number(ulo); else q.x_lo_at = ulo;
-    if (uhi.free_symbols().empty()) q.x_hi = number(uhi); else q.x_hi_at = uhi;
-    // the unknown's interval must hold something wherever the answer is wanted
-    for (int i = 0; i <= 16; ++i) {
-        const double p = q.p_lo + (q.p_hi - q.p_lo) * i / 16.0;
-        const double lo = at(ulo, p), hi = at(uhi, p);
-        if (!(lo < hi))
-            return std::unexpected(Error(ErrorCode::ParseError,
-                q.x_lo_at || q.x_hi_at
-                    ? std::format("ask: {} in [{}, {}] is empty at {} = {}", q.unknown, lo, hi, q.parameter, p)
-                    : std::format("ask: {} in [{}, {}] is empty", q.unknown, lo, hi)));
-    }
-    if (!r.done()) return r.fail("the end");
-    return q;
-}
-
-} // namespace detail
-
-// A question as a document: `solve f = g for x in [a, b], p in [c, d]` is the parameter
-// `p in [c, d]` and the root `x: f = g on [a, b]`; `integrate f for t in [a, b], x in [c, d]`
-// is `x in [c, d]` and `I = integral f dt on [a, b]`. Read from the question's own text, so an
-// error names a column of what was typed. Returns the document and the name it asks for.
+// A document and the name asked of it: a question as a page writes it, its rows the document's
+// lines (field_mathjson.hpp), so a question and a document ask the same thing.
 struct AskedDocument {
     spatium::io::build::Document document;
     std::string wanted;
 };
-
-inline spatium::Result<AskedDocument> question_document(std::string_view text) {
-    namespace bd = spatium::io::build;
-    bd::FieldReader r(text, "", "", {"solve", "integrate", "for", "in"});
-    bd::Statement asked;
-    if (r.take_word("solve")) asked.kind = bd::StatementKind::Root;
-    else if (r.take_word("integrate")) asked.kind = bd::StatementKind::Integral;
-    else return r.fail("'solve' or 'integrate'");
-    auto f = bd::detail::written(r, text);
-    if (!f) return std::unexpected(f.error());
-    asked.value = std::move(*f);
-    if (asked.kind == bd::StatementKind::Root) {
-        if (r.take('=')) {
-            auto g = bd::detail::written(r, text);
-            if (!g) return std::unexpected(g.error());
-            asked.rhs = std::move(*g);
-        } else {
-            asked.rhs = {Expr(0.0), "0"};
-        }
-    }
-    if (!r.take_word("for")) return r.fail(asked.kind == bd::StatementKind::Root ? "'=' or 'for'" : "'for'");
-    const std::string unknown(r.word());
-    if (unknown.empty()) return r.fail("a name");
-    r.take_word(unknown);
-    auto ends = bd::detail::interval(r, text, "in");
-    if (!ends) return std::unexpected(ends.error());
-    std::tie(asked.lo, asked.hi) = std::move(*ends);
-    if (!r.take(',')) return r.fail("',' and the parameter the answer is a function of");
-    bd::Statement parameter;
-    parameter.kind = bd::StatementKind::Parameter;
-    parameter.name = std::string(r.word());
-    if (parameter.name.empty()) return r.fail("a name");
-    r.take_word(parameter.name);
-    auto pends = bd::detail::interval(r, text, "in");
-    if (!pends) return std::unexpected(pends.error());
-    std::tie(parameter.lo, parameter.hi) = std::move(*pends);
-    if (!r.done()) return r.fail("the end");
-    if (parameter.name == unknown)
-        return std::unexpected(spatium::Error(spatium::ErrorCode::ParseError,
-            "ask: '" + unknown + "' is named twice, as the unknown and as the parameter"));
-    if (asked.kind == bd::StatementKind::Root) {
-        asked.name = unknown;
-    } else {
-        asked.variable = unknown;
-        // the integral's own name: I, or the first of I_1, I_2, ... no other name takes
-        asked.name = "I";
-        for (int k = 1; asked.name == unknown || asked.name == parameter.name; ++k) asked.name = std::format("I_{}", k);
-    }
-    AskedDocument out{{{std::move(parameter), std::move(asked)}}, {}};
-    out.wanted = out.document.statements.back().name;
-    if (auto ok = bd::check(out.document); !ok) return std::unexpected(ok.error());
-    return out;
-}
 
 // Parameters given a value: a scene's, or a slider's. Each names a parameter of the document and
 // lies on its interval.
@@ -340,7 +192,7 @@ inline spatium::Result<Unfolded> unfolded(const spatium::io::build::Document& do
 inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, std::string_view wanted, const Chosen& chosen = {}) {
     namespace bd = spatium::io::build;
     using spatium::Error, spatium::ErrorCode;
-    const auto refuse = [](std::string m) { return std::unexpected(Error(ErrorCode::InvalidArgument, "ask: " + m)); };
+    const auto refuse = [](std::string m) { return std::unexpected(Error(ErrorCode::InvalidArgument, m)); };
     const bd::Statement* d = doc.find(wanted);
     if (!d) return refuse(std::format("the document defines no '{}'", wanted));
     if (d->kind != bd::StatementKind::Root && d->kind != bd::StatementKind::Integral)
@@ -361,12 +213,12 @@ inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, 
     const auto number = [](const Expr& e) { return e(0.0, 0.0); };
     q.p_lo = number(p.lo.field), q.p_hi = number(p.hi.field);
     if (!(q.p_lo < q.p_hi))
-        return std::unexpected(Error(ErrorCode::ParseError, std::format("ask: {} in [{}, {}] is empty", q.parameter, q.p_lo, q.p_hi)));
+        return std::unexpected(Error(ErrorCode::ParseError, std::format("{} in [{}, {}] is empty", q.parameter, q.p_lo, q.p_hi)));
     for (const Expr* e : {&ulo, &uhi})
         for (const auto& name : e->free_symbols())
             if (name != q.parameter)
                 return std::unexpected(Error(ErrorCode::ParseError,
-                    "ask: a bound of " + q.unknown + " reads the name '" + name + "'; it may read only the parameter " + q.parameter));
+                    "a bound of " + q.unknown + " reads the name '" + name + "'; it may read only the parameter " + q.parameter));
     if (ulo.free_symbols().empty()) q.x_lo = number(ulo); else q.x_lo_at = ulo;
     if (uhi.free_symbols().empty()) q.x_hi = number(uhi); else q.x_hi_at = uhi;
     // the unknown's interval must hold something wherever the answer is wanted
@@ -377,18 +229,10 @@ inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, 
         if (!(lo < hi))
             return std::unexpected(Error(ErrorCode::ParseError,
                 q.x_lo_at || q.x_hi_at
-                    ? std::format("ask: {} in [{}, {}] is empty at {} = {}", q.unknown, lo, hi, q.parameter, v)
-                    : std::format("ask: {} in [{}, {}] is empty", q.unknown, lo, hi)));
+                    ? std::format("{} in [{}, {}] is empty at {} = {}", q.unknown, lo, hi, q.parameter, v)
+                    : std::format("{} in [{}, {}] is empty", q.unknown, lo, hi)));
     }
     return q;
-}
-
-// A question typed as text, read into the Query it asks: through its document, so a question
-// and a document line ask the same thing.
-inline spatium::Result<Query> ask(std::string_view text) {
-    auto asked = question_document(text);
-    if (!asked) return std::unexpected(asked.error());
-    return query_of(asked->document, asked->wanted);
 }
 
 } // namespace rsc
