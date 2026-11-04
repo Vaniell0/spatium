@@ -110,7 +110,7 @@ ordinary header of the library under the library's tests.
 | Cross-entropy against REINFORCE on the base dispatcher | measured | `tools/supervised_vs_reinforce.cpp`: 0.955 against 0.551 at 2000 updates; the trainers still use REINFORCE (finding B10) |
 | Distillation of a dispatcher into a decision tree | built | `tools/distill_tree.cpp`; the cost figures did not reproduce exactly (finding B12), the order of magnitude did |
 | Where an explicit contact chain replaces Newton | measured, window mapped | `tools/explicit_contact_window.cpp`; one non-monotone cell unexplained |
-| `Certified<T>`, `Interval`, proof over a box | designed | plan stages 1b and 4 |
+| `Certified<T>`, `Interval`, proof over a box | `Interval<T>` built, its first consumer a number's proved digits; `Certified<T>`, box splitting and the matrix's level designed | `core/interval.hpp`, `tests/test_interval.cpp`; plan stages 1b and 4 |
 | Jobs, the generator, the grown registry | designed | this page |
 | Mechanics assemblies, straightening, the error budget, IR passes | designed | this page |
 | Surrogates, IR rewriting, structure building | not attempted | the catalogue in the prototype's notes |

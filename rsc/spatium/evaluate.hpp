@@ -36,6 +36,7 @@
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/algebra/roots.hpp>
 #include <spatium/core/decimal.hpp>
+#include <spatium/core/interval.hpp>
 #include <spatium/core/precision.hpp>
 #include <spatium/core/rational.hpp>
 #include <spatium/io/document.hpp>
@@ -121,6 +122,9 @@ struct Evaluation {
     std::optional<ClosedForm> closed;
     std::optional<double> error;         // of an integral, as estimated
     std::optional<Answer> answer;        // of a synthesis, in pieces with their certificate
+    // a number's digits proved over the reals (core/interval.hpp), or why they are not
+    std::optional<spatium::Proved> proved;
+    std::string unproved;
     std::string parameter;               // the name the answer's pieces read as U
 
     // the route of the value, or of the first refusal when there is none
@@ -205,6 +209,38 @@ inline Candidate value_in(const Expr& f, Arithmetic a) {
     return value_in<double>(*pod, a);
 }
 
+// A number with nothing left to read, enclosed: computed in an interval of B, each constant held
+// as it was written, so the digits its ends share are digits of what was written, not of a double
+// near it. None are proved when a comparison on the way was undecided, since the program then
+// followed a guessed branch.
+template<spatium::Scalar B>
+void prove(const spatium::io::build::PodField<double>& pod, Evaluation& out) {
+    namespace bd = spatium::io::build;
+    using I = spatium::Interval<B>;
+    if (const auto op = bd::beyond<I>(pod)) {
+        out.unproved = std::format("an interval has no {} in it", bd::op_name(*op));
+        return;
+    }
+    const spatium::Undecided undecided;
+    const I v = bd::interpret(bd::converted<I>(pod), I{0}, I{0});
+    if (undecided.raised()) out.unproved = "a comparison on the way was undecided, or a root or logarithm reached below zero";
+    else if (v.is_empty()) out.unproved = "the value is not a number";
+    else out.proved = spatium::proved(v);
+}
+
+inline void prove(const Expr& f, Arithmetic a, Evaluation& out) {
+    const auto pod = spatium::io::build::lower(f);
+    if (!pod) {
+        out.unproved = pod.error().message;
+        return;
+    }
+#if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
+    if (a == Arithmetic::Real50) return prove<spatium::Real50>(*pod, out);
+#endif
+    (void)a;
+    prove<double>(*pod, out);
+}
+
 } // namespace detail
 
 // The route whose value is taken: the first, in the order of preference, that gives one.
@@ -265,6 +301,7 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
             out.written = u->f;   // the function, exact, in the parameter's name
             out.candidates.push_back({Route::Expression, 0, {}, {}, Arithmetic::Double, {}});
         }
+        if (out.free.empty()) detail::prove(u->f, engine.arithmetic, out);
         finish();
         return out;
     }

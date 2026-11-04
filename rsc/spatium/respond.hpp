@@ -142,6 +142,14 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             out.emplace_back("value", e.values.front());
             if (!c.text.empty()) out.emplace_back("text", c.text);
             out.emplace_back("latex", *bd::to_latex(e.written) + " = " + number_latex(c, e.values.front()));
+            // how far from zero only where no digit is proved: elsewhere it is the value's last digits
+            if (e.proved && e.proved->digits == 0)
+                out.emplace_back("proved", Object{{"digits", 0}, {"bound", decade_above(e.proved->bound)}});
+            else if (e.proved)
+                out.emplace_back("proved", Object{{"digits", e.proved->digits}, {"text", e.proved->text},
+                                                  {"exact", e.proved->exact}});
+            else if (!e.unproved.empty())
+                out.emplace_back("unproved", e.unproved);
             break;
         }
         case Route::Expression:
