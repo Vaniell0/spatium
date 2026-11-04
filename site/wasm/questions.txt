@@ -53,3 +53,4 @@ rows {"rows": [["Add", ["Multiply", 2, ["Power", ["Delimiter", ["Add", 3, 4]], 2
 rows {"rows": [["Equal", ["Add", "x", ["Multiply", 2, "y"]], 5], ["Equal", ["Subtract", ["Multiply", 3, "x"], "y"], 1]]}
 rows {"rows": [["LessEqual", ["Divide", ["Subtract", "x", 1], ["Add", "x", 2]], 0]]}
 x^2 - 4 > 0
+rows {"rows": [["Equal", ["Add", ["Power", "x", 2], ["Power", "y", 2]], 4], ["Equal", ["Subtract", "x", "y"], 1]]}

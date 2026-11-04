@@ -169,6 +169,13 @@ struct Axis {
     bool line = false;         // the box is every double: its ends are infinite
 };
 
+// A system's roots on every double of each unknown, each proved alone in its box (roots_on in N
+// unknowns), and the boxes where one may still be.
+struct SystemRoots {
+    std::vector<std::string> unknowns;
+    std::vector<std::vector<spatium::Interval<double>>> roots, undecided;
+};
+
 struct Evaluation {
     std::string name;
     std::vector<std::string> free;       // the parameter the value is a function of, when there is one
@@ -181,6 +188,7 @@ struct Evaluation {
     std::optional<ClosedForm> closed;
     std::optional<LinearSystem> linear;   // a system's solution, every unknown's value
     std::optional<Axis> axis;             // an inequality's solution
+    std::optional<SystemRoots> system;    // a system's roots, where it is not linear
     std::optional<double> error;         // of an integral, as estimated
     std::optional<Answer> answer;        // of a synthesis, in pieces with their certificate
     // a number's digits proved over the reals (core/interval.hpp), or why they are not
@@ -356,6 +364,62 @@ inline Candidate enclosed_roots(const Expr& f, spatium::Interval<double> box, Ev
     }
     out.enclosed = std::move(found);
     return c;
+}
+
+// The roots of a system of N equations in N unknowns on every double of each, each proved (N from
+// 2 to 4): each equation lowered, run in intervals and in dual numbers, its unknowns put in its slots.
+template<std::size_t N = 2>
+Candidate enclosed_system(const std::vector<Expr>& equations, const std::vector<std::string>& unknowns, Evaluation& out) {
+    namespace bd = spatium::io::build;
+    using I = spatium::Interval<double>;
+    using D = spatium::Dual<I>;
+    Candidate c{Route::Enclosed, 0, {}, {}, Arithmetic::Double, {}};
+    if constexpr (N > 4) {
+        c.refused = "a system of more than four unknowns";
+        return c;
+    } else {
+        if (unknowns.size() != N) return enclosed_system<N + 1>(equations, unknowns, out);
+        std::vector<bd::PodField<I>> in_interval;
+        std::vector<bd::PodField<D>> in_dual;
+        std::vector<std::array<int, N>> slot;   // where each unknown is in each equation's slots, or -1
+        for (const auto& e : equations) {
+            const auto pod = bd::lower(e);
+            if (!pod) return c.refused = pod.error().message, c;
+            if (const auto op = bd::beyond<I>(*pod)) return c.refused = std::format("an interval has no {} in it", bd::op_name(*op)), c;
+            std::array<int, N> at;
+            for (std::size_t j = 0; j < N; ++j) {
+                const auto s = std::ranges::find(pod->symbols, unknowns[j]);
+                at[j] = s == pod->symbols.end() ? -1 : static_cast<int>(s - pod->symbols.begin());
+            }
+            in_interval.push_back(bd::converted<I>(*pod)), in_dual.push_back(bd::converted<D>(*pod)), slot.push_back(at);
+        }
+        const auto f = [&]<class X>(const std::array<X, N>& v) {
+            std::array<X, N> y;
+            for (std::size_t k = 0; k < N; ++k) {
+                const auto& program = [&]() -> const auto& { if constexpr (std::is_same_v<X, I>) return in_interval[k]; else return in_dual[k]; }();
+                std::vector<X> slots(program.symbols.size(), X(0));
+                for (std::size_t j = 0; j < N; ++j)
+                    if (slot[k][j] >= 0) slots[static_cast<std::size_t>(slot[k][j])] = v[j];
+                y[k] = bd::interpret(program, X(0), X(0), slots);
+            }
+            return y;
+        };
+        const double big = std::numeric_limits<double>::max();
+        spatium::Box<double, N> box;
+        box.fill(I{-big, big});
+        const spatium::RootsN<double, N> found = spatium::roots_on(f, box, spatium::Budget{.evaluations = 65536});
+        c.cost = found.evaluations;
+        SystemRoots s{unknowns, {}, {}};
+        for (const auto& r : found.roots) s.roots.emplace_back(r.begin(), r.end());
+        for (const auto& r : found.undecided) s.undecided.emplace_back(r.begin(), r.end());
+        if (s.roots.empty())
+            c.refused = found.complete() ? "no real root: every piece of the space is proved to hold none"
+                                         : std::format("no root proved; one may lie in {} pieces", found.undecided.size());
+        for (const auto& r : s.roots)
+            for (const I& v : r) c.values.push_back(v.mid());
+        out.system = std::move(s);
+        return c;
+    }
 }
 
 // The fraction with the smallest denominator in [a, b], by continued fractions: -2 in
@@ -594,7 +658,10 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
             if (!solved->exact.empty()) c.arithmetic = Arithmetic::Rational;
             out.linear = std::move(*solved);
         }
+        const bool not_linear = c.refused.find("not linear") != std::string::npos;
         out.candidates.push_back(std::move(c));
+        // where it is not linear, every root on every double, each proved
+        if (not_linear) out.candidates.push_back(detail::enclosed_system(u->system, unknowns, out));
         finish();
         return out;
     }
