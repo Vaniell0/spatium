@@ -4,15 +4,20 @@
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/core/concepts.hpp>
 #  include <algorithm>
+#  include <array>
 #  include <charconv>
 #  include <cmath>
 #  include <cstddef>
 #  include <cstdint>
+#  include <deque>
+#  include <functional>
 #  include <ios>
 #  include <limits>
 #  include <string>
 #  include <system_error>
 #  include <type_traits>
+#  include <utility>
+#  include <vector>
 #endif
 
 // `Interval<T>` -- a number known to lie between two numbers of T, whatever rounding happened on
@@ -49,19 +54,26 @@
 // way IEEE raises "inexact": `Undecided` counts them. A computation that raised none followed the
 // one branch every value in its inputs follows, so its interval holds; one that raised any took a
 // guessed branch somewhere, and its interval proves nothing. A square root or a logarithm of an
-// interval reaching below its domain raises it too, since part of what was asked has no value.
+// interval reaching below its domain is counted apart: part of what was asked has no value, and
+// the result holds the values of the rest.
 // The library's Scalar asks for a total order; this one is total on what it decides and says
 // where it did not, rather than weakening every algorithm's contract to a partial one.
 
 SPATIUM_EXPORT namespace spatium {
 
-// How many comparisons of intervals were undecided on this thread, ever. Read through `Undecided`.
+// How many comparisons of intervals were undecided on this thread, ever, and how many functions
+// were asked of an interval reaching outside their domain. Read through `Undecided`.
 inline thread_local std::uint64_t interval_undecided = 0;
+inline thread_local std::uint64_t interval_outside = 0;
 
-// Whether any comparison of intervals since this was made was undecided.
+// What happened since this was made: a comparison taken by guess, which leaves the result proving
+// nothing (`guessed`), or a root or a logarithm of an interval reaching below zero, whose result
+// then holds the values of the part that has them (`outside`); `raised` is either.
 struct Undecided {
-    std::uint64_t start = interval_undecided;
-    bool raised() const { return interval_undecided != start; }
+    std::uint64_t start = interval_undecided, start_outside = interval_outside;
+    bool guessed() const { return interval_undecided != start; }
+    bool outside() const { return interval_outside != start_outside; }
+    bool raised() const { return guessed() || outside(); }
 };
 
 enum class Truth : std::uint8_t { No, Yes, Undecided };
@@ -313,7 +325,7 @@ template<Scalar T> Interval<T> sqrt(const Interval<T>& x) {
     using namespace interval_detail;
     if (x.hi < T(0)) return Interval<T>::empty();
     T l = x.lo;
-    if (l < T(0)) ++interval_undecided, l = T(0);
+    if (l < T(0)) ++interval_outside, l = T(0);
     const auto end = [](const T& v, bool to_up) {
         const T r = sqrt(v);
         if constexpr (builtin<T>)
@@ -343,7 +355,7 @@ template<Scalar T> Interval<T> log_ends(const Interval<T>& x) {
 
 template<Scalar T> Interval<T> log(const Interval<T>& x) {
     if (!(T(0) < x.hi)) return Interval<T>::empty();
-    if (!(T(0) < x.lo)) ++interval_undecided;
+    if (!(T(0) < x.lo)) ++interval_outside;
     return interval_detail::log_ends(x);
 }
 
@@ -403,7 +415,7 @@ template<Scalar T> Interval<T> pow(const Interval<T>& x, const Interval<T>& y) {
         return {even && l < T(0) ? T(0) : l, fup(ph, T(abs(ph) * n), 2)};
     }
     if (x.hi < T(0)) return Interval<T>::empty();
-    if (x.lo < T(0)) ++interval_undecided;
+    if (x.lo < T(0)) ++interval_outside;
     const Interval<T> base{x.lo < T(0) ? T(0) : x.lo, x.hi};
     if (base.hi == T(0)) return y.lo > T(0) ? Interval<T>{T(0)} : Interval<T>::empty();
     return exp(y * log_ends(base));
@@ -492,6 +504,106 @@ template<Scalar T> Proved proved(const Interval<T>& x) {
             return out;
         }
     }
+    return out;
+}
+
+// ── A statement on a box ─────────────────────────────────────────
+//
+// Whether a statement holds at every point of a box, asked of the box's intervals: what holds of an
+// interval holds of each point in it. Where the answer is undecided the box is cut in two across
+// its widest side and each half asked again, breadth first, so that a budget refines the whole box
+// evenly rather than one corner of it. An answer whose computation took a comparison by guess
+// (`Undecided::guessed`) is undecided whatever it said. The proof is the partition: each piece with
+// what is known of it, Yes for true at every point, No for false at some point, and the verdict
+// over the whole box: No where some piece is, Yes where every one is.
+//
+// A statement may say more than its truth (`Decided`): that a piece it left undecided is final,
+// since cutting it would only ask again what T cannot hold -- a value past T's range at both ends.
+//
+// A side is cut at zero when it holds zero, at the middle of its magnitudes when it spans more than
+// a few of them -- the doubles' whole range reaches unit size in ten cuts, not a thousand -- and at
+// its middle otherwise; a side narrower than `smallest` of its size (of one, near zero) is not cut.
+
+template<Scalar T, std::size_t N> using Box = std::array<Interval<T>, N>;
+
+template<Scalar T, std::size_t N>
+struct Proof {
+    Truth verdict = Truth::Undecided;
+    std::vector<std::pair<Box<T, N>, Truth>> pieces;   // the box, cut, in the order they were decided
+    std::size_t evaluations = 0;                       // of the statement
+};
+
+struct Decided {
+    Truth truth = Truth::Undecided;
+    bool final = false;
+};
+
+struct Budget {
+    std::size_t evaluations = 4096;
+    double smallest = 0x1p-32;
+};
+
+namespace interval_detail {
+template<Scalar T> T cut(const Interval<T>& x) {
+    using std::sqrt;
+    if (x.lo < T(0) && T(0) < x.hi) return T(0);
+    const bool negative = !(T(0) < x.hi);
+    const T l = negative ? T(-x.hi) : x.lo, h = negative ? T(-x.lo) : x.hi;
+    const T base = l < T(1) ? T(1) : l;
+    if (T(16) * base < h) {
+        const T g = T(sqrt(base) * sqrt(h));
+        return negative ? T(-g) : g;
+    }
+    return x.mid();
+}
+} // namespace interval_detail
+
+template<Scalar T, std::size_t N, class Statement>
+Proof<T, N> prove_on(const Box<T, N>& box, Statement&& statement, const Budget& budget = {}) {
+    using std::abs;
+    Proof<T, N> out;
+    std::deque<Box<T, N>> open{box};
+    bool some_no = false, all_yes = true;
+    while (!open.empty()) {
+        const Box<T, N> b = open.front();
+        open.pop_front();
+        Truth t = Truth::Undecided;
+        bool final = false;
+        if (out.evaluations < budget.evaluations) {
+            ++out.evaluations;
+            const Undecided watch;
+            if constexpr (std::is_same_v<std::invoke_result_t<Statement&, const Box<T, N>&>, Decided>) {
+                const Decided d = statement(b);
+                t = d.truth, final = d.final;
+            } else {
+                t = statement(b);
+            }
+            if (watch.guessed()) t = Truth::Undecided;
+        }
+        if (t == Truth::Undecided && !final && out.evaluations < budget.evaluations) {
+            std::size_t k = N;
+            T widest{};
+            for (std::size_t i = 0; i < N; ++i) {
+                const T w = b[i].hi - b[i].lo;
+                const T size = std::max({T(1), T(abs(b[i].lo)), T(abs(b[i].hi))});
+                if (T(budget.smallest) * size < w && (k == N || widest < w)) k = i, widest = w;
+            }
+            if (k < N) {
+                const T c = interval_detail::cut(b[k]);
+                if (b[k].lo < c && c < b[k].hi) {
+                    Box<T, N> left = b, right = b;
+                    left[k].hi = c, right[k].lo = c;
+                    open.push_back(left);
+                    open.push_back(right);
+                    continue;
+                }
+            }
+        }
+        some_no |= t == Truth::No;
+        all_yes &= t == Truth::Yes;
+        out.pieces.emplace_back(b, t);
+    }
+    out.verdict = some_no ? Truth::No : all_yes ? Truth::Yes : Truth::Undecided;
     return out;
 }
 

@@ -79,6 +79,8 @@ std::string gallery() {
     cards.push_back(card("arithmetic", "2(3 + 4)^2 - 1/4"));
     cards.push_back(card("quadratic", "2x^2 - 3x - 5 = 0"));
     cards.push_back(card("complex", "x^2 + 2x + 5 = 0"));
+    cards.push_back(card("exponent", "2^x = 8"));
+    cards.push_back(card("wave", "sin(x) = 0.5 on [0, 10]"));
     cards.push_back(card("sqrt", "solve x^2 - p = 0 for x in [0, 10], p in [0.5, 4]"));
     cards.push_back(card("power", "integrate exp(p * log(x)) for x in [0, 1], p in [0, 3]"));
     cards.push_back(card("gauss", "integrate exp(-p * x^2) for x in [0, 1], p in [0.1, 4]"));

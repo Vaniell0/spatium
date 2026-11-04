@@ -254,6 +254,17 @@ Dual<T> pow(const Dual<T>& x, T n) {
     return {pow(x.value, n), x.deriv * n * pow(x.value, n - T{1})};
 }
 
+// A power whose base and exponent both move: d(x^y) = y x^(y-1) dx + x^y log(x) dy, each term only
+// where its part moves, so 2^x needs no power of 2 below zero and x^3 of a negative x no logarithm.
+template<Scalar T>
+Dual<T> pow(const Dual<T>& x, const Dual<T>& y) {
+    using std::pow, std::log;
+    const T p = pow(x.value, y.value);
+    T d = x.deriv == T{0} ? T{0} : T(x.deriv * y.value * pow(x.value, y.value - T{1}));
+    if (!(y.deriv == T{0})) d = d + y.deriv * log(x.value) * p;
+    return {p, d};
+}
+
 using Dual64 = Dual<double>;
 using Dual32 = Dual<float>;
 

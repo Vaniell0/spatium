@@ -83,7 +83,10 @@ TEST_CASE("respond: a question with a parameter is answered by synthesis, with i
 }
 
 TEST_CASE("respond: a text that is no question is refused with the library's reason", "[rsc][respond]") {
-    CHECK(at(rsc::respond("x^3 - 1 = 0"), "refused").as_string().find("degree at most two") != std::string::npos);
+    // a fourfold root: no closed form, and no step can prove it, so the refusal says both and where it may be
+    const auto fourfold = at(rsc::respond("x^4 = 0"), "refused").as_string();
+    CHECK(fourfold.find("degree at most two") != std::string::npos);
+    CHECK(fourfold.find("one may lie in") != std::string::npos);
     CHECK(at(rsc::respond("hello"), "refused").as_string().find("reads 'hello'") != std::string::npos);
     CHECK(at(rsc::respond("solve x - p for x in [0, 1]"), "refused").as_string().find("parameter") != std::string::npos);
     CHECK(at(rsc::respond("solve x^2 + p = 0 for x in [0, 10], p in [0.5, 4]"), "refused").as_string().find("no value")
@@ -157,7 +160,13 @@ TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][resp
     CHECK(r[1].as_number() > 1.99);
     // the cases it must fail: a number has no graph, and neither has a refusal
     CHECK(at(rsc::respond("2 + 2"), "graph").is_null());
-    CHECK(at(rsc::respond("x^3 - 1 = 0"), "graph").is_null());
+    CHECK(at(rsc::respond("x^4 = 0"), "graph").is_null());
+    // a root proved where no closed form is: drawn about it, as a closed form's are
+    const auto cubic = rsc::respond("x^3 - 1 = 0");
+    CHECK(at(cubic, "route").as_string() == "every root, proved");
+    const std::string cubic_drawn = at(at(cubic, "graph"), "document").as_string();
+    CHECK(cubic_drawn.starts_with("x in ["));
+    CHECK(cubic_drawn.ends_with("graph = (x^3 - 1) - (0)"));
 }
 
 TEST_CASE("respond: a new name on the left is a definition, not an equation in it", "[rsc][respond]") {
