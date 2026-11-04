@@ -93,6 +93,20 @@ TEST_CASE("document: a system names its unknowns, then an equation each", "[docu
     CHECK_FALSE(bd::same_document(*doc, *other));
 }
 
+TEST_CASE("document: a root's relation may be an inequality", "[document]") {
+    const auto doc = bd::read_document("x: x^2 - 4 >= 0 on [-5, 5]\ny: 1 - y < 0\n");
+    REQUIRE(doc.has_value());
+    CHECK(bd::to_text(*doc) == "x: x^2 - 4 >= 0 on [-5, 5]\ny: 1 - y < 0\n");
+    CHECK(doc->statements[0].relation == ">=");
+    CHECK(*bd::to_latex(doc->statements[0]) == "x^{2} - 4 \\ge 0, x \\in \\left[-5, 5\\right]");
+    const auto from_json = bd::document_from_json(bd::to_json(*doc));
+    REQUIRE(from_json.has_value());
+    CHECK(bd::same_document(*doc, *from_json));
+    // the case it must fail: a different relation is a different document, and a system holds equations
+    CHECK_FALSE(bd::same_document(*doc, *bd::read_document("x: x^2 - 4 > 0 on [-5, 5]\ny: 1 - y < 0\n")));
+    CHECK_FALSE(bd::read_document("x, y: x + y > 1, x - y = 0").has_value());
+}
+
 TEST_CASE("document: refused with the line, and the column for a parse error", "[document]") {
     const auto message = [](const char* text) {
         const auto d = bd::read_document(text);

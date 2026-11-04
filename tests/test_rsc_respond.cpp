@@ -167,6 +167,39 @@ TEST_CASE("respond: rows that are equations in as many unknowns are one system",
     CHECK(at(rsc::respond("x + y = 1\nx - y = z"), "route").as_string() != "linear system");
 }
 
+TEST_CASE("respond: an inequality is the set where it holds, by the interval method", "[rsc][respond]") {
+    const auto set = [](const char* q) {
+        const auto r = rsc::respond(q);
+        return r.find("set") ? at(r, "set").as_string() : "refused: " + r.string_or("refused", "?");
+    };
+    // its ends are the roots, as fractions where they are, in brackets where equality holds
+    CHECK(set("x^2 - 4 > 0") == "x \\in (-\\infty, -2) \\cup (2, \\infty)");
+    CHECK(set("x^2 - 4 >= 0") == "x \\in (-\\infty, -2] \\cup [2, \\infty)");
+    CHECK(set("4 - x^2 >= 0") == "x \\in [-2, 2]");
+    CHECK(set("2x - 1 < 0") == "x \\in (-\\infty, \\frac{1}{2})");
+    // a break where it has no value is never in the set: (x - 1)/(x + 2) <= 0 at -2
+    CHECK(set("(x - 1)/(x + 2) <= 0") == "x \\in (-2, 1]");
+    // every number, and none
+    CHECK(set("x^2 + 1 > 0") == "x \\in \\mathbb{R}");
+    CHECK(set("x^2 + 1 < 0") == "x \\in \\varnothing");
+    CHECK(set("x^2 >= 0") == "x \\in \\mathbb{R}");
+    // an end with no fraction: its proved digits
+    CHECK(set("x^2 < 2").find("1.41421356237309") != std::string::npos);
+    // on a bracket: sin(x) > 0 on [0, 10] is (0, π) and (2π, 3π)
+    CHECK(set("x: sin(x) > 0 on [0, 10]").starts_with("x \\in (0, 3.14159265358979"));
+    // the sheet: proved, an axis to draw; the rows of the editor ask the same
+    const auto r = rsc::respond("x^2 - 4 > 0");
+    CHECK(at(r, "route").as_string() == "interval method");
+    const auto& s = at(r, "sheet");
+    CHECK(at(s, "outcome").as_string() == "set");
+    CHECK(at(s, "label").as_string() == "Proved by the interval method");
+    CHECK(at(rsc::respond_rows(R"({"rows": [["Greater", ["Subtract", ["Power", "x", 2], 4], 0]]})"), "sheet").dump() == s.dump());
+    // the case it must not claim: a double root, where Newton's step cannot prove x^2 > 0 fails at 0 alone
+    CHECK(at(at(rsc::respond("x^2 > 0"), "sheet"), "label").as_string().find("undecided") != std::string::npos);
+    // and one it must refuse: an inequality in two unknowns
+    CHECK(rsc::respond("x + y > 0").string_or("refused", "").find("one unknown") != std::string::npos);
+}
+
 TEST_CASE("respond: a synthesis of one piece is its formula, of more how many", "[rsc][respond][sheet]") {
     // the error function has no closed form here: one Chebyshev piece, written as its sum
     const auto one = rsc::respond("x in [0.25, 3]\nE = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]");

@@ -57,7 +57,7 @@
 
 namespace rsc {
 
-enum class Route { Evaluate, Expression, ClosedForm, Linear, Enclosed, Bracket, Integral, Synthesis };
+enum class Route { Evaluate, Expression, ClosedForm, Linear, Intervals, Enclosed, Bracket, Integral, Synthesis };
 
 inline const char* route_name(Route r) {
     switch (r) {
@@ -65,6 +65,7 @@ inline const char* route_name(Route r) {
         case Route::Expression: return "expression";
         case Route::ClosedForm: return "closed form";
         case Route::Linear: return "linear system";
+        case Route::Intervals: return "interval method";
         case Route::Enclosed: return "every root, proved";
         case Route::Bracket: return "root on a bracket";
         case Route::Integral: return "integral";
@@ -89,6 +90,11 @@ inline const char* route_caption(Route r) {
             return "Solved by elimination. Each equation's coefficients are read from its own values and that it is "
                    "linear is checked at more points; in fractions where every coefficient is one, so the solution "
                    "is exact, else in doubles.";
+        case Route::Intervals:
+            return "The interval method. The axis is cut where the inequality is undecided on a piece, computed in "
+                   "intervals, until every piece is proved to hold it or not; between a piece where it holds and one "
+                   "where it does not is a root of its left side less its right, proved alone there by Newton's "
+                   "interval step and an end of the set, or a break where it has no value.";
         case Route::Enclosed:
             return "Every root on the box, each proved. The box is cut in two where it is undecided; a piece is "
                    "excluded where the equation's interval leaves out zero, and holds exactly one root where Newton's "
@@ -147,6 +153,22 @@ struct Candidate {
     std::string text;            // its number as that arithmetic holds it, when that is not a double (`21/4`)
 };
 
+// An inequality's solution on its box, by the interval method: the axis in order, each part a
+// piece where the inequality is proved to hold or to fail, or a point between two -- a root of
+// its left side less its right, proved alone in its interval, or a break where it has no value --
+// or a piece nothing was proved of.
+struct Axis {
+    enum class Kind { Holds, Fails, Root, Break, Undecided };
+    struct Part {
+        Kind kind = Kind::Undecided;
+        double lo = 0, hi = 0;
+        std::string text;   // a root's value: a fraction where it is one, else its proved digits
+    };
+    std::string relation;
+    std::vector<Part> parts;   // adjacent, from the box's low end to its high end
+    bool line = false;         // the box is every double: its ends are infinite
+};
+
 struct Evaluation {
     std::string name;
     std::vector<std::string> free;       // the parameter the value is a function of, when there is one
@@ -158,6 +180,7 @@ struct Evaluation {
     Expr written;                        // a value's expression as written, and as the function it is when free
     std::optional<ClosedForm> closed;
     std::optional<LinearSystem> linear;   // a system's solution, every unknown's value
+    std::optional<Axis> axis;             // an inequality's solution
     std::optional<double> error;         // of an integral, as estimated
     std::optional<Answer> answer;        // of a synthesis, in pieces with their certificate
     // a number's digits proved over the reals (core/interval.hpp), or why they are not
@@ -335,6 +358,117 @@ inline Candidate enclosed_roots(const Expr& f, spatium::Interval<double> box, Ev
     return c;
 }
 
+// The fraction with the smallest denominator in [a, b], by continued fractions: -2 in
+// [-2.0000000005, -1.9999999999999998]; none past 64 bits or 40 steps.
+inline std::optional<spatium::Rational> simplest_in(double a, double b, int depth = 0) {
+    using spatium::Rational;
+    if (!(a <= b) || depth > 40 || !std::isfinite(a) || !std::isfinite(b)) return std::nullopt;
+    if (a <= 0 && 0 <= b) return Rational(0);
+    if (b < 0) {
+        const auto r = simplest_in(-b, -a, depth);
+        return r ? std::optional(Rational(0) - *r) : std::nullopt;
+    }
+    if (const double c = std::ceil(a); c <= b) return c < 0x1p62 ? std::optional(Rational(static_cast<long long>(c), 1)) : std::nullopt;
+    const double f = std::floor(a);
+    const auto r = simplest_in(1 / (b - f), 1 / (a - f), depth + 1);
+    if (!r || *r == Rational(0)) return std::nullopt;
+    return Rational(static_cast<long long>(f), 1) + Rational(1) / *r;
+}
+
+// An inequality f rel 0 on a box, by the interval method (Axis). `written` is f as written, its
+// constants not folded, where a root that is a short fraction is checked to be one exactly.
+inline Candidate interval_method(const Expr& f, const Expr& written, const std::string& rel, spatium::Interval<double> box, Evaluation& out) {
+    namespace bd = spatium::io::build;
+    using I = spatium::Interval<double>;
+    using D = spatium::Dual<I>;
+    using spatium::Truth;
+    Candidate c{Route::Intervals, 0, {}, {}, Arithmetic::Double, {}};
+    const auto pod = bd::lower(f);
+    if (!pod) return c.refused = pod.error().message, c;
+    if (const auto op = bd::beyond<I>(*pod)) return c.refused = std::format("an interval has no {} in it", bd::op_name(*op)), c;
+    const auto in_interval = bd::converted<I>(*pod);
+    const auto in_dual = bd::converted<D>(*pod);
+    const auto field = [&]<class X>(const X& x) {
+        if constexpr (std::is_same_v<X, I>) return bd::interpret(in_interval, x, I{0});
+        else return bd::interpret(in_dual, x, D{I{0}});
+    };
+    // f rel 0 on a piece. Where f has no value on it the piece is cut, as roots_on cuts it, and
+    // left undecided once it is one magnitude with no value at either end: a break, found below
+    const auto one_scale = [](const I& x) { return (0 < x.lo && x.hi <= 16 * x.lo) || (x.hi < 0 && 16 * x.hi <= x.lo); };
+    const auto holds = [&](const spatium::Box<double, 1>& b) {
+        const I y = field(b[0]), zero{0};
+        if (y.is_empty())
+            return spatium::Decided{Truth::Undecided, one_scale(b[0]) && field(I{b[0].lo}).is_empty() && field(I{b[0].hi}).is_empty()};
+        if (rel == ">") return spatium::Decided{less(zero, y)};
+        if (rel == ">=") return spatium::Decided{less_equal(zero, y)};
+        if (rel == "<") return spatium::Decided{less(y, zero)};
+        return spatium::Decided{less_equal(y, zero)};
+    };
+    auto proof = spatium::prove_on(spatium::Box<double, 1>{box}, holds);
+    c.cost = proof.evaluations;
+    std::ranges::sort(proof.pieces, {}, [](const auto& p) { return p.first[0].lo; });
+    // a root or a break at a short fraction, checked in fractions: f is zero there, or has no
+    // value -- 2, not 2.000000000000000; -2, not -1.9999999999999998
+    const auto pod_written = bd::lower(written);
+    const auto exact = [&](const I& r, bool root) -> std::string {
+        if (!pod_written || bd::beyond<spatium::Rational>(*pod_written)) return {};
+        const auto found = simplest_in(r.lo, r.hi);
+        if (!found || !found->ok() || found->den() > 1000000) return {};
+        const spatium::Rational q = *found;
+        const auto v = bd::interpret(bd::converted<spatium::Rational>(*pod_written), q, spatium::Rational(0));
+        return (root ? v.ok() && v == spatium::Rational(0) : !v.ok()) ? q.text() : std::string();
+    };
+    Axis axis{rel, {}, box.lo == -std::numeric_limits<double>::max() && box.hi == std::numeric_limits<double>::max()};
+    const auto add = [&](Axis::Kind k, double lo, double hi, std::string text = {}) {
+        if (!axis.parts.empty() && axis.parts.back().kind == k && k != Axis::Kind::Root && k != Axis::Kind::Break)
+            axis.parts.back().hi = hi;
+        else axis.parts.push_back({k, lo, hi, std::move(text)});
+    };
+    // the pieces nothing was proved of, run together, are where it changes: a root, a break, or undecided
+    std::vector<I> runs;
+    for (const auto& [b, t] : proof.pieces) {
+        if (t != Truth::Undecided) {
+            add(t == Truth::Yes ? Axis::Kind::Holds : Axis::Kind::Fails, b[0].lo, b[0].hi);
+            continue;
+        }
+        if (!axis.parts.empty() && axis.parts.back().kind == Axis::Kind::Undecided && axis.parts.back().hi == b[0].lo) {
+            axis.parts.back().hi = b[0].hi;
+            continue;
+        }
+        axis.parts.push_back({Axis::Kind::Undecided, b[0].lo, b[0].hi, {}});
+    }
+    // past the doubles at the ends of the line the value overflows (inf / inf): an end piece nothing
+    // was proved of takes the verdict of the piece inside it, until the tails are read at infinity
+    if (axis.line && axis.parts.size() > 1) {
+        const double past = 0x1p1020;
+        if (axis.parts.front().kind == Axis::Kind::Undecided && axis.parts.front().hi <= -past)
+            axis.parts[1].lo = axis.parts.front().lo, axis.parts.erase(axis.parts.begin());
+        if (axis.parts.size() > 1 && axis.parts.back().kind == Axis::Kind::Undecided && axis.parts.back().lo >= past)
+            axis.parts[axis.parts.size() - 2].hi = axis.parts.back().hi, axis.parts.pop_back();
+    }
+    for (auto& p : axis.parts) {
+        if (p.kind != Axis::Kind::Undecided) continue;
+        // a break at a short fraction, where f in fractions has no value: 1/(x + 2) at -2
+        if (auto at = exact(I{p.lo, p.hi}, false); !at.empty()) {
+            p.kind = Axis::Kind::Break, p.text = std::move(at);
+            continue;
+        }
+        const auto found = spatium::roots_on(field, I{p.lo, p.hi}, spatium::Budget{.evaluations = 256});
+        c.cost += found.evaluations;
+        if (found.complete() && found.roots.size() == 1) {
+            const I& r = found.roots.front();
+            const auto proved = spatium::proved(r);
+            const std::string fraction = exact(r, true);
+            p = {Axis::Kind::Root, r.lo, r.hi, !fraction.empty() ? fraction : proved.digits > 0 ? proved.text : std::format("{}", r.mid())};
+            c.values.push_back(r.mid());
+        } else if (found.complete() && found.roots.empty()) {
+            p.kind = Axis::Kind::Break, p.text = exact(I{p.lo, p.hi}, false);
+        }
+    }
+    out.axis = std::move(axis);
+    return c;
+}
+
 } // namespace detail
 
 // The route whose value is taken: the first, in the order of preference, that gives one.
@@ -434,6 +568,16 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
         if (r.trusted()) c.values = {r.value}, out.error = r.error_estimate;
         else c.refused = std::format("the integral of {} did not converge", d->name);
         out.candidates.push_back(std::move(c));
+        finish();
+        return out;
+    }
+
+    // an inequality: the set where it holds, by the interval method
+    if (d->relation != "=") {
+        const bool bracket = bd::has_bracket(*d);
+        const double big = std::numeric_limits<double>::max();
+        out.candidates.push_back(detail::interval_method(u->f.bind(d->name, Expr::u()), u->written.bind(d->name, Expr::u()), d->relation,
+            bracket ? spatium::Interval<double>{number(u->lo), number(u->hi)} : spatium::Interval<double>{-big, big}, out));
         finish();
         return out;
     }
