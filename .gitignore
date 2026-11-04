@@ -47,6 +47,9 @@
 # the WebAssembly build of the core is built (site/wasm/build.sh), not kept
 /site/wasm/spatium_core.js
 /site/wasm/spatium_core.wasm
+# The page's package, TypeScript (compiled into site/pkg/, which is not kept)
+!/web/
+!/web/**
 !/modules/
 !/modules/**
 !/.github/
@@ -71,3 +74,5 @@
 
 !/gallery/
 !/gallery/**
+# the page's package, compiled from web/ (tsc -p web)
+/site/pkg/

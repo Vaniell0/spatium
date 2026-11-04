@@ -166,11 +166,12 @@
           };
 
           # Opt-in: Emscripten and node, for the WebAssembly build of the core the page calls
-          # (site/wasm/) and the check that it answers as the host does. `nix develop .#wasm`.
+          # (site/wasm/) and the check that it answers as the host does, and TypeScript for the
+          # page's package (web/). `nix develop .#wasm`.
           # Emscripten writes its cache of system libraries; the store is read-only, so it goes
           # under the user's cache.
           wasm = pkgs.mkShell {
-            packages = with pkgs; [ emscripten nodejs ];
+            packages = with pkgs; [ emscripten nodejs typescript ];
             shellHook = ''
               export EM_CACHE="''${EM_CACHE:-$HOME/.cache/emscripten}"
               mkdir -p "$EM_CACHE"

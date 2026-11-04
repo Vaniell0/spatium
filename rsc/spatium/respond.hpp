@@ -389,7 +389,10 @@ inline spatium::io::JsonValue respond_rows(std::string_view request) {
         return JsonValue(Object{{"question", ""}, {"route", "document"}, {"refused", "the request has no rows"}});
     std::string text;
     for (std::size_t k = 0; k < rows->as_array().size(); ++k) {
-        auto line = bd::mathjson_row_text(rows->as_array()[k]);
+        // a row is MathJSON, or a line already written in the language, {"text": "..."}
+        const JsonValue& row = rows->as_array()[k];
+        const JsonValue* typed = row.is_object() ? row.find("text") : nullptr;
+        auto line = typed && typed->is_string() ? spatium::Result<std::string>(typed->as_string()) : bd::mathjson_row_text(row);
         if (!line)
             return JsonValue(Object{{"question", text}, {"route", "document"}, {"row", static_cast<double>(k + 1)},
                                     {"refused", std::format("row {}: {}", k + 1, line.error().message)}});

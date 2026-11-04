@@ -129,6 +129,9 @@ jobs:
       - name: Build the core both ways and compare the answers
         run: nix develop .#wasm --command site/wasm/check.sh
 
+      - name: The page's package compiles and its document reads back
+        run: nix develop .#wasm --command bash -c "tsc -p web && node --test site/pkg/test/*.test.js"
+
   connectivity:
     name: connectivity matrix is up to date
     runs-on: ubuntu-24.04

@@ -71,20 +71,44 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .core-dot.failed { background: var(--warn); }
 .core-dot.busy { background: var(--accent); }
 
-/* ── the workspace: windows in an auto grid ─────────────────── */
-.work {
-  max-width: 1280px; margin: 8px auto 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
-  gap: 24px; align-items: start;
+/* ── the document: cells, the name each defines on the left ── */
+.beta { font: 500 12px/1 var(--f-mono); color: var(--accent); background: var(--accent-soft); border-radius: 10px; padding: 4px 8px; margin: 0 8px 0 -8px; }
+.layout { max-width: 1280px; margin: 8px auto 0; display: flex; flex-wrap: wrap; gap: 24px; align-items: start; }
+#sheet { flex: 999 1 560px; min-width: 0; }
+.sheet { display: grid; gap: 16px; }
+.cell { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; align-items: start; }
+.cell > .gutter { padding-top: 14px; text-align: right; }
+.cell .name { font-size: var(--t-label); color: var(--accent); overflow-wrap: anywhere; }
+.cell > .body { background: var(--surface); border-radius: var(--r-panel); min-width: 0; }
+.cell.refused > .body { box-shadow: inset 3px 0 0 var(--warn); }
+.cell.derived > .body { background: none; box-shadow: 0 0 0 1px var(--line-faint); }
+.cellbar { display: flex; align-items: center; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line-faint); }
+.cellbar > .input { flex: 1 1 auto; min-width: 0; }
+.cellbar .of { color: var(--ink-2); font-size: var(--t-label); padding: 0 8px; }
+.cell .answer { padding: 16px; display: grid; gap: 16px; min-width: 0; }
+.cell .answer:empty { display: none; }
+.quiet.small { height: 28px; padding: 0 8px; font-size: 13px; }
+.quiet[aria-pressed="false"] { color: var(--ink-3); }
+.adder { display: flex; flex-wrap: wrap; gap: 8px; padding-left: 100px; }
+.panel { flex: 1 1 320px; min-width: 0; max-height: calc(100vh - 96px); overflow: auto; position: sticky; top: 72px;
+  background: var(--surface); border-radius: var(--r-panel); padding: 16px; }
+.panel-body { display: grid; gap: 12px; }
+.panel .card { display: grid; gap: 4px; text-align: left; padding: 12px; border: 0; border-radius: var(--r-control); background: var(--bg); color: var(--ink); cursor: pointer; font: inherit; }
+.panel .card .q { font: 400 var(--t-label)/1.4 var(--f-mono); }
+.graph-bar { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-height: 32px; }
+.graph-bar .at { font-size: 13px; color: var(--ink-3); }
+.graph .plane { touch-action: none; cursor: grab; }
+.graph .plane:active { cursor: grabbing; }
+.sliders { display: grid; gap: 8px; padding-top: 8px; }
+.slider { display: grid; grid-template-columns: 32px minmax(0, 1fr) 72px; gap: 12px; align-items: center; }
+.slider .name { font-style: italic; font-family: "KaTeX_Math", serif; font-size: var(--t-body); }
+.slider input { accent-color: var(--accent); width: 100%; }
+.slider .mono { text-align: right; font-size: var(--t-label); }
+@media (max-width: 560px) {
+  .cell { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .cell > .gutter { padding-top: 0; text-align: left; }
+  .adder { padding-left: 0; }
 }
-.win { background: var(--surface); border-radius: var(--r-panel); min-width: 0; display: grid; }
-.win > .head {
-  display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px 4px 4px 16px;
-  border-bottom: 1px solid var(--line);
-}
-.win > .head .title { font: 500 var(--t-label)/1 var(--f-ui); color: var(--ink-2); margin-right: auto; }
-.win > .body { padding: 16px; display: grid; gap: 16px; min-width: 0; }
-.win.wide { grid-column: 1 / -1; }
 
 .seg { display: inline-flex; background: var(--bg); border-radius: var(--r-control); padding: 2px; gap: 2px; }
 .seg button {
