@@ -113,14 +113,30 @@ TEST_CASE("every function of the table reads as the text a person writes", "[io]
     }
 
     // the table and the cases agree: every function and constant the table names has a case above
-    // (an equation and the editor's error have theirs below)
+    // (an equation, an inequality and the editor's error have theirs below)
     const auto covered = [&](std::string_view quoted) {
         return std::ranges::any_of(cases, [&](const auto& c) { return c.first.find(quoted) != std::string::npos; });
     };
     for (const bd::MathJsonHead& h : bd::mathjson_heads)
-        if (h.name != "Equal" && h.name != "Error") CHECK(covered("\"" + std::string(h.name) + "\""));
+        if (h.name != "Equal" && h.name != "Error" && !h.name.starts_with("Less") && !h.name.starts_with("Greater"))
+            CHECK(covered("\"" + std::string(h.name) + "\""));
     for (const bd::MathJsonConstant& c : bd::mathjson_constants)
         CHECK(covered("\"" + std::string(c.name) + "\""));
+}
+
+TEST_CASE("an inequality as MathLive writes it is the line a person writes", "[io][mathjson]") {
+    const auto row = [](const char* m) {
+        auto t = bd::mathjson_row_text(json(m));
+        return t ? *t : "refused: " + t.error().message;
+    };
+    // x^2 - 4 > 0, x^2 \le 2, 1 \ge x, and one on its unknown's interval
+    CHECK(row(R"(["Greater", ["Subtract", ["Power", "x", 2], 4], 0])") == "x^2 - 4 > 0");
+    CHECK(row(R"(["LessEqual", ["Power", "x", 2], 2])") == "x^2 <= 2");
+    CHECK(row(R"(["GreaterEqual", 1, "x"])") == "1 >= x");
+    CHECK(row(R"(["Delimiter", ["Sequence", ["Less", ["Sin", "x"], 0], ["Element", "x", ["Interval", 0, 10]]], {"str": ","}])") ==
+          "x: sin(x) < 0 on [0, 10]");
+    // the case it must fail: a relation inside an expression
+    CHECK(row(R"(["Add", 1, ["Less", "x", 2]])").starts_with("refused"));
 }
 
 TEST_CASE("an equation as MathLive writes it is the root a person writes", "[io][mathjson]") {
@@ -200,7 +216,7 @@ TEST_CASE("what the language cannot say is refused by name and place", "[io][mat
     has(refusal(R"(["Add", "p"])"), "'Add' takes 2 or more arguments, not 1");
     has(refusal(R"j({"num": "1.(3)"})j"), "'1.(3)' is not a number the language writes");
     has(refusal(R"({"sym": "2x"})"), "the symbol '2x' is not a name the language reads");
-    has(refusal(R"(["Equal", "p", 1])"), "an equation stands only as a whole formula");
+    has(refusal(R"(["Equal", "p", 1])"), "an equation or an inequality stands only as a whole formula");
     has(refusal(R"({"what": 1})"), "not {\"num\"}, {\"sym\"} or {\"fn\"}");
 
     // read as text, the same refusals the language has: a name not defined above

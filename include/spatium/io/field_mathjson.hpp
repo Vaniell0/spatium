@@ -51,7 +51,7 @@ struct MathJsonHead {
     std::string_view caption;
 };
 
-inline constexpr std::array<MathJsonHead, 26> mathjson_heads{{
+inline constexpr std::array<MathJsonHead, 30> mathjson_heads{{
     {"Add", 2, -1, "a + b + ..."},
     {"Subtract", 2, 2, "a - b"},
     {"Negate", 1, 1, "-a"},
@@ -77,6 +77,10 @@ inline constexpr std::array<MathJsonHead, 26> mathjson_heads{{
     {"Min", 2, 2, "min(a, b)"},
     {"Delimiter", 1, 1, "(a)"},
     {"Equal", 2, 2, "a = b, the equation of a root"},
+    {"Less", 2, 2, "a < b, an inequality"},
+    {"LessEqual", 2, 2, "a <= b, an inequality"},
+    {"Greater", 2, 2, "a > b, an inequality"},
+    {"GreaterEqual", 2, 2, "a >= b, an inequality"},
     {"Error", 0, -1, "what the editor could not read"},
 }};
 
@@ -214,7 +218,8 @@ inline Result<MathText> mathjson_text(const JsonValue& v, const std::string& pat
         return mathjson_error(path, what.empty() ? std::string("the editor could not read the formula")
                                                  : std::format("the editor could not read the formula ({})", what));
     }
-    if (head == "Equal") return mathjson_error(path, "an equation stands only as a whole formula, the equation of a root");
+    if (head == "Equal" || head.starts_with("Less") || head.starts_with("Greater"))
+        return mathjson_error(path, "an equation or an inequality stands only as a whole formula, of a root or of a set");
     if (n < known->min_args || (known->max_args >= 0 && n > known->max_args))
         return mathjson_error(path, known->min_args == known->max_args
                                         ? std::format("'{}' takes {} argument{}, not {}", head, known->min_args, known->min_args == 1 ? "" : "s", n)
@@ -301,6 +306,26 @@ inline Result<std::string> mathjson_text(const JsonValue& expression) {
     if (!t) return std::unexpected(t.error());
     return std::move(t->text);
 }
+
+namespace detail {
+
+// A MathJSON relation, ["Equal", a, b] or ["Less", a, b] and the rest, as the texts of its two
+// sides and the relation between them, as the language writes it.
+inline Result<std::array<std::string, 3>> mathjson_relation(const JsonValue& relation) {
+    static constexpr std::pair<std::string_view, std::string_view> heads[]{
+        {"Equal", "="}, {"Less", "<"}, {"LessEqual", "<="}, {"Greater", ">"}, {"GreaterEqual", ">="}};
+    const auto& a = relation.as_array();   // empty when it is not an array
+    const auto head = a.size() == 3 && a[0].is_string() ? std::ranges::find(heads, a[0].as_string(), &std::pair<std::string_view, std::string_view>::first)
+                                                        : std::end(heads);
+    if (head == std::end(heads)) return mathjson_error("", "a relation is [\"Equal\", a, b], or Less, LessEqual, Greater, GreaterEqual");
+    auto l = mathjson_text(a[1], "[1]");
+    if (!l) return std::unexpected(l.error());
+    auto r = mathjson_text(a[2], "[2]");
+    if (!r) return std::unexpected(r.error());
+    return std::array<std::string, 3>{std::move(l->text), std::string(head->second), std::move(r->text)};
+}
+
+} // namespace detail
 
 // A MathJSON equation, ["Equal", a, b], as the texts of its two sides.
 inline Result<std::pair<std::string, std::string>> mathjson_equation(const JsonValue& equation) {
@@ -398,13 +423,11 @@ inline Result<std::string> mathjson_row_text(const JsonValue& row) {
         list = &a[1], at = "[1]";
     if (list) {
         const auto& s = list->as_array();
-        if (s.size() != 3 || !mathjson_is(s[1], "Equal", 2) || !mathjson_is(s[2], "Element", 2))
-            return mathjson_error(at, "a row holds one statement, or an equation and its unknown's interval: x^2 = 2, x \\in [0, 2]");
-        auto eq = mathjson_equation(s[1]);
-        if (!eq) return mathjson_error(at + "[1]", eq.error().message);
+        auto eq = s.size() == 3 && mathjson_is(s[2], "Element", 2) ? mathjson_relation(s[1]) : mathjson_relation(JsonValue());
+        if (!eq) return mathjson_error(at, "a row holds one statement, or an equation or inequality and its unknown's interval: x^2 = 2, x \\in [0, 2]");
         auto e = mathjson_element(s[2], at + "[2]");
         if (!e) return std::unexpected(e.error());
-        return std::format("{}: {} = {} on {}", e->first, eq->first, eq->second, e->second);
+        return std::format("{}: {} {} {} on {}", e->first, (*eq)[0], (*eq)[1], (*eq)[2], e->second);
     }
     if (mathjson_is(row, "Integrate", 2)) {
         auto i = mathjson_integral(row, "");
@@ -424,6 +447,8 @@ inline Result<std::string> mathjson_row_text(const JsonValue& row) {
         if (!eq) return std::unexpected(eq.error());
         return eq->first + " = " + eq->second;
     }
+    // an inequality, the set where it holds
+    if (auto rel = mathjson_relation(row)) return (*rel)[0] + " " + (*rel)[1] + " " + (*rel)[2];
     return mathjson_text(row);
 }
 

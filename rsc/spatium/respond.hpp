@@ -128,6 +128,70 @@ inline spatium::io::JsonValue::ObjectType proved_json(const spatium::Proved& p) 
     return {{"digits", p.digits}, {"text", p.text}, {"exact", p.exact}};
 }
 
+namespace respond_detail {
+
+// An inequality's axis as the page draws it: each part's kind, its ends, and a root's value.
+inline Object axis_json(const Axis& a) {
+    static constexpr const char* kinds[]{"holds", "fails", "root", "break", "undecided"};
+    Array parts;
+    for (const auto& p : a.parts) {
+        Object o{{"kind", kinds[static_cast<int>(p.kind)]}, {"lo", p.lo}, {"hi", p.hi}};
+        if (!p.text.empty()) o.emplace_back("text", p.text);
+        parts.push_back(std::move(o));
+    }
+    return Object{{"relation", a.relation}, {"line", a.line}, {"parts", parts}};
+}
+
+// The set where an inequality holds, as LaTeX: its intervals joined, an end in a bracket where it
+// belongs to the set -- a root of a relation that holds at equality, or a bracket's end -- and in a
+// parenthesis where it does not; the empty set, or every real number.
+inline std::string set_latex(const Axis& a, const std::string& name) {
+    namespace bd = spatium::io::build;
+    const auto number = [](double v) { return bd::detail::number_text(v, bd::detail::TextStyle::Latex); };
+    const auto value = [](const std::string& t) {
+        const auto slash = t.find('/');
+        if (slash == std::string::npos) return t;
+        const bool minus = t.starts_with('-');
+        return std::string(minus ? "-" : "") + "\\frac{" + t.substr(minus, slash - minus) + "}{" + t.substr(slash + 1) + "}";
+    };
+    const bool at_equality = a.relation.size() == 2;
+    using K = Axis::Kind;
+    std::vector<std::string> spans;
+    std::string lo;
+    bool open = false, whole = true;
+    for (std::size_t i = 0; i < a.parts.size(); ++i) {
+        const auto& p = a.parts[i];
+        const K prev = i ? a.parts[i - 1].kind : K::Fails, next = i + 1 < a.parts.size() ? a.parts[i + 1].kind : K::Fails;
+        if (p.kind == K::Holds) {
+            if (open) continue;
+            open = true;
+            if (i == 0) lo = a.line ? "(-\\infty" : "[" + number(p.lo);
+            else if (prev == K::Root) lo = (at_equality ? "[" : "(") + value(a.parts[i - 1].text);
+            else if (prev == K::Break && !a.parts[i - 1].text.empty()) lo = "(" + value(a.parts[i - 1].text);
+            else lo = "(" + number(p.lo);
+            continue;
+        }
+        whole = false;
+        if (p.kind == K::Root && at_equality) {
+            if (open && next == K::Holds) continue;   // a root inside the set, as x^2 >= 0 has at 0
+            if (open) spans.push_back(lo + ", " + value(p.text) + "]"), open = false;
+            else if (next != K::Holds) spans.push_back("\\{" + value(p.text) + "\\}");
+            continue;
+        }
+        if (open) spans.push_back(lo + ", " + (!p.text.empty() ? value(p.text) : number(p.lo)) + ")"), open = false;
+    }
+    if (open) spans.push_back(lo + ", " + (a.line ? std::string("\\infty)") : number(a.parts.back().hi) + "]"));
+    const std::string x = bd::detail::name_latex(name) + " \\in ";
+    if (spans.empty()) return x + "\\varnothing";
+    if (whole && a.line) return x + "\\mathbb{R}";
+    std::string out;
+    for (const auto& sp : spans) out += (out.empty() ? "" : " \\cup ") + sp;
+    return x + out;
+}
+
+} // namespace respond_detail
+
+
 inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, std::size_t written = 2) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -185,6 +249,11 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             Array values;
             for (double v : e.values) values.push_back(v);
             out.emplace_back("values", values);
+            break;
+        }
+        case Route::Intervals: {
+            out.emplace_back("axis", axis_json(*e.axis));
+            out.emplace_back("set", set_latex(*e.axis, e.name));
             break;
         }
         case Route::Linear: {
@@ -289,8 +358,8 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
     };
     // an equation, or an expression
     const std::string_view equation = q;
-    // no '=' but at the end (2 + 2 =): an expression to evaluate, as a calculator does
-    if (const auto eq = equation.find('='); eq == std::string_view::npos || trimmed(equation.substr(eq + 1)).empty()) {
+    // no relation but '=' at the end (2 + 2 =): an expression to evaluate, as a calculator does
+    if (const auto eq = equation.find_first_of("=<>"); eq == std::string_view::npos || (equation[eq] == '=' && trimmed(equation.substr(eq + 1)).empty())) {
         const std::string_view expression = trimmed(equation.substr(0, eq));
         const auto f = bd::parse(expression, "", "");
         if (!f) return refuse("evaluate", f.error().message);
@@ -307,7 +376,8 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
     root.kind = bd::StatementKind::Root;
     auto lhs = bd::detail::written(r, equation);
     if (!lhs) return refuse("closed form", lhs.error().message);
-    if (!r.take('=')) return refuse("closed form", r.fail("'='").error().message);
+    root.relation = bd::detail::relation(r);
+    if (root.relation.empty()) return refuse("closed form", r.fail("'=', '<' or '>'").error().message);
     auto rhs = bd::detail::written(r, equation);
     if (!rhs) return refuse("closed form", rhs.error().message);
     // on [a, b]: the box its roots are sought on, as in a document
@@ -319,16 +389,19 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
     }
     // a new name on the left that the right does not read is a definition, f = a^2 + 1, not an equation in f
     const std::string left(trimmed(lhs->text));
-    if (const auto right_reads = rhs->field.free_symbols(); !left.empty() && !above.find(left) &&
+    if (const auto right_reads = rhs->field.free_symbols(); root.relation == "=" && !left.empty() && !above.find(left) &&
         lhs->field.free_symbols() == std::vector<std::string>{left} && !std::ranges::contains(right_reads, left)) {
         bd::Statement value;
         value.name = left, value.value = std::move(*rhs);
         return with_above({{std::move(value)}}, left, "evaluate");
     }
     const auto names = unknown(lhs->field - rhs->field);
-    if (names.size() != 1) return refuse("closed form", solve_closed_form(lhs->field - rhs->field, "").error().message);
+    const char* route = root.relation == "=" ? "closed form" : "interval method";
+    if (names.size() != 1 && root.relation != "=")
+        return refuse(route, std::format("an inequality is solved for one unknown; this one reads {}", names.size()));
+    if (names.size() != 1) return refuse(route, solve_closed_form(lhs->field - rhs->field, "").error().message);
     root.name = names.front(), root.value = std::move(*lhs), root.rhs = std::move(*rhs);
-    return with_above({{std::move(root)}}, names.front(), "closed form");
+    return with_above({{std::move(root)}}, names.front(), route);
 }
 
 // What a page draws beside an answer, as the request `plot_request` takes: a value of one
@@ -533,6 +606,22 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             guarantee = c.exact ? "exact" : proved_all && !e.values.empty() ? "proved" : "computed";
             label = vieta ? "Closed form, checked by Vieta's formulas" : "Closed form";
             if (complete) label += e.values.empty() ? "; no real root" : "; no other real root";
+            break;
+        }
+        case Route::Intervals: {
+            const Axis& a = *e.axis;
+            outcome = "set", result = set_latex(a, e.name);
+            const auto undecided = std::ranges::count_if(a.parts, [](const Axis::Part& p) { return p.kind == Axis::Kind::Undecided; });
+            guarantee = "proved", ok = undecided == 0;
+            label = undecided == 0 ? std::string("Proved by the interval method")
+                                   : std::format("Proved by the interval method, except on {} piece{} undecided", undecided, undecided == 1 ? "" : "s");
+            section("Axis", true, "axis", axis_json(a));
+            Array facts;
+            for (const auto& p : a.parts)
+                if (p.kind == Axis::Kind::Root) facts.push_back(fact("End, a root", std::format("{} in [{}, {}]", p.text, text_of(p.lo), text_of(p.hi)), false, true));
+                else if (p.kind == Axis::Kind::Break) facts.push_back(fact("Break, no value", std::format("in [{}, {}]", text_of(p.lo), text_of(p.hi))));
+                else if (p.kind == Axis::Kind::Undecided) facts.push_back(fact("Undecided", std::format("[{}, {}]", text_of(p.lo), text_of(p.hi)), false, false));
+            if (!facts.empty()) section("Ends", false, "facts", facts);
             break;
         }
         case Route::Linear: {
