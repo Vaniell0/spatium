@@ -7,6 +7,8 @@
 // text that is neither kind of question is refused, with the library's own reason.
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <regex>
 #include <rsc/spatium/respond.hpp>
 
 #include <cmath>
@@ -215,7 +217,7 @@ TEST_CASE("respond: rows are computed in the arithmetic their engine names", "[r
     const auto by_document = rsc::evaluate_request(R"({"document": "x: x^2 - 2 = 0", "name": "x", "engine": {"arithmetic": "rational"}})");
     CHECK(at(at(exact, "sheet"), "result").as_string() == "x_{1,2} = \\pm \\sqrt{2}");
     CHECK(at(exact, "steps").dump() == at(by_document, "steps").dump());
-    CHECK(at(at(in_double, "sheet"), "result").as_string().find("1.414213562373095") != std::string::npos);
+    CHECK(at(at(in_double, "sheet"), "result").as_string().find("1.4142135623731") != std::string::npos);
     // the case it must fail: an arithmetic the engine does not have is refused, naming those it has
     const auto unknown = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "quaternion"}})");
     CHECK(at(unknown, "refused").as_string().starts_with("the engine has no arithmetic 'quaternion'; it has double"));
@@ -340,4 +342,27 @@ TEST_CASE("respond: rows above the last are rows of the page, an expression amon
     CHECK(at(rsc::respond("1 +\n2 + 2"), "refused").as_string().starts_with("line 1: parse: at column 4"));
     CHECK(at(rsc::respond("p in [0.5, 4]\nx: x^2 - q = 0 on [0, 10]"), "refused").as_string() ==
           "line 2: x reads 'q', which no line above defines");
+}
+
+TEST_CASE("respond: a number is shown with the digits it holds, no zeros after them", "[rsc][respond][numbers]") {
+    // what a page showed: 0.500000000000000 \\cdot 2 \\approx 1.0000000000000, -1.4142135623730951, -0
+    const std::regex trailing_zeros(R"(\d\.\d*?0{2,}(?!\d))"), long_run(R"(\d{16,})"), minus_zero(R"((^|[^\d.])-0(?![\d.]))");
+    for (const char* q : {"sin(pi/6)*2", "sqrt(2)*sqrt(2)", "x^2 - 2 = 0", "2^x = 8", "x^2 - 4 > 0", "x^2 + y^2 = 4\nx - y = 1",
+                          "2(3 + 4)^2 - 1/4", "0.1 + 0.2", "x: sin(x) = 0.5 on [0, 10]"}) {
+        INFO(q);
+        const auto r = rsc::respond(q);
+        std::vector<std::string> shown{at(r, "sheet").string_or("result", "")};
+        for (const auto& sec : at(at(r, "sheet"), "sections").as_array())
+            if (const auto* steps = sec.find("steps"))
+                for (const auto& st : steps->as_array()) shown.push_back(st.string_or("latex", ""));
+        for (const auto& t : shown) {
+            INFO(t);
+            CHECK_FALSE(std::regex_search(t, trailing_zeros));
+            CHECK_FALSE(std::regex_search(t, long_run));
+            CHECK_FALSE(std::regex_search(t, minus_zero));
+        }
+    }
+    // the second route: the digits a step shows are those of the value, 0.5 * 2 is about 1
+    const auto steps = at(rsc::respond("sin(pi/6)*2"), "steps").as_array();
+    CHECK(steps.back().string_or("latex", "").ends_with("\\approx 1"));
 }

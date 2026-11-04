@@ -66,7 +66,10 @@ inline std::string number_text(double x, TextStyle style) {
     if (style == TextStyle::Plain) return std::format("{}", x);
     if (std::isnan(x)) return "\\mathrm{NaN}";
     if (std::isinf(x)) return x > 0 ? "\\infty" : "-\\infty";
-    std::string s = std::format("{}", x);
+    // on a page a double shows at most 15 digits, the ones it holds of a decimal it was given or
+    // computed: 1.4142135623730951 as 1.4142135623731, 0.30000000000000004 as 0.3; -0 as 0
+    if (x == 0) return "0";
+    std::string s = std::format("{:.15g}", x);
     const auto e = s.find('e');
     if (e == std::string::npos) return s;
     // 1.8e-05 is 1.8 * 10^{-5}: no '+', no leading zeros, and no mantissa of exactly 1

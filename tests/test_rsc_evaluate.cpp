@@ -429,7 +429,7 @@ TEST_CASE("evaluate: every root of an equation on its box, each proved alone, fr
     REQUIRE(x.enclosed);
     CHECK(x.enclosed->complete());
     REQUIRE(x.enclosed->roots.size() == 1);
-    CHECK(spatium::proved(x.enclosed->roots.front()).text == "3.000000000000000");
+    CHECK(spatium::proved(x.enclosed->roots.front()).text == "3");
     CHECK(x.enclosed->box.hi == std::numeric_limits<double>::max());
     // four on the bracket, against their closed forms pi/6 + 2 pi k and 5 pi/6 + 2 pi k
     const auto w = rsc::evaluate(d, "w");

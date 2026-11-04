@@ -129,7 +129,7 @@ TEST_CASE("scene symbols: the scene as LaTeX says what was asked and what it cam
         "S_{{0}} &= \\operatorname{{torus}}\\left(2, 0.5\\right) \\\\\n"
         "S_{{1}} &= \\operatorname{{offset}}\\left(S_{{0}}, h\\right)\n"
         "\\end{{aligned}}",
-        s.h.value);
+        std::format("{:.15g}", s.h.value));   // a page shows 15 digits of a double
     CHECK(*tex == want);
     // the nodes the root does not reach are not in it
     s.trace.sphere(4.0);
