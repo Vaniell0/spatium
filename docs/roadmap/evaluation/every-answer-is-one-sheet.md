@@ -1,7 +1,7 @@
 ---
 date: 2026-11-04
 title: every answer is one sheet, and the gallery is read by how strongly its answers hold
-files: [rsc/spatium/respond.hpp, rsc/spatium/evaluate.hpp, web/src/view/answer.ts, web/src/view/dom.ts, web/src/page.ts, site/style.css, examples/gallery.cpp, site/gallery/gallery.json, site/data/reference.json, site/wasm/check.mjs, tests/test_rsc_respond.cpp, tests/test_rsc_evaluate.cpp]
+files: [include/spatium/io/steps_text.hpp, web/src/view/cells.ts, rsc/spatium/respond.hpp, rsc/spatium/evaluate.hpp, web/src/view/answer.ts, web/src/view/dom.ts, web/src/page.ts, site/style.css, examples/gallery.cpp, site/gallery/gallery.json, site/data/reference.json, site/wasm/check.mjs, tests/test_rsc_respond.cpp, tests/test_rsc_evaluate.cpp]
 open:
   - a route's own fields stay in the answer beside the sheet (the graph and the checks read them); they go when routes are a table
   - the closed form's steps are still written by hand (`to_steps`); the proof of roots shows its roots, not its cuts and Newton steps
@@ -16,3 +16,5 @@ The page draws a sheet and nothing else (`web/src/view/answer.ts`, 197 lines to 
 The gallery is grouped by guarantee, strongest first, under titles the gallery program writes: exact (the arithmetic card, the exercise from a page of problems), every root proved and no other (2^x = 8, sin x = 0.5 on [0, 10]), proved digits (2x^2 − 3x − 5 = 0), computed (the complex pair, Vieta's formulas checked), certified on a grid (the six syntheses), not answered. A card keeps its routes and what they gave, not their counts.
 
 The pairs: ten questions, one of each kind, give the outcome, guarantee and label measured, with their sections in the one order and each section holding something (`test_rsc_respond`); WebAssembly and host agree on all 51 questions, sheets included, the cost column of a table compared as a candidate's cost is, not at all, since a route's count of evaluations differs with the libm's last digits.
+
+The page was drawn by headless Chromium and driven over its DevTools protocol, which found what the type checks could not. A long question's result pushed its answer off a phone's screen, since it repeated the expression: the result is now the value alone, or a name and its value (the exercise's sheet reads 12). The on-screen keyboard's own keys -- delete, the arrows, enter, shift -- were blank and looked disabled: one style rule for the page's icons, `svg { fill: none }`, erased every glyph MathLive draws by fill. It is the icons' rule now, and the keyboard is a panel at the bottom edge with room made above it, where before a window below the row covered the answer. Typed keys reach the formula (7, +, 8, an arrow, a delete, read back from the field). On a phone the bar is two rows, the name and its tools, then the page's switch and its panels; a row written with no name no longer shows `answer =` beside it, and a power made of a chain of products is labelled power.

@@ -280,17 +280,18 @@ function setKeys(open: boolean) {
     if (!activeField || !document.body.contains(activeField)) activeField = document.querySelector("math-field");
     activeField?.focus();
     kb.show();
-    placeKeys();
   } else kb.hide();
+  placeKeys();
 }
 
+// the panel stays at the bottom edge; the page gets room below its last row, and the row being
+// written is scrolled above the panel when the panel would cover it
 function placeKeys() {
   const keys = $("#keys")!;
+  document.body.style.paddingBottom = keys.hidden ? "" : `${keys.offsetHeight + 32}px`;
   if (keys.hidden || !activeField) return;
-  const r = activeField.getBoundingClientRect(), h = keys.offsetHeight, w = keys.offsetWidth;
-  const below = r.bottom + 8 + h <= innerHeight;
-  keys.style.top = `${below ? r.bottom + 8 : Math.max(8, r.top - h - 8)}px`;
-  keys.style.left = `${Math.max(16, Math.min(r.left, innerWidth - w - 16))}px`;
+  const r = activeField.getBoundingClientRect(), top = keys.getBoundingClientRect().top;
+  if (r.bottom + 16 > top) scrollBy({ top: r.bottom + 16 - top, behavior: "smooth" });
 }
 
 // ── settings of the page ────────────────────────────────────────────────
@@ -325,7 +326,6 @@ function wire() {
   $("#close-keys")!.addEventListener("click", () => setKeys(false));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setKeys(false); complete.close(); } });
   addEventListener("resize", placeKeys);
-  addEventListener("scroll", placeKeys, { passive: true });
   const dialog = $<HTMLDialogElement>("#settings")!;
   $("#open-settings")!.addEventListener("click", () => { showCoreState(); dialog.showModal(); });
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });

@@ -65,7 +65,8 @@ export class Sheet {
     s.answer = answer;
     s.name = cell.kind === "math" ? nameOf(answer ?? undefined) : null;
     const name = s.box.querySelector(".name")!;
-    name.textContent = cell.kind === "graph" ? "graph" : s.name ? `${s.name} =` : "";
+    // a row written with no name is the document's `answer`, and shows none
+    name.textContent = cell.kind === "graph" ? "graph" : s.name && s.name !== "answer" ? `${s.name} =` : "";
     const out = s.box.querySelector<HTMLElement>(".answer")!;
     if (!answer) { out.replaceChildren(); return; }
     if (cell.kind === "graph") {

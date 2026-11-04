@@ -444,6 +444,17 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             result = rows->as_array().back().as_string();
     } else if (e.taken) switch (*route) {
         case Route::Evaluate: {
+            // the value alone, or the name and its value: the question stands above it, and a long
+            // one would push the answer off a phone's screen
+            const Candidate& c = e.candidates[*e.taken];
+            std::string value = number_latex(c, e.values.front());
+            if (e.exact && c.arithmetic == Arithmetic::Double) {
+                const auto d = e.exact->decimal();
+                value = e.exact->den() == 1 ? *d : bd::detail::fraction_latex(*e.exact) + (d ? " = " + *d : "");
+            } else if (e.proved && !e.proved->exact && e.proved->digits > 0) {
+                value = "\\approx " + e.proved->text;
+            }
+            result = (e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + (value.starts_with("\\approx") ? " " : " = ")) + value;
             if (e.proved && e.proved->exact) guarantee = "exact", label = "Exact";
             else if (e.proved && e.proved->digits > 0)
                 guarantee = "proved", label = std::format("Proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
@@ -496,7 +507,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                 complete = agree && e.enclosed->complete();
                 facts.push_back(fact("Every real root, proved", roots.empty() ? std::string("none") : roots, false, agree));
                 for (const auto& u : e.enclosed->undecided)
-                    facts.push_back(fact("Undecided", std::format("[{}, {}]", text_of(u.lo), text_of(u.hi)), false, false));
+                    facts.push_back(fact("Undecided", std::format("[{:.4g}, {:.4g}]", u.lo, u.hi), false, false));
             }
             const bool proved_all = agree;
             section("Check", true, "facts", facts);
@@ -523,7 +534,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             section("Roots", true, "table", Object{{"columns", Array{"root", "digits", "interval"}}, {"rows", rows}});
             const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
             Array facts{fact("Searched", line ? std::string("every double") : std::format("[{}, {}]", text_of(f.box.lo), text_of(f.box.hi)))};
-            for (const auto& u : f.undecided) facts.push_back(fact("Undecided", std::format("[{}, {}]", text_of(u.lo), text_of(u.hi)), false, false));
+            for (const auto& u : f.undecided) facts.push_back(fact("Undecided", std::format("[{:.4g}, {:.4g}]", u.lo, u.hi), false, false));
             section("Properties", false, "facts", facts);
             break;
         }

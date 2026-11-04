@@ -229,7 +229,9 @@ inline Result<std::vector<Step>> evaluation_steps(const Field<double>& whole) {
         if (is_leaf(n.op) || continued[i]) continue;
         const std::string on = spell_op(n, value, "u", "v", TextStyle::Latex).text;
         if (on == value[i].text) continue;   // a fraction as written, 1/4, is its own value
-        out.push_back({step_label(n.op), std::format("{} {} {}", on, approximate[i] ? "\\approx" : "=", value[i].text)});
+        // a chain of products of one base is a power, and named so
+        const std::string label = written[i].power > 1 ? "power" : step_label(n.op);
+        out.push_back({label, std::format("{} {} {}", on, approximate[i] ? "\\approx" : "=", value[i].text)});
     }
     // the answer, a fraction whose decimal ends, in that decimal too: \frac{391}{4} = 97.75
     if (const Rational& r = fraction[count - 1]; !out.empty() && fractions && r.ok() && r.den() != 1)

@@ -43,7 +43,8 @@ button { font: inherit; color: inherit; }
 .label { font-size: var(--t-label); color: var(--ink-3); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* the page's own icons; MathLive's keycaps draw their glyphs by fill, which a rule for every svg would erase */
+.icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── the bar ───────────────────────────────────────────────── */
 .bar {
@@ -258,8 +259,10 @@ details.sec > summary:focus-visible { outline: 2px solid var(--accent); outline-
 .card .kind { margin-left: auto; }
 
 /* ── the keyboard: a window near the line being written ────── */
+/* the keyboard is a panel at the bottom edge, over nothing it needs: the page makes room above it */
 .keys {
   position: fixed; z-index: 20; width: min(720px, calc(100vw - 32px));
+  left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: var(--raised); border-radius: var(--r-panel); box-shadow: 0 0 0 1px var(--line), 0 16px 40px rgb(0 0 0 / .18);
   display: grid;
 }
@@ -299,10 +302,12 @@ body { --keyboard-background: var(--raised); --keycap-background: var(--surface)
 @media (max-width: 560px) {
   .work { gap: 16px; }
   .win > .body { padding: 12px; }
-  .bar { flex-wrap: wrap; row-gap: 0; }
-  .add { order: 5; flex-basis: 100%; margin: -8px 0 8px -12px; }
+  /* two rows: the name and the tools, then the page's switch and its panels */
+  .bar { flex-wrap: wrap; row-gap: 8px; }
+  .preset { order: 5; }
+  .add { order: 6; flex: 1 1 auto; margin: 0 0 0 8px; }
   .mark { margin-right: auto; }
   .entry { grid-template-columns: minmax(0, 1fr); }
-  .keys { left: 8px !important; right: 8px; bottom: 8px !important; top: auto !important; width: auto; }
+  .keys { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: auto; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
