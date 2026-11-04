@@ -72,8 +72,8 @@ interface Reference {
   constants: { name: string; caption: string; example?: string }[];
   questions: { form: string; caption: string; example?: string; answer?: { question_latex?: string[] } }[];
 }
-interface Card { id: string; question?: string; question_latex?: string[]; typed?: boolean; route?: string; refused?: string }
-const data: { gallery: Card[]; reference: Reference | null } = { gallery: [], reference: null };
+interface Card { id: string; question?: string; question_latex?: string[]; typed?: boolean; route?: string; refused?: string; sheet?: { guarantee: string } }
+const data: { gallery: Card[]; groups: { guarantee: string; title: string }[]; reference: Reference | null } = { gallery: [], groups: [], reference: null };
 
 async function loadData() {
   const [g, r] = await Promise.all([
@@ -81,6 +81,7 @@ async function loadData() {
     fetch("data/reference.json").then((x) => x.json()).catch(() => null),
   ]);
   data.gallery = g.cards;
+  data.groups = g.groups ?? [];
   data.reference = r;
 }
 
@@ -188,11 +189,16 @@ function panel(which: "ref" | "gallery" | null) {
   box.hidden = false;
   const body = el("div", { class: "panel-body" });
   if (which === "gallery") {
-    for (const c of data.gallery) {
-      if (!c.question || c.typed === false) continue;
-      const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
-      body.append(el("button", { type: "button", class: "card", onclick: () => addRows(c.question_latex, c.question!) },
-        shownAs(c.question_latex, c.question, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
+    // by how strongly each answer holds, in the gallery's own order of groups
+    for (const g of data.groups) {
+      const cards = data.gallery.filter((c) => c.question && c.typed !== false && c.sheet?.guarantee === g.guarantee);
+      if (!cards.length) continue;
+      body.append(el("h3", { text: g.title }));
+      for (const c of cards) {
+        const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
+        body.append(el("button", { type: "button", class: "card", onclick: () => addRows(c.question_latex, c.question!) },
+          shownAs(c.question_latex, c.question!, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
+      }
     }
   } else {
     const r = data.reference;
@@ -274,17 +280,18 @@ function setKeys(open: boolean) {
     if (!activeField || !document.body.contains(activeField)) activeField = document.querySelector("math-field");
     activeField?.focus();
     kb.show();
-    placeKeys();
   } else kb.hide();
+  placeKeys();
 }
 
+// the panel stays at the bottom edge; the page gets room below its last row, and the row being
+// written is scrolled above the panel when the panel would cover it
 function placeKeys() {
   const keys = $("#keys")!;
+  document.body.style.paddingBottom = keys.hidden ? "" : `${keys.offsetHeight + 32}px`;
   if (keys.hidden || !activeField) return;
-  const r = activeField.getBoundingClientRect(), h = keys.offsetHeight, w = keys.offsetWidth;
-  const below = r.bottom + 8 + h <= innerHeight;
-  keys.style.top = `${below ? r.bottom + 8 : Math.max(8, r.top - h - 8)}px`;
-  keys.style.left = `${Math.max(16, Math.min(r.left, innerWidth - w - 16))}px`;
+  const r = activeField.getBoundingClientRect(), top = keys.getBoundingClientRect().top;
+  if (r.bottom + 16 > top) scrollBy({ top: r.bottom + 16 - top, behavior: "smooth" });
 }
 
 // ── settings of the page ────────────────────────────────────────────────
@@ -319,7 +326,6 @@ function wire() {
   $("#close-keys")!.addEventListener("click", () => setKeys(false));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { setKeys(false); complete.close(); } });
   addEventListener("resize", placeKeys);
-  addEventListener("scroll", placeKeys, { passive: true });
   const dialog = $<HTMLDialogElement>("#settings")!;
   $("#open-settings")!.addEventListener("click", () => { showCoreState(); dialog.showModal(); });
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });

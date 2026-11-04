@@ -42,16 +42,3 @@ export function number(v: unknown, digits = 12): string {
   return String(Number(v.toPrecision(digits)));
 }
 
-const SUP: Record<string, string> = { "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" };
-
-// a bound such as 1e-15 written as 10⁻¹⁵
-export function decadeText(e: number): string {
-  if (!(e > 0)) return "0";
-  return "10" + [...String(Math.round(Math.log10(e)))].map((d) => SUP[d] ?? d).join("");
-}
-
-// the same as a number with a raised exponent, for a font with no superscript digits
-export function decade(e: number): HTMLElement {
-  if (!(e > 0)) return el("span", { class: "mono", text: "exact, to the last digit" });
-  return el("span", { class: "mono" }, "10", el("sup", { text: String(Math.round(Math.log10(e))) }));
-}

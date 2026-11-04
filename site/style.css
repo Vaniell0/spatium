@@ -43,7 +43,8 @@ button { font: inherit; color: inherit; }
 .label { font-size: var(--t-label); color: var(--ink-3); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* the page's own icons; MathLive's keycaps draw their glyphs by fill, which a rule for every svg would erase */
+.icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── the bar ───────────────────────────────────────────────── */
 .bar {
@@ -200,6 +201,22 @@ details { font-size: var(--t-label); color: var(--ink-2); }
 details summary { cursor: pointer; }
 .coeffs { margin: 8px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px 16px; font-family: var(--f-mono); }
 .coeffs span { color: var(--ink-3); margin-right: 8px; }
+/* the answer sheet: sections in the core's order, each opened or closed as the core says */
+details.sec { border-top: 1px solid var(--line-faint); }
+details.sec > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  font: 500 var(--t-label)/1.4 var(--f-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: "▸"; color: var(--ink-3); display: inline-block; transition: transform .15s; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+details.sec > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sec-body { display: grid; gap: 8px; padding-bottom: 16px; min-width: 0; }
+.sec-body .note { margin: 0; max-width: 64ch; font-size: var(--t-label); color: var(--ink-3); }
+.facts .no { color: var(--warn); }
+.sheet-table { border-collapse: collapse; font: 400 var(--t-label)/1.4 var(--f-mono); font-variant-numeric: tabular-nums; }
+.sheet-table th { text-align: left; font: 500 var(--t-label) var(--f-ui); color: var(--ink-3); padding: 4px 16px 8px 0; border-bottom: 1px solid var(--line-faint); }
+.sheet-table td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-faint); white-space: nowrap; }
+.sec-body .scroll { overflow-x: auto; max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { details.sec > summary::before { transition: none; } }
 .more { font-size: var(--t-label); }
 .more summary { color: var(--ink-3); }
 .more p { margin-top: 8px; max-width: 64ch; }
@@ -242,8 +259,10 @@ details summary { cursor: pointer; }
 .card .kind { margin-left: auto; }
 
 /* ── the keyboard: a window near the line being written ────── */
+/* the keyboard is a panel at the bottom edge, over nothing it needs: the page makes room above it */
 .keys {
   position: fixed; z-index: 20; width: min(720px, calc(100vw - 32px));
+  left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: var(--raised); border-radius: var(--r-panel); box-shadow: 0 0 0 1px var(--line), 0 16px 40px rgb(0 0 0 / .18);
   display: grid;
 }
@@ -283,10 +302,12 @@ body { --keyboard-background: var(--raised); --keycap-background: var(--surface)
 @media (max-width: 560px) {
   .work { gap: 16px; }
   .win > .body { padding: 12px; }
-  .bar { flex-wrap: wrap; row-gap: 0; }
-  .add { order: 5; flex-basis: 100%; margin: -8px 0 8px -12px; }
+  /* two rows: the name and the tools, then the page's switch and its panels */
+  .bar { flex-wrap: wrap; row-gap: 8px; }
+  .preset { order: 5; }
+  .add { order: 6; flex: 1 1 auto; margin: 0 0 0 8px; }
   .mark { margin-right: auto; }
   .entry { grid-template-columns: minmax(0, 1fr); }
-  .keys { left: 8px !important; right: 8px; bottom: 8px !important; top: auto !important; width: auto; }
+  .keys { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: auto; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }

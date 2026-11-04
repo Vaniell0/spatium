@@ -205,7 +205,7 @@ TEST_CASE("evaluate: what is not asked well is refused, by name", "[rsc][evaluat
 TEST_CASE("evaluate: the calculator's shorthand is the document line it stands for", "[rsc][evaluate]") {
     // the shorthand adds what it was read as and the graph a page draws of it
     const auto drop = [](JsonValue v) {
-        constexpr std::array<std::string_view, 4> added{"question", "document", "question_latex", "graph"};
+        constexpr std::array<std::string_view, 5> added{"question", "document", "question_latex", "graph", "sheet"};
         JsonValue::ObjectType kept;
         for (const auto& [k, x] : v.as_object())
             if (!std::ranges::contains(added, k)) kept.emplace_back(k, x);

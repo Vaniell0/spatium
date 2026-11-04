@@ -57,6 +57,31 @@ JsonValue card(std::string id, std::string question) {
             card.emplace_back(key, routes);
             continue;
         }
+        // the sheet's table of routes keeps its routes and what they gave, not the counts
+        if (key == "sheet") {
+            Object sheet;
+            for (const auto& [k, v] : value.as_object()) {
+                if (k != "sections") { sheet.emplace_back(k, v); continue; }
+                Array sections;
+                for (const auto& sec : v.as_array()) {
+                    Object kept;
+                    for (const auto& [sk, sv] : sec.as_object()) {
+                        const JsonValue* columns = sv.is_object() ? sv.find("columns") : nullptr;
+                        if (sk != "table" || !columns || columns->as_array().size() != 3 || columns->as_array()[1].as_string() != "cost") {
+                            kept.emplace_back(sk, sv);
+                            continue;
+                        }
+                        Array rows;
+                        for (const auto& r : sv.find("rows")->as_array()) rows.push_back(Array{r.as_array()[0], r.as_array()[2]});
+                        kept.emplace_back(sk, Object{{"columns", Array{"route", "gave"}}, {"rows", rows}});
+                    }
+                    sections.push_back(kept);
+                }
+                sheet.emplace_back(k, sections);
+            }
+            card.emplace_back(key, sheet);
+            continue;
+        }
         if (key != "answer") {
             card.emplace_back(key, value);
             continue;
@@ -138,7 +163,16 @@ std::string gallery() {
         cards.push_back(Object{{"id", "scene"}, {"route", "scene"}, {"latex", *bd::to_latex(scene.trace, scene.root())}});
     }
     // one card per line, so a change to one card is a change to one line
-    std::string out = "{\"cards\": [\n";
+    // the gallery is read by how strongly its answers hold, strongest first: a card's group is its
+    // sheet's guarantee, and the page shows the groups in this order under these titles
+    const Array groups{Object{{"guarantee", "exact"}, {"title", "Exact"}},
+                       Object{{"guarantee", "complete"}, {"title", "Every root proved, and no other"}},
+                       Object{{"guarantee", "proved"}, {"title", "Proved to their digits"}},
+                       Object{{"guarantee", "sampled"}, {"title", "Certified on a grid"}},
+                       Object{{"guarantee", "estimated"}, {"title", "Error estimated"}},
+                       Object{{"guarantee", "computed"}, {"title", "Computed"}},
+                       Object{{"guarantee", "none"}, {"title", "Not answered, and why"}}};
+    std::string out = "{\"groups\": " + JsonValue(groups).dump() + ",\n\"cards\": [\n";
     for (std::size_t i = 0; i < cards.size(); ++i) out += "  " + cards[i].dump() + (i + 1 < cards.size() ? ",\n" : "\n");
     return out + "]}\n";
 }
