@@ -3,6 +3,10 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/algebra/polynomial.hpp>
+#  include <spatium/core/interval.hpp>
+#  include <spatium/core/rational.hpp>
+#  include <spatium/io/field_parse.hpp>
+#  include <spatium/io/field_pod.hpp>
 #  include <spatium/io/field_text.hpp>
 #  include <cmath>
 #  include <format>
@@ -121,6 +125,116 @@ inline Step to_step(const VietaCheck<double>& v, std::string_view unknown = "x")
                                     detail::complex_latex(v.product), detail::num(v.want_product));
     if (!holds) latex += std::format("\\quad\\text{{(relative error {})}}", detail::num(v.error));
     return {holds ? "check: Vieta's formulas hold" : "check: Vieta's formulas do not hold", latex};
+}
+
+// ── A computation as its steps ────────────────────────────────────
+//
+// What a value was computed through, a step an operation: the operation written on the values of
+// what it reads, and the value it gave -- 3 + 4 = 7, then 7^{2} = 49 -- read off the lowered
+// program as it ran, never worked out again from the answer. The values are fractions where every
+// operation is one on fractions (`Rational`), and otherwise the digits an interval of the same
+// program proves (core/interval.hpp), written with \approx. A leaf -- a number, a name -- is no
+// step. The label is the operation's, from the language's own table (`functions`), the one the
+// reference shows.
+
+namespace detail {
+
+inline std::string fraction_latex(const Rational& r) {
+    if (r.den() == 1) return std::to_string(r.num());
+    return std::format("{}\\frac{{{}}}{{{}}}", r.num() < 0 ? "-" : "", r.num() < 0 ? -r.num() : r.num(), r.den());
+}
+
+// what an operation is called: a function by the head of its caption in the language's table
+inline std::string step_label(Op o) {
+    switch (o) {
+        case Op::Add: return "sum";
+        case Op::Sub: return "difference";
+        case Op::Mul: return "product";
+        case Op::Div: return "quotient";
+        case Op::Pow: return "power";
+        default: break;
+    }
+    std::string name = op_name(o);
+    for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const auto& f : functions)
+        if (f.name == name) return std::string(f.caption.substr(0, f.caption.find(',')));
+    return name;
+}
+
+inline bool is_leaf(Op o) {
+    switch (o) {
+        case Op::Const: case Op::U: case Op::V: case Op::Symbol: case Op::Coord: case Op::Origin: case Op::Point:
+        case Op::Id: case Op::Hash: case Op::Opaque:
+            return true;
+        default:
+            return false;
+    }
+}
+
+} // namespace detail
+
+inline Result<std::vector<Step>> evaluation_steps(const Field<double>& whole) {
+    using namespace detail;
+    using I = Interval<double>;
+    const Field<double> f = whole.reachable_from_root();
+    const auto pod = lower(f);
+    if (!pod) return std::unexpected(pod.error());
+    if (const auto op = beyond<I>(*pod))
+        return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("an interval has no {} in it", op_name(*op))));
+    const auto count = static_cast<std::uint32_t>(pod->ops.size());
+    // each operation as written, and its value: a fraction where it is one, else proved digits
+    std::vector<Spelled> written(count), value(count);
+    for (std::uint32_t i = 0; i < count; ++i) written[i] = spell_op(f.op(i), written, "u", "v", TextStyle::Latex);
+    std::vector<Rational> fraction(count);
+    const bool fractions = !beyond<Rational>(*pod);
+    if (fractions) {
+        const auto in = converted<Rational>(*pod);
+        interpret(in.ops.data(), count, in.tables.data(), in.points.data(), fraction.data(),
+                  FieldInputs<Rational>{Rational(0), Rational(0)});
+    }
+    const auto in = converted<I>(*pod);
+    std::vector<I> enclosed(count);
+    interpret(in.ops.data(), count, in.tables.data(), in.points.data(), enclosed.data(), FieldInputs<I>{I{0}, I{0}});
+    std::vector<bool> approximate(count, false);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        if (is_leaf(f.op(i).op)) {
+            value[i] = written[i];   // a number or a name as it was written
+            continue;
+        }
+        if (fractions && fraction[i].ok()) {
+            const Rational& r = fraction[i];
+            value[i] = Spelled{fraction_latex(r), r.num() < 0 ? Binding::Sum : Binding::Atom, r.num() == 1 && r.den() == 1,
+                               r.num() < 0, r.den() != 1};
+        } else {
+            // where no digit is proved, how far from zero the value may be: 10^20 + 1 - 10^20 is
+            // 1, which a double's interval holds only within 2^14 of zero
+            const Proved p = proved(enclosed[i]);
+            const std::string text = p.digits > 0 ? p.text
+                                                  : std::format("0 \\pm 10^{{{}}}", static_cast<int>(std::ceil(std::log10(p.bound))));
+            const bool negative = text.front() == '-';
+            value[i] = Spelled{text, negative ? Binding::Sum : Binding::Atom, p.exact && text == "1", negative, false};
+            approximate[i] = !p.exact;
+        }
+        // a power written as a chain of products keeps its base, so the chain is one step
+        value[i].base = written[i].base, value[i].power = written[i].power;
+    }
+    // a link of such a chain that the next one continues is no step of its own
+    std::vector<bool> continued(count, false);
+    for (std::uint32_t k = 0; k < count; ++k)
+        if (const auto& n = f.op(k); n.op == Op::Mul && written[k].power > 1 && written[n.a].base == written[k].base)
+            continued[n.a] = true;
+    std::vector<Step> out;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto& n = f.op(i);
+        if (is_leaf(n.op) || continued[i]) continue;
+        const std::string on = spell_op(n, value, "u", "v", TextStyle::Latex).text;
+        if (on == value[i].text) continue;   // a fraction as written, 1/4, is its own value
+        out.push_back({step_label(n.op), std::format("{} {} {}", on, approximate[i] ? "\\approx" : "=", value[i].text)});
+    }
+    // the answer, a fraction whose decimal ends, in that decimal too: \frac{391}{4} = 97.75
+    if (const Rational& r = fraction[count - 1]; !out.empty() && fractions && r.ok() && r.den() != 1)
+        if (const auto d = r.decimal()) out.back().latex += " = " + *d;
+    return out;
 }
 
 } // namespace spatium::io::build

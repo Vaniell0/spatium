@@ -68,6 +68,17 @@ export function finalStep(steps: Step[]): Step {
   return solving[solving.length - 1] ?? steps[steps.length - 1];
 }
 
+// the chain of steps an answer carries, its last or paying step marked
+function chain(steps: Step[], last: Step, tex: (latex: string, cls?: string, display?: boolean) => HTMLElement) {
+  const list = el("ol", { class: "chain", "aria-label": "Steps" });
+  steps.forEach((s, k) => {
+    const cls = s === last ? "pay" : s.label.startsWith("check") ? "check" : "";
+    list.append(el("li", { class: cls }, el("span", { class: "n", text: String(k + 1) }), el("span", { class: "lab", text: s.label }),
+      tex(s.latex, "math", true)));
+  });
+  return list;
+}
+
 function how(route: unknown) {
   const text = typeof route === "string" ? HOW[route] : undefined;
   return text ? el("details", { class: "more" }, el("summary", { text: "How it was found" }), el("p", { text })) : null;
@@ -115,6 +126,9 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
     if (p && p.digits > 0 && !p.exact) rows.push(["Proved", el("span", { class: "mono", text: p.text })]);
     else if (!p && a.unproved) rows.push(["Not proved", el("span", { text: String(a.unproved) })]);
     out.append(tex(String(a.latex), "big", true), facts(rows));
+    // how the number was computed, a step an operation, as it ran
+    const steps = (a.steps ?? []) as Step[];
+    if (shown.steps && steps.length > 1) out.append(chain(steps, steps[steps.length - 1], tex));
     const h = how(a.route);
     if (h) out.append(h);
     return out;
@@ -123,15 +137,7 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
     const steps = (a.steps ?? []) as Step[];
     const last = finalStep(steps);
     out.append(tex(last.latex, "big accent", true));
-    if (shown.steps) {
-      const chain = el("ol", { class: "chain", "aria-label": "Steps" });
-      steps.forEach((s, k) => {
-        const cls = s === last ? "pay" : s.label.startsWith("check") ? "check" : "";
-        chain.append(el("li", { class: cls }, el("span", { class: "n", text: String(k + 1) }), el("span", { class: "lab", text: s.label }),
-          tex(s.latex, "math", true)));
-      });
-      out.append(chain);
-    }
+    if (shown.steps) out.append(chain(steps, last, tex));
     const check = a.check as { by: string; holds: boolean; error_below: number } | undefined;
     const rows: [string, Node][] = [];
     if (check) rows.push(

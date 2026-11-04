@@ -123,6 +123,7 @@ inline std::string number_latex(const Candidate& c, double value) {
 // the value's last digits.
 inline spatium::io::JsonValue::ObjectType proved_json(const spatium::Proved& p) {
     using namespace respond_detail;
+    if (p.exact) return {{"digits", p.digits}, {"text", p.text}, {"exact", true}};
     if (p.digits == 0) return {{"digits", 0}, {"bound", decade_above(p.bound)}};
     return {{"digits", p.digits}, {"text", p.text}, {"exact", p.exact}};
 }
@@ -142,7 +143,19 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             const Candidate& c = e.candidates[*e.taken];
             out.emplace_back("value", e.values.front());
             if (!c.text.empty()) out.emplace_back("text", c.text);
-            out.emplace_back("latex", *bd::to_latex(e.written) + " = " + number_latex(c, e.values.front()));
+            // an exact value as its fraction and, where it ends, its decimal: = \frac{391}{4} = 97.75
+            std::string value = number_latex(c, e.values.front());
+            if (e.exact && c.arithmetic == Arithmetic::Double) {
+                const auto d = e.exact->decimal();
+                value = e.exact->den() == 1 ? *d
+                        : spatium::io::build::detail::fraction_latex(*e.exact) + (d ? " = " + *d : "");
+            }
+            out.emplace_back("latex", *bd::to_latex(e.written) + " = " + value);
+            if (!e.steps.empty()) {
+                Array steps;
+                for (const auto& st : e.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+                out.emplace_back("steps", steps);
+            }
             if (e.proved) out.emplace_back("proved", proved_json(*e.proved));
             else if (!e.unproved.empty())
                 out.emplace_back("unproved", e.unproved);

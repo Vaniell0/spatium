@@ -345,7 +345,18 @@ TEST_CASE("evaluate: a number's digits are proved over the reals, and held again
     const auto in = [&](const char* name, rsc::Arithmetic a = rsc::Arithmetic::Double) {
         return rsc::evaluate(d, name, {}, rsc::Engine{.arithmetic = a});
     };
-    for (const char* name : {"a", "b", "s"}) {
+    // where every operation is one on fractions the value is exact: the fraction, and its decimal
+    // where that ends; the pair is the rational engine's own value
+    for (const auto& [name, text] : {std::pair{"a", "245/57"}, std::pair{"b", "0.3"}, std::pair{"four", "4"}}) {
+        INFO(name);
+        const auto e = in(name);
+        REQUIRE(e.proved);
+        CHECK(e.proved->exact);
+        CHECK(e.proved->text == text);
+        REQUIRE(e.exact);
+        CHECK(e.exact->text() == in(name, rsc::Arithmetic::Rational).candidates.front().text);
+    }
+    for (const char* name : {"s"}) {
         INFO(name);
         const auto e = in(name);
         REQUIRE(e.proved);

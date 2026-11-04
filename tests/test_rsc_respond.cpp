@@ -180,3 +180,23 @@ TEST_CASE("respond: a new name on the left is a definition, not an equation in i
     // the case it must fail: a name the right side reads is an equation in it
     CHECK(at(rsc::respond("x = x^2 - 2"), "route").as_string() == "closed form");
 }
+
+TEST_CASE("respond: an exercise as a page of problems writes it, exact, with its steps", "[rsc][respond][steps]") {
+    // ((3,2 - 1,7) : 0,003 / ((29/35 - 3/7) * 4 : 0,2) - (1 13/20 - 1,5) * 1,5 / ((2,44 + 1 14/25) * 1/8))
+    //   : 62 1/20 + 1,364 : 0,124, as the formula editor's parser writes it once the page has put its
+    // colons and decimal commas in that parser's notation (web/src/answers.ts, `notation`)
+    const std::string row = R"(["Add",["Divide",["Delimiter",["Subtract",["Divide",["Divide",["Delimiter",["Subtract",{"num":"3.2"},{"num":"1.7"}]],{"num":"0.003"}],["Multiply",["Delimiter",["Subtract",["Divide",29,35],["Divide",3,7]]],["Divide",4,{"num":"0.2"}]]],["Divide",["Multiply",["Delimiter",["Subtract",["InvisibleOperator",1,["Divide",13,20]],{"num":"1.5"}]],{"num":"1.5"}],["Multiply",["Delimiter",["Add",{"num":"2.44"},["InvisibleOperator",1,["Divide",14,25]]]],["Divide",1,8]]]]],["InvisibleOperator",62,["Divide",1,20]]],["Divide",{"num":"1.364"},{"num":"0.124"}]])";
+    const auto r = rsc::respond_rows(R"({"rows": [)" + row + "]}");
+    CHECK(at(r, "route").as_string() == "evaluate");
+    // twelve, exactly: the double's 12.000000000000002 is not the answer
+    CHECK(at(at(r, "proved"), "exact").as_bool());
+    CHECK(at(at(r, "proved"), "text").as_string() == "12");
+    CHECK(at(r, "latex").as_string().ends_with(" = 12"));
+    // a mixed number is a sum, 1 13/20 = 33/20, not the product a bare juxtaposition is
+    const auto& steps = at(r, "steps").as_array();
+    REQUIRE(steps.size() == 18);
+    CHECK(at(steps[6], "latex").as_string() == "1 + \\frac{13}{20} = \\frac{33}{20}");
+    CHECK(at(steps[15], "latex").as_string() == "\\frac{\\frac{1241}{20}}{\\frac{1241}{20}} = 1");
+    CHECK(at(steps[16], "latex").as_string() == "\\frac{1.364}{0.124} = 11");
+    CHECK(at(steps.back(), "latex").as_string() == "1 + 11 = 12");
+}

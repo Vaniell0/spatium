@@ -9,6 +9,13 @@ import { type Cell, type Doc, graph, presets } from "./doc.js";
 
 export type Parse = (latex: string) => unknown;
 
+// A formula as a page of exercises writes it, in the notation the editor's parser reads: a decimal
+// comma (3{,}2, as the editor writes it under a comma locale) as a point, and a division written
+// a : b as a \div b, which the parser would otherwise read as a relation looser than a sum.
+export function notation(latex: string): string {
+  return latex.replace(/\{,\}/g, ".").replace(/(?<!\\):/g, "\\div ");
+}
+
 // the row the core reads a math cell as, or null for an empty one
 export function rowOf(cell: Cell, parse: Parse): unknown | null {
   if (cell.kind !== "math") return null;

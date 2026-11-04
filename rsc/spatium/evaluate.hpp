@@ -41,7 +41,9 @@
 #include <spatium/core/rational.hpp>
 #include <spatium/io/document.hpp>
 #include <spatium/io/field_pod.hpp>
+#include <spatium/io/steps_text.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -128,6 +130,9 @@ struct Evaluation {
     // a number's digits proved over the reals (core/interval.hpp), or why they are not
     std::optional<spatium::Proved> proved;
     std::string unproved;
+    std::optional<spatium::Rational> exact;   // the value as a fraction, where every operation is one on fractions
+    // a number's computation, a step an operation, as it ran (io/steps_text.hpp)
+    std::vector<spatium::io::build::Step> steps;
     // an equation's roots on its bracket, or on the doubles' whole range: each proved alone in its
     // interval, and where one may still be
     std::optional<spatium::Roots<double>> enclosed;
@@ -235,10 +240,23 @@ void prove(const spatium::io::build::PodField<double>& pod, Evaluation& out) {
 }
 
 inline void prove(const Expr& f, Arithmetic a, Evaluation& out) {
-    const auto pod = spatium::io::build::lower(f);
+    namespace bd = spatium::io::build;
+    const auto pod = bd::lower(f);
     if (!pod) {
         out.unproved = pod.error().message;
         return;
+    }
+    // where every operation is one on fractions, the value is the fraction it is, exactly: the
+    // twelve a page of exercises asks for, not 12.000000000000002 and its proved digits
+    if (!bd::beyond<spatium::Rational>(*pod)) {
+        const auto r = bd::interpret(bd::converted<spatium::Rational>(*pod), spatium::Rational(0), spatium::Rational(0));
+        if (r.ok()) {
+            const auto decimal = r.decimal();
+            out.exact = r;
+            out.proved = spatium::Proved{decimal ? static_cast<int>(std::ranges::count_if(*decimal, [](char c) { return c >= '0' && c <= '9'; })) : 0,
+                                         decimal ? *decimal : r.text(), std::abs(r.to_double()), true};
+            return;
+        }
     }
 #if defined(SPATIUM_HAS_BOOST_MULTIPRECISION) && SPATIUM_HAS_BOOST_MULTIPRECISION
     if (a == Arithmetic::Real50) return prove<spatium::Real50>(*pod, out);
@@ -347,7 +365,10 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
             out.written = u->f;   // the function, exact, in the parameter's name
             out.candidates.push_back({Route::Expression, 0, {}, {}, Arithmetic::Double, {}});
         }
-        if (out.free.empty()) detail::prove(u->f, engine.arithmetic, out);
+        if (out.free.empty()) {
+            detail::prove(u->f, engine.arithmetic, out);
+            if (auto steps = spatium::io::build::evaluation_steps(u->f)) out.steps = std::move(*steps);
+        }
         finish();
         return out;
     }
