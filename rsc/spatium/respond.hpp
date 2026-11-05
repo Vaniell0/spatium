@@ -519,6 +519,17 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         return JsonValue(f);
     };
     const auto text_of = [](double v) { return bd::detail::number_text(v, bd::detail::TextStyle::Plain); };
+    const auto interval_text = [&](const spatium::Interval<double>& v) { return std::format("[{}, {}]", text_of(v.lo), text_of(v.hi)); };
+    const auto box_text = [&](const std::vector<spatium::Interval<double>>& b) {
+        std::string t;
+        for (const auto& v : b) t += (t.empty() ? "" : " × ") + interval_text(v);
+        return t;
+    };
+    // a piece nothing was proved of, and why where it is past what a double holds
+    const auto undecided_text = [](double lo, double hi) {
+        const bool overflows = std::min(std::abs(lo), std::abs(hi)) >= 1e300 && (lo > 0) == (hi > 0);
+        return std::format("[{:.4g}, {:.4g}]{}", lo, hi, overflows ? ", where the equation overflows a double" : "");
+    };
     // a power of ten as LaTeX, for a fact, and as text with raised digits, 10⁻¹⁵, for a label
     const auto decade_text = [](double v) {
         return v > 0 ? std::format("10^{{{}}}", static_cast<int>(std::lround(std::log10(v)))) : std::string("0");
@@ -621,8 +632,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                         });
                 complete = agree && e.enclosed->complete();
                 facts.push_back(fact("Every real root, proved", roots.empty() ? std::string("none") : roots, false, agree));
-                for (const auto& u : e.enclosed->undecided)
-                    facts.push_back(fact("Undecided", std::format("[{:.4g}, {:.4g}]", u.lo, u.hi), false, false));
+                for (const auto& u : e.enclosed->undecided) facts.push_back(fact("Undecided", undecided_text(u.lo, u.hi), false, false));
             }
             const bool proved_all = agree;
             section("Check", true, "facts", facts);
@@ -677,7 +687,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                 notes.push_back(sys.undecided.empty() ? "no other on the box" : "elsewhere undecided");
                 Array columns, rows;
                 for (const auto& u : sys.unknowns) columns.push_back(u);
-                columns.push_back("digits");
+                columns.push_back("digits"), columns.push_back("box");
                 for (const auto& r : sys.roots) {
                     Array row;
                     int digits = 17;
@@ -685,13 +695,26 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                         const auto p = spatium::proved(v);
                         row.push_back(p.text), digits = std::min(digits, p.digits);
                     }
-                    row.push_back(std::to_string(digits));
+                    row.push_back(std::to_string(digits)), row.push_back(box_text(r));
                     rows.push_back(std::move(row));
                 }
                 section("Roots", true, "table", Object{{"columns", columns}, {"rows", rows}},
                         Object{{"gist", std::format("{} root{}", n, n == 1 ? "" : "s")}});
-                Array facts{fact("Searched", "every double of each unknown")};
-                if (!sys.undecided.empty()) facts.push_back(fact("Undecided", std::format("{} pieces", sys.undecided.size()), false, false));
+                // the second route: each equation on its root's box, an interval that holds zero
+                Array checks;
+                bool hold = true;
+                for (std::size_t k = 0; k < sys.at_roots.size(); ++k) {
+                    const bool zero = std::ranges::all_of(sys.at_roots[k], [](const auto& v) { return v.lo <= 0 && 0 <= v.hi; });
+                    hold = hold && zero;
+                    std::string t;
+                    for (const auto& v : sys.at_roots[k]) t += (t.empty() ? "" : ", ") + std::format("[{:.3g}, {:.3g}]", v.lo, v.hi);
+                    checks.push_back(fact(std::format("Root {}, each equation on its box", k + 1), t, false, zero));
+                }
+                if (!checks.empty()) section("Check", !hold, "facts", checks);
+                Array facts{fact("Searched", "every double of each unknown"),
+                            fact("Cut into", std::format("{} pieces, {} proved to hold no root", sys.pieces, sys.excluded))};
+                for (std::size_t k = 0; k < sys.undecided.size() && k < 8; ++k) facts.push_back(fact("Undecided", box_text(sys.undecided[k]), false, false));
+                if (sys.undecided.size() > 8) facts.push_back(fact("Undecided", std::format("and {} more", sys.undecided.size() - 8), false, false));
                 section("Properties", false, "facts", facts);
                 break;
             }
@@ -709,8 +732,9 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             section("Roots", true, "table", Object{{"columns", Array{"root", "digits", "interval"}}, {"rows", rows}},
                     Object{{"gist", std::format("{} root{}", n, n == 1 ? "" : "s")}});
             const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
-            Array facts{fact("Searched", line ? std::string("every double") : std::format("[{}, {}]", text_of(f.box.lo), text_of(f.box.hi)))};
-            for (const auto& u : f.undecided) facts.push_back(fact("Undecided", std::format("[{:.4g}, {:.4g}]", u.lo, u.hi), false, false));
+            Array facts{fact("Searched", line ? std::string("every double") : std::format("[{}, {}]", text_of(f.box.lo), text_of(f.box.hi))),
+                        fact("Cut into", std::format("{} pieces, {} proved to hold no root", f.pieces, f.excluded))};
+            for (const auto& u : f.undecided) facts.push_back(fact("Undecided", undecided_text(u.lo, u.hi), false, false));
             section("Properties", false, "facts", facts);
             break;
         }
@@ -778,13 +802,146 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         if (route) extra.emplace_back("note", route_caption(*route));
         section("How it was found", false, "table", Object{{"columns", Array{"route", "cost", "gave"}}, {"rows", rows}}, std::move(extra));
     }
+    // Every route that answered, each with its own chain, in the order they were tried: the taken
+    // one's is the Steps above; a closed form's check by Vieta's formulas is a chain of its own
+    Array routes;
+    const auto chain_of = [](const std::vector<bd::Step>& steps) {
+        Array out;
+        for (const auto& st : steps) out.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+        return out;
+    };
+    const auto add_route = [&](std::string name, std::size_t cost, bool taken, Array steps) {
+        if (steps.empty()) return;
+        const std::size_t n = steps.size();
+        routes.push_back(Object{{"route", std::move(name)}, {"cost", cost}, {"taken", taken},
+                                {"gist", std::format("{} step{}", n, n == 1 ? "" : "s")}, {"steps", std::move(steps)}});
+    };
+    const auto x_of = [&](const std::string& name) { return bd::detail::name_latex(name); };
+    for (std::size_t i = 0; i < e.candidates.size(); ++i) {
+        const Candidate& c = e.candidates[i];
+        if (!c.refused.empty()) continue;
+        const bool taken = e.taken == i;
+        const std::string name = route_name(c.route);
+        const auto one = [&](std::string label, std::string latex) { return Array{Object{{"label", std::move(label)}, {"latex", std::move(latex)}}}; };
+        switch (c.route) {
+            case Route::Evaluate:
+                if (e.steps.size() > 1) add_route(name, c.cost, taken, chain_of(e.steps));
+                else if (taken && !result.empty()) add_route(name, c.cost, taken, one("value", result));
+                break;
+            case Route::ClosedForm: {
+                if (!e.closed) break;
+                std::vector<bd::Step> chain, checks;
+                for (const auto& st : e.closed->steps) (st.label.starts_with("check") ? checks : chain).push_back(st);
+                add_route(name, c.cost, taken, chain_of(chain));
+                // Vieta's formulas: the equation and its coefficients, then the sum and the product of the roots
+                if (!checks.empty() && chain.size() >= 2) {
+                    std::vector<bd::Step> vieta{chain[0], chain[1]};
+                    vieta.insert(vieta.end(), checks.begin(), checks.end());
+                    add_route("Vieta's formulas", 0, false, chain_of(vieta));
+                }
+                break;
+            }
+            case Route::Linear:
+                if (e.linear) add_route(name, c.cost, taken, chain_of(e.linear->steps));
+                break;
+            case Route::Intervals: {
+                if (!e.axis) break;
+                Array steps;
+                for (const auto& part : e.axis->parts)
+                    if (part.kind == Axis::Kind::Root)
+                        steps.push_back(Object{{"label", "an end: a root, proved alone by Newton's step"}, {"latex", std::format("{} \\approx {}", x_of(e.name), part.text)}});
+                    else if (part.kind == Axis::Kind::Break)
+                        steps.push_back(Object{{"label", "a break: no value"}, {"latex", std::format("{} \\in \\left[{}, {}\\right]", x_of(e.name), text_of(part.lo), text_of(part.hi))}});
+                steps.push_back(Object{{"label", "where it holds"}, {"latex", set_latex(*e.axis, e.name)}});
+                add_route(name, c.cost, taken, std::move(steps));
+                break;
+            }
+            case Route::Enclosed: {
+                Array steps;
+                const auto searched = [&](std::string latex) { steps.push_back(Object{{"label", "searched"}, {"latex", std::move(latex)}}); };
+                const auto cut = [&](std::size_t pieces, std::size_t excluded, std::size_t roots, std::size_t undecided) {
+                    steps.push_back(Object{{"label", "cut where undecided"},
+                                           {"latex", std::format("\\text{{{} pieces: {} hold no root, {} hold one, {} undecided}}", pieces, excluded, roots, undecided)}});
+                };
+                if (e.system) {
+                    const auto& sys = *e.system;
+                    std::string names;
+                    for (const auto& u : sys.unknowns) names += (names.empty() ? "" : ", ") + x_of(u);
+                    searched(std::format("{} \\in \\mathbb{{R}}", names));
+                    cut(sys.pieces, sys.excluded, sys.roots.size(), sys.undecided.size());
+                    for (const auto& r : sys.roots) {
+                        std::string at;
+                        for (std::size_t j = 0; j < r.size(); ++j) at += (j ? ",\\ " : "") + x_of(sys.unknowns[j]) + " \\approx " + spatium::proved(r[j]).text;
+                        steps.push_back(Object{{"label", "Krawczyk's step lands inside: one root"}, {"latex", at}});
+                    }
+                } else if (e.enclosed) {
+                    const auto& f = *e.enclosed;
+                    const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
+                    searched(line ? x_of(e.name) + " \\in \\mathbb{R}"
+                                  : std::format("{} \\in \\left[{}, {}\\right]", x_of(e.name), text_of(f.box.lo), text_of(f.box.hi)));
+                    cut(f.pieces, f.excluded, f.roots.size(), f.undecided.size());
+                    for (const auto& r : f.roots) {
+                        const auto p = spatium::proved(r);
+                        steps.push_back(Object{{"label", "Newton's step lands inside: one root"},
+                                               {"latex", std::format("{} \\approx {}", x_of(e.name), p.digits > 0 ? p.text : std::string("0"))}});
+                    }
+                }
+                add_route(name, c.cost, taken, std::move(steps));
+                break;
+            }
+            case Route::Bracket:
+                if (!c.values.empty())
+                    add_route(name, c.cost, taken, one("bisection to the last bit", std::format("{} = {}", x_of(e.name), text_of(c.values.front()))));
+                break;
+            case Route::Expression: case Route::Integral: case Route::Synthesis:
+                if (taken && !result.empty()) add_route(name, c.cost, taken, one(name, result));
+                break;
+        }
+    }
+    // Next: what else this question can become, each written as a question of its own -- the same
+    // equation as an inequality, on an interval about its roots, its integral between two roots;
+    // an inequality as its equation, or the other side of it. Only for a root alone on its page.
+    Array next;
+    const JsonValue* doc = field_of(out, "document");
+    const JsonValue* statements = doc ? doc->find("statements") : nullptr;
+    if (kind == bd::StatementKind::Root && statements && statements->is_array() && statements->as_array().size() == 1) {
+        const JsonValue& st = statements->as_array().front();
+        const std::string name = st.string_or("name", ""), lhs = st.string_or("lhs", ""), rhs = st.string_or("rhs", ""),
+                          rel = st.string_or("relation", "=");
+        const auto offer = [&](std::string caption, std::string text) {
+            const auto asked = bd::read_document(text);
+            if (!asked || asked->statements.size() != 1) return;
+            if (const auto latex = bd::to_latex(asked->statements.front()))
+                next.push_back(Object{{"caption", std::move(caption)}, {"text", std::move(text)}, {"latex", *latex}});
+        };
+        if (!st.find("also") && !name.empty()) {
+            const std::string bracket = st.find("lo") ? std::format(" on [{}, {}]", st.string_or("lo", ""), st.string_or("hi", "")) : "";
+            if (rel == "=") {
+                offer("Where it is greater", std::format("{}: {} > {}{}", name, lhs, rhs, bracket));
+                std::vector<double> real = e.values;
+                std::ranges::sort(real);
+                if (bracket.empty() && !real.empty() && std::isfinite(real.front()) && std::isfinite(real.back()))
+                    offer("Only on an interval about its roots", std::format("{}: {} = {} on [{}, {}]", name, lhs, rhs,
+                                                                             std::floor(real.front()) - 1, std::ceil(real.back()) + 1));
+                if (real.size() >= 2 && real.front() < real.back())
+                    offer("Its integral between the outer roots", std::format("I = integral {} d{} on [{}, {}]",
+                                                                              rhs == "0" ? lhs : std::format("({}) - ({})", lhs, rhs), name,
+                                                                              detail::shortest(real.front()), detail::shortest(real.back())));
+            } else {
+                const std::string other = rel == "<" ? ">=" : rel == "<=" ? ">" : rel == ">" ? "<=" : "<";
+                offer("Where it is equal", std::format("{}: {} = {}{}", name, lhs, rhs, bracket));
+                offer("Where it does not hold", std::format("{}: {} {} {}{}", name, lhs, other, rhs, bracket));
+            }
+        }
+    }
+    if (!next.empty()) section("Next", true, "next", next, Object{{"gist", std::format("{} question{}", next.size(), next.size() == 1 ? "" : "s")}});
     // the label is the verdict in one line: "Proved, 4 roots, no other on the box"
     label = strength;
     if (!label.empty()) label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
     Array note_list;
     for (const auto& n : notes) label += ", " + n, note_list.push_back(n);
     return Object{{"outcome", outcome}, {"guarantee", guarantee}, {"verdict", Object{{"strength", strength}, {"notes", note_list}}},
-                  {"label", label}, {"ok", ok}, {"result", result}, {"sections", sections}};
+                  {"label", label}, {"ok", ok}, {"result", result}, {"sections", sections}, {"routes", routes}};
 }
 
 // How a request asks for its values to be computed: `engine`, {"arithmetic": "rational",

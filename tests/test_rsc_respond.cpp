@@ -306,7 +306,7 @@ TEST_CASE("respond: an exercise as a page of problems writes it, exact, with its
 
 TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc][respond][sheet]") {
     struct Want { const char* question; const char* outcome; const char* guarantee; const char* label; bool ok; };
-    const std::vector<std::string> order{"Input", "Steps", "Roots", "Certificate", "Check", "Pieces", "Properties", "How it was found"};
+    const std::vector<std::string> order{"Input", "Steps", "Roots", "Certificate", "Check", "Pieces", "Properties", "How it was found", "Next"};
     for (const Want& w : std::initializer_list<Want>{
              {"2(3 + 4)^2 - 1/4", "number", "exact", "Exact", true},
              {"sqrt(2) + 1", "number", "proved", "Proved to 16 digits", true},
@@ -341,7 +341,7 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
             REQUIRE(static_cast<std::size_t>(k) < order.size());
             CHECK(static_cast<std::size_t>(k) >= last);
             last = static_cast<std::size_t>(k);
-            CHECK((sec.find("rows") || sec.find("steps") || sec.find("facts") || sec.find("table")));
+            CHECK((sec.find("rows") || sec.find("steps") || sec.find("facts") || sec.find("table") || sec.find("axis") || sec.find("next")));
         }
     }
     // the closed form's roots, each inside an interval the second route proved to hold one
@@ -352,6 +352,77 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
             for (const auto& f : at(sec, "facts").as_array())
                 if (at(f, "label").as_string() == "Every real root, proved") held = at(f, "ok").as_bool();
     CHECK(held);
+}
+
+TEST_CASE("respond: every route that answered shows its own chain", "[rsc][respond][sheet]") {
+    // a quadratic: the closed form, its check by Vieta's formulas, and every root proved, each a chain
+    const auto s = at(rsc::respond("2x^2 - 3x - 5 = 0"), "sheet");
+    std::vector<std::string> names;
+    int taken = 0;
+    for (const auto& r : at(s, "routes").as_array()) {
+        names.push_back(at(r, "route").as_string());
+        CHECK_FALSE(at(r, "steps").as_array().empty());
+        if (at(r, "taken").as_bool()) {
+            ++taken;
+            // the taken route's chain is the sheet's Steps
+            for (const auto& sec : at(s, "sections").as_array())
+                if (at(sec, "title").as_string() == "Steps") CHECK(at(sec, "steps").dump() == at(r, "steps").dump());
+        }
+    }
+    CHECK(taken == 1);
+    CHECK(names == std::vector<std::string>{"closed form", "Vieta's formulas", "every root, proved"});
+    // a piece left undecided where the equation overflows a double says so
+    CHECK(at(s, "sections").dump().find("overflows a double") != std::string::npos);
+    // every answer: each route with a chain, at most one taken
+    for (const char* q : {"sin(pi/6)*2", "2^x = 8", "x^2 - 4 > 0", "x + 2y = 5\n3x - y = 1", "x^2 + y^2 = 4\nx - y = 1",
+                          "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x^4 = 0"}) {
+        INFO(q);
+        int n = 0;
+        for (const auto& r : at(at(rsc::respond(q), "sheet"), "routes").as_array()) {
+            CHECK_FALSE(at(r, "steps").as_array().empty());
+            n += at(r, "taken").as_bool();
+        }
+        CHECK(n <= 1);
+    }
+    // a system's roots: each with its box, and each equation on it an interval holding zero
+    const auto sys = at(rsc::respond("x^2 + y^2 = 4\nx - y = 1"), "sheet");
+    bool box = false, held = true;
+    int checked = 0;
+    for (const auto& sec : at(sys, "sections").as_array()) {
+        if (at(sec, "title").as_string() == "Roots") box = at(at(sec, "table"), "columns").dump().find("\"box\"") != std::string::npos;
+        if (at(sec, "title").as_string() == "Check")
+            for (const auto& f : at(sec, "facts").as_array()) ++checked, held = held && at(f, "ok").as_bool();
+    }
+    CHECK(box);
+    CHECK(checked == 2);
+    CHECK(held);
+}
+
+TEST_CASE("respond: what else a question can become, each a question the library answers", "[rsc][respond][sheet]") {
+    const auto next_of = [](const char* q) {
+        std::vector<std::string> texts;
+        for (const auto& sec : at(at(rsc::respond(q), "sheet"), "sections").as_array())
+            if (const auto* n = sec.find("next"))
+                for (const auto& item : n->as_array()) {
+                    CHECK_FALSE(item.string_or("latex", "").empty());
+                    texts.push_back(item.string_or("text", ""));
+                }
+        return texts;
+    };
+    const auto quadratic = next_of("2x^2 - 3x - 5 = 0");
+    CHECK(quadratic == std::vector<std::string>{"x: 2x^2 - 3x - 5 > 0", "x: 2x^2 - 3x - 5 = 0 on [-2, 4]",
+                                                "I = integral 2x^2 - 3x - 5 dx on [-1, 2.5]"});
+    const auto inequality = next_of("x^2 - 4 > 0");
+    CHECK(inequality == std::vector<std::string>{"x: x^2 - 4 = 0", "x: x^2 - 4 <= 0"});
+    // each is answered: the sheet never offers what the library cannot do
+    for (const auto& t : {quadratic, inequality, next_of("x: sin(x) = 0.5 on [0, 10]")})
+        for (const auto& q : t) {
+            INFO(q);
+            CHECK_FALSE(at(at(rsc::respond(q), "sheet"), "outcome").as_string() == "refused");
+        }
+    // the case it must fail: a system and a number offer nothing yet
+    CHECK(next_of("x + 2y = 5\n3x - y = 1").empty());
+    CHECK(next_of("2 + 2").empty());
 }
 
 TEST_CASE("respond: rows above the last are rows of the page, an expression among them", "[rsc][respond][rows]") {

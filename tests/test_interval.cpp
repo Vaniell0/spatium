@@ -297,10 +297,15 @@ TEST_CASE("roots over the doubles' whole range, and none where there are none", 
     const auto none = roots_on([](const auto& x) { return x * x + k(x, 1); }, doubles);
     CHECK(none.complete());
     CHECK(none.roots.empty());
+    // its pieces, counted: with no root, every one is proved to hold none
+    CHECK(none.pieces > 0);
+    CHECK(none.excluded == none.pieces);
     // sin x = 1/2 on [0, 10]: pi/6, 5pi/6, 13pi/6, 17pi/6
     const auto wave = roots_on([](const auto& x) { return sin(x) - k(x, I("0.5")); }, I{0, 10});
     CHECK(wave.complete());
     REQUIRE(wave.roots.size() == 4);
+    // the case it must fail: with roots, some pieces hold one and are not excluded
+    CHECK(wave.excluded + wave.roots.size() <= wave.pieces);
     const R pi = acos(R(-1));
     const int sixths[4] = {1, 5, 13, 17};
     for (int r = 0; r < 4; ++r) {

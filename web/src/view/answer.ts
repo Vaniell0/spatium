@@ -17,7 +17,8 @@ interface Fact { label: string; text?: string; latex?: string; ok?: boolean }
 interface Table { columns: string[]; rows: string[][] }
 interface Part { kind: "holds" | "fails" | "root" | "break" | "undecided"; lo: number; hi: number; text?: string }
 interface Axis { relation: Relation; line: boolean; parts: Part[] }
-interface Section { title: string; open: boolean; gist?: string; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis }
+interface Next { caption: string; text: string; latex: string }
+interface Section { title: string; open: boolean; gist?: string; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis; next?: Next[] }
 export interface Sheet { outcome: string; guarantee: string; verdict: { strength: string; notes: string[] }; label: string; ok: boolean; result: string; sections: Section[] }
 
 // what an answer is and how strongly it holds, in the core's words; a card asked in code and a
@@ -89,6 +90,9 @@ function section(sec: Section, tex: (latex: string, cls?: string, display?: bool
     body.append(el("div", { class: "scroll" }, table));
   }
   if (sec.axis) body.append(axisView(sec.axis));
+  // what else the question can become: a caption and the question as the library writes it
+  if (sec.next) body.append(el("ul", { class: "next" }, ...sec.next.map((n) =>
+    el("li", {}, el("span", { class: "caption", text: n.caption }), tex(n.latex, "math")))));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
   const d = el("details", { class: "sec" }, el("summary", {}, sec.title, sec.gist ? el("span", { class: "gist", text: sec.gist }) : null), body);
   if (sec.open) d.setAttribute("open", "");

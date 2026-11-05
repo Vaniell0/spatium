@@ -83,6 +83,8 @@ struct Roots {
     std::vector<Interval<T>> undecided;   // where a root may still be, neither excluded nor proved
     Interval<T> box;                      // what was searched
     std::size_t evaluations = 0;          // of f, as an interval or a dual number
+    std::size_t pieces = 0;               // the box was cut into, each decided or left undecided
+    std::size_t excluded = 0;             // of them proved to hold no root
     bool complete() const { return undecided.empty(); }
 };
 
@@ -121,12 +123,12 @@ Roots<T> roots_on(F&& f, const Interval<T>& box, const Budget& budget = {}) {
         const I x = b[0];
         // first f alone: a derivative can guess a branch the value does not (abs at its kink)
         ++out.evaluations;
-        if (misses_zero(f(x))) return Decided{Truth::Yes};
+        if (misses_zero(f(x))) return ++out.excluded, Decided{Truth::Yes};
         const Undecided watch;
         const D fx = at(x);
         I n = step(x, fx);
         if (n.is_empty()) return undecided(x);
-        if (n.hi < x.lo || x.hi < n.lo) return Decided{Truth::Yes};
+        if (n.hi < x.lo || x.hi < n.lo) return ++out.excluded, Decided{Truth::Yes};
         I y = n;
         if (!within(n, x)) {
             if (!(n.width() < x.width())) return undecided(x);
@@ -155,6 +157,7 @@ Roots<T> roots_on(F&& f, const Interval<T>& box, const Budget& budget = {}) {
         return Decided{Truth::Yes};
     };
     const Proof<T, 1> proof = prove_on(Box<T, 1>{box}, statement, budget);
+    out.pieces = proof.pieces.size();
     const auto by_lo = [](const I& a, const I& b) { return a.lo < b.lo; };
     // a root on a cut, found from both sides: one, where f' keeps its sign across the two
     std::ranges::sort(out.roots, by_lo);
@@ -199,6 +202,8 @@ struct RootsN {
     std::vector<Box<T, N>> undecided;   // where a root may still be
     Box<T, N> box;
     std::size_t evaluations = 0;        // of f, in intervals or in dual numbers
+    std::size_t pieces = 0;             // the box was cut into, each decided or left undecided
+    std::size_t excluded = 0;           // of them proved to hold no root
     bool complete() const { return undecided.empty(); }
 };
 
@@ -262,11 +267,11 @@ RootsN<T, N> roots_on(F&& f, const Box<T, N>& box, const Budget& budget = {}) {
     const auto statement = [&](const Box<T, N>& x) {
         const Box<T, N> fx = values(x);
         for (const I& v : fx)
-            if (misses_zero(v)) return Decided{Truth::Yes};
+            if (misses_zero(v)) return ++out.excluded, Decided{Truth::Yes};
         const Undecided watch;
         const auto k = krawczyk(x);
         if (!k) return Decided{};
-        if (apart(*k, x)) return Decided{Truth::Yes};
+        if (apart(*k, x)) return ++out.excluded, Decided{Truth::Yes};
         Box<T, N> y = *k;
         if (!inside(*k, x)) {
             // a root on a cut: K(X) widened, which holds every root of X, proved to hold one
@@ -305,6 +310,7 @@ RootsN<T, N> roots_on(F&& f, const Box<T, N>& box, const Budget& budget = {}) {
         return Decided{Truth::Yes};
     };
     const Proof<T, N> proof = prove_on(box, statement, budget);
+    out.pieces = proof.pieces.size();
     // a root found from two pieces is one where their boxes meet
     std::vector<Box<T, N>> roots;
     for (const auto& r : out.roots) {

@@ -178,6 +178,8 @@ struct Axis {
 struct SystemRoots {
     std::vector<std::string> unknowns;
     std::vector<std::vector<spatium::Interval<double>>> roots, undecided;
+    std::vector<std::vector<spatium::Interval<double>>> at_roots;   // each equation on each root's box: holds 0
+    std::size_t pieces = 0, excluded = 0;                            // the space was cut into; proved to hold none
 };
 
 struct Evaluation {
@@ -413,8 +415,12 @@ Candidate enclosed_system(const std::vector<Expr>& equations, const std::vector<
         box.fill(I{-big, big});
         const spatium::RootsN<double, N> found = spatium::roots_on(f, box, spatium::Budget{.evaluations = 65536});
         c.cost = found.evaluations;
-        SystemRoots s{unknowns, {}, {}};
-        for (const auto& r : found.roots) s.roots.emplace_back(r.begin(), r.end());
+        SystemRoots s{unknowns, {}, {}, {}, found.pieces, found.excluded};
+        for (const auto& r : found.roots) {
+            s.roots.emplace_back(r.begin(), r.end());
+            const auto y = f(r);
+            s.at_roots.emplace_back(y.begin(), y.end());
+        }
         for (const auto& r : found.undecided) s.undecided.emplace_back(r.begin(), r.end());
         if (s.roots.empty())
             c.refused = found.complete() ? "no real root: every piece of the space is proved to hold none"
