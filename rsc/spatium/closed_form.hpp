@@ -315,17 +315,29 @@ inline spatium::Result<ClosedForm> solve_closed_form(const spatium::io::build::F
         auto r = k ? closed_form_detail::exact_roots((*k)[0], (*k)[1], (*k)[2]) : std::unexpected(k.error());
         if (r) out.exact = std::move(*r);
         else out.inexact = r.error().message;
-        // the roots' step says them as they are: one root, two fractions, or a pair (p ± q√m)/d
+        // the roots' step says them as they are, then as decimals: one root, two fractions, or a pair
+        // (p ± q√m)/d -- 5/2 = 2.5, and (3 ± √17)/2 ≈ 3.56, -0.56
         if (out.exact && !out.steps.empty()) {
             using closed_form_detail::fraction_latex;
             const auto& e = *out.exact;
             const std::string name = bd::detail::name_latex(x);
+            const auto shown = [](spatium::Rational r) {
+                if (r.den() == 1) return fraction_latex(r);
+                const auto d = r.decimal();
+                return fraction_latex(r) + (d ? " = " + *d : std::format(" \\approx {:.12g}", r.to_double()));
+            };
             auto& last = out.steps.back();
             if (last.label == "root" && !e.fractions.empty())
-                last.latex = name + " = " + fraction_latex(e.fractions[0]);
+                last.latex = name + " = " + shown(e.fractions[0]);
             else if (last.label == "roots" && e.fractions.size() == 2)
-                last.latex = std::format("{0}_{{1}} = {1},\\quad {0}_{{2}} = {2}", name, fraction_latex(e.fractions[0]),
-                                         fraction_latex(e.fractions[1]));
+                last.latex = std::format("{0}_{{1}} = {1},\\quad {0}_{{2}} = {2}", name, shown(e.fractions[0]), shown(e.fractions[1]));
+            else if (last.label == "roots" && !e.i) {
+                // twelve digits, and a pair about zero as one: ±√2 ≈ ±1.41421356237
+                const auto twelve = [](double v) { return std::format("{:.12g}", v); };
+                const double r0 = out.solution.roots[0].re, r1 = out.solution.roots[1].re;
+                const std::string near = e.p == spatium::Rational(0) ? "\\pm " + twelve(std::abs(r0)) : twelve(r0) + ",\\ " + twelve(r1);
+                last.latex = std::format("{}_{{1,2}} = {} \\approx {}", name, e.latex, near);
+            }
             else if (last.label == "roots")
                 last.latex = name + "_{1,2} = " + e.latex;
         }

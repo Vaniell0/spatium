@@ -13,7 +13,7 @@ export interface Shown {
   ask?: (text: string) => void;   // a question the sheet offers, asked
 }
 
-interface Step { label: string; latex: string }
+interface Step { label: string; latex: string; lead?: string; note?: string }
 interface Fact { label: string; text?: string; latex?: string; ok?: boolean }
 interface Table { columns: string[]; rows: string[][] }
 interface Part { kind: "holds" | "fails" | "root" | "break" | "undecided"; lo: number; hi: number; text?: string }
@@ -86,7 +86,9 @@ function chain(steps: Step[], title: string, tex: Tex) {
   // numbered by the list itself; what the step does above, its formula under it, the last one paid
   const list = el("ol", { class: "chain", "aria-label": title });
   steps.forEach((st, k) => list.append(el("li", { class: k === steps.length - 1 ? "step pay" : "step" },
-    el("span", { class: "op", text: st.label }), tex(st.latex, "math", true))));
+    // what the step does: its lead in bold, the rest beside it; a step with neither says its label
+    el("span", { class: "op" }, el("b", { text: st.lead ?? st.label.charAt(0).toUpperCase() + st.label.slice(1) }), st.note ? ` ${st.note}` : null),
+    tex(st.latex, "math", true))));
   return list;
 }
 

@@ -498,7 +498,7 @@ TEST_CASE("evaluate: in fractions, a closed form's roots are what they are", "[r
     CHECK(taken(two).arithmetic == rsc::Arithmetic::Rational);
     CHECK(taken(two).text == "5/2, -1");
     CHECK(two.values == std::vector<double>{2.5, -1.0});
-    CHECK(two.closed->steps[4].latex == "x_{1} = \\frac{5}{2},\\quad x_{2} = -1");
+    CHECK(two.closed->steps[4].latex == "x_{1} = \\frac{5}{2} = 2.5,\\quad x_{2} = -1");
     CHECK(roots("x^2 - 2x + 1 = 0").closed->exact->text == "1, 1");
     CHECK(roots("0.5x^2 - 0.125 = 0").closed->exact->text == "1/2, -1/2");
     // a constant is read as written, not as the double it folds to: 1/3 is a third
@@ -530,6 +530,9 @@ TEST_CASE("evaluate: in fractions, a closed form's roots are what they are", "[r
     CHECK(irrational.candidates[0].refused == "the equation reads Sqrt, which has no fraction");
     CHECK(taken(irrational).arithmetic == rsc::Arithmetic::Double);
     CHECK(roots("sqrt(2) x^2 - 1 = 0", true).refused == "the equation reads Sqrt, which has no fraction");
-    // and with no engine, the closed form is the double's, with nothing exact
-    CHECK_FALSE(rsc::evaluate(doc("x: x^2 - 3x - 2 = 0"), "x").closed->exact);
+    // and with no engine the values are the double's, but the roots as they are are sought all the same
+    const auto plain = rsc::evaluate(doc("x: x^2 - 3x - 2 = 0"), "x");
+    REQUIRE(plain.closed->exact);
+    CHECK(plain.closed->exact->latex == "\\frac{3 \\pm \\sqrt{17}}{2}");
+    CHECK(plain.candidates[*plain.taken].arithmetic == rsc::Arithmetic::Double);
 }

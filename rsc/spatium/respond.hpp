@@ -499,6 +499,15 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& 
 // what is inside. A page draws these shapes and never asks which route answered; a route's own
 // fields stay beside it as the record.
 
+// a step as a sheet writes it: its label, its formula, and the words a page sets in bold with the
+// rest beside them, where the step has them
+inline JsonValue step_json(const spatium::io::build::Step& st) {
+    Object o{{"label", st.label}, {"latex", st.latex}};
+    if (!st.lead.empty()) o.emplace_back("lead", st.lead);
+    if (!st.note.empty()) o.emplace_back("note", st.note);
+    return o;
+}
+
 inline const JsonValue* field_of(const Object& o, std::string_view key) {
     for (const auto& [k, v] : o)
         if (k == key) return &v;
@@ -589,7 +598,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             else guarantee = "computed", ok = false, strength = "computed in double";
             if (e.steps.size() > 1) {
                 Array steps;
-                for (const auto& st : e.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+                for (const auto& st : e.steps) steps.push_back(step_json(st));
                 section("Steps", true, "steps", steps, Object{{"gist", std::format("{} steps", e.steps.size())}});
             }
             Array facts{fact("In double", text_of(e.values.front()))};
@@ -611,7 +620,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             const auto named = std::ranges::find_if(chain, [](const bd::Step& st) { return st.label == "roots" || st.label == "root"; });
             result = named != chain.end() ? named->latex : (chain.empty() ? result : chain.back().latex);
             Array steps;
-            for (const auto& st : chain) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+            for (const auto& st : chain) steps.push_back(step_json(st));
             section("Steps", true, "steps", steps, Object{{"gist", std::format("closed form, {} steps", chain.size())}});
             Array facts;
             const bool vieta = c.check && c.check->error <= 1e-12;
@@ -669,7 +678,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             strength = guarantee, notes.push_back(exact ? "by elimination in fractions" : "by elimination in doubles");
             result = l.steps.back().latex;
             Array steps;
-            for (const auto& st : l.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+            for (const auto& st : l.steps) steps.push_back(step_json(st));
             section("Steps", true, "steps", steps, Object{{"gist", std::format("elimination, {} steps", l.steps.size())}});
             std::string residuals;
             for (double r : l.residuals) residuals += (residuals.empty() ? "" : ", ") + text_of(r);
@@ -807,7 +816,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
     Array routes;
     const auto chain_of = [](const std::vector<bd::Step>& steps) {
         Array out;
-        for (const auto& st : steps) out.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+        for (const auto& st : steps) out.push_back(step_json(st));
         return out;
     };
     const auto add_route = [&](std::string name, std::size_t cost, bool taken, Array steps) {
