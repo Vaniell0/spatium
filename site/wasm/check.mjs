@@ -116,4 +116,19 @@ for (const n of notes) {
   if (bad.length) { ++misread; console.log(`differs: reference ${n.id} read from ${JSON.stringify(n.rows)}: ${bad.join(', ')}`); }
 }
 console.log(`${notes.length - misread} of ${notes.length} rows of the reference's notation read as the language they stand for`);
-process.exit(failed || unread || misread ? 1 : 0);
+// What a sheet offers next (`Next`) is put in the line as the row the library wrote for it: read
+// back by the editor's parser, that row asks what the offer's text asks -- the same route and the
+// same answer.
+let offers = 0, wrong = 0;
+for (const line of lines.filter(l => !/^(rows|evaluate|plot) /.test(l))) {
+  const sheet = JSON.parse(respond(line, 0)).sheet;
+  for (const n of (sheet?.sections ?? []).flatMap(s => s.next ?? [])) {
+    ++offers;
+    const byText = JSON.parse(respond(n.text, 0)), byRow = JSON.parse(rows(JSON.stringify({ rows: [ls.parse(n.latex)] })));
+    const bad = ['route', 'refused'].filter(k => JSON.stringify(byRow[k]) !== JSON.stringify(byText[k]));
+    if (byRow.sheet?.result !== byText.sheet?.result) bad.push(`result ${byRow.sheet?.result} vs ${byText.sheet?.result}`);
+    if (bad.length) { ++wrong; console.log(`differs: next of "${line}": ${n.text} read from ${n.latex}: ${bad.join(', ')}`); }
+  }
+}
+console.log(`${offers - wrong} of ${offers} questions the sheets offer next read back from their rows`);
+process.exit(failed || unread || misread || wrong ? 1 : 0);
