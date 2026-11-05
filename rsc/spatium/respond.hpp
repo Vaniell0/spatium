@@ -348,6 +348,23 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
     return out;
 }
 
+// The guarantees a sheet can carry, strongest first: the title a page gathers answers under (the
+// gallery's groups) and what each promises, in one sentence (the reference's).
+struct Guarantee {
+    std::string_view name, title, promise;
+};
+inline constexpr Guarantee guarantees[] = {
+    {"exact", "Exact", "The value itself, in fractions or in closed form: nothing in it is rounded."},
+    {"complete", "Every root proved, and no other",
+     "Each root lies in an interval that holds exactly one, and the rest of the interval or box is proved to hold none."},
+    {"proved", "Proved to their digits", "Every digit shown is proved: the true value lies between two bounds that share them."},
+    {"sampled", "Certified on a grid",
+     "A function of a parameter, its error below the bound at every point of a grid; between the points it is not proved."},
+    {"estimated", "Error estimated", "The error is estimated, not bounded: likely that close, not proved."},
+    {"computed", "Computed", "Computed in doubles; nothing is proved about its digits."},
+    {"none", "Not answered, and why", "No answer, and the reason the library gives for it."},
+};
+
 namespace respond_detail {
 
 // The shorthand of one line read as the document it stands for, with the names `above` defined

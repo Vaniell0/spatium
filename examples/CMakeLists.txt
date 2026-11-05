@@ -83,11 +83,12 @@ endif()
 
 # The reference of the question language the page reads, site/data/reference.json, written from
 # the library's own tables with every example answered by the library, and the same words as
-# TypeScript types, web/src/gen/language.ts. Its --check is a test.
+# TypeScript types, web/src/gen/language.ts, and as a page of the docs, docs/language.md. Its --check
+# is a test.
 spatium_add_example(NAME site_reference INCLUDE_DIRS ${PROJECT_SOURCE_DIR})
 if(SPATIUM_BUILD_TESTS)
     add_test(NAME site_reference_up_to_date COMMAND site_reference --check ${PROJECT_SOURCE_DIR}/site/data/reference.json
-             ${PROJECT_SOURCE_DIR}/web/src/gen/language.ts)
+             ${PROJECT_SOURCE_DIR}/web/src/gen/language.ts ${PROJECT_SOURCE_DIR}/docs/language.md)
 endif()
 
 # Geodesic Voronoi regions on a marching-cubes-tessellated implicit
