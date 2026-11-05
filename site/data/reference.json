@@ -30,5 +30,46 @@
     {"form":"f = g,\\ x \\in [a, b]","caption":"every root on the interval, each proved alone in its own","example":"x: sin(x) = 0.5 on [0, 10]","answer":{"route":"every root, proved","question_latex":["\\sin\\left(x\\right) = 0.5, x \\in \\left[0, 10\\right]"]}},
     {"form":"p \\in [c, d]","caption":"a parameter: a row below that reads it is answered as a function of p, synthesised and certified","example":"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]","answer":{"route":"synthesis","question_latex":["p \\in \\left[0.5, 4\\right]","x^{2} - p = 0, x \\in \\left[0, 10\\right]"]}},
     {"form":"I = \\int_a^b f\\,dt","caption":"an integral; a limit may be a parameter above","example":"x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]","answer":{"route":"synthesis","question_latex":["x \\in \\left[0.5, 6\\right]","\\mathrm{Si} = \\int_{0}^{x} \\frac{\\sin\\left(t\\right)}{t}\\,dt"]}}
+  ],
+  "statements": [
+    {"name":"value"},
+    {"name":"parameter"},
+    {"name":"root"},
+    {"name":"integral"},
+    {"name":"shape"}
+  ],
+  "relations": [
+    {"written":"=","latex":"="},
+    {"written":"<","latex":"<"},
+    {"written":"<=","latex":"\\le"},
+    {"written":">","latex":">"},
+    {"written":">=","latex":"\\ge"}
+  ],
+  "routes": [
+    {"name":"evaluate","caption":"Evaluated as written, with nothing rewritten: in fractions where every operation is one on fractions, else in intervals, each number held as it was typed and every operation rounding outward, so the true value lies between the ends; the digits both ends share are proved."},
+    {"name":"expression","caption":"The expression as written, a function of the parameter it reads."},
+    {"name":"closed form","caption":"Solved in closed form. The coefficients are read from the equation's own values and the degree is checked at more points; the roots come from the quadratic formula in the form that keeps the small root, and Vieta's formulas check them by a second route."},
+    {"name":"linear system","caption":"Solved by elimination. Each equation's coefficients are read from its own values and that it is linear is checked at more points; in fractions where every coefficient is one, so the solution is exact, else in doubles."},
+    {"name":"interval method","caption":"The interval method. The axis is cut where the inequality is undecided on a piece, computed in intervals, until every piece is proved to hold it or not; between a piece where it holds and one where it does not is a root of its left side less its right, proved alone there by Newton's interval step and an end of the set, or a break where it has no value."},
+    {"name":"every root, proved","caption":"Every root on the box, each proved. The box is cut in two where it is undecided; a piece is excluded where the equation's interval leaves out zero, and holds exactly one root where Newton's step in intervals, with the derivative enclosed by a dual number, lands inside it. Where the derivative may vanish, at a double root, nothing is proved. With no bracket the box is every double."},
+    {"name":"root on a bracket","caption":"A root where the equation changes sign on its bracket, by bisection to the last bit."},
+    {"name":"integral","caption":"The integral by the library's quadrature, its error estimated, not proved."},
+    {"name":"synthesis","caption":"Synthesised. The library computes the question's value at each parameter by its own solvers; the answer is the shortest expression in the parameter that matches it, searched bottom up, or a Chebyshev polynomial where none of a few terms does, checked against those values on a dense grid."}
+  ],
+  "arithmetics": [
+    {"name":"double"},
+    {"name":"float"},
+    {"name":"rational"},
+    {"name":"decimal"},
+    {"name":"real50"}
+  ],
+  "shapes": [
+    {"name":"torus","arguments":"nn","required":2,"variadic":false,"caption":"a torus: the radius to the tube's centre, and the tube's"},
+    {"name":"cylinder","arguments":"nn","required":2,"variadic":false,"caption":"a closed cylinder on the z axis: its radius and its height"},
+    {"name":"sphere","arguments":"n","required":1,"variadic":false,"caption":"a sphere at the origin: its radius"},
+    {"name":"flake","arguments":"nnnn","required":3,"variadic":false,"caption":"a shallow cap in a slab: the slab's half extents, and how much wider its sphere is"},
+    {"name":"offset","arguments":"sf","required":2,"variadic":false,"caption":"a closed surface pushed along its normal by a thickness"},
+    {"name":"scatter","arguments":"ssnn","required":3,"variadic":false,"caption":"copies of a shape on a surface: the shape, the surface, how many, and a seed"},
+    {"name":"union","arguments":"s","required":1,"variadic":true,"caption":"the shapes together"}
   ]
 }

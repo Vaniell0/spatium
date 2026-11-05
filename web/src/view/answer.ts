@@ -5,6 +5,7 @@
 
 import type { Answer } from "../core.js";
 import { el, math } from "./dom.js";
+import type { Relation } from "../gen/language.js";
 
 export interface Shown {
   steps: boolean;
@@ -15,7 +16,7 @@ interface Step { label: string; latex: string }
 interface Fact { label: string; text?: string; latex?: string; ok?: boolean }
 interface Table { columns: string[]; rows: string[][] }
 interface Part { kind: "holds" | "fails" | "root" | "break" | "undecided"; lo: number; hi: number; text?: string }
-interface Axis { relation: string; line: boolean; parts: Part[] }
+interface Axis { relation: Relation; line: boolean; parts: Part[] }
 interface Section { title: string; open: boolean; echo?: boolean; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis }
 export interface Sheet { outcome: string; guarantee: string; label: string; ok: boolean; result: string; sections: Section[] }
 

@@ -105,6 +105,15 @@ TEST_CASE("document: a root's relation may be an inequality", "[document]") {
     // the case it must fail: a different relation is a different document, and a system holds equations
     CHECK_FALSE(bd::same_document(*doc, *bd::read_document("x: x^2 - 4 > 0 on [-5, 5]\ny: 1 - y < 0\n")));
     CHECK_FALSE(bd::read_document("x, y: x + y > 1, x - y = 0").has_value());
+    // the table a page takes the relations from is the reader's: each is read and printed back
+    for (const auto rel : bd::relations) {
+        const std::string text = std::format("x: x - 1 {} 0\n", rel);
+        const auto one = bd::read_document(text);
+        REQUIRE(one.has_value());
+        CHECK(one->statements[0].relation == rel);
+        CHECK(bd::to_text(*one) == text);
+    }
+    CHECK_FALSE(bd::read_document("x: x - 1 => 0").has_value());
 }
 
 TEST_CASE("document: refused with the line, and the column for a parse error", "[document]") {

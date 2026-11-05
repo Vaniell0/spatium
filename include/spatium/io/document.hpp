@@ -52,6 +52,9 @@ struct Written {
 
 enum class StatementKind { Value, Parameter, Root, Integral, Shape };
 
+inline constexpr StatementKind statement_kinds[] = {StatementKind::Value, StatementKind::Parameter, StatementKind::Root,
+                                                    StatementKind::Integral, StatementKind::Shape};
+
 inline const char* statement_kind_name(StatementKind k) {
     switch (k) {
         case StatementKind::Value: return "value";
@@ -82,6 +85,9 @@ inline constexpr ShapeOperation shape_operations[] = {
     {"scatter", "ssnn", 3, false, "copies of a shape on a surface: the shape, the surface, how many, and a seed"},
     {"union", "s", 1, true, "the shapes together"},
 };
+
+// The relations a root's sides may stand in, as written.
+inline constexpr std::string_view relations[] = {"=", "<", "<=", ">", ">="};
 
 namespace detail {
 
