@@ -10,7 +10,7 @@ import type { Relation } from "../gen/language.js";
 export interface Shown {
   steps: boolean;
   source: boolean;                // formulas as LaTeX source
-  ask?: (text: string) => void;   // a question the sheet offers, asked
+  ask?: (text: string, rows?: string[]) => void;   // a question the sheet offers, asked: its text, and its rows as the library writes them
 }
 
 interface Step { label: string; latex: string; lead?: string; note?: string }
@@ -94,7 +94,7 @@ function chain(steps: Step[], title: string, tex: Tex) {
 
 // a section of the sheet; its open state as the person left it, else the core's. Steps with more
 // than one route answering carry a tab each, the route read before first, else the one taken.
-export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?: (text: string) => void) {
+export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?: (text: string, rows?: string[]) => void) {
   const body = el("div", { class: "body" });
   const gist = el("span", { class: "tag", text: sec.gist ?? "" });
   if (sec.rows) for (const r of sec.rows) body.append(tex(r, "math", true));
@@ -132,7 +132,7 @@ export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?:
   // what else the question can become: a caption and the question as the library writes it
   if (sec.next) body.append(el("ul", { class: "next" }, ...sec.next.map((n) => {
     const inner = [el("span", { class: "caption", text: n.caption }), tex(n.latex, "math")];
-    return el("li", {}, ask ? el("button", { type: "button", class: "ask", onclick: () => ask(n.text) }, ...inner) : el("div", {}, ...inner));
+    return el("li", {}, ask ? el("button", { type: "button", class: "ask", onclick: () => ask(n.text, [n.latex]) }, ...inner) : el("div", {}, ...inner));
   })));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
   return foldable(sec.title, gist, sec.open, body);
