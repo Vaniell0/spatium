@@ -7,7 +7,7 @@
 import type { Answer } from "../core.js";
 import { type Cell, type Doc, graph, math, presets, setting, splitLines } from "../doc.js";
 import { nameOf, wordBefore } from "../answers.js";
-import { answerView } from "./answer.js";
+import { answerView, foldable } from "./answer.js";
 import { el } from "./dom.js";
 import { graphView, type GraphOptions, type View } from "./graph.js";
 
@@ -18,6 +18,7 @@ export interface CardsHost {
   focused(field: HTMLElement): void;  // a row took the focus (the keyboard goes there)
   hint(word: string): [name: string, caption: string, example: string] | null;  // what the reference says of a word
   curve: (cell: Cell) => GraphOptions["curve"];                                 // a graph's curve in doubles
+  ask: (text: string) => void;                                                   // a question the sheet offers, as a new card
 }
 
 type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string;
@@ -64,7 +65,10 @@ export class Cards {
   show(cell: Cell, answer: Answer | null, above = 0, from?: Cell) {
     if (from) {
       const slot = this.shown.get(from)?.box.querySelector(".also");
-      if (slot && answer) slot.replaceChildren(graphView(answer, { height: 260, curve: this.host.curve(cell) }));
+      // closed unless the person keeps plots open; drawn the first time it opens
+      const body = el("div", { class: "sec-body" });
+      if (slot && answer) slot.replaceChildren(foldable("Plot", null, false, body,
+        () => body.append(graphView(answer, { height: 260, curve: this.host.curve(cell) }))));
       return;
     }
     const s = this.shown.get(cell);
@@ -84,7 +88,7 @@ export class Cards {
       return;
     }
     const typed = "text" in cell.written ? cell.written.text : "";
-    out.replaceChildren(answerView(answer, typed, { steps: setting(this.doc, cell, "steps"), source: this.host.source() }));
+    out.replaceChildren(answerView(answer, typed, { steps: setting(this.doc, cell, "steps"), source: this.host.source(), ask: this.host.ask }));
   }
 
   // graphs the page added are dropped before a new run

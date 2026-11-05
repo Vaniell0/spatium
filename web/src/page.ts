@@ -335,6 +335,7 @@ cards = new Cards(doc, {
   focused: (f) => { activeField = f; placeKeys(); },
   hint,
   curve: (cell) => (at) => answers.curve(cell, at),
+  ask: (text) => addText(text),
 });
 $("#sheet")!.append(cards.root);
 usePreset(doc.preset);
