@@ -272,6 +272,23 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             break;
         }
         case Route::Enclosed: {
+            if (e.system) {
+                // a system's roots, each as its unknowns' proved digits
+                Array values;
+                std::string latex;
+                for (const auto& r : e.system->roots) {
+                    std::string names, digits;
+                    for (std::size_t j = 0; j < r.size(); ++j) {
+                        values.push_back(r[j].mid());
+                        names += (j ? ", " : "") + bd::detail::name_latex(e.system->unknowns[j]);
+                        digits += (j ? ", " : "") + spatium::proved(r[j]).text;
+                    }
+                    latex += (latex.empty() ? "" : ";\\quad ") + std::format("({}) = ({})", names, digits);
+                }
+                out.emplace_back("values", values);
+                out.emplace_back("latex", latex);
+                break;
+            }
             // each root as its proved digits, or within a bound of zero where none is proved
             Array values;
             for (double v : e.values) values.push_back(v);
@@ -642,6 +659,30 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         }
         case Route::Enclosed: {
             outcome = "roots";
+            if (e.system) {
+                const auto& sys = *e.system;
+                const std::size_t n = sys.roots.size();
+                guarantee = sys.undecided.empty() ? "complete" : "proved";
+                label = std::format("{} root{} proved{}", n, n == 1 ? "" : "s", sys.undecided.empty() ? ", and no other" : "; elsewhere undecided");
+                Array columns, rows;
+                for (const auto& u : sys.unknowns) columns.push_back(u);
+                columns.push_back("digits");
+                for (const auto& r : sys.roots) {
+                    Array row;
+                    int digits = 17;
+                    for (const auto& v : r) {
+                        const auto p = spatium::proved(v);
+                        row.push_back(p.text), digits = std::min(digits, p.digits);
+                    }
+                    row.push_back(std::to_string(digits));
+                    rows.push_back(std::move(row));
+                }
+                section("Roots", true, "table", Object{{"columns", columns}, {"rows", rows}});
+                Array facts{fact("Searched", "every double of each unknown")};
+                if (!sys.undecided.empty()) facts.push_back(fact("Undecided", std::format("{} pieces", sys.undecided.size()), false, false));
+                section("Properties", false, "facts", facts);
+                break;
+            }
             const auto& f = *e.enclosed;
             const std::size_t n = f.roots.size();
             guarantee = f.complete() ? "complete" : "proved";

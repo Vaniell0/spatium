@@ -160,11 +160,29 @@ TEST_CASE("respond: rows that are equations in as many unknowns are one system",
     const auto in_double = rsc::respond("sqrt(2) x + y = 1\nx - y = 0");
     CHECK(at(at(in_double, "sheet"), "guarantee").as_string() == "computed");
     CHECK(std::abs(at(at(in_double, "solution"), "x").as_number() - 1 / (std::sqrt(2.0) + 1)) < 1e-15);
-    // the cases it must fail: an equation that is not linear, and equations that are not independent
-    CHECK(at(rsc::respond("x^2 + y = 1\nx - y = 0"), "refused").as_string() == "equation 1 is not linear in the unknowns");
+    // the case it must fail: equations that are not independent (one not linear goes to its roots, below)
     CHECK(at(rsc::respond("x + y = 1\n2x + 2y = 2"), "refused").as_string().find("not independent") != std::string::npos);
     // rows in more names than equations stay rows of a document
     CHECK(at(rsc::respond("x + y = 1\nx - y = z"), "route").as_string() != "linear system");
+}
+
+TEST_CASE("respond: a system that is not linear has every root proved", "[rsc][respond]") {
+    // x^2 + y^2 = 4 and x - y = 1 meet at x = (1 ± √7)/2, y = x - 1: both proved, none other on the plane
+    const auto r = rsc::respond("x^2 + y^2 = 4\nx - y = 1");
+    CHECK(at(r, "route").as_string() == "every root, proved");
+    CHECK(at(at(r, "sheet"), "label").as_string() == "2 roots proved, and no other");
+    const auto& v = at(r, "values").as_array();
+    REQUIRE(v.size() == 4);
+    for (std::size_t k = 0; k < 4; k += 2) {
+        const double x = v[k].as_number(), y = v[k + 1].as_number();
+        // the second route: the roots of the quadratic the substitution y = x - 1 leaves, 2x^2 - 2x - 3 = 0
+        CHECK(std::min(std::abs(x - (1 + std::sqrt(7.0)) / 2), std::abs(x - (1 - std::sqrt(7.0)) / 2)) < 1e-14);
+        CHECK(std::abs(y - (x - 1)) < 1e-14);
+    }
+    // the linear route was asked first and said why not
+    CHECK(at(r, "candidates").as_array().front().string_or("refused", "") == "equation 1 is not linear in the unknowns");
+    // the case it must fail: a circle and a line that do not meet have no real root, proved
+    CHECK(rsc::respond("x^2 + y^2 = 1\nx + y = 3").string_or("refused", "").find("no real root") != std::string::npos);
 }
 
 TEST_CASE("respond: an inequality is the set where it holds, by the interval method", "[rsc][respond]") {
