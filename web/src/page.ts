@@ -9,7 +9,7 @@ import { Core, type State } from "./core.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
 import { Cards } from "./view/cells.js";
 import { $, el, math as tex } from "./view/dom.js";
-import { kindOf, type Sheet } from "./view/answer.js";
+import type { Sheet } from "./view/answer.js";
 import { History } from "./view/history.js";
 
 // ── settings of the page (a cell's own are in the document) ─────────────
@@ -88,17 +88,10 @@ interface Reference {
   constants: { name: string; caption: string; example?: string }[];
   questions: { form: string; caption: string; example?: string; answer?: { question_latex?: string[] } }[];
 }
-interface Card { id: string; question?: string; question_latex?: string[]; typed?: boolean; route?: string; refused?: string; sheet?: { guarantee: string } }
-const data: { gallery: Card[]; groups: { guarantee: string; title: string }[]; reference: Reference | null } = { gallery: [], groups: [], reference: null };
+const data: { reference: Reference | null } = { reference: null };
 
 async function loadData() {
-  const [g, r] = await Promise.all([
-    fetch("gallery/gallery.json").then((x) => x.json()).catch(() => ({ cards: [] })),
-    fetch("data/reference.json").then((x) => x.json()).catch(() => null),
-  ]);
-  data.gallery = g.cards;
-  data.groups = g.groups ?? [];
-  data.reference = r;
+  data.reference = await fetch("data/reference.json").then((x) => x.json()).catch(() => null);
 }
 
 // ── the document: from the address, else the browser, else a question to start from ─
@@ -218,7 +211,7 @@ function intoLine(written: Calc["line"]) {
   changed();
 }
 
-// ── panels: the reference and the gallery, each line of them a cell to add ─
+// ── the reference panel: each line of it a question to put in the line ─
 
 // a question: its rows as the library writes them (`question_latex`), or a line of text -- on the
 // calculator, which takes formulas only, that line as a formula -- put in the calculator's line,
@@ -233,25 +226,13 @@ const addText = (text: string) => addRows(undefined, text);
 const shownAs = (rows: string[] | undefined, text: string, cls: string) =>
   rows?.length ? el("span", { class: cls }, ...rows.map((r) => tex(r, { cls: "math" }))) : el("span", { class: cls, text });
 
-function panel(which: "ref" | "gallery" | null) {
+function panel(which: "ref" | null) {
   const box = $("#panel")!;
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-panel]")) b.setAttribute("aria-pressed", String(b.dataset.panel === which));
   if (!which) { box.hidden = true; return; }
   box.hidden = false;
   const body = el("div", { class: "panel-body" });
-  if (which === "gallery") {
-    // by how strongly each answer holds, in the gallery's own order of groups
-    for (const g of data.groups) {
-      const picks = data.gallery.filter((c) => c.question && c.typed !== false && c.sheet?.guarantee === g.guarantee);
-      if (!picks.length) continue;
-      body.append(el("h3", { text: g.title }));
-      for (const c of picks) {
-        const [ok, label] = kindOf(c as unknown as Record<string, unknown>);
-        body.append(el("button", { type: "button", class: "pick", onclick: () => addRows(c.question_latex, c.question!) },
-          shownAs(c.question_latex, c.question!, "q asked"), el("span", { class: ok ? "kind ok" : "kind", text: label })));
-      }
-    }
-  } else {
+  {
     const r = data.reference;
     const filter = el("input", { class: "filter", type: "search", placeholder: "Find a function, an operator, a form", "aria-label": "Find in the reference" });
     const list = el("div", { class: "ref" });
@@ -311,14 +292,31 @@ function setKeys(open: boolean) {
   placeKeys();
 }
 
-// the panel stays at the bottom edge; the page gets room below its last row, and the row being
-// written is scrolled above the panel when the panel would cover it
+// the keyboard is a window of its own over the page: it takes no room from the page, is moved by
+// its title bar, and comes back where it was left (kept in this browser), inside the viewport
 function placeKeys() {
   const keys = $("#keys")!;
-  document.body.style.paddingBottom = keys.hidden ? "" : `${keys.offsetHeight + 32}px`;
-  if (keys.hidden || !activeField) return;
-  const r = activeField.getBoundingClientRect(), top = keys.getBoundingClientRect().top;
-  if (r.bottom + 16 > top) scrollBy({ top: r.bottom + 16 - top, behavior: "smooth" });
+  if (keys.hidden) return;
+  let at: { x: number; y: number } | null = null;
+  try { at = JSON.parse(localStorage.getItem("spatium.keys") ?? "null"); } catch { /* where CSS puts it */ }
+  if (!at) { keys.style.left = keys.style.top = keys.style.bottom = keys.style.transform = ""; return; }
+  const x = Math.min(Math.max(0, at.x), innerWidth - keys.offsetWidth), y = Math.min(Math.max(0, at.y), innerHeight - keys.offsetHeight);
+  Object.assign(keys.style, { left: `${x}px`, top: `${y}px`, bottom: "auto", transform: "none" });
+}
+
+function dragKeys() {
+  const keys = $("#keys")!, head = keys.querySelector<HTMLElement>(".keys-head")!;
+  head.addEventListener("pointerdown", (e) => {
+    if ((e.target as Element).closest("button")) return;
+    const r = keys.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId);
+    const move = (m: PointerEvent) => {
+      try { localStorage.setItem("spatium.keys", JSON.stringify({ x: m.clientX - dx, y: m.clientY - dy })); } catch { /* not kept */ }
+      placeKeys();
+    };
+    head.addEventListener("pointermove", move);
+    head.addEventListener("pointerup", () => head.removeEventListener("pointermove", move), { once: true });
+  });
 }
 
 // ── settings of the page ────────────────────────────────────────────────
@@ -346,13 +344,14 @@ function wire() {
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-preset]"))
     b.addEventListener("click", () => usePreset(b.dataset.preset as Preset));
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-panel]"))
-    b.addEventListener("click", () => panel(b.getAttribute("aria-pressed") === "true" ? null : (b.dataset.panel as "ref" | "gallery")));
+    b.addEventListener("click", () => panel(b.getAttribute("aria-pressed") === "true" ? null : (b.dataset.panel as "ref")));
   $("#copy-link")!.addEventListener("click", copyLink);
   $("#open-keys")!.addEventListener("pointerdown", (e) => e.preventDefault());
   $("#open-keys")!.addEventListener("click", () => setKeys($("#keys")!.hidden === true));
   $("#close-keys")!.addEventListener("click", () => setKeys(false));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") setKeys(false); });
   addEventListener("resize", placeKeys);
+  dragKeys();
   const dialog = $<HTMLDialogElement>("#settings")!;
   $("#open-settings")!.addEventListener("click", () => { showCoreState(); dialog.showModal(); });
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
@@ -422,6 +421,9 @@ cards = new Cards(doc, {
 });
 $("#sheet")!.append(cards.root, past.root);
 usePreset(doc.preset);
+// the gallery's bar links here by name: the canvas, or the reference open
+if (location.hash === "#canvas") usePreset("canvas");
+if (location.hash === "#ref") panel("ref");
 await coreLoaded;
 showCoreState();
 if (core.failed) toast(`The core did not load: ${core.failed}`, true);
