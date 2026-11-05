@@ -1,5 +1,5 @@
 // Written by examples/site_reference.cpp from the library's own tables; do not edit.
-// Regenerate: site_reference --write site/data/reference.json web/src/gen/language.ts
+// Regenerate: site_reference --write site/data/reference.json web/src/gen/language.ts docs/language.md
 
 export const functions = ["sin", "cos", "log", "exp", "sqrt", "abs", "min", "max", "less"] as const;
 export type FunctionName = (typeof functions)[number];

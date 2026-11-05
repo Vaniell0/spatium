@@ -15,7 +15,8 @@ const key: Record<string, string> = { operators: "written", relations: "written"
 
 test("every word of the library has a home on the page, and no other word does", () => {
   for (const [list, words] of Object.entries(homes)) {
-    const library = (reference[list] as Record<string, string>[]).map((w) => w[key[list] ?? "name"]);
+    // a function the editor writes and the language has no name for (`\tan`, `\lg`) is not a word of it
+    const library = new Set((reference[list] as Record<string, string>[]).map((w) => w[key[list] ?? "name"]).filter(Boolean));
     assert.deepEqual(Object.keys(words).sort(), [...library].sort(), list);
   }
 });

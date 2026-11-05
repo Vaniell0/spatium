@@ -10,22 +10,26 @@
 // page's door, so each one shown is one the library reads, and its value and LaTeX are the
 // library's. `--check` is a ctest.
 //
-//   site_reference --write site/data/reference.json web/src/gen/language.ts
-//   site_reference --check site/data/reference.json web/src/gen/language.ts
+//   site_reference --write site/data/reference.json web/src/gen/language.ts docs/language.md
+//   site_reference --check site/data/reference.json web/src/gen/language.ts docs/language.md
 
 #include <rsc/spatium/evaluate.hpp>
 #include <rsc/spatium/respond.hpp>
 #include <spatium/io/document.hpp>
+#include <spatium/io/field_mathjson.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <format>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -44,18 +48,93 @@ JsonValue answered(std::string_view example) {
     for (const auto& [k, v] : r.as_object()) {
         if (k == "route" || k == "refused" || k == "question_latex") out.emplace_back(k, v);
         if (k == "value") out.emplace_back("value", std::format("{:.12g}", v.as_number()));
+        if (k == "sheet")
+            for (const auto& [sk, sv] : v.as_object())
+                if (sk == "guarantee" || sk == "label") out.emplace_back(sk, sv);
     }
     if (const auto f = bd::parse(example); f && std::string_view(example).find('=') == std::string_view::npos)
         out.emplace_back("latex", *bd::to_latex(*f));
     return out;
 }
 
-std::string reference() {
-    Array functions, operators, constants, questions;
+// The editor's notation of a function, where it is not the language's own: `\ln`, `\lg`,
+// `\log_b`, `\tan`, `\sqrt[n]`. `rows` is the example as the editor writes it, `example` the line
+// of the language it reads as; site/wasm/check.mjs reads the rows back with the editor's parser and
+// asks that they answer as the line does. Every MathJSON head the reader takes is here, or is a
+// form the Writing and Operators sections show (`forms` below), or main fails.
+struct Notation {
+    const char* head;      // MathJSON's name, as field_mathjson.hpp has it
+    const char* form;      // LaTeX, as a person writes it
+    const char* rows;      // the example, in the editor
+    const char* example;   // the same, in the language
+    const char* caption;   // where the language has no function of this name
+    const char* domain;
+};
+constexpr Notation notation[] = {
+    {"Sin", "\\sin x", "\\sin\\left(\\frac{\\pi}{6}\\right)", "sin(pi / 6)", "", ""},
+    {"Cos", "\\cos x", "\\cos\\left(\\frac{\\pi}{3}\\right)", "cos(pi / 3)", "", ""},
+    {"Tan", "\\tan x", "\\tan\\left(\\frac{\\pi}{4}\\right)", "sin(pi / 4) / cos(pi / 4)", "tangent, sin x / cos x",
+     "every x where cos x is not 0"},
+    {"Exp", "\\exp x", "\\exp\\left(1\\right)", "exp(1)", "", ""},
+    {"Ln", "\\ln x", "\\ln\\left(2\\right)", "log(2)", "", ""},
+    {"Lg", "\\lg x", "\\lg\\left(100\\right)", "log(100) / log(10)", "logarithm in base 10; \\log x alone is the same",
+     "x > 0"},
+    {"Log", "\\log_{b} x", "\\log_{3}\\left(81\\right)", "log(81) / log(3)", "logarithm in base b", "x > 0, b > 0, b not 1"},
+    {"Lb", "\\log_{2} x", "\\log_{2}\\left(8\\right)", "log(8) / log(2)", "logarithm in base 2", "x > 0"},
+    {"Sqrt", "\\sqrt{x}", "\\sqrt{2}", "sqrt(2)", "", ""},
+    {"Root", "\\sqrt[n]{x}", "\\sqrt[3]{8}", "8^(1/3)", "the n-th root", "x > 0"},
+    {"Abs", "\\left|x\\right|", "\\left|-3\\right|", "abs(-3)", "", ""},
+    {"Min", "\\min\\left(x, y\\right)", "\\min\\left(2, 3\\right)", "min(2, 3)", "", ""},
+    {"Max", "\\max\\left(x, y\\right)", "\\max\\left(2, 3\\right)", "max(2, 3)", "", ""},
+};
+// the heads that are forms, not functions: the Writing and Operators sections show them
+constexpr std::string_view forms[] = {"Add", "Subtract", "Negate", "Multiply", "InvisibleOperator", "Divide", "Rational",
+                                      "Half", "Power", "Square", "Delimiter", "Equal", "Less", "LessEqual", "Greater",
+                                      "GreaterEqual", "Error"};
+
+// the language's function a notation's example calls first, if it is one
+const bd::Function* function_of(std::string_view example) {
     for (const auto& f : bd::functions)
-        functions.push_back(Object{{"name", std::string(f.name)}, {"arity", f.arity}, {"caption", std::string(f.caption)},
-                                   {"domain", std::string(f.domain)}, {"example", std::string(f.example)},
-                                   {"answer", answered(f.example)}});
+        if (example.starts_with(std::string(f.name) + "(")) return &f;
+    return nullptr;
+}
+
+std::string reference() {
+    for (const auto& h : bd::mathjson_heads) {
+        bool placed = std::ranges::find(forms, h.name) != std::end(forms);
+        for (const auto& n : notation) placed = placed || h.name == n.head;
+        if (!placed) throw std::runtime_error(std::format("the editor's {} has no row in the reference", h.name));
+    }
+    Array writing, functions, operators, constants, questions;
+    // how the formula editor takes keystrokes: what is typed, and the line of the language the rows
+    // it shows read as; the rows are the library's own (`question_latex`)
+    struct Typed { const char* typed; const char* reads; const char* caption; };
+    for (const Typed& t : {Typed{"sqrt", "sqrt(2)", "a square root"}, Typed{"/", "1 / 3", "a fraction"},
+                           Typed{"^", "2^10", "a power; the arrow keys leave it"}, Typed{"pi", "pi", "the number pi"},
+                           Typed{"<=", "x: x^2 <= 4", "an inequality; >= gives the other"},
+                           Typed{"in", "x: x^2 = 2 on [0, 2]", "where to look for the roots"},
+                           Typed{"Shift+Enter", "x, y: x + y = 3, x - y = 1", "a new row; rows of equations are a system"}})
+        writing.push_back(Object{{"typed", t.typed}, {"reads", t.reads}, {"caption", t.caption}, {"answer", answered(t.reads)}});
+    for (const Notation& n : notation) {
+        const bd::Function* f = *n.caption ? nullptr : function_of(n.example);
+        if (!*n.caption && !f) throw std::runtime_error(std::format("{}: no caption, and no function of the language", n.head));
+        std::string reads;   // what the reader makes of it, as field_mathjson.hpp says
+        for (const auto& h : bd::mathjson_heads)
+            if (h.name == n.head) reads = std::string(h.caption);
+        functions.push_back(Object{{"head", n.head}, {"form", n.form}, {"reads", reads}, {"name", f ? std::string(f->name) : std::string()}, {"arity", f ? f->arity : 1},
+                                   {"caption", f ? std::string(f->caption) : std::string(n.caption)},
+                                   {"domain", f ? std::string(f->domain) : std::string(n.domain)}, {"rows", Array{n.rows}},
+                                   {"example", n.example}, {"answer", answered(n.example)}});
+    }
+    // a function of the language no notation calls: the language's text only
+    for (const auto& f : bd::functions) {
+        bool shown = false;
+        for (const auto& n : notation) shown = shown || std::string_view(n.example).starts_with(std::string(f.name) + "(");
+        if (!shown)
+            functions.push_back(Object{{"name", std::string(f.name)}, {"arity", f.arity}, {"caption", std::string(f.caption)},
+                                       {"domain", std::string(f.domain)}, {"example", std::string(f.example)},
+                                       {"answer", answered(f.example)}});
+    }
     for (const auto& o : bd::operators)
         operators.push_back(Object{{"written", std::string(o.written)}, {"caption", std::string(o.caption)},
                                    {"example", std::string(o.example)}, {"answer", answered(o.example)}});
@@ -69,13 +148,54 @@ std::string reference() {
                                         "and every real root proved", "2x^2 - 3x - 5 = 0"},
                           Kind{"f = g,\\ x \\in [a, b]", "every root on the interval, each proved alone in its own",
                                "x: sin(x) = 0.5 on [0, 10]"},
+                          Kind{"f > g", "an inequality: where it holds, by the interval method", "x: x^2 - 4 > 0"},
+                          Kind{"f = g \\\\ h = k", "a system: one row per equation, an equation per unknown",
+                               "x, y: x + y = 3, x - y = 1"},
                           Kind{"p \\in [c, d]", "a parameter: a row below that reads it is answered as a function of p, "
                                               "synthesised and certified", "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"},
                           Kind{"I = \\int_a^b f\\,dt", "an integral; a limit may be a parameter above",
                                "x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]"}})
         questions.push_back(Object{{"form", k.form}, {"caption", k.caption}, {"example", k.example},
                                    {"answer", answered(k.example)}});
-    Array statements, relations, routes, arithmetics, shapes;
+    // the canvas's text: a line of the language a definition, each example read by the library and
+    // written back as it reads it, with its row of LaTeX; every kind of statement has a line here
+    Array language, told;
+    std::vector<bd::StatementKind> seen;
+    struct Line { const char* form; const char* caption; const char* example; };
+    for (const Line& l : {Line{"name = f", "a value, named; a line below reads it by its name", "r = 0.5\nA = pi * r^2"},
+                          Line{"x: f = g", "the roots of an equation in x", "x: 2x^2 - 3x - 5 = 0"},
+                          Line{"x: f = g on [a, b]", "every root on the interval", "x: sin(x) = 0.5 on [0, 10]"},
+                          Line{"x: f > g", "where an inequality holds; also <, <= and >=", "x: x^2 - 4 > 0"},
+                          Line{"x, y: f = g, h = k", "a system: an equation for each unknown", "x, y: x + y = 3, x - y = 1"},
+                          Line{"p in [a, b]", "a parameter: a line that reads it is answered as a function of it",
+                               "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"},
+                          Line{"I = integral f dt on [a, b]", "an integral in the variable after d", "I = integral t^2 dt on [0, 1]"},
+                          Line{"S = torus(R, r)", "a shape, from the operations below; another reads it by name",
+                               "S0 = torus(2, 0.5)\nS1 = offset(S0, 0.1)"},
+                          Line{"# words", "a comment, to the end of the line", "r = 2  # the radius"}}) {
+        const auto doc = bd::read_document(l.example);
+        if (!doc) throw std::runtime_error(std::format("{}: {}", l.example, doc.error().message));
+        Array latex;
+        for (const auto& st : doc->statements) {
+            seen.push_back(st.kind);
+            if (const auto row = bd::to_latex(st)) latex.push_back(*row);
+            for (const auto& e : st.also)   // a system: an equation a row, as respond writes them
+                if (const auto row = bd::to_latex(e)) latex.push_back(*row);
+        }
+        language.push_back(Object{{"form", l.form}, {"caption", l.caption}, {"example", l.example}, {"latex", latex}});
+    }
+    for (const auto k : bd::statement_kinds)
+        if (std::ranges::find(seen, k) == seen.end())
+            throw std::runtime_error(std::format("no line of the language shows a {}", bd::statement_kind_name(k)));
+    // what the library says of a document it does not take, in its own words
+    for (const auto& [caption, example] : {std::pair{"a name read before a line defines it", "A = pi * r^2"},
+                                           std::pair{"a name defined twice", "r = 1\nr = 2"},
+                                           std::pair{"a cycle: a line reads only the lines above it", "a = b + 1\nb = a - 1"}}) {
+        const auto doc = bd::read_document(example);
+        if (doc) throw std::runtime_error(std::format("{}: read, and should not be", example));
+        told.push_back(Object{{"caption", caption}, {"example", example}, {"told", doc.error().message}});
+    }
+    Array statements, relations, routes, arithmetics, shapes, guarantees;
     for (const auto k : bd::statement_kinds) statements.push_back(Object{{"name", bd::statement_kind_name(k)}});
     for (const auto r : bd::relations)
         relations.push_back(Object{{"written", std::string(r)}, {"latex", bd::detail::relation_latex(r)}});
@@ -84,10 +204,14 @@ std::string reference() {
     for (const auto& o : bd::shape_operations)
         shapes.push_back(Object{{"name", std::string(o.name)}, {"arguments", std::string(o.arguments)},
                                 {"required", o.required}, {"variadic", o.variadic}, {"caption", std::string(o.caption)}});
+    for (const auto& g : rsc::guarantees)
+        guarantees.push_back(Object{{"name", std::string(g.name)}, {"title", std::string(g.title)}, {"promise", std::string(g.promise)}});
     const std::pair<const char*, const Array*> sections[] = {
-        {"functions", &functions},   {"operators", &operators}, {"constants", &constants},
-        {"questions", &questions},   {"statements", &statements}, {"relations", &relations},
-        {"routes", &routes},         {"arithmetics", &arithmetics}, {"shapes", &shapes}};
+        {"writing", &writing},       {"functions", &functions},   {"operators", &operators},
+        {"constants", &constants},   {"questions", &questions},   {"language", &language},
+        {"told", &told},             {"guarantees", &guarantees}, {"statements", &statements},
+        {"relations", &relations},   {"routes", &routes},         {"arithmetics", &arithmetics},
+        {"shapes", &shapes}};
     std::string out = "{\n";
     for (std::size_t s = 0; s < std::size(sections); ++s) {
         const auto& [name, rows] = sections[s];
@@ -103,7 +227,7 @@ std::string reference() {
 // the page gives it a place.
 std::string language_ts() {
     std::string out = "// Written by examples/site_reference.cpp from the library's own tables; do not edit.\n"
-                      "// Regenerate: site_reference --write site/data/reference.json web/src/gen/language.ts\n";
+                      "// Regenerate: site_reference --write site/data/reference.json web/src/gen/language.ts docs/language.md\n";
     const auto list = [&](const char* name, const char* type, const std::vector<std::string>& words) {
         out += std::format("\nexport const {} = [", name);
         for (std::size_t i = 0; i < words.size(); ++i) out += (i ? ", " : "") + JsonValue(words[i]).dump();
@@ -126,6 +250,77 @@ std::string language_ts() {
     return out;
 }
 
+// The same reference as a page of the docs, `docs/language.md`, written from the JSON above so the
+// two cannot differ: LaTeX in `$...$`, the language's text in code.
+std::string language_md(const std::string& json) {
+    const JsonValue r = *spatium::io::parse(json);
+    const auto rows = [&](const char* name) -> const Array& {
+        for (const auto& [k, v] : r.as_object())
+            if (k == name) return v.as_array();
+        throw std::runtime_error(name);
+    };
+    // a table cell: a pipe would end it, a line break too
+    const auto cell = [](std::string s) {
+        std::string out;
+        for (const char c : s) out += c == '|' ? std::string("\\|") : c == '\n' ? std::string("<br>") : std::string(1, c);
+        return out;
+    };
+    const auto tex = [&](const std::string& s) { return s.empty() ? std::string() : cell("$" + s + "$"); };
+    const auto code = [&](const std::string& s) { return s.empty() ? std::string() : "`" + cell(s) + "`"; };
+    const auto shown = [&](const JsonValue& row) {
+        std::string out;
+        if (const JsonValue* a = row.find("answer"); a && a->find("question_latex"))
+            for (const auto& l : a->find("question_latex")->as_array()) out += (out.empty() ? "" : "<br>") + tex(l.as_string());
+        return out;
+    };
+    std::string out = "# The language\n\n"
+                      "Written by `examples/site_reference.cpp` from the library's own tables, as the site's reference "
+                      "is; do not edit. Every example here is answered by the library, and its formula is the one "
+                      "it writes.\n\n## Writing a question\n\nIn the formula editor, what is typed becomes the formula "
+                      "shown, which reads as the line of the language beside it.\n\n| type | shows | reads as | |\n|---|---|---|---|\n";
+    for (const auto& w : rows("writing"))
+        out += std::format("| {} | {} | {} | {} |\n", code(w.string_or("typed", "")), shown(w), code(w.string_or("reads", "")),
+                           cell(w.string_or("caption", "")));
+    out += "\n## Questions\n\n| form | what it asks | example | answer |\n|---|---|---|---|\n";
+    for (const auto& q : rows("questions"))
+        out += std::format("| {} | {} | {} | {} |\n", tex(q.string_or("form", "")), cell(q.string_or("caption", "")), shown(q),
+                           cell(q.find("answer")->string_or("label", "")));
+    out += "\n## Functions\n\nThe editor's notation, the language's text, where each has a value, and an example.\n\n"
+           "| written | in the language | | defined for | example |\n|---|---|---|---|---|\n";
+    for (const auto& f : rows("functions"))
+        out += std::format("| {} | {} | {} | {} | {} |\n", tex(f.string_or("form", "")),
+                           code(f.string_or("name", "").empty() ? f.string_or("example", "") : f.string_or("name", "")),
+                           cell(f.string_or("caption", "")), cell(f.string_or("domain", "")), code(f.string_or("example", "")));
+    out += "\n## Operators\n\nTightest last.\n\n| written | | example |\n|---|---|---|\n";
+    for (const auto& o : rows("operators"))
+        out += std::format("| {} | {} | {} |\n", code(o.string_or("written", "")), cell(o.string_or("caption", "")),
+                           code(o.string_or("example", "")));
+    out += "\n## Constants\n\n| name | |\n|---|---|\n";
+    for (const auto& c : rows("constants"))
+        out += std::format("| {} | {} |\n", code(c.string_or("name", "")), cell(c.string_or("caption", "")));
+    out += "\n## The language of the canvas\n\nA document is lines, a definition each; a line reads the names the "
+           "lines above it define.\n\n| line | | example | as a formula |\n|---|---|---|---|\n";
+    for (const auto& l : rows("language")) {
+        std::string latex;
+        for (const auto& x : l.find("latex")->as_array()) latex += (latex.empty() ? "" : "<br>") + tex(x.as_string());
+        out += std::format("| {} | {} | {} | {} |\n", code(l.string_or("form", "")), cell(l.string_or("caption", "")),
+                           code(l.string_or("example", "")), latex);
+    }
+    out += "\nShapes:\n\n| operation | |\n|---|---|\n";
+    for (const auto& sh : rows("shapes"))
+        out += std::format("| {} | {} |\n", code(sh.string_or("name", "") + "(" + sh.string_or("arguments", "") + ")"),
+                           cell(sh.string_or("caption", "")));
+    out += "\n`n` is a number, `s` a shape.\n\nWhat the library says of a document it does not take:\n\n"
+           "| | document | told |\n|---|---|---|\n";
+    for (const auto& t : rows("told"))
+        out += std::format("| {} | {} | {} |\n", cell(t.string_or("caption", "")), code(t.string_or("example", "")),
+                           cell(t.string_or("told", "")));
+    out += "\n## Answers\n\nHow strongly an answer holds, strongest first.\n\n| | promises |\n|---|---|\n";
+    for (const auto& g : rows("guarantees"))
+        out += std::format("| {} | {} |\n", cell(g.string_or("title", "")), cell(g.string_or("promise", "")));
+    return out;
+}
+
 // the file at `path` as it is now, or empty
 std::string contents(const char* path) {
     std::ifstream in(path);
@@ -137,17 +332,18 @@ std::string contents(const char* path) {
 } // namespace
 
 int main(int argc, char** argv) {
-    const std::string_view mode = argc > 3 ? argv[1] : "";
+    const std::string_view mode = argc > 4 ? argv[1] : "";
     if (mode != "--write" && mode != "--check") {
-        std::fprintf(stderr, "usage: site_reference --write|--check <reference.json> <language.ts>\n");
+        std::fprintf(stderr, "usage: site_reference --write|--check <reference.json> <language.ts> <language.md>\n");
         return 2;
     }
-    const std::string files[] = {reference(), language_ts()};
+    const std::string json = reference();
+    const std::string files[] = {json, language_ts(), language_md(json)};
     int stale = 0;
-    for (int k = 0; k < 2; ++k) {
+    for (int k = 0; k < 3; ++k) {
         if (mode == "--write") std::ofstream(argv[2 + k]) << files[k];
         else if (contents(argv[2 + k]) != files[k]) {
-            std::fprintf(stderr, "%s is out of date; regenerate: site_reference --write %s %s\n", argv[2 + k], argv[2], argv[3]);
+            std::fprintf(stderr, "%s is out of date; regenerate: site_reference --write %s %s %s\n", argv[2 + k], argv[2], argv[3], argv[4]);
             stale = 1;
         }
     }

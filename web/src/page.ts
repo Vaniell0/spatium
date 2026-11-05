@@ -85,11 +85,19 @@ async function loadEditor() {
   }
 }
 
+// the reference, as site_reference writes it from the library's tables: every example answered
+// by the library (`answer`), every formula the library's or read back by the editor's parser in CI
+interface Answered { route?: string; refused?: string; question_latex?: string[]; label?: string }
 interface Reference {
-  functions: { name: string; arity: number; caption: string; domain: string; example?: string }[];
-  operators: { written: string; caption: string; example?: string }[];
-  constants: { name: string; caption: string; example?: string }[];
-  questions: { form: string; caption: string; example?: string; answer?: { question_latex?: string[] } }[];
+  writing: { typed: string; reads: string; caption: string; answer: Answered }[];
+  questions: { form: string; caption: string; example: string; answer: Answered }[];
+  functions: { form?: string; reads?: string; name: string; arity?: number; caption: string; domain: string; rows?: string[]; example: string; answer: Answered }[];
+  operators: { written: string; caption: string; example: string; answer: Answered }[];
+  constants: { name: string; caption: string }[];
+  language: { form: string; caption: string; example: string; latex: string[] }[];
+  shapes: { name: string; arguments: string; caption: string }[];
+  told: { caption: string; example: string; told: string }[];
+  guarantees: { name: string; title: string; promise: string }[];
 }
 const data: { reference: Reference | null } = { reference: null };
 
@@ -230,43 +238,79 @@ const addRows = (rows: string[] | undefined, text: string) => {
   else cards.append([math(written)]);
 };
 const addText = (text: string) => addRows(undefined, text);
-// a question shown as its rows, or as its text where the library wrote none
-const shownAs = (rows: string[] | undefined, text: string, cls: string) =>
-  rows?.length ? el("span", { class: cls }, ...rows.map((r) => tex(r, { cls: "math" }))) : el("span", { class: cls, text });
+
+// The reference: a drawer of sections, as a page of docs is -- how to write, the questions, the
+// functions, the operators, the constants, the canvas's language, what an answer promises -- each
+// entry in both notations, the page's own first (LaTeX on the calculator, the language on the
+// canvas), and its example a button that puts it in the line or on the canvas.
+const REF = "spatium.ref";   // the drawer's scroll, for the session
+const sections = ["Writing", "Questions", "Functions", "Operators", "Constants", "Language", "Answers"] as const;
 
 function panel(which: "ref" | null) {
   const box = $("#panel")!;
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-panel]")) b.setAttribute("aria-pressed", String(b.dataset.panel === which));
+  $("#scrim")!.hidden = !which;
   if (!which) { box.hidden = true; return; }
   box.hidden = false;
-  const body = el("div", { class: "panel-body" });
-  {
-    const r = data.reference;
-    const filter = el("input", { class: "filter", type: "search", placeholder: "Find a function, an operator, a form", "aria-label": "Find in the reference" });
-    const list = el("div", { class: "ref" });
-    const entry = (name: string, e: { caption: string; example?: string }, domain?: string) =>
-      el("div", { class: "entry", "data-find": `${name} ${e.caption}`.toLowerCase() },
-        el("div", { class: "name mono", text: name }),
-        el("div", {}, el("p", { class: "caption", text: e.caption + (domain ? `. Defined for ${domain}.` : "") }),
-          e.example ? el("button", { type: "button", class: "ex", text: e.example, onclick: () => addText(e.example!) }) : null));
-    if (!r) list.append(el("p", { class: "state", text: "The reference did not load." }));
-    else list.append(
-      el("h3", { text: "Questions" }), ...r.questions.map((q) =>
-        el("div", { class: "entry", "data-find": `${q.form} ${q.caption}`.toLowerCase() },
-          el("div", { class: "name" }, tex(q.form, { cls: "math" })),
-          el("div", {}, el("p", { class: "caption", text: q.caption }),
-            q.example ? el("button", { type: "button", class: "ex", onclick: () => addRows(q.answer?.question_latex, q.example!) },
-              shownAs(q.answer?.question_latex, q.example, "asked")) : null))),
-      el("h3", { text: "Functions" }), ...r.functions.map((f) => entry(`${f.name}(${f.arity === 2 ? "x, y" : "x"})`, f, f.domain)),
-      el("h3", { text: "Operators" }), ...r.operators.map((o) => entry(o.written, o)),
-      el("h3", { text: "Constants" }), ...r.constants.map((c) => entry(c.name, c)));
-    filter.addEventListener("input", () => {
-      const q = filter.value.trim().toLowerCase();
-      for (const e of list.querySelectorAll<HTMLElement>(".entry")) e.hidden = Boolean(q) && !e.dataset.find!.includes(q);
-    });
-    body.append(filter, list);
-  }
-  box.replaceChildren(body);
+  // under the bar, which is two rows on a phone
+  const top = `${Math.round($(".bar")!.getBoundingClientRect().bottom)}px`;
+  box.style.top = top, $("#scrim")!.style.top = top;
+  if (box.dataset.preset === cards.document.preset && box.childElementCount) return;   // drawn already, for this page
+  box.dataset.preset = cards.document.preset;
+  const r = data.reference;
+  const dslFirst = cards.document.preset === "canvas";
+  const close = el("button", { type: "button", class: "icon", "aria-label": "Close the reference", onclick: () => panel(null) });
+  close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  const filter = el("input", { class: "filter", type: "search", placeholder: "Find in the reference", "aria-label": "Find in the reference" });
+  const index = el("nav", { class: "ref-index", "aria-label": "Sections" });
+  const doc = el("div", { class: "ref" });
+  const rows = (latex: string[]) => el("span", { class: "rows" }, ...latex.map((l) => tex(l, { cls: "math" })));
+  const mono = (text: string) => el("code", { class: "mono", text });
+  // the notations of one thing, the page's own first
+  const both = (latex: HTMLElement | null, dsl: HTMLElement | null) =>
+    el("div", { class: "forms" }, ...(dslFirst ? [dsl, latex] : [latex, dsl]));
+  const example = (latex: string[] | undefined, text: string, label?: string) =>
+    el("button", { type: "button", class: "ex", "aria-label": `Ask ${text}`, onclick: () => addRows(latex, text) },
+      dslFirst || !latex?.length ? mono(text) : rows(latex), label ? el("span", { class: "said", text: label }) : null);
+  const entry = (find: string, head: HTMLElement, ...rest: (HTMLElement | null)[]) =>
+    el("div", { class: "entry", "data-find": find.toLowerCase() }, head, el("div", { class: "what" }, ...rest));
+  const caption = (text: string) => el("p", { class: "caption", text });
+  const part = (title: (typeof sections)[number], intro: string | null, ...entries: HTMLElement[]) =>
+    el("section", { class: "ref-sec", id: `ref-${title.toLowerCase()}` }, el("h3", { text: title }), intro ? caption(intro) : null, ...entries);
+  if (!r) doc.append(el("p", { class: "state", text: "The reference did not load." }));
+  else doc.append(
+    part("Writing", "What is typed in the formula editor, the formula it becomes, and the line of the language it reads as.",
+      ...r.writing.map((w) => entry(`${w.typed} ${w.reads} ${w.caption}`,
+        el("kbd", { text: w.typed }), example(w.answer.question_latex, w.reads), dslFirst ? null : mono(w.reads), caption(w.caption)))),
+    part("Questions", null, ...r.questions.map((q) => entry(`${q.form} ${q.caption} ${q.example}`,
+      el("div", { class: "name" }, tex(q.form, { cls: "math" })), caption(q.caption),
+      example(q.answer.question_latex, q.example, q.answer.label)))),
+    part("Functions", null, ...r.functions.map((f) => entry(`${f.name} ${f.form ?? ""} ${f.caption} ${f.example}`,
+      both(f.form ? tex(f.form, { cls: "math" }) : null, mono(f.name ? `${f.name}(${f.arity === 2 ? "x, y" : "x"})` : f.reads ?? "")),
+      caption(`${f.caption}; defined for ${f.domain}`), example(f.rows ?? f.answer.question_latex, f.example)))),
+    part("Operators", "Tightest last.", ...r.operators.map((o) => entry(`${o.written} ${o.caption}`,
+      mono(o.written), caption(o.caption), example(o.answer.question_latex, o.example)))),
+    part("Constants", null, ...r.constants.map((c) => entry(`${c.name} ${c.caption}`, mono(c.name), caption(c.caption)))),
+    part("Language", "The canvas's text: a line a definition, reading the names the lines above it define.",
+      ...r.language.map((l) => entry(`${l.form} ${l.caption} ${l.example}`,
+        mono(l.form), caption(l.caption), example(l.latex.length ? l.latex : undefined, l.example))),
+      entry("shape shapes " + r.shapes.map((s) => s.name).join(" "), el("span", { class: "name", text: "Shapes" }),
+        el("dl", { class: "shapes" }, ...r.shapes.flatMap((s) => [el("dt", {}, mono(`${s.name}(${s.arguments})`)), el("dd", { text: s.caption })]))),
+      ...r.told.map((t) => entry(`${t.caption} ${t.told}`, el("pre", { class: "mono", text: t.example }),
+        caption(t.caption), el("p", { class: "told", text: t.told })))),
+    part("Answers", "How strongly an answer holds, strongest first.", ...r.guarantees.map((g) => entry(`${g.title} ${g.promise}`,
+      el("span", { class: "name", text: g.title }), caption(g.promise)))));
+  for (const title of sections)
+    index.append(el("button", { type: "button", class: "chip", text: title,
+      onclick: () => doc.querySelector(`#ref-${title.toLowerCase()}`)?.scrollIntoView({ block: "start" }) }));
+  filter.addEventListener("input", () => {
+    const q = filter.value.trim().toLowerCase();
+    for (const e of doc.querySelectorAll<HTMLElement>(".entry")) e.hidden = Boolean(q) && !e.dataset.find!.includes(q);
+    for (const sec of doc.querySelectorAll<HTMLElement>(".ref-sec")) sec.hidden = !sec.querySelector(".entry:not([hidden])");
+  });
+  doc.addEventListener("scroll", () => { try { sessionStorage.setItem(REF, String(doc.scrollTop)); } catch { /* not kept */ } }, { passive: true });
+  box.replaceChildren(el("div", { class: "drawer-head" }, filter, close), index, doc);
+  try { doc.scrollTop = Number(sessionStorage.getItem(REF) ?? 0); } catch { /* from the top */ }
 }
 
 // ── a hint for the word under the caret, from the reference ─────────────
@@ -275,11 +319,11 @@ function panel(which: "ref" | null) {
 function hint(word: string): [string, string, string] | null {
   const r = data.reference;
   if (!r) return null;
-  const words = [...r.functions.map((f) => ({ name: f.name, shown: `${f.name}(${f.arity === 2 ? "x, y" : "x"})`, e: f, domain: f.domain })),
-    ...r.constants.map((c) => ({ name: c.name, shown: c.name, e: c, domain: "" }))];
+  const words = [...r.functions.filter((f) => f.name).map((f) => ({ name: f.name, shown: `${f.name}(${f.arity === 2 ? "x, y" : "x"})`, caption: f.caption, domain: f.domain, example: f.example })),
+    ...r.constants.map((c) => ({ name: c.name, shown: c.name, caption: c.caption, domain: "", example: "" }))];
   const begun = words.filter((w) => w.name.startsWith(word));
   const w = words.find((x) => x.name === word) ?? (begun.length === 1 ? begun[0] : undefined);
-  return w ? [w.shown, w.e.caption + (w.domain ? `, for ${w.domain}` : ""), w.e.example ?? ""] : null;
+  return w ? [w.shown, w.caption + (w.domain ? `, for ${w.domain}` : ""), w.example] : null;
 }
 
 // ── the keyboard: MathLive's own, in a window near the row being written ─
@@ -353,6 +397,7 @@ function wire() {
     b.addEventListener("click", () => usePreset(b.dataset.preset as Preset));
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-panel]"))
     b.addEventListener("click", () => panel(b.getAttribute("aria-pressed") === "true" ? null : (b.dataset.panel as "ref")));
+  $("#scrim")!.addEventListener("click", () => panel(null));
   $("#copy-link")!.addEventListener("click", copyLink);
   $("#open-keys")!.addEventListener("pointerdown", (e) => e.preventDefault());
   $("#open-keys")!.addEventListener("click", () => setKeys($("#keys")!.hidden === true));
@@ -362,6 +407,7 @@ function wire() {
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (!$("#keys")!.hidden) { setKeys(false); return; }
+    if (!$("#panel")!.hidden) { panel(null); return; }
     if (cards.document.preset === "calculator" && Date.now() - escAt < 1000) { escAt = 0; commitLine(false); }
     else escAt = Date.now();
   });

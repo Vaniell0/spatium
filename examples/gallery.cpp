@@ -181,14 +181,10 @@ std::string gallery() {
     }
     // one card per line, so a change to one card is a change to one line
     // the gallery is read by how strongly its answers hold, strongest first: a card's group is its
-    // sheet's guarantee, and the page shows the groups in this order under these titles
-    const Array groups{Object{{"guarantee", "exact"}, {"title", "Exact"}},
-                       Object{{"guarantee", "complete"}, {"title", "Every root proved, and no other"}},
-                       Object{{"guarantee", "proved"}, {"title", "Proved to their digits"}},
-                       Object{{"guarantee", "sampled"}, {"title", "Certified on a grid"}},
-                       Object{{"guarantee", "estimated"}, {"title", "Error estimated"}},
-                       Object{{"guarantee", "computed"}, {"title", "Computed"}},
-                       Object{{"guarantee", "none"}, {"title", "Not answered, and why"}}};
+    // sheet's guarantee, and the page shows the groups in the library's order under its titles
+    Array groups;
+    for (const auto& g : rsc::guarantees)
+        groups.push_back(Object{{"guarantee", std::string(g.name)}, {"title", std::string(g.title)}});
     std::string out = "{\"groups\": " + JsonValue(groups).dump() + ",\n\"cards\": [\n";
     for (std::size_t i = 0; i < cards.size(); ++i) out += "  " + cards[i].dump() + (i + 1 < cards.size() ? ",\n" : "\n");
     return out + "]}\n";

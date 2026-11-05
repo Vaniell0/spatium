@@ -101,4 +101,19 @@ for (const c of cards) {
   if (bad.length) { ++unread; console.log(`differs: card ${c.id} read back from its rows: ${bad.join(', ')}`); }
 }
 console.log(`${cards.length - unread} of ${cards.length} questions of the gallery and the reference read back from their rows`);
-process.exit(failed || unread ? 1 : 0);
+
+// The reference's own notation: what is typed in the editor (Writing, the rows the library wrote)
+// and a function as the editor writes it (`\lg`, `\log_3`, `\sqrt[3]`, rows written by hand), read
+// back by the editor's parser, answer as the line of the language beside them does.
+const notes = [...reference.writing.map(w => ({ id: w.typed, rows: w.answer.question_latex, answer: w.answer })),
+               ...reference.functions.filter(f => f.rows).map(f => ({ id: f.head, rows: f.rows, answer: f.answer }))];
+let misread = 0;
+for (const n of notes) {
+  const a = JSON.parse(rows(JSON.stringify({ rows: n.rows.map(r => ls.parse(r)) })));
+  const bad = ['route', 'refused'].filter(k => JSON.stringify(a[k]) !== JSON.stringify(n.answer[k]));
+  if (n.answer.value !== undefined && !(Math.abs(a.value - Number(n.answer.value)) <= 1e-9 * Math.abs(a.value))) bad.push(`value ${a.value}`);
+  if (n.answer.label !== undefined && a.sheet?.label !== n.answer.label) bad.push(`label ${a.sheet?.label}`);
+  if (bad.length) { ++misread; console.log(`differs: reference ${n.id} read from ${JSON.stringify(n.rows)}: ${bad.join(', ')}`); }
+}
+console.log(`${notes.length - misread} of ${notes.length} rows of the reference's notation read as the language they stand for`);
+process.exit(failed || unread || misread ? 1 : 0);
