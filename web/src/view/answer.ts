@@ -9,7 +9,8 @@ import type { Relation } from "../gen/language.js";
 
 export interface Shown {
   steps: boolean;
-  source: boolean;   // formulas as LaTeX source
+  source: boolean;                // formulas as LaTeX source
+  ask?: (text: string) => void;   // a question the sheet offers, asked
 }
 
 interface Step { label: string; latex: string }
@@ -19,7 +20,18 @@ interface Part { kind: "holds" | "fails" | "root" | "break" | "undecided"; lo: n
 interface Axis { relation: Relation; line: boolean; parts: Part[] }
 interface Next { caption: string; text: string; latex: string }
 interface Section { title: string; open: boolean; gist?: string; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis; next?: Next[] }
-export interface Sheet { outcome: string; guarantee: string; verdict: { strength: string; notes: string[] }; label: string; ok: boolean; result: string; sections: Section[] }
+interface RouteChain { route: string; cost?: number; taken: boolean; gist: string; steps: Step[] }
+export interface Sheet { outcome: string; guarantee: string; verdict: { strength: string; notes: string[] }; label: string; ok: boolean; result: string;
+  sections: Section[]; routes?: RouteChain[] }
+
+// what a person chose before, kept in this browser only: which sections they keep open, and the
+// route whose chain they read first; a page with no storage shows the core's defaults
+function kept<T>(key: string): Record<string, T> {
+  try { return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, T>; } catch { return {}; }
+}
+function keep<T>(key: string, name: string, value: T) {
+  try { localStorage.setItem(key, JSON.stringify({ ...kept<T>(key), [name]: value })); } catch { /* not kept */ }
+}
 
 // what an answer is and how strongly it holds, in the core's words; a card asked in code and a
 // scene, which carry no sheet, by what they are
@@ -63,20 +75,42 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
   for (const sec of s.sections) {
     // steps where the settings hide them
     if (sec.steps && !shown.steps) continue;
-    out.append(section(sec, tex));
+    out.append(section(sec, tex, sec.title === "Steps" ? s.routes ?? [] : [], shown.ask));
   }
   return out;
 }
 
-function section(sec: Section, tex: (latex: string, cls?: string, display?: boolean) => HTMLElement) {
+type Tex = (latex: string, cls?: string, display?: boolean) => HTMLElement;
+
+function chain(steps: Step[], title: string, tex: Tex) {
+  const list = el("ol", { class: "chain", "aria-label": title });
+  steps.forEach((st, k) => list.append(el("li", { class: k === steps.length - 1 ? "pay" : "" },
+    el("span", { class: "n", text: String(k + 1) }), el("span", { class: "lab", text: st.label }), tex(st.latex, "math", true))));
+  return list;
+}
+
+// a section of the sheet; its open state as the person left it, else the core's. Steps with more
+// than one route answering carry a tab each, the route read before first, else the one taken.
+export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?: (text: string) => void) {
   const body = el("div", { class: "sec-body" });
+  const gist = el("span", { class: "gist", text: sec.gist ?? "" });
   if (sec.rows) for (const r of sec.rows) body.append(tex(r, "math", true));
-  if (sec.steps) {
-    const list = el("ol", { class: "chain", "aria-label": sec.title });
-    sec.steps.forEach((st, k) => list.append(el("li", { class: k === sec.steps!.length - 1 ? "pay" : "" },
-      el("span", { class: "n", text: String(k + 1) }), el("span", { class: "lab", text: st.label }), tex(st.latex, "math", true))));
-    body.append(list);
-  }
+  if (sec.steps && routes.length > 1) {
+    const before = kept<number>("spatium.route");
+    const first = routes.reduce((b, r, k) => ((before[r.route] ?? 0) > (before[routes[b].route] ?? 0) ? k : b), Math.max(0, routes.findIndex((r) => r.taken)));
+    const tabs = el("div", { class: "route-tabs", role: "tablist", "aria-label": "Routes" });
+    const panel = el("div", { role: "tabpanel" });
+    const pick = (k: number, remember: boolean) => {
+      tabs.querySelectorAll("button").forEach((b, j) => b.setAttribute("aria-selected", String(j === k)));
+      panel.replaceChildren(chain(routes[k].steps, routes[k].route, tex));
+      gist.textContent = `${routes[k].route}, ${routes[k].gist}`;
+      if (remember) keep("spatium.route", routes[k].route, Date.now());
+    };
+    routes.forEach((r, k) => tabs.append(el("button", { type: "button", role: "tab", onclick: () => pick(k, true) },
+      el("span", { text: r.route }), r.cost !== undefined ? el("span", { class: "cost", text: String(r.cost) }) : null)));
+    body.append(tabs, panel);
+    pick(first, false);
+  } else if (sec.steps) body.append(chain(sec.steps, sec.title, tex));
   if (sec.facts) {
     const dl = el("dl", { class: "facts" });
     for (const f of sec.facts)
@@ -91,11 +125,25 @@ function section(sec: Section, tex: (latex: string, cls?: string, display?: bool
   }
   if (sec.axis) body.append(axisView(sec.axis));
   // what else the question can become: a caption and the question as the library writes it
-  if (sec.next) body.append(el("ul", { class: "next" }, ...sec.next.map((n) =>
-    el("li", {}, el("span", { class: "caption", text: n.caption }), tex(n.latex, "math")))));
+  if (sec.next) body.append(el("ul", { class: "next" }, ...sec.next.map((n) => {
+    const inner = [el("span", { class: "caption", text: n.caption }), tex(n.latex, "math")];
+    return el("li", {}, ask ? el("button", { type: "button", class: "ask", onclick: () => ask(n.text) }, ...inner) : el("div", {}, ...inner));
+  })));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
-  const d = el("details", { class: "sec" }, el("summary", {}, sec.title, sec.gist ? el("span", { class: "gist", text: sec.gist }) : null), body);
-  if (sec.open) d.setAttribute("open", "");
+  return foldable(sec.title, gist, sec.open, body);
+}
+
+// a titled part that folds, open as the person last left one of that title, else as `open`; `fill`
+// builds its body the first time it opens, so what is never opened is never built
+export function foldable(title: string, gist: HTMLElement | null, open: boolean, body: HTMLElement, fill?: () => void) {
+  const summary = el("summary", {}, title, gist);
+  const d = el("details", { class: "sec" }, summary, body);
+  const fillOnce = () => { if (d.open && fill && !body.firstChild) fill(); };
+  d.addEventListener("toggle", fillOnce);
+  // only a person's choice is kept: a click (or Enter) on the title, not the core's default opening it
+  summary.addEventListener("click", () => keep("spatium.open", title, !d.open));
+  if (kept<boolean>("spatium.open")[title] ?? open) d.setAttribute("open", "");
+  fillOnce();
   return d;
 }
 

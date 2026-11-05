@@ -859,16 +859,16 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             case Route::Enclosed: {
                 Array steps;
                 const auto searched = [&](std::string latex) { steps.push_back(Object{{"label", "searched"}, {"latex", std::move(latex)}}); };
-                const auto cut = [&](std::size_t pieces, std::size_t excluded, std::size_t roots, std::size_t undecided) {
-                    steps.push_back(Object{{"label", "cut where undecided"},
-                                           {"latex", std::format("\\text{{{} pieces: {} hold no root, {} hold one, {} undecided}}", pieces, excluded, roots, undecided)}});
+                const auto cut = [&](std::size_t pieces, std::size_t excluded, std::size_t undecided) {
+                    steps.push_back(Object{{"label", "pieces cut where undecided: with no root + with one + undecided"},
+                                           {"latex", std::format("{} = {} + {} + {}", pieces, excluded, pieces - excluded - undecided, undecided)}});
                 };
                 if (e.system) {
                     const auto& sys = *e.system;
                     std::string names;
                     for (const auto& u : sys.unknowns) names += (names.empty() ? "" : ", ") + x_of(u);
                     searched(std::format("{} \\in \\mathbb{{R}}", names));
-                    cut(sys.pieces, sys.excluded, sys.roots.size(), sys.undecided.size());
+                    cut(sys.pieces, sys.excluded, sys.undecided.size());
                     for (const auto& r : sys.roots) {
                         std::string at;
                         for (std::size_t j = 0; j < r.size(); ++j) at += (j ? ",\\ " : "") + x_of(sys.unknowns[j]) + " \\approx " + spatium::proved(r[j]).text;
@@ -879,7 +879,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                     const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
                     searched(line ? x_of(e.name) + " \\in \\mathbb{R}"
                                   : std::format("{} \\in \\left[{}, {}\\right]", x_of(e.name), text_of(f.box.lo), text_of(f.box.hi)));
-                    cut(f.pieces, f.excluded, f.roots.size(), f.undecided.size());
+                    cut(f.pieces, f.excluded, f.undecided.size());
                     for (const auto& r : f.roots) {
                         const auto p = spatium::proved(r);
                         steps.push_back(Object{{"label", "Newton's step lands inside: one root"},

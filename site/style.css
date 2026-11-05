@@ -142,12 +142,12 @@ math-field {
 math-field:focus-within { outline: 0; box-shadow: 0 0 0 2px var(--accent); }
 math-field::part(menu-toggle), math-field::part(virtual-keyboard-toggle) { display: none; }
 math-field::part(content) { padding: 0; overflow-x: auto; overflow-y: hidden; }
-.text {
+textarea.text {
   width: 100%; min-height: calc(var(--control) * 2); resize: vertical; padding: 8px 12px;
   border: 0; border-radius: var(--r-control); background: var(--raised); color: var(--ink);
   font: 400 var(--t-body)/1.5 var(--f-mono);
 }
-.text:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+textarea.text:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 .hint { font-size: var(--t-label); color: var(--ink-2); min-height: 1.5em; }
 .hint:empty { display: none; }
 .hint code { font-family: var(--f-mono); color: var(--ink); }
@@ -204,9 +204,18 @@ details.sec > summary::before { content: "▸"; color: var(--ink-3); display: in
 details.sec[open] > summary::before { transform: rotate(90deg); }
 details.sec > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sec-body { display: grid; gap: 8px; padding-bottom: 16px; min-width: 0; }
-.sec-body .next { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.sec-body .next li { display: grid; gap: 2px; }
+.sec-body .next { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.sec-body .next .ask, .sec-body .next li > div { display: grid; gap: 2px; width: 100%; padding: 8px; margin: 0 -8px;
+  text-align: left; font: inherit; color: inherit; background: none; border: 0; border-radius: var(--r-control); }
+.sec-body .next .ask { cursor: pointer; }
+.sec-body .next .ask:hover { background: var(--raised); }
 .sec-body .next .caption { font-size: var(--t-label); color: var(--ink-2); }
+/* one tab per route that answered; the chain under it is that route's */
+.route-tabs { display: flex; gap: 16px; overflow-x: auto; border-bottom: 1px solid var(--line-faint); }
+.route-tabs button { display: inline-flex; align-items: baseline; gap: 8px; min-height: 40px; padding: 0; white-space: nowrap;
+  font: inherit; font-size: var(--t-label); color: var(--ink-3); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+.route-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.route-tabs .cost { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .sec-body .note { margin: 0; max-width: 64ch; font-size: var(--t-label); color: var(--ink-3); }
 .facts .no { color: var(--warn); }
 /* an inequality's axis: a scheme of its points, the set shaded */
