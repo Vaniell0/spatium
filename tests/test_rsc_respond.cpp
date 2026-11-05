@@ -51,7 +51,9 @@ TEST_CASE("respond: an equation is answered in closed form with its steps", "[rs
     REQUIRE(steps.size() == direct->steps.size());
     for (std::size_t i = 0; i < steps.size(); ++i) {
         CHECK(at(steps[i], "label").as_string() == direct->steps[i].label);
-        CHECK(at(steps[i], "latex").as_string() == direct->steps[i].latex);
+        // the roots as they are, then their decimals: what the solver alone, given no written form, cannot say
+        if (direct->steps[i].label != "roots") CHECK(at(steps[i], "latex").as_string() == direct->steps[i].latex);
+        else CHECK(at(steps[i], "latex").as_string() == "x_{1} = \\frac{5}{2} = 2.5,\\quad x_{2} = -1");
     }
     // the question back as the row of a formula editor, written by the library
     CHECK(at(r, "question_latex").as_array().front().as_string() == "2x^{2} - 3x - 5 = 0");
@@ -233,9 +235,10 @@ TEST_CASE("respond: rows are computed in the arithmetic their engine names", "[r
     const auto exact = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "rational"}})");
     const auto in_double = rsc::respond_rows(R"({"rows": [)" + row + "]}");
     const auto by_document = rsc::evaluate_request(R"({"document": "x: x^2 - 2 = 0", "name": "x", "engine": {"arithmetic": "rational"}})");
-    CHECK(at(at(exact, "sheet"), "result").as_string() == "x_{1,2} = \\pm \\sqrt{2}");
+    CHECK(at(at(exact, "sheet"), "result").as_string() == "x_{1,2} = \\pm \\sqrt{2} \\approx \\pm 1.41421356237");
     CHECK(at(exact, "steps").dump() == at(by_document, "steps").dump());
-    CHECK(at(at(in_double, "sheet"), "result").as_string().find("1.4142135623731") != std::string::npos);
+    // in double too, the roots as they are beside their decimals
+    CHECK(at(at(in_double, "sheet"), "result").as_string() == at(at(exact, "sheet"), "result").as_string());
     // the case it must fail: an arithmetic the engine does not have is refused, naming those it has
     const auto unknown = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "quaternion"}})");
     CHECK(at(unknown, "refused").as_string().starts_with("the engine has no arithmetic 'quaternion'; it has double"));
@@ -311,7 +314,7 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
              {"2(3 + 4)^2 - 1/4", "number", "exact", "Exact", true},
              {"sqrt(2) + 1", "number", "proved", "Proved to 16 digits", true},
              {"10^20 + 1 - 10^20", "number", "none", "No digit proved, within 10⁴ of zero", false},
-             {"2x^2 - 3x - 5 = 0", "roots", "proved", "Proved, closed form, checked by Vieta's formulas", true},
+             {"2x^2 - 3x - 5 = 0", "roots", "exact", "Exact, closed form, checked by Vieta's formulas", true},
              {"2^x = 8", "roots", "complete", "Proved, 1 root, no other on the box", true},
              {"x: sin(x) = 0.5 on [0, 10]", "roots", "complete", "Proved, 4 roots, no other on the box", true},
              {"x + 2y = 5\n3x - y = 1", "system", "exact", "Exact, by elimination in fractions", true},

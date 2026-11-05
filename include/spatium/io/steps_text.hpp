@@ -12,6 +12,7 @@
 #  include <format>
 #  include <string>
 #  include <string_view>
+#  include <utility>
 #  include <vector>
 #endif
 
@@ -27,6 +28,12 @@ SPATIUM_EXPORT namespace spatium::io::build {
 struct Step {
     std::string label;   // what the step is, in words
     std::string latex;   // the step itself
+    std::string lead;    // the words a page sets in bold, "Discriminant", where they are not the label
+    std::string note;    // what follows them, plain text: "b² − 4ac"
+
+    Step() = default;
+    Step(std::string label_, std::string latex_, std::string lead_ = {}, std::string note_ = {})
+        : label(std::move(label_)), latex(std::move(latex_)), lead(std::move(lead_)), note(std::move(note_)) {}
 };
 
 namespace detail {
@@ -69,7 +76,24 @@ inline std::string complex_latex(const Complex<double>& z) {
 
 } // namespace detail
 
+namespace detail {
+// what a quadratic's step says to a reader: a phrase in bold, and the rest beside it
+inline std::vector<Step> with_leads(std::vector<Step> steps) {
+    for (auto& st : steps) {
+        if (st.label == "equation") st.lead = "The equation";
+        else if (st.label == "coefficients")
+            st.lead = "Read the coefficients", st.note = "from the equation's values at 0, 1 and −1, the degree checked at more points";
+        else if (st.label == "discriminant") st.lead = "Discriminant", st.note = "b² − 4ac";
+        else if (st.label == "roots") st.lead = "Roots";
+        else if (st.label == "root") st.lead = "Root";
+        else st.lead = "Case", st.note = st.label;
+    }
+    return steps;
+}
+} // namespace detail
+
 inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_view unknown = "x") {
+    using detail::with_leads;
     using detail::num, detail::grouped_num;
     const std::string x = detail::name_latex(unknown);
     std::vector<Step> out;
@@ -78,15 +102,15 @@ inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_v
     switch (s.kind) {
         case QuadraticCase::Identity:
             out.push_back({"a = b = c = 0: every value is a root", "0 = 0 \\text{ for every } " + x});
-            return out;
+            return with_leads(std::move(out));
         case QuadraticCase::None:
             out.push_back({"a = b = 0 and c is not 0: no root", std::format("{} = 0 \\text{{ holds for no }} {}", num(s.c), x)});
-            return out;
+            return with_leads(std::move(out));
         case QuadraticCase::Linear:
             out.push_back({"a = 0: the equation is linear",
                            std::format("{} = -\\frac{{c}}{{b}} = {} = {}", x, detail::signed_fraction(-s.c, s.b),
                                        num(s.roots[0].re))});
-            return out;
+            return with_leads(std::move(out));
         default: break;
     }
     out.push_back({"discriminant", std::format("D = b^{{2}} - 4ac = {}^{{2}} - 4 \\cdot {} \\cdot {} = {}", grouped_num(s.b),
@@ -102,7 +126,7 @@ inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_v
         out.push_back({"D = 0: one root, counted twice",
                        std::format("{} = -\\frac{{b}}{{2a}} = {}", x, detail::signed_fraction(-s.b, 2 * s.a))});
         out.push_back({"root", std::format("{} = {}", x, num(s.roots[0].re))});
-        return out;
+        return with_leads(std::move(out));
     } else {
         out.push_back({"D > 0: two real roots",
                        std::format("{}_{{1,2}} = \\frac{{-b \\pm \\sqrt{{D}}}}{{2a}} = \\frac{{{}\\pm \\sqrt{{{}}}}}{{{}}}", x,
@@ -110,7 +134,7 @@ inline std::vector<Step> to_steps(const QuadraticSteps<double>& s, std::string_v
     }
     out.push_back({"roots", std::format("{}_{{1}} = {},\\quad {}_{{2}} = {}", x, detail::complex_latex(s.roots[0]), x,
                                         detail::complex_latex(s.roots[1]))});
-    return out;
+    return with_leads(std::move(out));
 }
 
 // The check of the roots by Vieta's formulas as the last step: the sum and the product as
@@ -132,7 +156,8 @@ inline Step to_step(const VietaCheck<double>& v, std::string_view unknown = "x")
                                     x, shown(v.sum, v.want_sum), rel, detail::num(v.want_sum),
                                     shown(v.product, v.want_product), detail::num(v.want_product));
     if (!holds) latex += std::format("\\quad\\text{{(relative error {})}}", detail::num(v.error));
-    return {holds ? "check: Vieta's formulas hold" : "check: Vieta's formulas do not hold", latex};
+    return {holds ? "check: Vieta's formulas hold" : "check: Vieta's formulas do not hold", latex, "Check",
+            holds ? "by Vieta's formulas: the sum of the roots is −b/a, their product c/a" : "by Vieta's formulas: they do not hold"};
 }
 
 // ── A computation as its steps ────────────────────────────────────

@@ -683,7 +683,8 @@ inline Evaluation evaluate(const spatium::io::build::Document& doc, std::string_
         // as fractions when the engine asks for them: the roots as they are, or why they are not
         const bool exact = engine.arithmetic == Arithmetic::Rational;
         Candidate c{Route::ClosedForm, 0, {}, {}, Arithmetic::Double, {}};
-        if (auto solved = solve_closed_form(u->f, d->name, exact ? &u->written : nullptr); !solved) {
+        // the roots as they are are always sought: a page shows them beside their decimals
+        if (auto solved = solve_closed_form(u->f, d->name, &u->written); !solved) {
             c.refused = solved.error().message;
         } else {
             c.cost = solved->evaluations;
