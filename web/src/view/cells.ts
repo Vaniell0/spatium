@@ -71,9 +71,10 @@ export class Cards {
   // an answer arrived for a card, or for a graph the page adds after the card `from`
   show(cell: Cell, answer: Answer | null, above = 0, from?: Cell) {
     if (from) {
-      const slot = this.shown.get(from)?.box.querySelector(".also");
+      const box = this.shown.get(from)?.box;
+      const slot = box?.querySelector(".answer .plot-slot") ?? box?.querySelector(".also");
       // closed unless the person keeps plots open; drawn the first time it opens
-      const body = el("div", { class: "sec-body" });
+      const body = el("div", { class: "body" });
       if (slot && answer) slot.replaceChildren(foldable("Plot", null, false, body,
         () => body.append(graphView(answer, { height: 260, curve: this.host.curve(cell) }))));
       return;
@@ -100,14 +101,15 @@ export class Cards {
 
   // graphs the page added are dropped before a new run
   clearDerived() {
-    for (const slot of this.root.querySelectorAll(".also")) slot.replaceChildren();
+    for (const slot of this.root.querySelectorAll(".also, .plot-slot")) slot.replaceChildren();
   }
 
   private card(cell: Cell): HTMLElement {
     const policy = presets[this.doc.preset];
-    const box = el("article", { class: "card", "data-kind": cell.kind });
+    const box = el("article", { class: "card cell", "data-kind": cell.kind });
     const rows = el("div", { class: "rows" });
-    const head = el("div", { class: "head" }, rows);
+    // the ask row: the prompt, then the question's rows, as the answer sheet's cell begins
+    const head = el("div", { class: "head ask" }, el("span", { class: "prompt", "aria-hidden": "true", text: "›" }), rows);
     const hint = el("p", { class: "hint", "aria-live": "polite" });
     head.append(hint);
     this.fill(cell, rows, hint);

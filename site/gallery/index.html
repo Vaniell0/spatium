@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spatium gallery</title>
+<meta name="description" content="Questions the library answered, grouped by how strongly each answer holds.">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../style.css">
+<script>
+  // the theme and text size before the first paint, so the page does not flash
+  try {
+    const s = JSON.parse(localStorage.getItem("spatium.settings") || "{}");
+    if (s.theme === "light" || s.theme === "dark") document.documentElement.dataset.theme = s.theme;
+    if (s.scale) document.documentElement.style.setProperty("--scale", s.scale);
+  } catch {}
+</script>
+<script defer src="../vendor/katex/katex.min.js"></script>
+<script type="module" src="../pkg/src/gallery.js"></script>
+</head>
+<body>
+<header class="bar">
+  <a class="mark" href="../">spatium</a>
+  <span class="beta" title="A concept of the page; it changes as the library grows">beta</span>
+  <nav class="seg preset" aria-label="Page">
+    <a href="../">Calculator</a>
+    <a href="../#canvas">Canvas</a>
+  </nav>
+  <nav class="add" aria-label="Pages">
+    <a href="../#ref">Reference</a>
+    <a href="./" aria-current="page">Gallery</a>
+  </nav>
+</header>
+<main class="gallery" id="gallery" aria-label="Gallery">
+  <h1>Gallery</h1>
+</main>
+</body>
+</html>

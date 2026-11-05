@@ -62,17 +62,17 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
   const s = a.sheet as Sheet | undefined;
   if (!s) {
     if (a.refused) out.append(refusal(a, typed));
-    else if (typeof a.latex === "string") out.append(tex(a.latex, "big", true));
+    else if (typeof a.latex === "string") out.append(el("div", { class: "result" }, tex(a.latex, "math", true)));
     return out;
   }
-  if (s.outcome === "refused") out.append(refusal(a, typed));
-  else {
-    // how strongly it holds, then how: "proved · 4 roots · no other on the box"
-    out.append(el("p", { class: s.ok ? "verdict ok" : "verdict" }, el("span", { class: "strength", text: s.verdict.strength }),
-      ...s.verdict.notes.map((n) => el("span", { text: n }))));
-    if (s.result) out.append(tex(s.result, "big accent", true));
-  }
+  // the result, then how strongly it holds and how: "exact  two real roots  checked by two routes"
+  if (s.outcome === "refused") out.append(el("div", { class: "result" }, refusal(a, typed)));
+  else out.append(el("div", { class: "result" }, s.result ? tex(s.result, "math", true) : null,
+    el("p", { class: s.ok ? "verdict ok" : "verdict" }, el("span", { class: "strength", text: s.verdict.strength }),
+      ...s.verdict.notes.map((n) => el("span", { text: n })))));
   for (const sec of s.sections) {
+    // the plot, which the page draws, goes where the sheet's order puts it: before how it was found
+    if (sec.title === "How it was found") out.append(el("div", { class: "plot-slot" }));
     // steps where the settings hide them
     if (sec.steps && !shown.steps) continue;
     out.append(section(sec, tex, sec.title === "Steps" ? s.routes ?? [] : [], shown.ask));
@@ -83,17 +83,18 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
 type Tex = (latex: string, cls?: string, display?: boolean) => HTMLElement;
 
 function chain(steps: Step[], title: string, tex: Tex) {
+  // numbered by the list itself; what the step does above, its formula under it, the last one paid
   const list = el("ol", { class: "chain", "aria-label": title });
-  steps.forEach((st, k) => list.append(el("li", { class: k === steps.length - 1 ? "pay" : "" },
-    el("span", { class: "n", text: String(k + 1) }), el("span", { class: "lab", text: st.label }), tex(st.latex, "math", true))));
+  steps.forEach((st, k) => list.append(el("li", { class: k === steps.length - 1 ? "step pay" : "step" },
+    el("span", { class: "op", text: st.label }), tex(st.latex, "math", true))));
   return list;
 }
 
 // a section of the sheet; its open state as the person left it, else the core's. Steps with more
 // than one route answering carry a tab each, the route read before first, else the one taken.
 export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?: (text: string) => void) {
-  const body = el("div", { class: "sec-body" });
-  const gist = el("span", { class: "gist", text: sec.gist ?? "" });
+  const body = el("div", { class: "body" });
+  const gist = el("span", { class: "tag", text: sec.gist ?? "" });
   if (sec.rows) for (const r of sec.rows) body.append(tex(r, "math", true));
   if (sec.steps && routes.length > 1) {
     const before = kept<number>("spatium.route");
@@ -115,13 +116,15 @@ export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?:
     const dl = el("dl", { class: "facts" });
     for (const f of sec.facts)
       dl.append(el("dt", { text: f.label }),
-        el("dd", { class: f.ok === true ? "ok" : f.ok === false ? "no" : "" }, f.latex !== undefined ? tex(f.latex) : el("span", { text: f.text ?? "" })));
+        el("dd", { class: f.ok === true ? "agree" : f.ok === false ? "no" : "" }, f.latex !== undefined ? tex(f.latex) : el("span", { text: f.text ?? "" })));
     body.append(dl);
   }
   if (sec.table) {
-    const table = el("table", { class: "sheet-table" }, el("tr", {}, ...sec.table.columns.map((c) => el("th", { text: c }))),
-      ...sec.table.rows.map((r) => el("tr", {}, ...r.map((c) => el("td", { text: c })))));
-    body.append(el("div", { class: "scroll" }, table));
+    // the routes tried, the taken one marked; any other table is numbers, in columns
+    const how = sec.title === "How it was found";
+    const table = el("table", { class: how ? "" : "roots" }, el("tr", {}, ...sec.table.columns.map((c) => el("th", { text: c }))),
+      ...sec.table.rows.map((r) => el("tr", {}, ...r.map((c, j) => el("td", { class: how ? (j === 0 && c.endsWith(", taken") ? "taken" : j === 1 ? "num" : "") : "", text: c })))));
+    body.append(el("div", { class: how ? "scroll how" : "scroll" }, table));
   }
   if (sec.axis) body.append(axisView(sec.axis));
   // what else the question can become: a caption and the question as the library writes it

@@ -56,7 +56,7 @@ export class History {
       b.innerHTML = ICON[name];
       return b;
     };
-    const ask = el("div", { class: "ask-row" }, el("span", { class: "prompt", text: "›" }), question,
+    const ask = el("div", { class: "ask" }, el("span", { class: "prompt", "aria-hidden": "true", text: "›" }), question,
       el("span", { class: "acts" },
         icon("up", "Put in the line", () => this.host.use(e)),
         icon("x", "Remove from history", () => {
@@ -68,11 +68,11 @@ export class History {
     const result = el("button", { type: "button", class: "result-row", "aria-expanded": "false" },
       e.result ? tex(e.result, "math res") : null,
       el("span", { class: e.ok ? "strength ok" : "strength", text: e.strength }), e.note ? el("span", { class: "note", text: e.note }) : null);
-    const box = el("article", { class: "hcell" }, ask, result, body);
+    const box = el("article", { class: "hcell cell" }, ask, result, body);
     const show = async () => {
       result.setAttribute("aria-expanded", "true");
       box.classList.add("open");
-      body.replaceChildren(el("p", { class: "state", text: "Asking again" }));
+      body.replaceChildren(el("p", { class: "state body", text: "Asking again" }));
       const a = await this.host.sheet(e);
       if (this.open !== e) return;
       body.replaceChildren(a ? answerView(a, "", { steps: true, source: this.host.source(), ask: this.host.ask }) : el("p", { class: "state", text: "Not answered" }));
