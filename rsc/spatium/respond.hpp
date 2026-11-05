@@ -491,11 +491,13 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& 
 //
 // Every answer, whatever route gave it, as the same sheet a page draws (`sheet`): what it is
 // (`outcome`: a number, roots, a function, none, a parameter, or refused), how strongly it holds
-// (`guarantee`: exact, proved digits, proved complete, estimated, sampled, computed, none) with
-// the line that says so (`label`), the result in one line of LaTeX, and its sections in one order
-// -- Input, Steps, Roots, Check, Properties, How it was found -- each a list of steps, of facts or
-// a table, with whether it starts open. A page draws three shapes and never asks which route
-// answered; a route's own fields stay beside it as the record.
+// (`guarantee`: exact, proved digits, proved complete, estimated, sampled, computed, none) in
+// words (`verdict`: its `strength`, "proved to 16 digits", and `notes` on how, "closed form",
+// "no other real root"; `label` the two as one line), the result in one line of LaTeX, and its
+// sections in one order -- Input, Steps, Roots, Check, Properties, How it was found -- each a list
+// of steps, of facts or a table, with whether it starts open and a `gist` where a few words say
+// what is inside. A page draws these shapes and never asks which route answered; a route's own
+// fields stay beside it as the record.
 
 inline const JsonValue* field_of(const Object& o, std::string_view key) {
     for (const auto& [k, v] : o)
@@ -528,23 +530,30 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         for (char c : std::to_string(static_cast<int>(std::lround(std::log10(v))))) out += c == '-' ? "⁻" : raised[c - '0'];
         return out;
     };
-    std::string outcome = "number", guarantee = "computed", label, result;
+    std::string outcome = "number", guarantee = "computed", label, strength, result;
+    std::vector<std::string> notes;
     bool ok = true;
-    // Input: the rows the question was asked as
-    if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty())
-        section("Input", true, "rows", *rows, Object{{"echo", true}});   // the question again, which a cell already shows
+    // Input: the question as the library read it, and what it asks for
+    if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty()) {
+        std::string read;
+        for (const auto& r : rows->as_array()) read += (read.empty() ? "" : ",\\quad ") + r.as_string();
+        Array facts{fact("Read as", read, true)};
+        if (e.name != "answer") facts.push_back(fact("Asks for", bd::detail::name_latex(e.name), true));
+        section("Input", false, "facts", facts);
+    }
     const JsonValue* latex = field_of(out, "latex");
     if (latex && latex->is_string()) result = latex->as_string();
     const std::optional<Route> route = e.route();
 
     if (!e.taken) {
         outcome = "refused", guarantee = "none", ok = false;
-        label = route && e.candidates.size() <= 1 ? std::format("Not answered by {}", route_name(*route)) : "Not answered";
+        strength = "not answered";
+        if (route && e.candidates.size() <= 1) notes.push_back(std::format("by {}", route_name(*route)));
         result.clear();
         // a synthesis that answered on part of the interval still shows its pieces below
     }
     if (kind == spatium::io::build::StatementKind::Parameter && e.taken) {
-        outcome = "parameter", guarantee = "exact", label = "Parameter", ok = false;
+        outcome = "parameter", guarantee = "exact", strength = "a parameter", ok = false;
         if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty())
             result = rows->as_array().back().as_string();
     } else if (e.taken) switch (*route) {
@@ -560,17 +569,17 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                 value = "\\approx " + e.proved->text;
             }
             result = (e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + (value.starts_with("\\approx") ? " " : " = ")) + value;
-            if (e.proved && e.proved->exact) guarantee = "exact", label = "Exact";
+            if (e.proved && e.proved->exact) guarantee = "exact", strength = "exact";
             else if (e.proved && e.proved->digits > 0)
-                guarantee = "proved", label = std::format("Proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
+                guarantee = "proved", strength = std::format("proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
             else if (e.proved)
-                guarantee = "none", ok = false, label = std::format("Evaluated; no digit proved, within {} of zero", decade_label(e.proved->bound));
-            else guarantee = "computed", ok = false, label = "Evaluated in double";
+                guarantee = "none", ok = false, strength = "no digit proved",
+                notes.push_back(std::format("within {} of zero", decade_label(e.proved->bound)));
+            else guarantee = "computed", ok = false, strength = "computed in double";
             if (e.steps.size() > 1) {
                 Array steps;
                 for (const auto& st : e.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
-                // folded: an exercise's chain runs to a screen or more under a value read at a glance
-                section(std::format("{} steps", e.steps.size()), false, "steps", steps);
+                section("Steps", true, "steps", steps, Object{{"gist", std::format("{} steps", e.steps.size())}});
             }
             Array facts{fact("In double", text_of(e.values.front()))};
             if (e.proved && !e.proved->exact && e.proved->digits > 0) facts.push_back(fact("Proved", e.proved->text, false, true));
@@ -580,7 +589,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         }
         case Route::Expression: {
             outcome = "function", guarantee = "exact", ok = false;
-            label = std::format("A function of {}, as written", e.free.empty() ? std::string("its parameter") : e.free.front());
+            strength = "exact", notes.push_back(std::format("a function of {}, as written", e.free.empty() ? std::string("its parameter") : e.free.front()));
             break;
         }
         case Route::ClosedForm: {
@@ -592,7 +601,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             result = named != chain.end() ? named->latex : (chain.empty() ? result : chain.back().latex);
             Array steps;
             for (const auto& st : chain) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
-            section("Steps", true, "steps", steps);
+            section("Steps", true, "steps", steps, Object{{"gist", std::format("closed form, {} steps", chain.size())}});
             Array facts;
             const bool vieta = c.check && c.check->error <= 1e-12;
             for (const auto& st : checks) facts.push_back(fact("Vieta's formulas", st.latex, true, vieta));
@@ -621,8 +630,9 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             section("Properties", false, "facts", props);
             // proved digits are of real roots; complex ones are computed, and checked by Vieta's formulas
             guarantee = c.exact ? "exact" : proved_all && !e.values.empty() ? "proved" : "computed";
-            label = vieta ? "Closed form, checked by Vieta's formulas" : "Closed form";
-            if (complete) label += e.values.empty() ? "; no real root" : "; no other real root";
+            strength = guarantee, notes.push_back("closed form");
+            if (vieta) notes.push_back("checked by Vieta's formulas");
+            if (complete) notes.push_back(e.values.empty() ? "no real root" : "no other real root");
             break;
         }
         case Route::Intervals: {
@@ -630,8 +640,8 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             outcome = "set", result = set_latex(a, e.name);
             const auto undecided = std::ranges::count_if(a.parts, [](const Axis::Part& p) { return p.kind == Axis::Kind::Undecided; });
             guarantee = "proved", ok = undecided == 0;
-            label = undecided == 0 ? std::string("Proved by the interval method")
-                                   : std::format("Proved by the interval method, except on {} piece{} undecided", undecided, undecided == 1 ? "" : "s");
+            strength = "proved", notes.push_back("by the interval method");
+            if (undecided) notes.push_back(std::format("except on {} piece{} undecided", undecided, undecided == 1 ? "" : "s"));
             section("Axis", true, "axis", axis_json(a));
             Array facts;
             for (const auto& p : a.parts)
@@ -646,11 +656,11 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             outcome = "system";
             const bool exact = !l.exact.empty();
             guarantee = exact ? "exact" : "computed", ok = exact;
-            label = exact ? "Exact, by elimination in fractions" : "By elimination in doubles";
+            strength = guarantee, notes.push_back(exact ? "by elimination in fractions" : "by elimination in doubles");
             result = l.steps.back().latex;
             Array steps;
             for (const auto& st : l.steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
-            section("Steps", true, "steps", steps);
+            section("Steps", true, "steps", steps, Object{{"gist", std::format("elimination, {} steps", l.steps.size())}});
             std::string residuals;
             for (double r : l.residuals) residuals += (residuals.empty() ? "" : ", ") + text_of(r);
             const bool holds = std::ranges::all_of(l.residuals, [](double r) { return std::abs(r) <= 1e-12; });
@@ -663,7 +673,8 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                 const auto& sys = *e.system;
                 const std::size_t n = sys.roots.size();
                 guarantee = sys.undecided.empty() ? "complete" : "proved";
-                label = std::format("{} root{} proved{}", n, n == 1 ? "" : "s", sys.undecided.empty() ? ", and no other" : "; elsewhere undecided");
+                strength = "proved", notes.push_back(std::format("{} root{}", n, n == 1 ? "" : "s"));
+                notes.push_back(sys.undecided.empty() ? "no other on the box" : "elsewhere undecided");
                 Array columns, rows;
                 for (const auto& u : sys.unknowns) columns.push_back(u);
                 columns.push_back("digits");
@@ -677,7 +688,8 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                     row.push_back(std::to_string(digits));
                     rows.push_back(std::move(row));
                 }
-                section("Roots", true, "table", Object{{"columns", columns}, {"rows", rows}});
+                section("Roots", true, "table", Object{{"columns", columns}, {"rows", rows}},
+                        Object{{"gist", std::format("{} root{}", n, n == 1 ? "" : "s")}});
                 Array facts{fact("Searched", "every double of each unknown")};
                 if (!sys.undecided.empty()) facts.push_back(fact("Undecided", std::format("{} pieces", sys.undecided.size()), false, false));
                 section("Properties", false, "facts", facts);
@@ -686,14 +698,16 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             const auto& f = *e.enclosed;
             const std::size_t n = f.roots.size();
             guarantee = f.complete() ? "complete" : "proved";
-            label = std::format("{} root{} proved{}", n, n == 1 ? "" : "s", f.complete() ? ", and no other on the box" : "; elsewhere undecided");
+            strength = "proved", notes.push_back(std::format("{} root{}", n, n == 1 ? "" : "s"));
+            notes.push_back(f.complete() ? "no other on the box" : "elsewhere undecided");
             Array rows;
             for (const auto& r : f.roots) {
                 const auto p = spatium::proved(r);
                 rows.push_back(Array{p.digits > 0 ? p.text : std::string("0"), p.digits > 0 ? std::to_string(p.digits) : std::string("-"),
                                      std::format("[{}, {}]", text_of(r.lo), text_of(r.hi))});
             }
-            section("Roots", true, "table", Object{{"columns", Array{"root", "digits", "interval"}}, {"rows", rows}});
+            section("Roots", true, "table", Object{{"columns", Array{"root", "digits", "interval"}}, {"rows", rows}},
+                    Object{{"gist", std::format("{} root{}", n, n == 1 ? "" : "s")}});
             const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
             Array facts{fact("Searched", line ? std::string("every double") : std::format("[{}, {}]", text_of(f.box.lo), text_of(f.box.hi)))};
             for (const auto& u : f.undecided) facts.push_back(fact("Undecided", std::format("[{:.4g}, {:.4g}]", u.lo, u.hi), false, false));
@@ -702,12 +716,12 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         }
         case Route::Bracket: {
             result = std::format("{} = {}", bd::detail::name_latex(e.name), bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex));
-            guarantee = "computed", label = "A root on its bracket, by bisection to the last bit";
+            guarantee = "computed", strength = "computed", notes.push_back("a root on its bracket, by bisection to the last bit");
             break;
         }
         case Route::Integral: {
             result = std::format("{} = {}", bd::detail::name_latex(e.name), bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex));
-            guarantee = "estimated", label = std::format("An integral, error below {} (estimated)", decade_label(e.error ? *e.error : 0));
+            guarantee = "estimated", strength = std::format("error below {}, estimated", decade_label(e.error ? *e.error : 0));
             break;
         }
         case Route::Synthesis: break;
@@ -726,7 +740,8 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             const bool relative = cert->string_or("norm", "") == "largest relative error";
             if (e.taken) {
                 guarantee = "sampled";
-                label = below > 0 ? std::format("Certified, {}error below {}", relative ? "relative " : "", decade_label(below)) : "Certified, exact on the grid";
+                strength = below > 0 ? std::format("{}error below {}", relative ? "relative " : "", decade_label(below)) : "exact on the grid";
+                notes.push_back(std::format("certified on {} points", cert->number_or("points", 0)));
             }
             section("Certificate", true, "facts",
                     Array{fact("Strength", std::format("{}, on {} points", cert->string_or("strength", ""), cert->number_or("points", 0))),
@@ -758,11 +773,18 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         }
         rows.push_back(Array{std::string(route_name(c.route)) + (e.taken == i ? ", taken" : ""), std::to_string(c.cost), gave});
     }
-    if (!rows.empty())
-        section("How it was found", false, "table", Object{{"columns", Array{"route", "cost", "gave"}}, {"rows", rows}},
-                route ? Object{{"note", route_caption(*route)}} : Object{});
-    return Object{{"outcome", outcome}, {"guarantee", guarantee}, {"label", label}, {"ok", ok},
-                  {"result", result}, {"sections", sections}};
+    if (!rows.empty()) {
+        Object extra{{"gist", std::format("{} route{}", rows.size(), rows.size() == 1 ? "" : "s")}};
+        if (route) extra.emplace_back("note", route_caption(*route));
+        section("How it was found", false, "table", Object{{"columns", Array{"route", "cost", "gave"}}, {"rows", rows}}, std::move(extra));
+    }
+    // the label is the verdict in one line: "Proved, 4 roots, no other on the box"
+    label = strength;
+    if (!label.empty()) label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+    Array note_list;
+    for (const auto& n : notes) label += ", " + n, note_list.push_back(n);
+    return Object{{"outcome", outcome}, {"guarantee", guarantee}, {"verdict", Object{{"strength", strength}, {"notes", note_list}}},
+                  {"label", label}, {"ok", ok}, {"result", result}, {"sections", sections}};
 }
 
 // How a request asks for its values to be computed: `engine`, {"arithmetic": "rational",

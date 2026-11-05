@@ -170,7 +170,7 @@ TEST_CASE("respond: a system that is not linear has every root proved", "[rsc][r
     // x^2 + y^2 = 4 and x - y = 1 meet at x = (1 ± √7)/2, y = x - 1: both proved, none other on the plane
     const auto r = rsc::respond("x^2 + y^2 = 4\nx - y = 1");
     CHECK(at(r, "route").as_string() == "every root, proved");
-    CHECK(at(at(r, "sheet"), "label").as_string() == "2 roots proved, and no other");
+    CHECK(at(at(r, "sheet"), "label").as_string() == "Proved, 2 roots, no other on the box");
     const auto& v = at(r, "values").as_array();
     REQUIRE(v.size() == 4);
     for (std::size_t k = 0; k < 4; k += 2) {
@@ -210,7 +210,7 @@ TEST_CASE("respond: an inequality is the set where it holds, by the interval met
     CHECK(at(r, "route").as_string() == "interval method");
     const auto& s = at(r, "sheet");
     CHECK(at(s, "outcome").as_string() == "set");
-    CHECK(at(s, "label").as_string() == "Proved by the interval method");
+    CHECK(at(s, "label").as_string() == "Proved, by the interval method");
     CHECK(at(rsc::respond_rows(R"({"rows": [["Greater", ["Subtract", ["Power", "x", 2], 4], 0]]})"), "sheet").dump() == s.dump());
     // the case it must not claim: a double root, where Newton's step cannot prove x^2 > 0 fails at 0 alone
     CHECK(at(at(rsc::respond("x^2 > 0"), "sheet"), "label").as_string().find("undecided") != std::string::npos);
@@ -310,14 +310,14 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
     for (const Want& w : std::initializer_list<Want>{
              {"2(3 + 4)^2 - 1/4", "number", "exact", "Exact", true},
              {"sqrt(2) + 1", "number", "proved", "Proved to 16 digits", true},
-             {"10^20 + 1 - 10^20", "number", "none", "Evaluated; no digit proved, within 10⁴ of zero", false},
-             {"2x^2 - 3x - 5 = 0", "roots", "proved", "Closed form, checked by Vieta's formulas", true},
-             {"2^x = 8", "roots", "complete", "1 root proved, and no other on the box", true},
-             {"x: sin(x) = 0.5 on [0, 10]", "roots", "complete", "4 roots proved, and no other on the box", true},
+             {"10^20 + 1 - 10^20", "number", "none", "No digit proved, within 10⁴ of zero", false},
+             {"2x^2 - 3x - 5 = 0", "roots", "proved", "Proved, closed form, checked by Vieta's formulas", true},
+             {"2^x = 8", "roots", "complete", "Proved, 1 root, no other on the box", true},
+             {"x: sin(x) = 0.5 on [0, 10]", "roots", "complete", "Proved, 4 roots, no other on the box", true},
              {"x + 2y = 5\n3x - y = 1", "system", "exact", "Exact, by elimination in fractions", true},
-             {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "function", "sampled", "Certified, relative error below 10⁻¹⁵", true},
-             {"I = integral exp(-t^2) dt on [0, 1]", "number", "estimated", "An integral, error below 10⁻¹⁶ (estimated)", true},
-             {"p in [1, 2]", "parameter", "exact", "Parameter", false},
+             {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "function", "sampled", "Relative error below 10⁻¹⁵, certified on 2001 points", true},
+             {"I = integral exp(-t^2) dt on [0, 1]", "number", "estimated", "Error below 10⁻¹⁶, estimated", true},
+             {"p in [1, 2]", "parameter", "exact", "A parameter", false},
              {"x^4 = 0", "refused", "none", "Not answered", false},
          }) {
         INFO(w.question);
@@ -326,12 +326,17 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
         CHECK(at(s, "outcome").as_string() == w.outcome);
         CHECK(at(s, "guarantee").as_string() == w.guarantee);
         CHECK(at(s, "label").as_string() == w.label);
+        // the label is the verdict in one line: its strength, then its notes
+        std::string verdict = at(at(s, "verdict"), "strength").as_string();
+        for (const auto& n : at(at(s, "verdict"), "notes").as_array()) verdict += ", " + n.as_string();
+        CHECK(verdict.substr(1) == std::string_view(w.label).substr(1));
         CHECK(at(s, "ok").as_bool() == w.ok);
         // the sections in the one order, each with what it shows
         std::size_t last = 0;
         for (const auto& sec : at(s, "sections").as_array()) {
-            // a number's steps are titled by their count, "18 steps"
-            const auto title = at(sec, "title").as_string().ends_with(" steps") ? std::string("Steps") : at(sec, "title").as_string();
+            const auto title = at(sec, "title").as_string();
+            // the steps are never folded, and say in a few words what they are
+            if (title == "Steps") CHECK((at(sec, "open").as_bool() && !sec.string_or("gist", "").empty()));
             const auto k = std::ranges::find(order, title) - order.begin();
             REQUIRE(static_cast<std::size_t>(k) < order.size());
             CHECK(static_cast<std::size_t>(k) >= last);

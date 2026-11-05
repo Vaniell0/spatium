@@ -17,8 +17,8 @@ interface Fact { label: string; text?: string; latex?: string; ok?: boolean }
 interface Table { columns: string[]; rows: string[][] }
 interface Part { kind: "holds" | "fails" | "root" | "break" | "undecided"; lo: number; hi: number; text?: string }
 interface Axis { relation: Relation; line: boolean; parts: Part[] }
-interface Section { title: string; open: boolean; echo?: boolean; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis }
-export interface Sheet { outcome: string; guarantee: string; label: string; ok: boolean; result: string; sections: Section[] }
+interface Section { title: string; open: boolean; gist?: string; note?: string; rows?: string[]; steps?: Step[]; facts?: Fact[]; table?: Table; axis?: Axis }
+export interface Sheet { outcome: string; guarantee: string; verdict: { strength: string; notes: string[] }; label: string; ok: boolean; result: string; sections: Section[] }
 
 // what an answer is and how strongly it holds, in the core's words; a card asked in code and a
 // scene, which carry no sheet, by what they are
@@ -54,12 +54,14 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
   }
   if (s.outcome === "refused") out.append(refusal(a, typed));
   else {
-    out.append(el("p", { class: s.ok ? "kind ok" : "kind", text: s.label }));
+    // how strongly it holds, then how: "proved · 4 roots · no other on the box"
+    out.append(el("p", { class: s.ok ? "verdict ok" : "verdict" }, el("span", { class: "strength", text: s.verdict.strength }),
+      ...s.verdict.notes.map((n) => el("span", { text: n }))));
     if (s.result) out.append(tex(s.result, "big accent", true));
   }
   for (const sec of s.sections) {
-    // the question again, which the cell shows above its answer; steps where the settings hide them
-    if (sec.echo || (sec.steps && !shown.steps)) continue;
+    // steps where the settings hide them
+    if (sec.steps && !shown.steps) continue;
     out.append(section(sec, tex));
   }
   return out;
@@ -88,7 +90,7 @@ function section(sec: Section, tex: (latex: string, cls?: string, display?: bool
   }
   if (sec.axis) body.append(axisView(sec.axis));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
-  const d = el("details", { class: "sec" }, el("summary", { text: sec.title }), body);
+  const d = el("details", { class: "sec" }, el("summary", {}, sec.title, sec.gist ? el("span", { class: "gist", text: sec.gist }) : null), body);
   if (sec.open) d.setAttribute("open", "");
   return d;
 }
