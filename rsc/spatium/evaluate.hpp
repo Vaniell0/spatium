@@ -59,6 +59,10 @@ namespace rsc {
 
 enum class Route { Evaluate, Expression, ClosedForm, Linear, Intervals, Enclosed, Bracket, Integral, Synthesis };
 
+inline constexpr Route routes[] = {Route::Evaluate,  Route::Expression, Route::ClosedForm,
+                                   Route::Linear,    Route::Intervals,  Route::Enclosed,
+                                   Route::Bracket,   Route::Integral,   Route::Synthesis};
+
 inline const char* route_name(Route r) {
     switch (r) {
         case Route::Evaluate: return "evaluate";
