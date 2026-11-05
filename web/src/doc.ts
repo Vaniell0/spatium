@@ -34,7 +34,7 @@ export interface Policy {
   defaults: Required<Pick<Settings, "numbers" | "steps">>;
   reads: "own" | "above";         // a question is its cell's rows alone, or every row above it too
   may: {
-    add: "input" | "any";         // a calculator adds formulas to type in; the canvas, any kind of cell
+    add: "none" | "any";          // a calculator is one line, its past in the history; the canvas adds any kind of cell
     place: boolean;               // move and size cells freely
     reorder: boolean;             // move a cell above the cells it reads is refused either way
   };
@@ -50,10 +50,10 @@ export type Auto = "split" | "graph" | "sliders";
 
 export const presets: Record<Preset, Policy> = {
   calculator: {
-    settings: ["numbers", "steps"],
+    settings: [],
     defaults: { numbers: "decimal", steps: true },
     reads: "own",
-    may: { add: "input", place: false, reorder: false },
+    may: { add: "none", place: false, reorder: false },
     auto: ["split", "graph", "sliders"],
   },
   canvas: {

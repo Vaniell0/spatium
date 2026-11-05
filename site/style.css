@@ -317,3 +317,31 @@ body { --keyboard-background: var(--raised); --keycap-background: var(--surface)
   .keys { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: auto; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* ── the calculator's history: what was asked, newest first, each folded to one line ── */
+.history { display: grid; gap: 16px; margin-top: 32px; }
+.history[hidden] { display: none; }
+.history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.history-head h2 { margin: 0; font-size: var(--t-label); font-weight: 500; color: var(--ink-2); }
+.hcell { display: grid; min-width: 0; border-radius: var(--r-panel); background: var(--surface); overflow: hidden; }
+.hcell .ask-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 8px 8px 24px; color: var(--ink-2); }
+.hcell .prompt { font-family: var(--f-mono); color: var(--ink-3); }
+.hcell .q { flex: 1 1 auto; display: grid; gap: 2px; min-width: 0; overflow-x: auto; }
+.hcell .acts { display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.hcell:hover .acts, .hcell:focus-within .acts { opacity: 1; }
+@media (hover: none) { .hcell .acts { opacity: 1; } }
+.icon.dense { width: var(--dense); height: var(--dense); }
+.hcell .result-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 8px 24px 16px; text-align: left;
+  font: inherit; font-size: var(--t-label); color: var(--ink-2); background: none; border: 0; border-top: 1px solid var(--line-faint); cursor: pointer; }
+.hcell .result-row .res { font-size: 1.1em; color: var(--ink); }
+.hcell .result-row .strength { color: var(--ink-3); font-weight: 500; }
+.hcell .result-row .strength.ok { color: var(--accent); }
+.hcell .sheet-body { display: grid; gap: 8px; padding: 0 24px; }
+.hcell.open .sheet-body { padding-bottom: 16px; }
+.card .clear { align-self: center; }
+.undo { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 16px;
+  min-height: 40px; padding: 0 8px 0 16px; border-radius: 20px; background: var(--raised); border: 1px solid var(--line);
+  font-size: var(--t-label); color: var(--ink); box-shadow: 0 8px 24px rgb(0 0 0 / .18); }
+.undo[hidden] { display: none; }
+@media (max-width: 480px) { .hcell .ask-row { padding-left: 16px; } .hcell .result-row, .hcell .sheet-body { padding-left: 16px; padding-right: 16px; } }
+@media (prefers-reduced-motion: reduce) { .hcell .acts { transition: none; } }

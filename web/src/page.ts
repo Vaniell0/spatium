@@ -1,13 +1,16 @@
-// The page: one document of cells under the policy the bar picks -- the calculator or the canvas
-// -- answered live by the core in a worker. It keeps the document in its address (#w=) and in
-// the browser, and shows the JSON the core and the library's files hold; it composes nothing.
+// The page: the calculator -- one line and the history of what was asked -- or the canvas, a
+// document of cells, as the bar picks, answered live by the core in a worker. It keeps what is
+// written in its address (#w=) and in the browser, and shows the JSON the core and the library's
+// files hold; it composes nothing.
 
 import { Answers, notation, type Parse } from "./answers.js";
+import { type Calc, type Entry, blank, commit, empty, load as loadCalc, save as saveCalc } from "./calc.js";
 import { Core, type State } from "./core.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
 import { Cards } from "./view/cells.js";
 import { $, el, math as tex } from "./view/dom.js";
-import { kindOf } from "./view/answer.js";
+import { kindOf, type Sheet } from "./view/answer.js";
+import { History } from "./view/history.js";
 
 // ── settings of the page (a cell's own are in the document) ─────────────
 
@@ -16,6 +19,21 @@ type PageSettings = typeof DEFAULTS;
 const settings: PageSettings = { ...DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem("spatium.settings") || "{}")); } catch {}
 const saveSettings = () => { try { localStorage.setItem("spatium.settings", JSON.stringify(settings)); } catch {} };
+
+// the one transient message: what was just undone-able, under the bar, for five seconds
+let undoTimer: ReturnType<typeof setTimeout> | 0 = 0, undoing: (() => void) | null = null;
+function undoStrip(message: string, restore: () => void) {
+  const strip = $("#undo")!;
+  clearTimeout(undoTimer);
+  undoing = restore;
+  strip.replaceChildren(el("span", { text: message }), el("button", { type: "button", class: "quiet small", text: "Undo", onclick: () => {
+    undoing?.();
+    undoing = null;
+    strip.hidden = true;
+  } }));
+  strip.hidden = false;
+  undoTimer = setTimeout(() => { strip.hidden = true; undoing = null; }, 5000);
+}
 
 let toastTimer: ReturnType<typeof setTimeout> | 0 = 0;
 function toast(text: string, bad = false) {
@@ -117,6 +135,10 @@ function fromBrowser(): Doc | null {
 
 let cards: Cards;
 let answers: Answers;
+let calc: Calc;              // the calculator's line and its history
+let canvas: Doc;             // the canvas's document, kept while the calculator is shown
+let past: History;
+type HistoryHostSheet = ConstructorParameters<typeof History>[1]["sheet"];
 let runTimer: ReturnType<typeof setTimeout> | 0 = 0, saveTimer: ReturnType<typeof setTimeout> | 0 = 0;
 
 function changed() {
@@ -137,7 +159,10 @@ async function run() {
 
 async function save() {
   const doc = cards.document;
-  try { localStorage.setItem(KEPT, JSON.stringify(toJSON(doc))); } catch {}
+  if (doc.preset === "calculator") {
+    calc.line = doc.cells[0]?.kind === "math" ? doc.cells[0].written : empty();
+    saveCalc(calc);
+  } else try { localStorage.setItem(KEPT, JSON.stringify(toJSON(doc))); } catch {}
   try { history.replaceState(null, "", `#w=${await toLink(doc)}`); } catch {}
 }
 
@@ -152,20 +177,57 @@ async function copyLink() {
   }
 }
 
+// the calculator's line as a document of one cell, its rows the line's own
+const lineDoc = (): Doc => ({ preset: "calculator", cells: [math(calc.line)] });
+
 function usePreset(preset: Preset) {
-  cards.document.preset = preset;
+  const now = cards.document;
+  if (now.preset === "canvas") canvas = now;
+  else if (now.cells[0]?.kind === "math") calc.line = now.cells[0].written;
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-preset]")) b.setAttribute("aria-pressed", String(b.dataset.preset === preset));
   document.body.dataset.preset = preset;
-  cards.build();
+  past.root.hidden = preset !== "calculator";
+  if (preset !== now.preset) cards.setDoc(preset === "calculator" ? lineDoc() : canvas);
+  else cards.build();
+  changed();
+}
+
+// the line is done: what it asked goes on top of the history, shown open when `open`, and the
+// line is empty again
+function commitLine(open: boolean) {
+  const cell = cards.document.cells[0];
+  if (cards.document.preset !== "calculator" || cell?.kind !== "math") return;
+  const sheet = cards.answerOf(cell)?.sheet as Sheet | undefined;
+  let opened: Entry | null = null;
+  if (sheet && !blank(cell.written)) {
+    calc = commit(calc, { written: structuredClone(cell.written), result: sheet.result, strength: sheet.verdict?.strength ?? sheet.label,
+      note: sheet.verdict?.notes[0] ?? "", ok: sheet.ok, t: Date.now() });
+    opened = open ? calc.history[0] : null;
+  }
+  calc.line = empty();
+  cards.setDoc(lineDoc());
+  past.render(calc, opened);
+  changed();
+}
+
+// a question put in the line, what was there committed first
+function intoLine(written: Calc["line"]) {
+  commitLine(false);
+  calc.line = structuredClone(written);
+  cards.setDoc(lineDoc());
   changed();
 }
 
 // ── panels: the reference and the gallery, each line of them a cell to add ─
 
-// a question added as a card at the end: its rows as the library writes them (`question_latex`),
-// or a line of text -- on the calculator, which takes formulas only, that line as a formula
-const addRows = (rows: string[] | undefined, text: string) =>
-  cards.append([math(rows?.length ? { rows } : cards.document.preset === "calculator" && editor.ready ? { rows: [editor.toLatex(text)] } : { text })]);
+// a question: its rows as the library writes them (`question_latex`), or a line of text -- on the
+// calculator, which takes formulas only, that line as a formula -- put in the calculator's line,
+// or added as a card at the end of the canvas
+const addRows = (rows: string[] | undefined, text: string) => {
+  const written = rows?.length ? { rows } : cards.document.preset === "calculator" && editor.ready ? { rows: [editor.toLatex(text)] } : { text };
+  if (cards.document.preset === "calculator") intoLine(written);
+  else cards.append([math(written)]);
+};
 const addText = (text: string) => addRows(undefined, text);
 // a question shown as its rows, or as its text where the library wrote none
 const shownAs = (rows: string[] | undefined, text: string, cls: string) =>
@@ -327,7 +389,27 @@ const coreLoaded = core.load();
 await Promise.all([loadData(), loadEditor()]);
 applySettings();
 answers = new Answers(core, (latex) => editor.parse(latex));
-const doc = (await fromAddress()) ?? fromBrowser() ?? starting();
+const asked = await fromAddress();
+calc = loadCalc();
+canvas = fromBrowser() ?? starting();
+canvas.preset = "canvas";
+if (asked?.preset === "canvas") canvas = asked;
+else if (asked?.cells[0]?.kind === "math") calc.line = asked.cells[0].written;
+const doc = asked?.preset === "canvas" ? canvas : lineDoc();
+past = new History(calc, {
+  source: () => settings.formulas === "source",
+  sheet: async (e) => {
+    const one: Doc = { preset: "calculator", cells: [math(structuredClone(e.written))] };
+    let got: Awaited<ReturnType<HistoryHostSheet>> = null;
+    await answers.run(one, (cell, answer, _above, from) => { if (!from && cell === one.cells[0]) got = answer; });
+    return got;
+  },
+  use: (e) => intoLine(e.written),
+  changed: (c) => { calc = c; saveCalc(calc); },
+  ask: (text) => addText(text),
+  undo: undoStrip,
+});
+past.render(calc);
 cards = new Cards(doc, {
   editor: editor.ready,
   source: () => settings.formulas === "source",
@@ -336,8 +418,9 @@ cards = new Cards(doc, {
   hint,
   curve: (cell) => (at) => answers.curve(cell, at),
   ask: (text) => addText(text),
+  commit: () => commitLine(true),
 });
-$("#sheet")!.append(cards.root);
+$("#sheet")!.append(cards.root, past.root);
 usePreset(doc.preset);
 await coreLoaded;
 showCoreState();

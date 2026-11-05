@@ -43,9 +43,9 @@ export const homes = {
     "synthesis": sheet,
   } satisfies Record<L.Route, Home>,
   arithmetics: {
-    double: { at: "calculator: Numbers, decimal" },
+    double: { at: "canvas: a card's Numbers, decimal; the calculator computes in it" },
     float: noControl,
-    rational: { at: "calculator: Numbers, exact" },
+    rational: { at: "canvas: a card's Numbers, exact; the calculator where every operation is one on fractions" },
     decimal: noControl,
     real50: noControl,
   } satisfies Record<L.Arithmetic, Home>,

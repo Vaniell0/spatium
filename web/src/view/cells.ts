@@ -19,6 +19,7 @@ export interface CardsHost {
   hint(word: string): [name: string, caption: string, example: string] | null;  // what the reference says of a word
   curve: (cell: Cell) => GraphOptions["curve"];                                 // a graph's curve in doubles
   ask: (text: string) => void;                                                   // a question the sheet offers, as a new card
+  commit?: () => void;                                                           // the calculator's line is done: into the history
 }
 
 type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string;
@@ -51,13 +52,19 @@ export class Cards {
 
   get document() { return this.doc; }
 
+  // the calculator's commit, where this document is the calculator's line
+  private get line() { return this.doc.preset === "calculator" ? this.host.commit : undefined; }
+
+  // the answer a card shows now, if any
+  answerOf(cell: Cell): Answer | null { return this.shown.get(cell)?.answer ?? null; }
+
   // every card drawn again from the document; answers come as they are asked
   build(focus?: Cell, row = 0) {
     this.shown.clear();
     this.root.replaceChildren();
     if (!this.doc.cells.length) this.doc.cells.push(math({ rows: [""] }));
     for (const cell of this.doc.cells) this.root.append(this.card(cell));
-    this.root.append(this.adder());
+    if (presets[this.doc.preset].may.add !== "none") this.root.append(this.adder());
     if (focus) this.focus(focus, row);
   }
 
@@ -117,6 +124,12 @@ export class Cards {
       });
       head.append(gear);
       box.append(panel);
+    }
+    // the calculator's line is cleared by x: what it asked goes into the history first
+    if (this.line) {
+      const x = el("button", { type: "button", class: "icon clear", "aria-label": "Clear the line", title: "Clear the line", onclick: () => this.line?.() });
+      x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+      head.append(x);
     }
     box.append(el("div", { class: "answer", "aria-live": "polite" }), el("div", { class: "also" }));
     this.shown.set(cell, { box, answer: null, above: 0, name: null });
@@ -180,6 +193,7 @@ export class Cards {
     t.addEventListener("keyup", look);
     t.addEventListener("blur", () => tell(""));
     t.addEventListener("keydown", (e) => {
+      if (this.line && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.line(); return; }
       // Enter on an empty last line, or with Ctrl, opens a card below; else it is a new line
       if (e.key !== "Enter" || e.shiftKey || !(e.ctrlKey || e.metaKey || t.value.endsWith("\n"))) return;
       e.preventDefault();
@@ -194,6 +208,15 @@ export class Cards {
   private rowKeys(e: KeyboardEvent, cell: Cell, k: number, value: string) {
     if (e.defaultPrevented || cell.kind !== "math" || !("rows" in cell.written)) return;
     const rows = cell.written.rows, empty = !value.trim();
+    // the calculator: Enter is done, the line goes into the history; Shift+Enter writes a row below
+    if (this.line && e.key === "Enter") {
+      e.preventDefault();
+      if (!e.shiftKey) { this.line(); return; }
+      rows.splice(k + 1, 0, "");
+      this.build(cell, k + 1);
+      this.host.changed();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey || (empty && k === rows.length - 1 && rows.length > 1)) {
