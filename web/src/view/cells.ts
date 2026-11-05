@@ -25,7 +25,7 @@ export interface CardsHost {
 type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string;
   getValue(start: number, end: number, format: string): string };
 
-interface Shown { box: HTMLElement; answer: Answer | null; above: number; name: string | null }
+interface Shown { box: HTMLElement; answer: Answer | null; above: number; name: string | null; slow?: ReturnType<typeof setTimeout> }
 
 // the choices of a setting in a card's gear, in its words
 const CHOICES = {
@@ -81,6 +81,9 @@ export class Cards {
     }
     const s = this.shown.get(cell);
     if (!s) return;
+    s.box.classList.remove("pending");
+    clearTimeout(s.slow);
+    s.box.querySelector(".status")?.remove();
     Object.assign(s, { answer, above, name: nameOf(answer ?? undefined) });
     const out = s.box.querySelector<HTMLElement>(".answer")!;
     s.box.classList.toggle("refused", Boolean(answer?.refused));
@@ -97,6 +100,21 @@ export class Cards {
     }
     const typed = "text" in cell.written ? cell.written.text : "";
     out.replaceChildren(answerView(answer, typed, { steps: setting(this.doc, cell, "steps"), source: this.host.source(), ask: this.host.ask }));
+  }
+
+  // every card is being asked again: its answer stays, dimmed, until the new one comes; one still
+  // unanswered after ten seconds says so, with a way to stop
+  pending(stop: () => void) {
+    for (const [cell, s] of this.shown) {
+      s.box.classList.add("pending");
+      clearTimeout(s.slow);
+      s.slow = setTimeout(() => {
+        if (!s.box.classList.contains("pending")) return;
+        s.box.querySelector(".status")?.remove();
+        s.box.querySelector(".ask")?.after(el("p", { class: "status", role: "status" }, "Still working",
+          el("button", { type: "button", class: "quiet small", text: "Stop", onclick: () => { stop(); this.show(cell, null); } })));
+      }, 10000);
+    }
   }
 
   // graphs the page added are dropped before a new run
@@ -129,7 +147,7 @@ export class Cards {
     }
     // the calculator's line is cleared by x: what it asked goes into the history first
     if (this.line) {
-      const x = el("button", { type: "button", class: "icon clear", "aria-label": "Clear the line", title: "Clear the line", onclick: () => this.line?.() });
+      const x = el("button", { type: "button", class: "icon clear", "aria-label": "Clear the line", onclick: () => this.line?.() });
       x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
       head.append(x);
     }

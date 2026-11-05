@@ -88,6 +88,19 @@ export class Core {
     });
   }
 
+  // the question being computed is given up: its worker is ended and a new one started, and every
+  // question still waiting is dropped
+  stop() {
+    for (const q of this.waiting.values()) q.resolve(null);
+    this.waiting.clear();
+    const f = this.inflight;
+    if (!f) return;
+    if (f.timer) clearTimeout(f.timer);
+    f.resolve(null);
+    this.inflight = null;
+    void this.spawn();
+  }
+
   // a key no longer asked for: its question is dropped
   forget(key: object) {
     this.waiting.get(key)?.resolve(null);

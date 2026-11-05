@@ -386,3 +386,10 @@ body { --keyboard-background: var(--raised); --keycap-background: var(--surface)
 .tile .label { font-size: var(--t-label); color: var(--ink-3); }
 .tile .label.ok { color: var(--ok); }
 @media (max-width: 640px) { .gallery { padding: 24px 16px 48px; } }
+
+.quiet.warn { color: var(--warn); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* a card asked again: its last answer stays, dimmed, until the new one comes */
+.card.pending > .answer { opacity: .48; transition: opacity .15s; }
+.card .status { display: flex; align-items: center; gap: 16px; margin: 0; padding: 8px 24px; font-size: var(--t-label); color: var(--ink-2); border-bottom: 1px solid var(--line-faint); }
+@media (prefers-reduced-motion: reduce) { .card.pending > .answer { transition: none; } }

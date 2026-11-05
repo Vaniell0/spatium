@@ -25,7 +25,7 @@
 <body>
 <header class="bar">
   <a class="mark" href="./">spatium</a>
-  <span class="beta" title="A concept of the page; it changes as the library grows">beta</span>
+  <span class="beta">beta</span>
   <div class="seg preset" role="group" aria-label="Page">
     <button type="button" data-preset="calculator">Calculator</button>
     <button type="button" data-preset="canvas">Canvas</button>
@@ -34,8 +34,8 @@
     <button type="button" data-panel="ref" aria-pressed="false">Reference</button>
     <a href="gallery/">Gallery</a>
   </nav>
-  <span class="core-dot" id="core-dot" title="Core loading" aria-hidden="true"></span>
-  <button class="icon" id="copy-link" type="button" aria-label="Copy a link to this workspace" title="Copy a link to this workspace">
+  <span class="core-dot" id="core-dot" aria-hidden="true"></span>
+  <button class="icon" id="copy-link" type="button" aria-label="Copy a link to this workspace">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>
   </button>
   <button class="icon" id="open-keys" type="button" aria-label="Keyboard" aria-controls="keys" aria-expanded="false">
@@ -48,6 +48,7 @@
 
 <div id="undo" class="undo" role="status" aria-live="polite" hidden></div>
 <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+<p class="sr-only" id="said" aria-live="polite"></p>
 
 <div class="layout">
   <main id="sheet" aria-label="Document"></main>
@@ -113,6 +114,10 @@
         <span id="core-state">Not loaded</span>
         <button type="button" class="quiet" id="check-update">Check for update</button>
       </div>
+    </fieldset>
+    <fieldset>
+      <legend>Saved work</legend>
+      <div class="core-row" id="forget-row"></div>
     </fieldset>
   </form>
 </dialog>
