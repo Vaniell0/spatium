@@ -119,10 +119,18 @@ inline Step to_step(const VietaCheck<double>& v, std::string_view unknown = "x")
     const std::string x = detail::name_latex(unknown);
     const bool holds = v.error <= 1e-12;
     const std::string rel = holds ? "=" : "\\ne";
-    std::string latex = std::format("{0}_{{1}} + {0}_{{2}} = {1} {2} -\\frac{{b}}{{a}} = {3},\\quad {0}_{{1}} {0}_{{2}} = {4} {2} "
+    // where it holds, a value off by the doubles' last bits is written as the one it is near, with
+    // \approx: x_1 + x_2 \approx 0, not -2.220446049250313 \cdot 10^{-16}
+    const auto shown = [&](const Complex<double>& got, double want) {
+        const double scale = std::max({std::abs(want), std::abs(got.re), 1.0});
+        if (!holds || got.im != 0 || got.re == want || std::abs(got.re - want) > 1e-12 * scale)
+            return "= " + detail::complex_latex(got);
+        return "\\approx " + detail::num(want);
+    };
+    std::string latex = std::format("{0}_{{1}} + {0}_{{2}} {1} {2} -\\frac{{b}}{{a}} = {3},\\quad {0}_{{1}} {0}_{{2}} {4} {2} "
                                     "\\frac{{c}}{{a}} = {5}",
-                                    x, detail::complex_latex(v.sum), rel, detail::num(v.want_sum),
-                                    detail::complex_latex(v.product), detail::num(v.want_product));
+                                    x, shown(v.sum, v.want_sum), rel, detail::num(v.want_sum),
+                                    shown(v.product, v.want_product), detail::num(v.want_product));
     if (!holds) latex += std::format("\\quad\\text{{(relative error {})}}", detail::num(v.error));
     return {holds ? "check: Vieta's formulas hold" : "check: Vieta's formulas do not hold", latex};
 }

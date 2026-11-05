@@ -444,6 +444,18 @@ template<class T> std::string scientific(const T& x, int digits) {
         return x.str(digits - 1, std::ios_base::scientific);
     }
 }
+// A number's digits with no zeros after the last that tells: "3.000000000000000" as "3",
+// "0.500000000000000" as "0.5", "1.000e-30" as "1e-30". How many digits are proved is
+// `Proved::digits`; the zeros only repeat it.
+inline std::string without_zeros(std::string s) {
+    const auto e = s.find_first_of("eE");
+    std::string mantissa = s.substr(0, e), exponent = e == std::string::npos ? std::string() : s.substr(e);
+    if (mantissa.find('.') != std::string::npos) {
+        mantissa.erase(mantissa.find_last_not_of('0') + 1);
+        if (mantissa.ends_with('.')) mantissa.pop_back();
+    }
+    return mantissa + exponent;
+}
 // "4.2982e+00" as "4.2982", "1.25e-03" as "0.00125"; a far exponent stays as it is.
 inline std::string plain(const std::string& s) {
     const auto e = s.find_first_of("eE");
@@ -476,9 +488,9 @@ template<Scalar T> Proved proved(const Interval<T>& x) {
         if constexpr (builtin<T>) {
             char buf[64];
             const auto r = std::to_chars(buf, buf + sizeof buf, x.lo);
-            out.text = plain(std::string(buf, r.ptr));
+            out.text = without_zeros(plain(std::string(buf, r.ptr)));
         } else {
-            out.text = plain(x.lo.str(0, std::ios_base::scientific));
+            out.text = without_zeros(plain(x.lo.str(0, std::ios_base::scientific)));
         }
         if (const auto e = out.text.find_first_of("eE"), point = out.text.find('.'); point != std::string::npos) {
             const std::size_t stop = e == std::string::npos ? out.text.size() : e;
@@ -500,7 +512,7 @@ template<Scalar T> Proved proved(const Interval<T>& x) {
         const std::string a = scientific(x.lo, n);
         if (a == scientific(x.hi, n)) {
             out.digits = n;
-            out.text = plain(a);
+            out.text = without_zeros(plain(a));
             return out;
         }
     }
