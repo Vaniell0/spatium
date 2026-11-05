@@ -57,10 +57,21 @@ JsonValue card(std::string id, std::string question) {
             card.emplace_back(key, routes);
             continue;
         }
-        // the sheet's table of routes keeps its routes and what they gave, not the counts
+        // the sheet's routes and its table of them keep the routes and what they gave, not the counts
         if (key == "sheet") {
             Object sheet;
             for (const auto& [k, v] : value.as_object()) {
+                if (k == "routes") {
+                    Array routes;
+                    for (const auto& r : v.as_array()) {
+                        Object kept;
+                        for (const auto& [rk, rv] : r.as_object())
+                            if (rk != "cost") kept.emplace_back(rk, rv);
+                        routes.push_back(kept);
+                    }
+                    sheet.emplace_back(k, routes);
+                    continue;
+                }
                 if (k != "sections") { sheet.emplace_back(k, v); continue; }
                 Array sections;
                 for (const auto& sec : v.as_array()) {
