@@ -52,7 +52,7 @@ export class History {
     const rows = "rows" in e.written ? e.written.rows.filter((r) => r.trim()) : [];
     const question = rows.length ? el("span", { class: "q" }, ...rows.map((r) => tex(r))) : el("span", { class: "q mono", text: "text" in e.written ? e.written.text : "" });
     const icon = (name: keyof typeof ICON, label: string, act: () => void) => {
-      const b = el("button", { type: "button", class: "icon dense", "aria-label": label, title: label, onclick: act });
+      const b = el("button", { type: "button", class: "icon dense", "aria-label": label, onclick: act });
       b.innerHTML = ICON[name];
       return b;
     };

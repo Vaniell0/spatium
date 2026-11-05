@@ -6,6 +6,7 @@
 import { Answers, notation, type Parse } from "./answers.js";
 import { type Calc, type Entry, blank, commit, empty, load as loadCalc, save as saveCalc } from "./calc.js";
 import { Core, type State } from "./core.js";
+import { layout } from "./keys.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
 import { Cards } from "./view/cells.js";
 import { $, el, math as tex } from "./view/dom.js";
@@ -73,7 +74,9 @@ async function loadEditor() {
     ml.MathfieldElement.fontsDirectory = new URL("vendor/katex/fonts/", location.href).href;
     ml.MathfieldElement.soundsDirectory = null;
     ml.MathfieldElement.computeEngine = null;
-    (window as unknown as { mathVirtualKeyboard: { container: Element } }).mathVirtualKeyboard.container = $("#keys-body")!;
+    const kb = (window as unknown as { mathVirtualKeyboard: { container: Element; layouts: unknown } }).mathVirtualKeyboard;
+    kb.container = $("#keys-body")!;
+    kb.layouts = [layout()];
     editor.parse = (latex: string) => ls.parse(notation(latex));
     editor.toLatex = ml.convertAsciiMathToLatex;
     editor.ready = true;
@@ -147,6 +150,7 @@ async function run() {
     return;
   }
   cards.clearDerived();
+  cards.pending(() => core.stop());
   await answers.run(cards.document, (cell, answer, above, from) => cards.show(cell, answer, above, from));
 }
 
@@ -162,9 +166,13 @@ async function save() {
 async function copyLink() {
   clearTimeout(saveTimer);
   await save();
+  // said in place: the icon turns into a check for a moment, and a screen reader hears it
+  const button = $("#copy-link")!, was = button.innerHTML;
   try {
     await navigator.clipboard.writeText(location.href);
-    toast("Link to this document copied");
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+    $("#said")!.textContent = "Link copied";
+    setTimeout(() => { button.innerHTML = was; $("#said")!.textContent = ""; }, 1500);
   } catch {
     toast("The address bar holds the link to this document");
   }
@@ -349,7 +357,23 @@ function wire() {
   $("#open-keys")!.addEventListener("pointerdown", (e) => e.preventDefault());
   $("#open-keys")!.addEventListener("click", () => setKeys($("#keys")!.hidden === true));
   $("#close-keys")!.addEventListener("click", () => setKeys(false));
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setKeys(false); });
+  // Esc closes the keyboard; with it closed, Esc twice within a second clears the line
+  let escAt = 0;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("#keys")!.hidden) { setKeys(false); return; }
+    if (cards.document.preset === "calculator" && Date.now() - escAt < 1000) { escAt = 0; commitLine(false); }
+    else escAt = Date.now();
+  });
+  // forgetting asks once, in place: the button becomes Forget and Cancel
+  const forgetRow = () => $("#forget-row")!.replaceChildren(el("button", { type: "button", class: "quiet warn", text: "Forget history and canvas",
+    onclick: () => $("#forget-row")!.replaceChildren(
+      el("button", { type: "button", class: "quiet warn", text: "Forget", onclick: () => {
+        try { for (const k of ["spatium.calc", KEPT]) localStorage.removeItem(k); } catch { /* nothing kept */ }
+        location.replace(location.pathname);
+      } }),
+      el("button", { type: "button", class: "quiet", text: "Cancel", onclick: forgetRow })) }));
+  forgetRow();
   addEventListener("resize", placeKeys);
   dragKeys();
   const dialog = $<HTMLDialogElement>("#settings")!;
