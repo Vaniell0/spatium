@@ -278,7 +278,7 @@ table.roots td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-fa
   grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; padding: 16px 0 0; background: var(--surface);
   border-left: 1px solid var(--line); box-shadow: -16px 0 40px rgb(0 0 0 / .12); animation: drawer-in 150ms ease-out; }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } }
-.scrim { display: none; }
+.drawer[hidden], .scrim { display: none; }
 @media (max-width: 1023px) {
   .drawer { left: 0; width: auto; border-left: 0; border-top: 1px solid var(--line); border-radius: var(--r-panel) var(--r-panel) 0 0;
     animation-name: sheet-in; }
