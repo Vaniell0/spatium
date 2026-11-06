@@ -117,6 +117,7 @@ if(SPATIUM_USE_MODULES)
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/ode.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/linear_solve.cppm
             ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/calculus.cppm
+            ${CMAKE_CURRENT_SOURCE_DIR}/modules/algebra/zeta.cppm
         DEPS spatium_sdk spatium_core_module)
     add_library(Spatium::algebra_module ALIAS spatium_algebra_module)
 

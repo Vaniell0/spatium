@@ -137,6 +137,7 @@ add_executable(spatium_tests
     test_answer_query.cpp
     test_answer_respond.cpp
     test_answer_evaluate.cpp
+    test_zeta.cpp
 )
 
 target_include_directories(spatium_tests PRIVATE

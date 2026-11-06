@@ -11,10 +11,13 @@
 //   plot(request)      a value drawn as the graph of a function of one parameter: a WebGL2
 //                      shader whose slots are the other parameters, and with a grid, F at each
 //                      pixel as the shader's check mode computes it, in fp32
+//   zeta(request)      the zeta page's data: Z(t), the zeros proved, Gram points, zeta on a
+//                      grid, and the notes, from the proved zeta (rsc/spatium/zeta_request.hpp)
 //
 // Built by build.sh with Emscripten; check.mjs holds it against the host build of the same calls.
 
 #include <spatium/answer/respond.hpp>
+#include <rsc/spatium/zeta_request.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
@@ -46,6 +49,8 @@ const char* spatium_evaluate(const char* request) { return hand_back(spatium::an
 
 const char* spatium_plot(const char* request) { return hand_back(spatium::answer::plot_request(request).dump()); }
 
+const char* spatium_zeta(const char* request) { return hand_back(rsc::zeta_request(request).dump()); }
+
 
 }
 
@@ -58,6 +63,7 @@ int main() {
         if (line.starts_with("evaluate ")) std::cout << spatium_evaluate(line.c_str() + 9) << "\n";
         else if (line.starts_with("rows ")) std::cout << spatium_rows(line.c_str() + 5) << "\n";
         else if (line.starts_with("plot ")) std::cout << spatium_plot(line.c_str() + 5) << "\n";
+        else if (line.starts_with("zeta ")) std::cout << spatium_zeta(line.c_str() + 5) << "\n";
         else std::cout << spatium_respond(line.c_str(), 0) << "\n";
     }
 }
