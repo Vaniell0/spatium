@@ -54,3 +54,8 @@ rows {"rows": [["Equal", ["Add", "x", ["Multiply", 2, "y"]], 5], ["Equal", ["Sub
 rows {"rows": [["LessEqual", ["Divide", ["Subtract", "x", 1], ["Add", "x", 2]], 0]]}
 x^2 - 4 > 0
 rows {"rows": [["Equal", ["Add", ["Power", "x", 2], ["Power", "y", 2]], 4], ["Equal", ["Subtract", "x", "y"], 1]]}
+zeta {"what": "hardy", "t0": 0, "t1": 50, "n": 64}
+zeta {"what": "zeros", "t0": 0, "t1": 50}
+zeta {"what": "gram", "t0": 270, "t1": 290}
+zeta {"what": "grid", "s0": [-1, 0], "s1": [2, 30], "w": 8, "h": 8}
+zeta {"what": "notes", "t0": 270, "t1": 290}

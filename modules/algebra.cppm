@@ -29,6 +29,7 @@ export import :dual;
 export import :ode;
 export import :linear_solve;
 export import :calculus;
+export import :zeta;
 // algebra/eigen_interop.hpp stays header-only in Phase 1 — SSE intrinsics
 // pulled by Eigen/Core and by vec_simd's GMF cause conflicting language linkage
 // when both BMIs land in the same TU. Revisit once header units (or a SIMD
