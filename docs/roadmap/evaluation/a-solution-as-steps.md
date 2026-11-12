@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: an equation solved in closed form with its steps, and the gallery written by the library
-files: [include/spatium/algebra/polynomial.hpp, include/spatium/io/steps_text.hpp, rsc/spatium/closed_form.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_solution_steps.cpp]
+files: [include/spatium/algebra/polynomial.hpp, include/spatium/io/steps_text.hpp, include/spatium/answer/closed_form.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_solution_steps.cpp]
 resolves: [ir/a-question-typed-as-text#2]
 open:
   - steps only for the quadratic; the cubic and the quartic solvers keep no record yet

@@ -7,8 +7,8 @@
 // cubic and an equation in two unknowns are refused by name.
 
 #include <catch2/catch_test_macros.hpp>
-#include <rsc/spatium/closed_form.hpp>
-#include <rsc/spatium/evaluate.hpp>
+#include <spatium/answer/closed_form.hpp>
+#include <spatium/answer/evaluate.hpp>
 #include <spatium/algebra/polynomial.hpp>
 #include <spatium/io/steps_text.hpp>
 
@@ -118,7 +118,7 @@ TEST_CASE("solution steps: a quadratic as a chain a page reads", "[io][steps]") 
 }
 
 TEST_CASE("solution steps: an equation typed as text is solved in closed form, or refused by name", "[rsc][steps]") {
-    const auto typed = rsc::solve_closed_form("2x^2 - 3x - 5 = 0");
+    const auto typed = spatium::answer::solve_closed_form("2x^2 - 3x - 5 = 0");
     REQUIRE(typed.has_value());
     const auto built = spatium::solve_quadratic_steps(2.0, -3.0, -5.0);
     CHECK((typed->solution.a == 2 && typed->solution.b == -3 && typed->solution.c == -5));
@@ -127,19 +127,19 @@ TEST_CASE("solution steps: an equation typed as text is solved in closed form, o
     CHECK(typed->unknown == "x");
 
     // an equation not written in the form: its coefficients come from its values, not from rewriting
-    const auto product = rsc::solve_closed_form("(y - 1) * (y + 2) = 4 - y");
+    const auto product = spatium::answer::solve_closed_form("(y - 1) * (y + 2) = 4 - y");
     REQUIRE(product.has_value());
     CHECK(product->unknown == "y");
     CHECK((product->solution.a == 1 && product->solution.b == 2 && product->solution.c == -6));
 
     // the cases it must fail
-    const auto cubic = rsc::solve_closed_form("x^3 - 1 = 0");
+    const auto cubic = spatium::answer::solve_closed_form("x^3 - 1 = 0");
     REQUIRE_FALSE(cubic.has_value());
     CHECK(cubic.error().message.find("not a polynomial of degree at most two in x") != std::string::npos);
-    const auto two_names = rsc::solve_closed_form("x + y = 0");
+    const auto two_names = spatium::answer::solve_closed_form("x + y = 0");
     REQUIRE_FALSE(two_names.has_value());
     CHECK(two_names.error().message.find("exactly one unknown") != std::string::npos);
-    CHECK_FALSE(rsc::solve_closed_form("x^2 - 1").has_value());
+    CHECK_FALSE(spatium::answer::solve_closed_form("x^2 - 1").has_value());
 }
 
 TEST_CASE("solution steps: a minus is written once", "[io][steps]") {
@@ -189,7 +189,7 @@ TEST_CASE("evaluation steps: a number's computation, an operation a step, as it 
         INFO(q);
         const auto doc = bd::read_document(std::string("a = ") + q);
         REQUIRE(doc.has_value());
-        const auto e = rsc::evaluate(*doc, "a", {}, rsc::Engine{.arithmetic = rsc::Arithmetic::Rational});
+        const auto e = spatium::answer::evaluate(*doc, "a", {}, spatium::answer::Engine{.arithmetic = spatium::answer::Arithmetic::Rational});
         REQUIRE(e.taken);
         const std::string text = e.candidates[*e.taken].text;   // 391/4
         const auto slash = text.find('/');

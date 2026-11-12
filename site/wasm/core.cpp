@@ -1,5 +1,5 @@
 // The core the page calls, built to WebAssembly: what a person types goes in as text, and the
-// library's answer comes out as the JSON the page reads -- the same door (`rsc::respond`) the
+// library's answer comes out as the JSON the page reads -- the same door (`spatium::answer::respond`) the
 // gallery is written through, so a live answer and a card cannot differ. Nothing is composed on
 // the page.
 //
@@ -14,7 +14,7 @@
 //
 // Built by build.sh with Emscripten; check.mjs holds it against the host build of the same calls.
 
-#include <rsc/spatium/respond.hpp>
+#include <spatium/answer/respond.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
@@ -37,14 +37,14 @@ const char* hand_back(std::string s) {
 extern "C" {
 
 const char* spatium_respond(const char* text, double tolerance) {
-    return hand_back(rsc::respond(text, {.tolerance = tolerance > 0 ? tolerance : 1e-8}).dump());
+    return hand_back(spatium::answer::respond(text, {.tolerance = tolerance > 0 ? tolerance : 1e-8}).dump());
 }
 
-const char* spatium_rows(const char* request) { return hand_back(rsc::respond_rows(request).dump()); }
+const char* spatium_rows(const char* request) { return hand_back(spatium::answer::respond_rows(request).dump()); }
 
-const char* spatium_evaluate(const char* request) { return hand_back(rsc::evaluate_request(request).dump()); }
+const char* spatium_evaluate(const char* request) { return hand_back(spatium::answer::evaluate_request(request).dump()); }
 
-const char* spatium_plot(const char* request) { return hand_back(rsc::plot_request(request).dump()); }
+const char* spatium_plot(const char* request) { return hand_back(spatium::answer::plot_request(request).dump()); }
 
 
 }

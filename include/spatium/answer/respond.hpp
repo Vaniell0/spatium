@@ -20,10 +20,10 @@
 // An error is written as the power of ten above it (`error_below`): a bound a person reads, and
 // one that does not move with the last digits of a libm.
 
-#include <rsc/spatium/closed_form.hpp>
-#include <rsc/spatium/evaluate.hpp>
-#include <rsc/spatium/query.hpp>
-#include <rsc/spatium/synthesis.hpp>
+#include <spatium/answer/closed_form.hpp>
+#include <spatium/answer/evaluate.hpp>
+#include <spatium/answer/query.hpp>
+#include <spatium/answer/synthesis.hpp>
 #include <spatium/io/document.hpp>
 #include <spatium/io/field_mathjson.hpp>
 #include <spatium/io/plot_glsl.hpp>
@@ -41,7 +41,7 @@
 #include <string>
 #include <string_view>
 
-namespace rsc {
+namespace spatium::answer {
 
 namespace respond_detail {
 
@@ -59,6 +59,26 @@ inline std::string_view trimmed(std::string_view s) {
 
 } // namespace respond_detail
 
+namespace respond_detail {
+
+// A piece of a synthesised answer as LaTeX: its expression, or a Chebyshev sum named by its degree.
+inline std::string piece_latex(const Solution& s, const std::string& parameter) {
+    namespace bd = spatium::io::build;
+    if (s.form != Form::Chebyshev) return *bd::to_latex(s.expr, parameter);
+    const std::string p = bd::detail::name_latex(parameter);
+    return std::format("\\sum_{{k=0}}^{{{}}} c_k\\,T_k\\!\\left(\\frac{{2{} - {} - {}}}{{{}}}\\right)", s.terms - 1, p,
+                       bd::detail::number_text(s.lo, bd::detail::TextStyle::Latex), bd::detail::number_text(s.hi, bd::detail::TextStyle::Latex),
+                       bd::detail::number_text(s.hi - s.lo, bd::detail::TextStyle::Latex));
+}
+
+inline double worst_error(const Answer& a) {
+    double worst = 0;
+    for (const auto& s : a.pieces) worst = std::max(worst, s.error);
+    return worst;
+}
+
+} // namespace respond_detail
+
 // An answer by synthesis as JSON: its pieces written out when there are at most `written` of them,
 // else counted, and the certificate they share.
 inline spatium::io::JsonValue::ObjectType answer_json(const Answer& a, const std::string& parameter, std::size_t written = 2) {
@@ -66,8 +86,6 @@ inline spatium::io::JsonValue::ObjectType answer_json(const Answer& a, const std
     namespace bd = spatium::io::build;
     Object out{{"answered", a.answered}};
     if (!a.refused.empty()) out.emplace_back("refused", a.refused);
-    double worst = 0;
-    for (const auto& s : a.pieces) worst = std::max(worst, s.error);
     out.emplace_back("pieces", a.pieces.size());
     if (!a.pieces.empty()) {
         const Certificate& c = a.pieces.front().certificate;
@@ -76,26 +94,21 @@ inline spatium::io::JsonValue::ObjectType answer_json(const Answer& a, const std
                                                {"points", c.points},
                                                {"scalar", c.scalar},
                                                {"computed", c.computed},
-                                               {"error_below", decade_above(worst)}});
+                                               {"error_below", decade_above(worst_error(a))}});
     }
     if (!a.pieces.empty() && a.pieces.size() <= written) {
         Array pieces;
         for (const auto& s : a.pieces) {
             if (s.form == Form::Chebyshev) {
                 // the polynomial is a long field; the page shows what it is and its coefficients
-                const std::string p = bd::detail::name_latex(parameter);
                 Array coefficients;
                 for (double c : s.coefficients) coefficients.push_back(c);
                 pieces.push_back(Object{{"lo", s.lo}, {"hi", s.hi}, {"form", "chebyshev"}, {"degree", s.terms - 1},
-                                        {"latex", std::format("\\sum_{{k=0}}^{{{}}} c_k\\,T_k\\!\\left(\\frac{{2{} - {} - {}}}{{{}}}\\right)",
-                                                              s.terms - 1, p, bd::detail::number_text(s.lo, bd::detail::TextStyle::Latex),
-                                                              bd::detail::number_text(s.hi, bd::detail::TextStyle::Latex),
-                                                              bd::detail::number_text(s.hi - s.lo, bd::detail::TextStyle::Latex))},
-                                        {"coefficients", coefficients}, {"accepted", s.accepted}});
+                                        {"latex", piece_latex(s, parameter)}, {"coefficients", coefficients}, {"accepted", s.accepted}});
                 continue;
             }
             pieces.push_back(Object{{"lo", s.lo}, {"hi", s.hi}, {"form", "expression"},
-                                    {"latex", *bd::to_latex(s.expr, parameter)},
+                                    {"latex", piece_latex(s, parameter)},
                                     {"text", *bd::to_text(s.expr, parameter)}, {"terms", s.terms},
                                     {"accepted", s.accepted}});
         }
@@ -104,8 +117,8 @@ inline spatium::io::JsonValue::ObjectType answer_json(const Answer& a, const std
     return out;
 }
 
-// An evaluation as JSON: the route its value came by and the value as that route gives it, or
-// why there is none, and every candidate with its cost.
+namespace respond_detail {
+
 // A computed number on a page: a fraction as one, otherwise the arithmetic's own digits, and a
 // double as the printer writes it.
 inline std::string number_latex(const Candidate& c, double value) {
@@ -122,13 +135,47 @@ inline std::string number_latex(const Candidate& c, double value) {
 // A number's proved digits: how far from zero only where none is proved, since elsewhere that is
 // the value's last digits.
 inline spatium::io::JsonValue::ObjectType proved_json(const spatium::Proved& p) {
-    using namespace respond_detail;
     if (p.exact) return {{"digits", p.digits}, {"text", p.text}, {"exact", true}};
     if (p.digits == 0) return {{"digits", 0}, {"bound", decade_above(p.bound)}};
     return {{"digits", p.digits}, {"text", p.text}, {"exact", p.exact}};
 }
 
-namespace respond_detail {
+// Every root proved, as one line: a system's roots each as its unknowns' proved digits; an
+// equation's each as its proved digits, or within a bound of zero where none is proved.
+inline std::string enclosed_latex(const Evaluation& e) {
+    namespace bd = spatium::io::build;
+    std::string latex;
+    if (e.system) {
+        for (const auto& r : e.system->roots) {
+            std::string names, digits;
+            for (std::size_t j = 0; j < r.size(); ++j) {
+                names += (j ? ", " : "") + bd::detail::name_latex(e.system->unknowns[j]);
+                digits += (j ? ", " : "") + spatium::proved(r[j]).text;
+            }
+            latex += (latex.empty() ? "" : ";\\quad ") + std::format("({}) = ({})", names, digits);
+        }
+        return latex;
+    }
+    const auto& roots = e.enclosed->roots;
+    for (std::size_t k = 0; k < roots.size(); ++k) {
+        const auto p = spatium::proved(roots[k]);
+        const std::string name = roots.size() == 1 ? e.name : std::format("{}_{{{}}}", e.name, k + 1);
+        latex += (k ? ",\\quad " : "") +
+                 (p.digits > 0 ? name + " = " + p.text
+                               : std::format("\\left|{}\\right| \\le {}", name,
+                                             bd::detail::number_text(decade_above(p.bound), bd::detail::TextStyle::Latex)));
+    }
+    return latex;
+}
+
+// The question as the rows of a formula editor, written by the library.
+inline Array question_rows(const spatium::io::build::Document& doc) {
+    Array rows;
+    for (const auto& d : doc.statements)
+        if (auto written = spatium::io::build::to_latex_rows(d))
+            for (auto& row : *written) rows.push_back(std::move(row));
+    return rows;
+}
 
 // An inequality's axis as the page draws it: each part's kind, its ends, and a root's value.
 inline Object axis_json(const Axis& a) {
@@ -142,56 +189,11 @@ inline Object axis_json(const Axis& a) {
     return Object{{"relation", a.relation}, {"line", a.line}, {"parts", parts}};
 }
 
-// The set where an inequality holds, as LaTeX: its intervals joined, an end in a bracket where it
-// belongs to the set -- a root of a relation that holds at equality, or a bracket's end -- and in a
-// parenthesis where it does not; the empty set, or every real number.
-inline std::string set_latex(const Axis& a, const std::string& name) {
-    namespace bd = spatium::io::build;
-    const auto number = [](double v) { return bd::detail::number_text(v, bd::detail::TextStyle::Latex); };
-    const auto value = [](const std::string& t) {
-        const auto slash = t.find('/');
-        if (slash == std::string::npos) return t;
-        const bool minus = t.starts_with('-');
-        return std::string(minus ? "-" : "") + "\\frac{" + t.substr(minus, slash - minus) + "}{" + t.substr(slash + 1) + "}";
-    };
-    const bool at_equality = a.relation.size() == 2;
-    using K = Axis::Kind;
-    std::vector<std::string> spans;
-    std::string lo;
-    bool open = false, whole = true;
-    for (std::size_t i = 0; i < a.parts.size(); ++i) {
-        const auto& p = a.parts[i];
-        const K prev = i ? a.parts[i - 1].kind : K::Fails, next = i + 1 < a.parts.size() ? a.parts[i + 1].kind : K::Fails;
-        if (p.kind == K::Holds) {
-            if (open) continue;
-            open = true;
-            if (i == 0) lo = a.line ? "(-\\infty" : "[" + number(p.lo);
-            else if (prev == K::Root) lo = (at_equality ? "[" : "(") + value(a.parts[i - 1].text);
-            else if (prev == K::Break && !a.parts[i - 1].text.empty()) lo = "(" + value(a.parts[i - 1].text);
-            else lo = "(" + number(p.lo);
-            continue;
-        }
-        whole = false;
-        if (p.kind == K::Root && at_equality) {
-            if (open && next == K::Holds) continue;   // a root inside the set, as x^2 >= 0 has at 0
-            if (open) spans.push_back(lo + ", " + value(p.text) + "]"), open = false;
-            else if (next != K::Holds) spans.push_back("\\{" + value(p.text) + "\\}");
-            continue;
-        }
-        if (open) spans.push_back(lo + ", " + (!p.text.empty() ? value(p.text) : number(p.lo)) + ")"), open = false;
-    }
-    if (open) spans.push_back(lo + ", " + (a.line ? std::string("\\infty)") : number(a.parts.back().hi) + "]"));
-    const std::string x = bd::detail::name_latex(name) + " \\in ";
-    if (spans.empty()) return x + "\\varnothing";
-    if (whole && a.line) return x + "\\mathbb{R}";
-    std::string out;
-    for (const auto& sp : spans) out += (out.empty() ? "" : " \\cup ") + sp;
-    return x + out;
-}
-
 } // namespace respond_detail
 
 
+// An evaluation as JSON: the route its value came by and the value as that route gives it, or
+// why there is none, and every candidate with its cost.
 inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, std::size_t written = 2) {
     using namespace respond_detail;
     namespace bd = spatium::io::build;
@@ -203,6 +205,17 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
     else if (!e.refused.empty())
         out.emplace_back("refused", e.refused);
     if (e.taken) switch (e.candidates[*e.taken].route) {
+        case Route::AtInfinity: {
+            const auto& l = *e.limit;
+            out.emplace_back("value", l.value);
+            out.emplace_back("latex", *bd::to_latex(e.written) + " = " + bd::detail::number_text(l.value, bd::detail::TextStyle::Latex));
+            out.emplace_back("limit", Object{{"kind", l.kind == spatium::LimitKind::Infinite ? "infinite" : "finite"},
+                                             {"order", -l.order()}, {"coefficient", l.coefficient}});
+            Array steps;
+            for (const auto& st : e.candidates[*e.taken].steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+            out.emplace_back("steps", steps);
+            break;
+        }
         case Route::Evaluate: {
             const Candidate& c = e.candidates[*e.taken];
             out.emplace_back("value", e.values.front());
@@ -234,6 +247,10 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             const auto& c = *e.closed;
             Array steps;
             for (const auto& s : c.steps) steps.push_back(Object{{"label", s.label}, {"latex", s.latex}});
+            if (c.check) {
+                const auto s = bd::to_step(*c.check, c.unknown);
+                steps.push_back(Object{{"label", s.label}, {"latex", s.latex}});
+            }
             out.emplace_back("unknown", c.unknown);
             out.emplace_back("steps", steps);
             if (c.check)
@@ -272,39 +289,11 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             break;
         }
         case Route::Enclosed: {
-            if (e.system) {
-                // a system's roots, each as its unknowns' proved digits
-                Array values;
-                std::string latex;
-                for (const auto& r : e.system->roots) {
-                    std::string names, digits;
-                    for (std::size_t j = 0; j < r.size(); ++j) {
-                        values.push_back(r[j].mid());
-                        names += (j ? ", " : "") + bd::detail::name_latex(e.system->unknowns[j]);
-                        digits += (j ? ", " : "") + spatium::proved(r[j]).text;
-                    }
-                    latex += (latex.empty() ? "" : ";\\quad ") + std::format("({}) = ({})", names, digits);
-                }
-                out.emplace_back("values", values);
-                out.emplace_back("latex", latex);
-                break;
-            }
-            // each root as its proved digits, or within a bound of zero where none is proved
             Array values;
             for (double v : e.values) values.push_back(v);
-            std::string latex;
-            const auto& roots = e.enclosed->roots;
-            for (std::size_t k = 0; k < roots.size(); ++k) {
-                const auto p = spatium::proved(roots[k]);
-                const std::string name = roots.size() == 1 ? e.name : std::format("{}_{{{}}}", e.name, k + 1);
-                latex += (k ? ",\\quad " : "") +
-                         (p.digits > 0 ? name + " = " + p.text
-                                       : std::format("\\left|{}\\right| \\le {}", name,
-                                                     bd::detail::number_text(decade_above(p.bound), bd::detail::TextStyle::Latex)));
-            }
-            out.emplace_back("unknown", e.name);
+            if (!e.system) out.emplace_back("unknown", e.name);
             out.emplace_back("values", values);
-            out.emplace_back("latex", latex);
+            out.emplace_back("latex", enclosed_latex(e));
             break;
         }
         case Route::Bracket: out.emplace_back("value", e.values.front()); break;
@@ -350,10 +339,12 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
 
 // The guarantees a sheet can carry, strongest first: the title a page gathers answers under (the
 // gallery's groups) and what each promises, in one sentence (the reference's).
+namespace respond_detail {
 struct Guarantee {
     std::string_view name, title, promise;
 };
-inline constexpr Guarantee guarantees[] = {
+} // namespace respond_detail
+inline constexpr respond_detail::Guarantee guarantees[] = {
     {"exact", "Exact", "The value itself, in fractions or in closed form: nothing in it is rounded."},
     {"complete", "Every root proved, and no other",
      "Each root lies in an interval that holds exactly one, and the rest of the interval or box is proved to hold none."},
@@ -375,67 +366,21 @@ struct Shorthand {
 
 inline Shorthand shorthand(std::string_view q, const spatium::io::build::Document& above) {
     namespace bd = spatium::io::build;
-    const auto refuse = [](const char* route, std::string why) {
-        return Shorthand{std::unexpected(std::pair{route, std::move(why)})};
-    };
+    // the route a line asks by: an expression evaluated, an equation in closed form, an inequality
+    // by the interval method
+    const auto rel = q.find_first_of("=<>");
+    const char* route = rel == std::string_view::npos || (q[rel] == '=' && trimmed(q.substr(rel + 1)).empty()) ? "evaluate"
+                        : q.find_first_of("<>") != std::string_view::npos                                      ? "interval method"
+                                                                                                                : "closed form";
+    auto st = bd::read_shorthand(q, above);
+    if (!st) return Shorthand{std::unexpected(std::pair{route, st.error().message})};
+    if (st->kind == bd::StatementKind::Value) route = "evaluate";
     // the statements above, then the one asked; checked as one document
-    const auto with_above = [&](bd::Document asked, std::string wanted, const char* route) {
-        asked.statements.insert(asked.statements.begin(), above.statements.begin(), above.statements.end());
-        if (auto ok = bd::check(asked); !ok) return refuse(route, ok.error().message);
-        return Shorthand{AskedDocument{std::move(asked), std::move(wanted)}};
-    };
-    const auto unknown = [&](const auto& f) {
-        std::vector<std::string> open;
-        for (auto& n : f.free_symbols())
-            if (!above.find(n)) open.push_back(std::move(n));
-        return open;
-    };
-    // an equation, or an expression
-    const std::string_view equation = q;
-    // no relation but '=' at the end (2 + 2 =): an expression to evaluate, as a calculator does
-    if (const auto eq = equation.find_first_of("=<>"); eq == std::string_view::npos || (equation[eq] == '=' && trimmed(equation.substr(eq + 1)).empty())) {
-        const std::string_view expression = trimmed(equation.substr(0, eq));
-        const auto f = bd::parse(expression, "", "");
-        if (!f) return refuse("evaluate", f.error().message);
-        if (const auto open = unknown(*f); !open.empty())
-            return refuse("evaluate", "evaluate: the expression reads '" + open.front() +
-                                          "', which has no value; to find it, write an equation (" + std::string(expression) + " = 0)");
-        bd::Statement value;
-        value.name = "answer", value.value = {*f, std::string(expression)};
-        return with_above({{std::move(value)}}, "answer", "evaluate");
-    }
-    // the roots of the equation in its one unknown: in closed form, and proved on its bracket or the whole line
-    bd::FieldReader r(equation, "", "", {"on"});
-    bd::Statement root;
-    root.kind = bd::StatementKind::Root;
-    auto lhs = bd::detail::written(r, equation);
-    if (!lhs) return refuse("closed form", lhs.error().message);
-    root.relation = bd::detail::relation(r);
-    if (root.relation.empty()) return refuse("closed form", r.fail("'=', '<' or '>'").error().message);
-    auto rhs = bd::detail::written(r, equation);
-    if (!rhs) return refuse("closed form", rhs.error().message);
-    // on [a, b]: the box its roots are sought on, as in a document
-    if (!r.done()) {
-        auto ends = bd::detail::interval(r, equation, "on");
-        if (!ends) return refuse("closed form", ends.error().message);
-        std::tie(root.lo, root.hi) = std::move(*ends);
-        if (!r.done()) return refuse("closed form", r.fail("the end").error().message);
-    }
-    // a new name on the left that the right does not read is a definition, f = a^2 + 1, not an equation in f
-    const std::string left(trimmed(lhs->text));
-    if (const auto right_reads = rhs->field.free_symbols(); root.relation == "=" && !left.empty() && !above.find(left) &&
-        lhs->field.free_symbols() == std::vector<std::string>{left} && !std::ranges::contains(right_reads, left)) {
-        bd::Statement value;
-        value.name = left, value.value = std::move(*rhs);
-        return with_above({{std::move(value)}}, left, "evaluate");
-    }
-    const auto names = unknown(lhs->field - rhs->field);
-    const char* route = root.relation == "=" ? "closed form" : "interval method";
-    if (names.size() != 1 && root.relation != "=")
-        return refuse(route, std::format("an inequality is solved for one unknown; this one reads {}", names.size()));
-    if (names.size() != 1) return refuse(route, solve_closed_form(lhs->field - rhs->field, "").error().message);
-    root.name = names.front(), root.value = std::move(*lhs), root.rhs = std::move(*rhs);
-    return with_above({{std::move(root)}}, names.front(), route);
+    bd::Document asked = above;
+    std::string wanted = st->name;
+    asked.statements.push_back(std::move(*st));
+    if (auto ok = bd::check(asked); !ok) return Shorthand{std::unexpected(std::pair{route, ok.error().message})};
+    return Shorthand{AskedDocument{std::move(asked), std::move(wanted)}};
 }
 
 // What a page draws beside an answer, as the request `plot_request` takes: a value of one
@@ -444,36 +389,29 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
 // roots and a margin on each side (around the vertex when it has none); a synthesised answer of
 // one expression as that expression along its parameter; a value reading one parameter as
 // itself. Anything else has no graph.
-inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& out) {
+inline std::optional<Object> graph_of(const AskedDocument& asked, const Evaluation& e) {
     namespace bd = spatium::io::build;
-    const auto field = [&](std::string_view key) -> const JsonValue* {
-        for (const auto& [k, v] : out)
-            if (k == key) return &v;
-        return nullptr;
-    };
-    if (field("refused")) return std::nullopt;
+    if (!e.taken) return std::nullopt;
     const bd::Statement* wanted = asked.document.find(asked.wanted);
     if (!wanted) return std::nullopt;
     std::vector<const bd::Statement*> parameters;
     for (const auto& d : asked.document.statements)
         if (d.kind == bd::StatementKind::Parameter) parameters.push_back(&d);
-    const JsonValue* route = field("route");
-    const std::string how = route && route->is_string() ? route->as_string() : "";
+    const Route how = e.candidates[*e.taken].route;
     const auto request = [](std::string document, std::string name, std::string along) {
         return Object{{"document", std::move(document)}, {"name", std::move(name)}, {"along", std::move(along)}};
     };
-    if ((how == "closed form" || how == "every root, proved") && wanted->kind == bd::StatementKind::Root) {
+    if ((how == Route::ClosedForm || how == Route::Enclosed) && wanted->kind == bd::StatementKind::Root) {
         std::vector<double> roots;
-        if (const JsonValue* v = field("values"); v && v->is_array())
-            for (const auto& x : v->as_array())
-                if (x.is_number() && std::isfinite(x.as_number())) roots.push_back(x.as_number());
+        for (double x : e.values)
+            if (std::isfinite(x)) roots.push_back(x);
         double lo = 0, hi = 0;
         if (!roots.empty()) {
             const auto [a, b] = std::ranges::minmax(roots);
             const double margin = std::max(1.0, 0.5 * (b - a));
             lo = a - margin, hi = b + margin;
-        } else if (const JsonValue* s = field("solution"); s && s->is_object() && s->number_or("a", 0) != 0) {
-            const double a = s->number_or("a", 0), b = s->number_or("b", 0), D = s->number_or("discriminant", 0);
+        } else if (how == Route::ClosedForm && e.closed->solution.a != 0) {
+            const double a = e.closed->solution.a, b = e.closed->solution.b, D = e.closed->solution.discriminant;
             const double centre = -b / (2 * a), half = std::max(2.0, std::sqrt(std::abs(D)) / std::abs(a));
             lo = centre - half, hi = centre + half;
         } else {
@@ -485,18 +423,21 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Object& 
             text += bd::to_text(d) + "\n";
         }
         const std::string name = asked.document.find("graph") ? "graph_1" : "graph";
-        text += std::format("{} in [{}, {}]\n{} = ({}) - ({})", wanted->name, lo, hi, name, wanted->value.text, wanted->rhs.text);
+        text += bd::to_text({.kind = bd::StatementKind::Parameter, .name = wanted->name, .lo = {{}, std::format("{}", lo)},
+                             .hi = {{}, std::format("{}", hi)}}) + "\n" +
+                bd::to_text({.name = name, .value = {{}, std::format("({}) - ({})", wanted->value.text, wanted->rhs.text)}});
         return request(std::move(text), name, wanted->name);
     }
     if (parameters.size() != 1) return std::nullopt;
     const std::string& p = parameters.front()->name;
-    if (how == "synthesis") {
-        const JsonValue* pieces = field("answer");
-        if (!pieces || !pieces->is_array() || pieces->as_array().size() != 1) return std::nullopt;
-        const JsonValue& piece = pieces->as_array().front();
-        const std::string expression = piece.string_or("text", "");
-        if (piece.string_or("form", "") != "expression" || expression.empty()) return std::nullopt;
-        return request(std::format("{} in [{}, {}]\n{} = {}", p, piece.number_or("lo", 0), piece.number_or("hi", 0), wanted->name, expression),
+    if (how == Route::Synthesis) {
+        if (e.answer->pieces.size() != 1) return std::nullopt;
+        const Solution& piece = e.answer->pieces.front();
+        if (piece.form != Form::Expression) return std::nullopt;
+        const std::string expression = *bd::to_text(piece.expr, e.parameter);
+        return request(bd::to_text({.kind = bd::StatementKind::Parameter, .name = p, .lo = {{}, std::format("{}", piece.lo)},
+                                    .hi = {{}, std::format("{}", piece.hi)}}) + "\n" +
+                           bd::to_text({.name = wanted->name, .value = {{}, expression}}),
                        wanted->name, p);
     }
     if (wanted->kind == bd::StatementKind::Value) return request(bd::to_text(asked.document), wanted->name, p);
@@ -525,14 +466,9 @@ inline JsonValue step_json(const spatium::io::build::Step& st) {
     return o;
 }
 
-inline const JsonValue* field_of(const Object& o, std::string_view key) {
-    for (const auto& [k, v] : o)
-        if (k == key) return &v;
-    return nullptr;
-}
-
-inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind kind, const Object& out) {
+inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& asked, const spatium::io::build::Statement* wanted) {
     namespace bd = spatium::io::build;
+    const bd::StatementKind kind = wanted ? wanted->kind : bd::StatementKind::Value;
     Array sections;
     const auto section = [&](std::string title, bool open, std::string shape, JsonValue body, Object extra = {}) {
         Object o{{"title", std::move(title)}, {"open", open}, {std::move(shape), std::move(body)}};
@@ -571,16 +507,18 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
     std::vector<std::string> notes;
     bool ok = true;
     // Input: the question as the library read it, and what it asks for
-    if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty()) {
+    const Array question = question_rows(asked);
+    if (!question.empty()) {
         std::string read;
-        for (const auto& r : rows->as_array()) read += (read.empty() ? "" : ",\\quad ") + r.as_string();
+        for (const auto& r : question) read += (read.empty() ? "" : ",\\quad ") + r.as_string();
         Array facts{fact("Read as", read, true)};
         if (e.name != "answer") facts.push_back(fact("Asks for", bd::detail::name_latex(e.name), true));
         section("Input", false, "facts", facts);
     }
-    const JsonValue* latex = field_of(out, "latex");
-    if (latex && latex->is_string()) result = latex->as_string();
     const std::optional<Route> route = e.route();
+    // the result in one line, as the route gives it; the cases below write their own
+    if (e.taken && route == Route::Expression) result = *bd::to_latex(e.written);
+    if (e.taken && route == Route::Enclosed) result = enclosed_latex(e);
 
     if (!e.taken) {
         outcome = "refused", guarantee = "none", ok = false;
@@ -591,9 +529,23 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
     }
     if (kind == spatium::io::build::StatementKind::Parameter && e.taken) {
         outcome = "parameter", guarantee = "exact", strength = "a parameter", ok = false;
-        if (const JsonValue* rows = field_of(out, "question_latex"); rows && rows->is_array() && !rows->as_array().empty())
-            result = rows->as_array().back().as_string();
+        if (!question.empty()) result = question.back().as_string();
     } else if (e.taken) switch (*route) {
+        case Route::AtInfinity: {
+            // an infinity is exact, and so is a limit of zero; another number is the double's
+            const auto& l = *e.limit;
+            const std::string value = bd::detail::number_text(l.value, bd::detail::TextStyle::Latex);
+            result = (e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + " = ") + value;
+            const bool exact = l.kind == spatium::LimitKind::Infinite || l.value == 0;
+            guarantee = exact ? "exact" : "computed", ok = exact;
+            strength = exact ? "exact" : "computed in double";
+            notes.push_back("the limit, each inf one x → ∞");
+            if (l.kind == spatium::LimitKind::Infinite) notes.push_back(-l.order() == 1 ? std::string("growing like x") : std::format("growing like x^{}", -l.order()));
+            Array steps;
+            for (const auto& st : e.candidates[*e.taken].steps) steps.push_back(step_json(st));
+            section("Steps", true, "steps", steps, Object{{"gist", "as x grows without bound"}});
+            break;
+        }
         case Route::Evaluate: {
             // the value alone, or the name and its value: the question stands above it, and a long
             // one would push the answer off a phone's screen
@@ -611,7 +563,8 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
                 guarantee = "proved", strength = std::format("proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
             else if (e.proved)
                 guarantee = "none", ok = false, strength = "no digit proved",
-                notes.push_back(std::format("within {} of zero", decade_label(e.proved->bound)));
+                notes.push_back(std::isfinite(e.proved->bound) ? std::format("within {} of zero", decade_label(e.proved->bound))
+                                                               : std::string("past the largest double"));
             else guarantee = "computed", ok = false, strength = "computed in double";
             if (e.steps.size() > 1) {
                 Array steps;
@@ -632,8 +585,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         case Route::ClosedForm: {
             outcome = "roots";
             const auto& c = *e.closed;
-            std::vector<bd::Step> chain, checks;
-            for (const auto& st : c.steps) (st.label.starts_with("check") ? checks : chain).push_back(st);
+            const std::vector<bd::Step>& chain = c.steps;
             const auto named = std::ranges::find_if(chain, [](const bd::Step& st) { return st.label == "roots" || st.label == "root"; });
             result = named != chain.end() ? named->latex : (chain.empty() ? result : chain.back().latex);
             Array steps;
@@ -641,7 +593,7 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
             section("Steps", true, "steps", steps, Object{{"gist", std::format("closed form, {} steps", chain.size())}});
             Array facts;
             const bool vieta = c.check && c.check->error <= 1e-12;
-            for (const auto& st : checks) facts.push_back(fact("Vieta's formulas", st.latex, true, vieta));
+            if (c.check) facts.push_back(fact("Vieta's formulas", bd::to_step(*c.check, c.unknown).latex, true, vieta));
             // the second route: each root of the formula inside an interval proved to hold one
             bool agree = false, complete = false;
             if (e.enclosed) {
@@ -779,31 +731,30 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
     // a synthesis, answered or in part: its pieces and their certificate
     if (route == Route::Synthesis && e.answer) {
         outcome = e.taken ? "function" : outcome;
-        const JsonValue* pieces = field_of(out, "answer");
-        const JsonValue* cert = field_of(out, "certificate");
+        const Answer& a = *e.answer;
+        const std::size_t n = a.pieces.size();
         // one piece as its formula, an expression or a Chebyshev sum; more as how many there are
-        if (e.taken && pieces && pieces->is_array() && pieces->as_array().size() == 1)
-            result = std::format("{} = {}", bd::detail::name_latex(e.name), pieces->as_array().front().string_or("latex", ""));
-        else if (e.taken) result = std::format("\\text{{piecewise, {} pieces}}", e.answer->pieces.size());
-        if (cert && cert->is_object()) {
-            const double below = cert->number_or("error_below", 0);
-            const bool relative = cert->string_or("norm", "") == "largest relative error";
+        if (e.taken && n == 1) result = std::format("{} = {}", bd::detail::name_latex(e.name), piece_latex(a.pieces.front(), e.parameter));
+        else if (e.taken) result = std::format("\\text{{piecewise, {} pieces}}", n);
+        if (n > 0) {
+            const Certificate& cert = a.pieces.front().certificate;
+            const double below = decade_above(worst_error(a));
             if (e.taken) {
                 guarantee = "sampled";
-                strength = below > 0 ? std::format("{}error below {}", relative ? "relative " : "", decade_label(below)) : "exact on the grid";
-                notes.push_back(std::format("certified on {} points", cert->number_or("points", 0)));
+                strength = below > 0 ? std::format("{}error below {}", cert.relative ? "relative " : "", decade_label(below)) : "exact on the grid";
+                notes.push_back(std::format("certified on {} points", cert.points));
             }
             section("Certificate", true, "facts",
-                    Array{fact("Strength", std::format("{}, on {} points", cert->string_or("strength", ""), cert->number_or("points", 0))),
-                          fact(relative ? "Relative error below" : "Absolute error below", decade_text(below), true),
-                          fact("Scalar", cert->string_or("scalar", ""))});
+                    Array{fact("Strength", std::format("{}, on {} points", cert.strength, cert.points)),
+                          fact(cert.relative ? "Relative error below" : "Absolute error below", decade_text(below), true),
+                          fact("Scalar", cert.scalar)});
         }
-        if (pieces && pieces->is_array() && pieces->as_array().size() > 1) {
-            Array rows;
-            for (const auto& pc : pieces->as_array())
-                rows.push_back(Array{std::format("[{}, {}]", text_of(pc.number_or("lo", 0)), text_of(pc.number_or("hi", 0))),
-                                     pc.string_or("form", ""), pc.string_or("text", pc.string_or("latex", ""))});
-            section("Pieces", false, "table", Object{{"columns", Array{"on", "form", "expression"}}, {"rows", rows}});
+        if (n > 1) {
+            Array pieces;
+            for (const auto& pc : a.pieces)
+                pieces.push_back(Array{std::format("[{}, {}]", text_of(pc.lo), text_of(pc.hi)), pc.form == Form::Chebyshev ? "chebyshev" : "expression",
+                                       pc.form == Form::Chebyshev ? piece_latex(pc, e.parameter) : *bd::to_text(pc.expr, e.parameter)});
+            section("Pieces", false, "table", Object{{"columns", Array{"on", "form", "expression"}}, {"rows", pieces}});
         }
     }
     // a refusal no route was tried for says why here; one with routes says it route by route below
@@ -828,136 +779,61 @@ inline Object sheet_of(const Evaluation& e, spatium::io::build::StatementKind ki
         if (route) extra.emplace_back("note", route_caption(*route));
         section("How it was found", false, "table", Object{{"columns", Array{"route", "cost", "gave"}}, {"rows", rows}}, std::move(extra));
     }
-    // Every route that answered, each with its own chain, in the order they were tried: the taken
-    // one's is the Steps above; a closed form's check by Vieta's formulas is a chain of its own
+    // Every route that answered, each with its own chain as it ran, in the order they were tried,
+    // and after it each chain that checks it; a route that ran no chain of its own is its result
     Array routes;
-    const auto chain_of = [](const std::vector<bd::Step>& steps) {
-        Array out;
-        for (const auto& st : steps) out.push_back(step_json(st));
-        return out;
-    };
-    const auto add_route = [&](std::string name, std::size_t cost, bool taken, Array steps) {
-        if (steps.empty()) return;
-        const std::size_t n = steps.size();
+    const auto add_route = [&](std::string name, std::size_t cost, bool taken, const std::vector<bd::Step>& steps) {
+        Array chain;
+        for (const auto& st : steps) chain.push_back(step_json(st));
+        const std::size_t n = chain.size();
         routes.push_back(Object{{"route", std::move(name)}, {"cost", cost}, {"taken", taken},
-                                {"gist", std::format("{} step{}", n, n == 1 ? "" : "s")}, {"steps", std::move(steps)}});
+                                {"gist", std::format("{} step{}", n, n == 1 ? "" : "s")}, {"steps", std::move(chain)}});
     };
-    const auto x_of = [&](const std::string& name) { return bd::detail::name_latex(name); };
     for (std::size_t i = 0; i < e.candidates.size(); ++i) {
         const Candidate& c = e.candidates[i];
         if (!c.refused.empty()) continue;
         const bool taken = e.taken == i;
         const std::string name = route_name(c.route);
-        const auto one = [&](std::string label, std::string latex) { return Array{Object{{"label", std::move(label)}, {"latex", std::move(latex)}}}; };
-        switch (c.route) {
-            case Route::Evaluate:
-                if (e.steps.size() > 1) add_route(name, c.cost, taken, chain_of(e.steps));
-                else if (taken && !result.empty()) add_route(name, c.cost, taken, one("value", result));
-                break;
-            case Route::ClosedForm: {
-                if (!e.closed) break;
-                std::vector<bd::Step> chain, checks;
-                for (const auto& st : e.closed->steps) (st.label.starts_with("check") ? checks : chain).push_back(st);
-                add_route(name, c.cost, taken, chain_of(chain));
-                // Vieta's formulas: the equation and its coefficients, then the sum and the product of the roots
-                if (!checks.empty() && chain.size() >= 2) {
-                    std::vector<bd::Step> vieta{chain[0], chain[1]};
-                    vieta.insert(vieta.end(), checks.begin(), checks.end());
-                    add_route("Vieta's formulas", 0, false, chain_of(vieta));
-                }
-                break;
-            }
-            case Route::Linear:
-                if (e.linear) add_route(name, c.cost, taken, chain_of(e.linear->steps));
-                break;
-            case Route::Intervals: {
-                if (!e.axis) break;
-                Array steps;
-                for (const auto& part : e.axis->parts)
-                    if (part.kind == Axis::Kind::Root)
-                        steps.push_back(Object{{"label", "an end: a root, proved alone by Newton's step"}, {"latex", std::format("{} \\approx {}", x_of(e.name), part.text)}});
-                    else if (part.kind == Axis::Kind::Break)
-                        steps.push_back(Object{{"label", "a break: no value"}, {"latex", std::format("{} \\in \\left[{}, {}\\right]", x_of(e.name), text_of(part.lo), text_of(part.hi))}});
-                steps.push_back(Object{{"label", "where it holds"}, {"latex", set_latex(*e.axis, e.name)}});
-                add_route(name, c.cost, taken, std::move(steps));
-                break;
-            }
-            case Route::Enclosed: {
-                Array steps;
-                const auto searched = [&](std::string latex) { steps.push_back(Object{{"label", "searched"}, {"latex", std::move(latex)}}); };
-                const auto cut = [&](std::size_t pieces, std::size_t excluded, std::size_t undecided) {
-                    steps.push_back(Object{{"label", "pieces cut where undecided: with no root + with one + undecided"},
-                                           {"latex", std::format("{} = {} + {} + {}", pieces, excluded, pieces - excluded - undecided, undecided)}});
-                };
-                if (e.system) {
-                    const auto& sys = *e.system;
-                    std::string names;
-                    for (const auto& u : sys.unknowns) names += (names.empty() ? "" : ", ") + x_of(u);
-                    searched(std::format("{} \\in \\mathbb{{R}}", names));
-                    cut(sys.pieces, sys.excluded, sys.undecided.size());
-                    for (const auto& r : sys.roots) {
-                        std::string at;
-                        for (std::size_t j = 0; j < r.size(); ++j) at += (j ? ",\\ " : "") + x_of(sys.unknowns[j]) + " \\approx " + spatium::proved(r[j]).text;
-                        steps.push_back(Object{{"label", "Krawczyk's step lands inside: one root"}, {"latex", at}});
-                    }
-                } else if (e.enclosed) {
-                    const auto& f = *e.enclosed;
-                    const bool line = f.box.hi == std::numeric_limits<double>::max() && f.box.lo == -std::numeric_limits<double>::max();
-                    searched(line ? x_of(e.name) + " \\in \\mathbb{R}"
-                                  : std::format("{} \\in \\left[{}, {}\\right]", x_of(e.name), text_of(f.box.lo), text_of(f.box.hi)));
-                    cut(f.pieces, f.excluded, f.undecided.size());
-                    for (const auto& r : f.roots) {
-                        const auto p = spatium::proved(r);
-                        steps.push_back(Object{{"label", "Newton's step lands inside: one root"},
-                                               {"latex", std::format("{} \\approx {}", x_of(e.name), p.digits > 0 ? p.text : std::string("0"))}});
-                    }
-                }
-                add_route(name, c.cost, taken, std::move(steps));
-                break;
-            }
-            case Route::Bracket:
-                if (!c.values.empty())
-                    add_route(name, c.cost, taken, one("bisection to the last bit", std::format("{} = {}", x_of(e.name), text_of(c.values.front()))));
-                break;
-            case Route::Expression: case Route::Integral: case Route::Synthesis:
-                if (taken && !result.empty()) add_route(name, c.cost, taken, one(name, result));
-                break;
-        }
+        if (!c.steps.empty()) add_route(name, c.cost, taken, c.steps);
+        else if (taken && !result.empty()) add_route(name, c.cost, taken, {bd::Step(c.route == Route::Evaluate ? "value" : name, result)});
+        for (const auto& k : c.checks) add_route(k.name, 0, false, k.steps);
     }
     // Next: what else this question can become, each written as a question of its own -- the same
     // equation as an inequality, on an interval about its roots, its integral between two roots;
     // an inequality as its equation, or the other side of it. Only for a root alone on its page.
     Array next;
-    const JsonValue* doc = field_of(out, "document");
-    const JsonValue* statements = doc ? doc->find("statements") : nullptr;
-    if (kind == bd::StatementKind::Root && statements && statements->is_array() && statements->as_array().size() == 1) {
-        const JsonValue& st = statements->as_array().front();
-        const std::string name = st.string_or("name", ""), lhs = st.string_or("lhs", ""), rhs = st.string_or("rhs", ""),
-                          rel = st.string_or("relation", "=");
-        const auto offer = [&](std::string caption, std::string text) {
-            const auto asked = bd::read_document(text);
-            if (!asked || asked->statements.size() != 1) return;
-            if (const auto latex = bd::to_latex(asked->statements.front()))
+    if (wanted && wanted->kind == bd::StatementKind::Root && wanted->also.empty() && asked.statements.size() == 1) {
+        const auto offer = [&](std::string caption, const bd::Statement& st) {
+            std::string text = bd::to_text(st);
+            const auto read = bd::read_document(text);
+            if (!read || read->statements.size() != 1) return;
+            if (const auto latex = bd::to_latex(read->statements.front()))
                 next.push_back(Object{{"caption", std::move(caption)}, {"text", std::move(text)}, {"latex", *latex}});
         };
-        if (!st.find("also") && !name.empty()) {
-            const std::string bracket = st.find("lo") ? std::format(" on [{}, {}]", st.string_or("lo", ""), st.string_or("hi", "")) : "";
-            if (rel == "=") {
-                offer("Where it is greater", std::format("{}: {} > {}{}", name, lhs, rhs, bracket));
-                std::vector<double> real = e.values;
-                std::ranges::sort(real);
-                if (bracket.empty() && !real.empty() && std::isfinite(real.front()) && std::isfinite(real.back()))
-                    offer("Only on an interval about its roots", std::format("{}: {} = {} on [{}, {}]", name, lhs, rhs,
-                                                                             std::floor(real.front()) - 1, std::ceil(real.back()) + 1));
-                if (real.size() >= 2 && real.front() < real.back())
-                    offer("Its integral between the outer roots", std::format("I = integral {} d{} on [{}, {}]",
-                                                                              rhs == "0" ? lhs : std::format("({}) - ({})", lhs, rhs), name,
-                                                                              detail::shortest(real.front()), detail::shortest(real.back())));
-            } else {
-                const std::string other = rel == "<" ? ">=" : rel == "<=" ? ">" : rel == ">" ? "<=" : "<";
-                offer("Where it is equal", std::format("{}: {} = {}{}", name, lhs, rhs, bracket));
-                offer("Where it does not hold", std::format("{}: {} {} {}{}", name, lhs, other, rhs, bracket));
+        // the same root with another relation, or on another bracket
+        const auto as = [&](std::string relation, std::string lo = {}, std::string hi = {}) {
+            bd::Statement st = *wanted;
+            st.relation = std::move(relation);
+            if (!lo.empty()) st.lo.text = std::move(lo), st.hi.text = std::move(hi);
+            return st;
+        };
+        const std::string& rel = wanted->relation;
+        if (rel == "=") {
+            offer("Where it is greater", as(">"));
+            std::vector<double> real = e.values;
+            std::ranges::sort(real);
+            if (!bd::has_bracket(*wanted) && !real.empty() && std::isfinite(real.front()) && std::isfinite(real.back()))
+                offer("Only on an interval about its roots",
+                      as("=", std::format("{}", std::floor(real.front()) - 1), std::format("{}", std::ceil(real.back()) + 1)));
+            if (real.size() >= 2 && real.front() < real.back()) {
+                const std::string &lhs = wanted->value.text, &rhs = wanted->rhs.text;
+                offer("Its integral between the outer roots",
+                      {.kind = bd::StatementKind::Integral, .name = "I", .value = {{}, rhs == "0" ? lhs : std::format("({}) - ({})", lhs, rhs)},
+                       .variable = wanted->name, .lo = {{}, detail::shortest(real.front())}, .hi = {{}, detail::shortest(real.back())}});
             }
+        } else {
+            offer("Where it is equal", as("="));
+            offer("Where it does not hold", as(rel == "<" ? ">=" : rel == "<=" ? ">" : rel == ">" ? "<=" : "<"));
         }
     }
     if (!next.empty()) section("Next", true, "next", next, Object{{"gist", std::format("{} question{}", next.size(), next.size() == 1 ? "" : "s")}});
@@ -990,32 +866,13 @@ inline std::expected<Engine, std::string> engine_of(const JsonValue& request) {
     return engine;
 }
 
-// Lines that are each an equation, two or more, reading as many unknowns as there are lines,
-// written as the system they are: `x, y: x + 2y = 5, 3x - y = 1`, asked for its first unknown.
+// Lines that are each an equation, two or more, reading as many unknowns as there are lines: the
+// system they are (`read_system`), asked for its first unknown.
 inline std::optional<AskedDocument> system_of(std::string_view text) {
-    namespace bd = spatium::io::build;
-    std::vector<std::string> names, equations;
-    while (!text.empty()) {
-        const auto end = text.find('\n');
-        const std::string_view line = trimmed(text.substr(0, end));
-        text = end == std::string_view::npos ? std::string_view{} : text.substr(end + 1);
-        if (line.empty() || line.starts_with('#')) continue;
-        bd::FieldReader r(line, "", "");
-        auto lhs = r.expression();
-        if (!lhs || !r.take('=')) return std::nullopt;
-        auto rhs = r.expression();
-        if (!rhs || !r.done()) return std::nullopt;
-        for (auto& n : (*lhs - *rhs).free_symbols())
-            if (std::ranges::find(names, n) == names.end()) names.push_back(std::move(n));
-        equations.emplace_back(line);
-    }
-    if (equations.size() < 2 || names.size() != equations.size()) return std::nullopt;
-    std::string line;
-    for (std::size_t k = 0; k < names.size(); ++k) line += (k ? ", " : "") + names[k];
-    for (std::size_t k = 0; k < equations.size(); ++k) line += (k ? ", " : ": ") + equations[k];
-    auto doc = bd::read_document(line);
-    if (!doc) return std::nullopt;
-    return AskedDocument{std::move(*doc), names.front()};
+    auto system = spatium::io::build::read_system(text);
+    if (!system) return std::nullopt;
+    std::string wanted = system->name;
+    return AskedDocument{{{std::move(*system)}}, std::move(wanted)};
 }
 
 } // namespace respond_detail
@@ -1034,17 +891,9 @@ inline spatium::io::JsonValue respond(std::string_view text, Engine engine = {})
         const Evaluation e = evaluate(asked.document, asked.wanted, {}, engine);
         for (auto& [k, v] : evaluation_json(e)) out.emplace_back(std::move(k), std::move(v));
         out.emplace_back("document", bd::to_json(asked.document));
-        // the question as the rows of a formula editor, written by the library
-        Array rows;
-        for (const auto& d : asked.document.statements) {
-            if (auto row = bd::to_latex(d)) rows.push_back(*row);
-            for (const auto& e : d.also)   // a system: an equation a row, as a card writes them
-                if (auto row = bd::to_latex(e)) rows.push_back(*row);
-        }
-        out.emplace_back("question_latex", rows);
-        if (auto g = graph_of(asked, out)) out.emplace_back("graph", std::move(*g));
-        const bd::Statement* wanted = asked.document.find(asked.wanted);
-        out.emplace_back("sheet", sheet_of(e, wanted ? wanted->kind : bd::StatementKind::Value, out));
+        out.emplace_back("question_latex", question_rows(asked.document));
+        if (auto g = graph_of(asked, e)) out.emplace_back("graph", std::move(*g));
+        out.emplace_back("sheet", sheet_of(e, asked.document, asked.document.find(asked.wanted)));
         return JsonValue(std::move(out));
     };
     // the rows above the last, each a line of the document: a statement as written, or a row a
@@ -1275,4 +1124,4 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
     return out;
 }
 
-} // namespace rsc
+} // namespace spatium::answer

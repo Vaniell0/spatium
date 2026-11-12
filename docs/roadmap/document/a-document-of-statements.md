@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: a document of named statements, and a question read through one
-files: [include/spatium/io/document.hpp, rsc/spatium/query.hpp, tests/test_document.cpp, include/spatium/io/field_parse.hpp]
+files: [include/spatium/io/document.hpp, include/spatium/answer/query.hpp, tests/test_document.cpp, include/spatium/io/field_parse.hpp]
 open:
   - a document holds values, parameters, roots and integrals; shapes and scene operations (torus, offset) are not statements yet
   - a root or an integral that reads another root or integral is refused: one question is answered at a time

@@ -2,6 +2,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <spatium/io/json.hpp>
 
+#include <cmath>
+#include <limits>
+
 using namespace spatium::io;
 using Catch::Matchers::WithinAbs;
 
@@ -207,4 +210,14 @@ TEST_CASE("JSON find() and _or() accessors on non-object/missing keys", "[json]"
     obj.set("present", 1);
     CHECK(obj.number_or("absent", 42.0) == 42.0);
     CHECK(obj.number_or("present", 42.0) == 1.0);
+}
+
+TEST_CASE("JSON writes a number it has no word for, an infinity or a NaN, as null", "[json]") {
+    const double inf = std::numeric_limits<double>::infinity();
+    CHECK(JsonValue(inf).dump() == "null");
+    CHECK(JsonValue(-inf).dump() == "null");
+    CHECK(JsonValue(std::nan("")).dump() == "null");
+    const JsonValue row(JsonValue::ArrayType{1.5, -inf});
+    CHECK(row.dump() == "[1.5,null]");
+    CHECK(parse(row.dump()));   // what it writes, it reads back
 }

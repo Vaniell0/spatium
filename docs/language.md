@@ -47,7 +47,7 @@ The editor's notation, the language's text, where each has a value, and an examp
 | $\left\|x\right\|$ | `abs` | absolute value, the size of x | every x | `abs(-3)` |
 | $\min\left(x, y\right)$ | `min` | the smaller of two numbers | every x, y | `min(2, 3)` |
 | $\max\left(x, y\right)$ | `max` | the larger of two numbers | every x, y | `max(2, 3)` |
-|  | `less` | 1 where the first is below the second, else 0: a step that composes by multiplication | every x, y | `less(1, 2)` |
+| $\left[x < y\right]$ | `less` | 1 where the first is below the second, else 0: a step that composes by multiplication | every x, y | `less(1, 2)` |
 
 ## Operators
 

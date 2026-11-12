@@ -1,7 +1,7 @@
 ---
 date: 2026-11-04
 title: a number's digits proved over the reals, by intervals
-files: [include/spatium/core/interval.hpp, modules/core/interval.cppm, include/spatium/io/field_pod.hpp, rsc/spatium/evaluate.hpp, rsc/spatium/respond.hpp, web/src/view/answer.ts, tests/test_interval.cpp, tests/test_rsc_evaluate.cpp, site/gallery/gallery.json]
+files: [include/spatium/core/interval.hpp, modules/core/interval.cppm, include/spatium/io/field_pod.hpp, include/spatium/answer/evaluate.hpp, include/spatium/answer/respond.hpp, web/src/view/answer.ts, tests/test_interval.cpp, tests/test_answer_evaluate.cpp, site/gallery/gallery.json]
 open:
   - roots, integrals and synthesis carry no proof yet: a root over the reals without a bracket (interval Newton on subintervals), a synthesis proved on its pieces
   - a box of inputs is not split when a comparison is undecided; the value is then only refused a proof

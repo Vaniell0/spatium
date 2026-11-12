@@ -34,7 +34,7 @@
 #include <utility>
 #include <vector>
 
-namespace rsc {
+namespace spatium::answer {
 
 using Expr = spatium::io::build::Field<double>;
 
@@ -617,4 +617,4 @@ inline std::vector<Solution> synthesize_piecewise(const std::function<double(dou
     return out;
 }
 
-} // namespace rsc
+} // namespace spatium::answer

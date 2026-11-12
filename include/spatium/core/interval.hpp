@@ -221,8 +221,11 @@ struct Interval {
         using namespace interval_detail;
         return {add(a.lo, T(-b.hi), false), add(a.hi, T(-b.lo), true)};
     }
+    // An operation on the empty interval, a value with no real number, is empty too: a product
+    // with zero would otherwise be zero, and a quotient by it the whole line.
     friend Interval operator*(const Interval& a, const Interval& b) {
         using namespace interval_detail;
+        if (a.is_empty() || b.is_empty()) return empty();
         const T l[4] = {mul(a.lo, b.lo, false), mul(a.lo, b.hi, false), mul(a.hi, b.lo, false), mul(a.hi, b.hi, false)};
         const T h[4] = {mul(a.lo, b.lo, true), mul(a.lo, b.hi, true), mul(a.hi, b.lo, true), mul(a.hi, b.hi, true)};
         return {lower(lower(l[0], l[1]), lower(l[2], l[3])), upper(upper(h[0], h[1]), upper(h[2], h[3]))};
@@ -231,7 +234,7 @@ struct Interval {
     // still true, rather than a guess. A divisor that is zero alone has no quotient at all.
     friend Interval operator/(const Interval& a, const Interval& b) {
         using namespace interval_detail;
-        if (b.lo == T(0) && b.hi == T(0)) return empty();
+        if (a.is_empty() || b.is_empty() || (b.lo == T(0) && b.hi == T(0))) return empty();
         if (!(T(0) < b.lo || b.hi < T(0))) return entire();
         const T l[4] = {div(a.lo, b.lo, false), div(a.lo, b.hi, false), div(a.hi, b.lo, false), div(a.hi, b.hi, false)};
         const T h[4] = {div(a.lo, b.lo, true), div(a.lo, b.hi, true), div(a.hi, b.lo, true), div(a.hi, b.hi, true)};
@@ -314,9 +317,11 @@ template<Scalar T> Interval<T> abs(const Interval<T>& x) {
     return {T(0), x.hi < -x.lo ? -x.lo : x.hi};
 }
 template<Scalar T> Interval<T> min(const Interval<T>& a, const Interval<T>& b) {
+    if (a.is_empty() || b.is_empty()) return Interval<T>::empty();
     return {b.lo < a.lo ? b.lo : a.lo, b.hi < a.hi ? b.hi : a.hi};
 }
 template<Scalar T> Interval<T> max(const Interval<T>& a, const Interval<T>& b) {
+    if (a.is_empty() || b.is_empty()) return Interval<T>::empty();
     return {a.lo < b.lo ? b.lo : a.lo, a.hi < b.hi ? b.hi : a.hi};
 }
 

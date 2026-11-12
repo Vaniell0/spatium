@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: a synthesised answer reads as a person writes it, where it still holds
-files: [rsc/spatium/synthesis.hpp, tests/test_rsc_synthesis.cpp, site/wasm/questions.txt]
+files: [include/spatium/answer/synthesis.hpp, tests/test_answer_synthesis.cpp, site/wasm/questions.txt]
 open:
   - only a line in x is rewritten; a quadratic argument, or a product of terms, keeps the interval's variable
   - a coefficient goes under a square root only; under a logarithm it would be a sum, not a factor

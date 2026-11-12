@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: in fractions, a closed form's roots are what they are
-files: [include/spatium/core/rational.hpp, rsc/spatium/closed_form.hpp, rsc/spatium/query.hpp, rsc/spatium/evaluate.hpp, rsc/spatium/respond.hpp, tests/test_rsc_evaluate.cpp, site/wasm/questions.txt]
+files: [include/spatium/core/rational.hpp, include/spatium/answer/closed_form.hpp, include/spatium/answer/query.hpp, include/spatium/answer/evaluate.hpp, include/spatium/answer/respond.hpp, tests/test_answer_evaluate.cpp, site/wasm/questions.txt]
 open:
   - the steps before the roots (coefficients, discriminant) still print the double's numbers
   - a linear equation's step prints its root as a double; its exact root is in `exact`

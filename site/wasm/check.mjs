@@ -87,9 +87,12 @@ console.log(`${lines.length - failed} of ${lines.length} agree`);
 const ls = await import(path.join(here, '../vendor/latex-syntax/latex-syntax.min.js'));
 const gallery = JSON.parse(readFileSync(path.join(here, '../gallery/gallery.json'), 'utf8'));
 const reference = JSON.parse(readFileSync(path.join(here, '../data/reference.json'), 'utf8'));
+// every example of the reference the library answered with rows: a question, a function, an operator
+const examples = [...reference.questions.map(q => [q.form, q]), ...reference.functions.map(f => [f.name, f]),
+                  ...reference.operators.map(o => [o.written, o])];
 const cards = [...(gallery.cards ?? gallery).filter(c => c.question_latex),
-               ...reference.questions.filter(q => q.answer?.question_latex)
-                 .map(q => ({ id: q.form, question_latex: q.answer.question_latex, route: q.answer.route, refused: q.answer.refused, example: true }))];
+               ...examples.filter(([, e]) => e.answer?.question_latex)
+                 .map(([id, e]) => ({ id, question_latex: e.answer.question_latex, route: e.answer.route, refused: e.answer.refused, example: true }))];
 let unread = 0;
 for (const c of cards) {
   const a = JSON.parse(rows(JSON.stringify({ rows: c.question_latex.map(r => ls.parse(r)) })));

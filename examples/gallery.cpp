@@ -11,8 +11,8 @@
 //   gallery --write site/gallery/gallery.json
 //   gallery --check site/gallery/gallery.json
 
-#include <rsc/spatium/respond.hpp>
-#include <rsc/spatium/synthesis.hpp>
+#include <spatium/answer/respond.hpp>
+#include <spatium/answer/synthesis.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/geometry/make.hpp>
 #include <spatium/geometry/transform.hpp>
@@ -41,7 +41,7 @@ using Array = JsonValue::ArrayType;
 // at the tolerance a live answer has. The page shows the question as the rows the library writes
 // (`question_latex`), and opens a card as those rows
 JsonValue card(std::string id, std::string question) {
-    auto out = rsc::respond(question);
+    auto out = spatium::answer::respond(question);
     Object card{{"id", std::move(id)}};
     for (auto& [key, value] : out.as_object()) {
         // a route's cost counts the evaluations it took, and a root found to the last bit takes as
@@ -153,8 +153,8 @@ std::string gallery() {
             };
             return 2 * area * integrate(across, Finite<double>{0, 1}).value;
         };
-        const auto s = rsc::synthesize(volume, {.lo = 0, .hi = 10, .tolerance = 1e-12, .relative = false});
-        rsc::Answer a;
+        const auto s = spatium::answer::synthesize(volume, {.lo = 0, .hi = 10, .tolerance = 1e-12, .relative = false});
+        spatium::answer::Answer a;
         a.pieces = {s};
         a.answered = s.accepted;
         Object prism{{"id", "prism"},
@@ -162,7 +162,7 @@ std::string gallery() {
                      {"route", "synthesis"},
                      // asked in code, not typed: the page opens it as its card, not in the question line
                      {"typed", false}};
-        for (auto& kv : rsc::answer_json(a, "p")) prism.push_back(kv);
+        for (auto& kv : spatium::answer::answer_json(a, "p")) prism.push_back(kv);
         cards.push_back(prism);
     }
     {
@@ -183,7 +183,7 @@ std::string gallery() {
     // the gallery is read by how strongly its answers hold, strongest first: a card's group is its
     // sheet's guarantee, and the page shows the groups in the library's order under its titles
     Array groups;
-    for (const auto& g : rsc::guarantees)
+    for (const auto& g : spatium::answer::guarantees)
         groups.push_back(Object{{"guarantee", std::string(g.name)}, {"title", std::string(g.title)}});
     std::string out = "{\"groups\": " + JsonValue(groups).dump() + ",\n\"cards\": [\n";
     for (std::size_t i = 0; i < cards.size(); ++i) out += "  " + cards[i].dump() + (i + 1 < cards.size() ? ",\n" : "\n");

@@ -49,20 +49,54 @@ struct Function {
     std::string_view caption;   // what it is, in a few words
     std::string_view domain;    // where it has a value; elsewhere it is NaN
     std::string_view example;   // a text the reader reads, with no unknown
+    std::string_view mathjson;  // the head a LaTeX editor's MathJSON names it by (field_mathjson.hpp)
+    Op op;                      // the op of the field it is
+    std::string_view latex;     // how a page writes it, its arguments in {0} and {1} (field_text.hpp)
 };
 
 inline constexpr std::array<Function, 9> functions{{
-    {"sin", 1, "sine, of an angle in radians", "every x", "sin(pi / 6)"},
-    {"cos", 1, "cosine, of an angle in radians", "every x", "cos(pi / 3)"},
-    {"log", 1, "natural logarithm, the inverse of exp", "x > 0", "log(10)"},
-    {"exp", 1, "exponential, e raised to x", "every x", "exp(1)"},
-    {"sqrt", 1, "square root", "x >= 0", "sqrt(2)"},
-    {"abs", 1, "absolute value, the size of x", "every x", "abs(-3)"},
-    {"min", 2, "the smaller of two numbers", "every x, y", "min(2, 3)"},
-    {"max", 2, "the larger of two numbers", "every x, y", "max(2, 3)"},
+    {"sin", 1, "sine, of an angle in radians", "every x", "sin(pi / 6)", "Sin", Op::Sin, "\\sin\\left({0}\\right)"},
+    {"cos", 1, "cosine, of an angle in radians", "every x", "cos(pi / 3)", "Cos", Op::Cos, "\\cos\\left({0}\\right)"},
+    {"log", 1, "natural logarithm, the inverse of exp", "x > 0", "log(10)", "Ln", Op::Log, "\\ln\\left({0}\\right)"},
+    {"exp", 1, "exponential, e raised to x", "every x", "exp(1)", "Exp", Op::Exp, "\\exp\\left({0}\\right)"},
+    {"sqrt", 1, "square root", "x >= 0", "sqrt(2)", "Sqrt", Op::Sqrt, "\\sqrt{{{0}}}"},
+    {"abs", 1, "absolute value, the size of x", "every x", "abs(-3)", "Abs", Op::Abs, "\\left|{0}\\right|"},
+    {"min", 2, "the smaller of two numbers", "every x, y", "min(2, 3)", "Min", Op::Min, "\\min\\left({0}, {1}\\right)"},
+    {"max", 2, "the larger of two numbers", "every x, y", "max(2, 3)", "Max", Op::Max, "\\max\\left({0}, {1}\\right)"},
     {"less", 2, "1 where the first is below the second, else 0: a step that composes by multiplication",
-     "every x, y", "less(1, 2)"},
+     "every x, y", "less(1, 2)", "", Op::Less, "\\left[{0} < {1}\\right]"},   // MathJSON's Iverson bracket is Boole
 }};
+
+// A function of the table applied to its arguments, as many as its arity: the one place a name of
+// the language becomes an op of the field, whichever reader -- text or MathJSON -- met the name.
+inline Field<double> apply(const Function& f, std::vector<Field<double>> a) {
+    const std::string_view n = f.name;
+    if (n == "sin") return sin(std::move(a[0]));
+    if (n == "cos") return cos(std::move(a[0]));
+    if (n == "log") return log(std::move(a[0]));
+    if (n == "exp") return exp(std::move(a[0]));
+    if (n == "abs") return abs(std::move(a[0]));
+    if (n == "sqrt") return sqrt(std::move(a[0]));
+    if (n == "min") return min(std::move(a[0]), a[1]);
+    if (n == "max") return max(std::move(a[0]), a[1]);
+    return less(std::move(a[0]), a[1]);
+}
+
+inline const Function* function_of_op(Op op) {
+    for (const Function& f : functions)
+        if (f.op == op) return &f;
+    return nullptr;
+}
+
+namespace detail {
+
+inline const Function* function_named(std::string_view name) {
+    for (const Function& f : functions)
+        if (f.name == name) return &f;
+    return nullptr;
+}
+
+} // namespace detail
 
 // The operators, tightest last, and the numbers that have names.
 struct Operator {
@@ -138,6 +172,9 @@ public:
     }
 
     bool done() { return peek() == '\0'; }
+
+    // Whether the next mark is c, without taking it.
+    bool sees(char c) { return peek() == c; }
 
     // Where the reader stands, as an offset into the text: a caller keeps the text of what it read
     // (from the position before a read to the one after it) as the person wrote it.
@@ -281,26 +318,18 @@ private:
         if (!a) return a;
         if (one) {
             if (!take(')')) return fail(std::format("')' after the one argument of {}", name));
-            if (name == "sin") return sin(std::move(*a));
-            if (name == "cos") return cos(std::move(*a));
-            if (name == "log") return log(std::move(*a));
-            if (name == "exp") return exp(std::move(*a));
-            if (name == "abs") return abs(std::move(*a));
-            return sqrt(std::move(*a));
+            return apply(*detail::function_named(name), {std::move(*a)});
         }
         if (!take(',')) return fail(std::format("',' between the two arguments of {}", name));
         auto b = expression();
         if (!b) return b;
         if (!take(')')) return fail(std::format("')' after the two arguments of {}", name));
-        if (name == "min") return min(std::move(*a), *b);
-        if (name == "max") return max(std::move(*a), *b);
-        return less(std::move(*a), *b);
+        return apply(*detail::function_named(name), {std::move(*a), std::move(*b)});
     }
 
     static int arity_of(std::string_view name) {
-        for (const Function& f : functions)
-            if (f.name == name) return f.arity;
-        return 0;
+        const Function* f = detail::function_named(name);
+        return f ? f->arity : 0;
     }
 
     std::string_view s_;

@@ -1,7 +1,7 @@
 ---
 date: 2026-11-05
 title: the page shows every route's chain, asks what comes next, and plots on demand
-files: [web/src/view/answer.ts, web/src/view/cells.ts, web/src/page.ts, site/style.css, rsc/spatium/respond.hpp, site/gallery/gallery.json]
+files: [web/src/view/answer.ts, web/src/view/cells.ts, web/src/page.ts, site/style.css, include/spatium/answer/respond.hpp, site/gallery/gallery.json]
 open:
   - a Next question is asked as a new card; the one-line calculator with its history, where it would replace the line, is not there yet
   - the tabs are the calculator's; the canvas solve node does not reuse them yet

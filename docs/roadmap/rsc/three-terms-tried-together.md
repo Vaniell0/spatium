@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: synthesis tries sets of three short terms together, held to a measure of recall
-files: [rsc/spatium/synthesis.hpp, tests/test_rsc_synthesis.cpp]
+files: [include/spatium/answer/synthesis.hpp, tests/test_answer_synthesis.cpp]
 open:
   - sets of four are still grown greedily from the best of three; on [0.1, 100] 52 of 60 sums of four terms come back
   - the Thomas-Fermi solution near the origin is found as pieces, not as its series 1 + B x + 4/3 x^(3/2) + 2B/5 x^(5/2) + ...: the fourth term is six nodes

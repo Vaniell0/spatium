@@ -1,7 +1,7 @@
 ---
 date: 2026-11-02
 title: a symbol lowers to a slot, and the graph of a function is a WebGL2 shader
-files: [include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, include/spatium/io/plot_glsl.hpp, include/spatium/render/gpu/gpu_instances.hpp, rsc/spatium/respond.hpp, site/wasm/core.cpp, site/wasm/plot_check.mjs, site/wasm/plot_check.html, tests/test_field_symbols.cpp, tests/test_rsc_evaluate.cpp]
+files: [include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, include/spatium/io/plot_glsl.hpp, include/spatium/render/gpu/gpu_instances.hpp, include/spatium/answer/respond.hpp, site/wasm/core.cpp, site/wasm/plot_check.mjs, site/wasm/plot_check.html, tests/test_field_symbols.cpp, tests/test_answer_evaluate.cpp]
 open:
   - a Vulkan kernel binds no slot yet; there a symbol is refused by name and bound to a number first
   - a WebGL2 field takes no noise, gather, instance, point or coordinate; each is refused by name until a consumer brings it
