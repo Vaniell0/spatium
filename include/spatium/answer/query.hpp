@@ -21,7 +21,7 @@
 // `x: x^2 - p = 0 on [0, 10]` are the Query with those names, so what it answers is the question
 // built in code from the same symbols, to the last bit.
 
-#include <rsc/spatium/synthesis.hpp>
+#include <spatium/answer/synthesis.hpp>
 #include <spatium/io/document.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/algebra/quadrature.hpp>
@@ -34,7 +34,7 @@
 #include <string>
 #include <string_view>
 
-namespace rsc {
+namespace spatium::answer {
 
 enum class Ask { Solve, Integrate };
 
@@ -246,4 +246,4 @@ inline spatium::Result<Query> query_of(const spatium::io::build::Document& doc, 
     return q;
 }
 
-} // namespace rsc
+} // namespace spatium::answer

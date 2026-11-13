@@ -1,7 +1,7 @@
 ---
 date: 2026-10-29
 title: named symbols in the field, a question asked in them, and a field as LaTeX
-files: [include/spatium/io/field.hpp, include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, include/spatium/io/field_text.hpp, rsc/spatium/query.hpp, tests/test_field_symbols.cpp, tests/test_rsc_query.cpp]
+files: [include/spatium/io/field.hpp, include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, include/spatium/io/field_text.hpp, include/spatium/answer/query.hpp, tests/test_field_symbols.cpp, tests/test_answer_query.cpp]
 resolves: [ir/an-answer-that-reads-as-a-formula#2]
 open:
   - an unbound symbol does not lower; a slot the device reads (a uniform, a slider on a page) is the next step, with the scene that needs it

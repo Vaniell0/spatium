@@ -55,7 +55,7 @@ TEST_CASE("every function of the table reads as the text a person writes", "[io]
         {R"(["Add", "p", 1])", "p + 1"},
         {R"(["Add", "p", -1])", "p - 1"},
         {R"(["Add", ["Multiply", 2, ["Square", "p"]], ["Multiply", -3, "p"], -5])", "2 * p^2 - 3 * p - 5"},
-        {R"(["Add", "p", ["Multiply", -1, "p", "p"]])", "p - p * p"},
+        {R"(["Add", "p", ["Multiply", -1, "p", "p"]])", "p - p^2"},
         {R"(["Add", "p", ["Negate", ["Add", "p", 1]]])", "p - (p + 1)"},
         {R"(["Subtract", "p", ["Add", "p", 1]])", "p - (p + 1)"},
         {R"(["Negate", ["Power", "p", 2]])", "-p^2"},
@@ -79,14 +79,17 @@ TEST_CASE("every function of the table reads as the text a person writes", "[io]
         {R"(["Abs", ["Negate", "p"]])", "abs(-p)"},
         {R"(["Max", "p", 1])", "max(p, 1)"},
         {R"(["Min", "p", 1])", "min(p, 1)"},
-        {R"(["Delimiter", ["Add", "p", 1]])", "(p + 1)"},
+        // the Iverson bracket to_latex writes for less, \left[p < 1\right], as the editor reads it
+        {R"(["Boole", ["Less", "p", 1]])", "less(p, 1)"},
+        {R"(["Boole", ["Greater", "p", 1]])", "less(1, p)"},
+        {R"(["Delimiter", ["Add", "p", 1]])", "p + 1"},
         {R"({"sym": "Pi"})", "pi"},
         {R"(["Multiply", 2, {"sym": "Pi"}])", "2 * pi"},
         {R"({"sym": "ExponentialE"})", "exp(1)"},
         {R"(["Add", "p", {"sym": "PositiveInfinity"}])", "p + inf"},
         {R"(["Multiply", "p", {"sym": "NaN"}])", "p * nan"},
         {R"({"num": "0.1"})", "0.1"},
-        {R"({"num": "-2.5e-3"})", "-2.5e-3"},
+        {R"({"num": "-2.5e-3"})", "-0.0025"},
         {R"(2.5)", "2.5"},
         {R"(-3)", "-3"},
         {R"(["Multiply", 0.00001, "p"])", "1e-05 * p"},
@@ -120,6 +123,8 @@ TEST_CASE("every function of the table reads as the text a person writes", "[io]
     for (const bd::MathJsonHead& h : bd::mathjson_heads)
         if (h.name != "Equal" && h.name != "Error" && !h.name.starts_with("Less") && !h.name.starts_with("Greater"))
             CHECK(covered("\"" + std::string(h.name) + "\""));
+    for (const bd::Function& f : bd::functions)
+        if (!f.mathjson.empty()) CHECK(covered("\"" + std::string(f.mathjson) + "\""));
     for (const bd::MathJsonConstant& c : bd::mathjson_constants)
         CHECK(covered("\"" + std::string(c.name) + "\""));
 }

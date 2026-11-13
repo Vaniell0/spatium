@@ -16,7 +16,7 @@ export type StatementKind = (typeof statements)[number];
 export const relations = ["=", "<", "<=", ">", ">="] as const;
 export type Relation = (typeof relations)[number];
 
-export const routes = ["evaluate", "expression", "closed form", "linear system", "interval method", "every root, proved", "root on a bracket", "integral", "synthesis"] as const;
+export const routes = ["at infinity", "evaluate", "expression", "closed form", "linear system", "interval method", "every root, proved", "root on a bracket", "integral", "synthesis"] as const;
 export type Route = (typeof routes)[number];
 
 export const arithmetics = ["double", "float", "rational", "decimal", "real50"] as const;

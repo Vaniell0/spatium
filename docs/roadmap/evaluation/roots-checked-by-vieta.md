@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: the roots of a quadratic checked by Vieta's formulas, the last step of the chain
-files: [include/spatium/algebra/polynomial.hpp, include/spatium/io/steps_text.hpp, rsc/spatium/closed_form.hpp, rsc/spatium/respond.hpp, tests/test_solution_steps.cpp]
+files: [include/spatium/algebra/polynomial.hpp, include/spatium/io/steps_text.hpp, include/spatium/answer/closed_form.hpp, include/spatium/answer/respond.hpp, tests/test_solution_steps.cpp]
 open:
   - the solver still loses the small root to cancellation when b^2 dwarfs 4ac; the check now says so, the stable form q = -(b + sign(b) sqrt(D)) / 2 is not taken
 ---

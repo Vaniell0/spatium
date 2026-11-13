@@ -1,7 +1,7 @@
 ---
 date: 2026-11-04
 title: a question is the rows of a formula, and the answer gives them back
-files: [include/spatium/io/document.hpp, include/spatium/io/field_parse.hpp, rsc/spatium/respond.hpp, rsc/spatium/query.hpp, examples/gallery.cpp, examples/site_reference.cpp, site/gallery/gallery.json, site/data/reference.json, site/wasm/core.cpp, site/wasm/build.sh, site/wasm/check.mjs, site/wasm/questions.txt, site/style.css, web/src/page.ts, tests/test_document.cpp, tests/test_rsc_query.cpp, tests/test_rsc_respond.cpp, tests/test_rsc_evaluate.cpp]
+files: [include/spatium/io/document.hpp, include/spatium/io/field_parse.hpp, include/spatium/answer/respond.hpp, include/spatium/answer/query.hpp, examples/gallery.cpp, examples/site_reference.cpp, site/gallery/gallery.json, site/data/reference.json, site/wasm/core.cpp, site/wasm/build.sh, site/wasm/check.mjs, site/wasm/questions.txt, site/style.css, web/src/page.ts, tests/test_document.cpp, tests/test_answer_query.cpp, tests/test_answer_respond.cpp, tests/test_answer_evaluate.cpp]
 resolves: [document/the-rows-of-a-latex-editor-are-a-document#1]
 open:
   - a cell typed as text still takes the document's own words (`p in [0.5, 4]`, `x: ... on [0, 10]`); the formula editor is the input, and ∈ typed as text is not read

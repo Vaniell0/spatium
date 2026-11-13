@@ -2,6 +2,9 @@ digraph spatium_dependencies {
     rankdir=LR;
     "algebra" -> "core";
     "algebra" -> "spatium";
+    "answer" -> "algebra";
+    "answer" -> "core";
+    "answer" -> "io";
     "core" -> "spatium";
     "discrete" -> "algebra";
     "discrete" -> "core";

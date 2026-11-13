@@ -165,6 +165,11 @@ public:
         return n < 0 || d < 0 ? spoiled() : Rational(n, d);
     }
 
+    // The smaller and the larger of two, spoiled where either is: an infinity read in, or a step
+    // that did not fit, is no fraction to compare, though the order below puts it first.
+    friend Rational min(Rational a, Rational b) { return !a.ok() || !b.ok() ? spoiled() : b < a ? b : a; }
+    friend Rational max(Rational a, Rational b) { return !a.ok() || !b.ok() ? spoiled() : a < b ? b : a; }
+
     // Spoiled fractions are equal to each other and below every fraction, so the order stays total.
     friend constexpr bool operator==(const Rational&, const Rational&) = default;
     friend std::strong_ordering operator<=>(Rational a, Rational b) {

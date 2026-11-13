@@ -1,7 +1,7 @@
 ---
 date: 2026-11-05
 title: a quadratic's roots as they are beside their decimals, and a step's lead and note
-files: [rsc/spatium/closed_form.hpp, rsc/spatium/evaluate.hpp, rsc/spatium/respond.hpp, include/spatium/io/steps_text.hpp, tests/test_rsc_respond.cpp, tests/test_rsc_evaluate.cpp, site/gallery/gallery.json]
+files: [include/spatium/answer/closed_form.hpp, include/spatium/answer/evaluate.hpp, include/spatium/answer/respond.hpp, include/spatium/io/steps_text.hpp, tests/test_answer_respond.cpp, tests/test_answer_evaluate.cpp, site/gallery/gallery.json]
 open:
   - a number's own computation (sum, power, sine) has no lead or note beyond its label
   - a fraction from an evaluation is written as it is beside its decimal already; one from a linear system is not yet
@@ -16,7 +16,7 @@ The values stay the double's, and the guarantee is exact where the roots are.
 
 A step now carries what a page sets in bold and what follows it (`lead`, `note`), beside the label code keys on. The quadratic's steps read "Read the coefficients from the equation's values at 0, 1 and −1", "Discriminant b² − 4ac", "Case D > 0: two real roots", "Roots", and "Check by Vieta's formulas". The sheet writes them, while the answer's own steps are unchanged.
 
-The check (`test_rsc_respond`, `test_rsc_evaluate`):
+The check (`test_answer_respond`, `test_answer_evaluate`):
 - `2x^2 - 3x - 5 = 0` is exact, its roots `\frac{5}{2} = 2.5` and `-1`;
 - `x^2 - 2 = 0` reads the same in double and in fractions;
 - with no engine, `x^2 - 3x - 2 = 0` still finds `\frac{3 \pm \sqrt{17}}{2}` while its values stay doubles.

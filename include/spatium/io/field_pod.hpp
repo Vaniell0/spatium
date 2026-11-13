@@ -298,6 +298,10 @@ concept encloses = enclosure<T> || requires(const T& x) {
     x.deriv;
     requires enclosure<std::remove_cvref_t<decltype(x.value)>>;
 };
+// An arithmetic of expansions (algebra/series.hpp): a series in an infinitesimal, which has the
+// elementary functions and, like an enclosure, no table, noise or net to run on.
+template<class T>
+concept expansion = requires(const T& x) { x.valuation(); x.known_to(); };
 // What an enclosure says of a value it cannot compute: any number.
 template<encloses T> T unbounded() {
     if constexpr (enclosure<T>) return T::entire();
@@ -329,7 +333,7 @@ inline bool enclosed_op(Op o) {
 // The first op of `f` that arithmetic T cannot compute, if any.
 template<Scalar T>
 std::optional<Op> beyond(const PodField<double>& f) {
-    constexpr bool enclosure = detail::encloses<T>;
+    constexpr bool enclosure = detail::encloses<T> || detail::expansion<T>;
     if constexpr (!detail::transcendental<T> || enclosure)
         for (const auto& n : f.ops)
             if (!(enclosure ? detail::enclosed_op(static_cast<Op>(n.code)) : exact_op(static_cast<Op>(n.code))))
@@ -381,8 +385,9 @@ namespace detail {
 template<Scalar T>
 T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const T* points, const T* weights,
                const FieldInputs<T>& in) {
-    // what an enclosure does not hold, `beyond` refuses before it runs; were it run, the whole line
-    if constexpr (detail::encloses<T>) {
+    // what an enclosure or an expansion does not hold, `beyond` refuses before it runs; were it
+    // run, the whole line, or no number
+    if constexpr (detail::encloses<T> || detail::expansion<T>) {
         switch (static_cast<Op>(n.code)) {
             case Op::Sin:  return sin(s[n.a]);
             case Op::Cos:  return cos(s[n.a]);
@@ -390,7 +395,9 @@ T inexact_step(const PodOp<T>& n, const T* s, const std::uint8_t* tables, const 
             case Op::Log:  return log(s[n.a]);
             case Op::Exp:  return exp(s[n.a]);
             case Op::Pow:  return pow(s[n.a], s[n.b]);
-            default:       return detail::unbounded<T>();
+            default:
+                if constexpr (detail::encloses<T>) return detail::unbounded<T>();
+                else return T(std::numeric_limits<double>::quiet_NaN());
         }
     } else switch (static_cast<Op>(n.code)) {
         case Op::Sin:  { using std::sin; return sin(s[n.a]); }
@@ -444,7 +451,16 @@ T interpret(const PodOp<T>* ops, std::uint32_t count, const std::uint8_t* tables
             case Op::Div:   s[i] = s[n.a] / s[n.b]; break;
             case Op::Min:   { using std::min; s[i] = min(s[n.a], s[n.b]); break; }
             case Op::Max:   { using std::max; s[i] = max(s[n.a], s[n.b]); break; }
-            case Op::Less:  s[i] = s[n.a] < s[n.b] ? T{1} : T{0}; break;
+            case Op::Less:
+                s[i] = s[n.a] < s[n.b] ? T{1} : T{0};
+                // a spoiled fraction or an empty interval is no number to compare: the comparison
+                // is none either, as their product is
+                if constexpr (requires(const T& x) { { x.ok() } -> std::convertible_to<bool>; }) {
+                    if (!s[n.a].ok() || !s[n.b].ok()) s[i] = s[n.a] * s[n.b];
+                } else if constexpr (requires(const T& x) { { x.is_empty() } -> std::convertible_to<bool>; }) {
+                    if (s[n.a].is_empty() || s[n.b].is_empty()) s[i] = s[n.a] * s[n.b];
+                }
+                break;
             case Op::Origin: s[i] = in.origin[n.k]; break;
             case Op::Point:  s[i] = in.p[n.k]; break;
             case Op::Abs:    { using std::abs; s[i] = abs(s[n.a]); break; }

@@ -23,6 +23,8 @@
 "algebra/vec_simd.hpp: store_d",
 "algebra/vec_simd.hpp: store_f",
 "algebra/vector.hpp: Vec2f",
+"answer/closed_form.hpp: ExactRoots",
+"answer/evaluate.hpp: SystemRoots",
 "core/concepts.hpp: HasInterval",
 "core/concepts.hpp: HasLogMap",
 "core/concepts.hpp: HasProject",

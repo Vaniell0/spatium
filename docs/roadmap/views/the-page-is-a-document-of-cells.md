@@ -1,7 +1,7 @@
 ---
 date: 2026-11-04
 title: the page is a document of cells on its own package, under two policies
-files: [web/src/doc.ts, web/src/core.ts, web/src/answers.ts, web/src/page.ts, web/src/view/cells.ts, web/src/view/graph.ts, web/src/view/answer.ts, web/test/doc.test.ts, rsc/spatium/respond.hpp, site/index.html, site/bundle.sh]
+files: [web/src/doc.ts, web/src/core.ts, web/src/answers.ts, web/src/page.ts, web/src/view/cells.ts, web/src/view/graph.ts, web/src/view/answer.ts, web/test/doc.test.ts, include/spatium/answer/respond.hpp, site/index.html, site/bundle.sh]
 open:
   - cells sit in a column; on the canvas they are not placed freely or wired yet, and groups do not exist
   - a parameter's slider moves the graph that holds it, not the answers of the cells that read it
@@ -16,4 +16,4 @@ A cell is read in the document the cells above it make: its question is every ro
 
 A graph is a cell of its own. The core's shader computes the value at every pixel from the view and the held parameters it is given, so panning (drag), zooming (wheel, two fingers) and sliding a parameter are new uniforms, never a new question. The page is marked beta.
 
-Checked: six tests of the document under node's runner, the link also inflated by node's zlib as a second path; 74 assertions of `test_rsc_respond`; the page laid out by `site/bundle.sh` and shot in headless Chromium, the calculator and the canvas answered by the core in the browser, no sideways scroll at 1280 px.
+Checked: six tests of the document under node's runner, the link also inflated by node's zlib as a second path; 74 assertions of `test_answer_respond`; the page laid out by `site/bundle.sh` and shot in headless Chromium, the calculator and the canvas answered by the core in the browser, no sideways scroll at 1280 px.

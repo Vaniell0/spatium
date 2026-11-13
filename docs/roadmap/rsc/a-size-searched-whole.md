@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: synthesis searches a size whole, and drops a term that only refits the noise
-files: [rsc/spatium/synthesis.hpp, tests/test_rsc_synthesis.cpp]
+files: [include/spatium/answer/synthesis.hpp, tests/test_answer_synthesis.cpp]
 open:
   - a sequence known only at the integers (a formula from a list of (n, a_n)) is not a question synthesis can ask: it fits and certifies on a continuous grid, so a table read through an interpolating lambda gives 32 pieces of the interpolant, none accepted
   - a step function (the number of ways g(n) to write n as a sum of two primes) is 256 pieces, none accepted

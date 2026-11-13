@@ -36,7 +36,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rsc {
+namespace spatium::answer {
 
 // The roots of a quadratic with fractional coefficients, as they are: fractions, or
 // (p ± q√m)/d with i where the discriminant is negative.
@@ -54,7 +54,7 @@ struct ClosedForm {
     std::string inexact;                                // why not, when asked for and there are none
     spatium::QuadraticSteps<double> solution;
     std::optional<spatium::VietaCheck<double>> check;   // of the roots, when there are two
-    std::vector<spatium::io::build::Step> steps;        // the solution, and the check last
+    std::vector<spatium::io::build::Step> steps;        // the solution; `check` is a step of its own (to_step)
     std::size_t evaluations = 0;                        // of the equation's field, the route's cost
 };
 
@@ -342,7 +342,6 @@ inline spatium::Result<ClosedForm> solve_closed_form(const spatium::io::build::F
                 last.latex = name + "_{1,2} = " + e.latex;
         }
     }
-    if (out.check) out.steps.push_back(bd::to_step(*out.check, x));
     return out;
 }
 
@@ -361,4 +360,4 @@ inline spatium::Result<ClosedForm> solve_closed_form(std::string_view text) {
     return solve_closed_form(f, names.size() == 1 ? names.front() : std::string());
 }
 
-} // namespace rsc
+} // namespace spatium::answer

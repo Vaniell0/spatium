@@ -256,7 +256,9 @@ re-creates anything that earns a consumer.
 The removal rule above was applied on 2026-10-20: the prototype listed below
 left the tree, and the tag `rsc-prototype-final` marks the last commit that
 has it. The tree now holds `rsc/core` and `rsc/spatium`, described in the
-root `CLAUDE.md`.
+root `CLAUDE.md`. On 2026-11-12 the door a page calls -- a value by its routes,
+the sheet, closed forms, synthesis -- moved to `include/spatium/answer/`: it
+answers a document and runs no search. `rsc/spatium` keeps the finder.
 
 - `include/`: the registry, tasks, dispatcher, trainer, chains, checkpoint
   and the per-domain ops and tasks; `include/generated/` holds the one shipped

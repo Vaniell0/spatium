@@ -3,7 +3,7 @@
 // word or through its document. Its shapes are a scene: the same Trace, node for node and line for
 // line of its LaTeX, whether built from the document or by calls.
 
-#include <rsc/spatium/query.hpp>
+#include <spatium/answer/query.hpp>
 #include <spatium/io/document.hpp>
 #include <spatium/io/document_trace.hpp>
 #include <spatium/io/json.hpp>
@@ -133,22 +133,22 @@ TEST_CASE("document: refused with the line, and the column for a parse error", "
 }
 
 TEST_CASE("query_of: every question the gallery asks, written as a document", "[document][rsc]") {
-    struct Asked { const char* document; const char* wanted; rsc::Ask ask; const char* unknown; const char* parameter;
+    struct Asked { const char* document; const char* wanted; spatium::answer::Ask ask; const char* unknown; const char* parameter;
                    double x_lo, x_hi, p_lo, p_hi; bool bound_reads_parameter; };
     for (const Asked& a : std::initializer_list<Asked>{
-             {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x", rsc::Ask::Solve, "x", "p", 0, 10, 0.5, 4, false},
-             {"p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]", "x", rsc::Ask::Solve, "x", "p", 0, 10, 0.5, 4, false},
-             {"p in [1, 8]\nx: x^3 = p on [0, 3]", "x", rsc::Ask::Solve, "x", "p", 0, 3, 1, 8, false},
-             {"p in [0.5, 1]\nx: x - cos(p * x) = 0 on [0, 2]", "x", rsc::Ask::Solve, "x", "p", 0, 2, 0.5, 1, false},
-             {"p in [0, 3]\nI = integral exp(p * log(x)) dx on [0, 1]", "I", rsc::Ask::Integrate, "x", "p", 0, 1, 0, 3, false},
-             {"p in [0.1, 4]\nI = integral exp(-p * x^2) dx on [0, 1]", "I", rsc::Ask::Integrate, "x", "p", 0, 1, 0.1, 4, false},
-             {"x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]", "Si", rsc::Ask::Integrate, "t", "x", 0, 0, 0.5, 6, true},
-             {"p in [1, 2]\nI = integral t dt on [p, 2 p]", "I", rsc::Ask::Integrate, "t", "p", 0, 0, 1, 2, true},
+             {"p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x", spatium::answer::Ask::Solve, "x", "p", 0, 10, 0.5, 4, false},
+             {"p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]", "x", spatium::answer::Ask::Solve, "x", "p", 0, 10, 0.5, 4, false},
+             {"p in [1, 8]\nx: x^3 = p on [0, 3]", "x", spatium::answer::Ask::Solve, "x", "p", 0, 3, 1, 8, false},
+             {"p in [0.5, 1]\nx: x - cos(p * x) = 0 on [0, 2]", "x", spatium::answer::Ask::Solve, "x", "p", 0, 2, 0.5, 1, false},
+             {"p in [0, 3]\nI = integral exp(p * log(x)) dx on [0, 1]", "I", spatium::answer::Ask::Integrate, "x", "p", 0, 1, 0, 3, false},
+             {"p in [0.1, 4]\nI = integral exp(-p * x^2) dx on [0, 1]", "I", spatium::answer::Ask::Integrate, "x", "p", 0, 1, 0.1, 4, false},
+             {"x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]", "Si", spatium::answer::Ask::Integrate, "t", "x", 0, 0, 0.5, 6, true},
+             {"p in [1, 2]\nI = integral t dt on [p, 2 p]", "I", spatium::answer::Ask::Integrate, "t", "p", 0, 0, 1, 2, true},
          }) {
         INFO(a.document);
         const auto doc = bd::read_document(a.document);
         REQUIRE(doc.has_value());
-        const auto q = rsc::query_of(*doc, a.wanted);
+        const auto q = spatium::answer::query_of(*doc, a.wanted);
         REQUIRE(q.has_value());
         CHECK(q->ask == a.ask);
         CHECK(q->unknown == a.unknown);
@@ -167,11 +167,11 @@ TEST_CASE("query_of: every question the gallery asks, written as a document", "[
     CHECK(open.error().message.find("reads 'q', which no line above defines") != std::string::npos);
     const auto backwards = bd::read_document("p in [4, 1]\nx: x^2 - p = 0 on [0, 10]");
     REQUIRE(backwards.has_value());
-    CHECK(rsc::query_of(*backwards, "x").error().message == "p in [4, 1] is empty");
+    CHECK(spatium::answer::query_of(*backwards, "x").error().message == "p in [4, 1] is empty");
     // and a question with no parameter left free is a number, not a function: no Query
     const auto fixed = bd::read_document("x: x^2 - 2 = 0 on [0, 10]");
     REQUIRE(fixed.has_value());
-    CHECK_FALSE(rsc::query_of(*fixed, "x").has_value());
+    CHECK_FALSE(spatium::answer::query_of(*fixed, "x").has_value());
 }
 
 TEST_CASE("to_latex: a statement as the row of a formula editor", "[document]") {
@@ -201,15 +201,15 @@ TEST_CASE("to_latex: a statement as the row of a formula editor", "[document]") 
 TEST_CASE("query_of: a document's root with the values it reads put in place", "[document][rsc]") {
     const auto doc = bd::read_document("a = 2\nb = a + 1\np in [1, 3]\nx: x^2 - b * p = 0 on [0, 10]\ny: y - x = 0 on [0, 1]");
     REQUIRE(doc.has_value());
-    const auto q = rsc::query_of(*doc, "x");
+    const auto q = spatium::answer::query_of(*doc, "x");
     REQUIRE(q.has_value());
     CHECK(q->parameter == "p");
-    CHECK_THAT(rsc::reference(rsc::bound(*q), 3.0), WithinAbs(3.0, 1e-12));   // x^2 = 3 * 3
+    CHECK_THAT(spatium::answer::reference(spatium::answer::bound(*q), 3.0), WithinAbs(3.0, 1e-12));   // x^2 = 3 * 3
     // the cases it must fail: a value is not a question, and a root that reads another root is
     // not one yet
-    CHECK_FALSE(rsc::query_of(*doc, "a").has_value());
-    CHECK_FALSE(rsc::query_of(*doc, "y").has_value());
-    CHECK_FALSE(rsc::query_of(*doc, "z").has_value());
+    CHECK_FALSE(spatium::answer::query_of(*doc, "a").has_value());
+    CHECK_FALSE(spatium::answer::query_of(*doc, "y").has_value());
+    CHECK_FALSE(spatium::answer::query_of(*doc, "z").has_value());
 }
 
 namespace {

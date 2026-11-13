@@ -32,6 +32,7 @@ export const homes = {
   } satisfies Record<L.StatementKind, Home>,
   relations: { "=": sheet, "<": axis, "<=": axis, ">": axis, ">=": axis } satisfies Record<L.Relation, Home>,
   routes: {
+    "at infinity": sheet,
     "evaluate": sheet,
     "expression": sheet,
     "closed form": sheet,
