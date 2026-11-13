@@ -53,6 +53,7 @@ struct SynthesisSpec {
     std::size_t exhaustive_pairs = 200000; // all sets of one and two terms are tried when there are at most this many
     std::size_t exhaustive_triples = 40000; // and of three among the shortest terms, when no pair reaches rounding
     std::size_t polynomial_degree = 0;  // the largest degree of the Chebyshev fallback of a piece; 0 for none
+    bool scaled_variable = true;   // the interval's own variable t beside x; a law over data is in x alone
 };
 
 struct Term {
@@ -225,7 +226,7 @@ inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<
     // other, so a term in t is a term in x; on a narrow interval powers of x are all but constant
     // and only t keeps them apart
     const double centre = 0.5 * (spec.lo + spec.hi), scale = 2 / (spec.hi - spec.lo);
-    offer((Expr::u() - Expr(centre)) * Expr(scale), 1);
+    if (spec.scaled_variable) offer((Expr::u() - Expr(centre)) * Expr(scale), 1);
     offer(Expr::u(), 1); // and x itself, for the forms that are global (sin x, 4 / b)
     offer(Expr(1.0), 1);
     for (std::size_t s = 2; s <= spec.max_size && count < spec.max_candidates; ++s) {
