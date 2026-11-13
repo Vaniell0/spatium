@@ -14,7 +14,8 @@ step that fails:
               name, and TEST_CASEs and assertions under tests/ are counted on both sides
   builds      the test binary builds
   tests       every test case passes but the connectivity matrix's (which has its own job in CI)
-  the task    for a law: rsc_laws.py check on the task's space reports the task's law as now
+  the task    against the base's snapshot of the laws, whatever the branch's own says:
+              for a law: rsc_laws.py check on the task's space reports the task's law as now
               holding, and no law there stops holding; for an operation: rsc_laws.py missing no
               longer lists it
   no regress  rsc_laws.py check on every space whose headers the change touched reports no law
@@ -170,6 +171,10 @@ def judge(branch, base, task):
     if not step("tests", code == 0, tail if code == 0 else (out[-2500:]), t):
         return steps
 
+    # Both law checks compare with the base's snapshot: a branch that does a task also takes its gain
+    # with `rsc_laws.py discover`, and against its own snapshot the gain would be no change at all.
+    snapshot = TREE / "rsc" / "spatium" / "laws.json"
+    snapshot.write_text(git("show", f"{merge_base}:rsc/spatium/laws.json"))
     laws = ["python3", "rsc/spatium/rsc_laws.py", "check"]
     if task["kind"] == "breaks a law of its neighbours":
         t = time.time()
@@ -195,6 +200,8 @@ def judge(branch, base, task):
         lost = [x for x in lost if not x.startswith(task["space"] + ":")]
     if not step("no regress", not lost, lost or out.strip().splitlines()[:1], t):
         return steps
+
+    git("checkout", "--", "rsc/spatium/laws.json", cwd=TREE)   # the branch's own snapshot back
 
     t = time.time()
     failed = []
