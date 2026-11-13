@@ -1,54 +1,6 @@
 [
  {
   "kind": "breaks a law of its neighbours",
-  "space": "H1",
-  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
-  "laws": 5,
-  "examples": [
-   "d(p,p) = d(exp(p,w),exp(p,w))",
-   "d(p,q) = (d(p,q)+d(q,q))",
-   "d(q,r) = (d(q,q)+d(q,r))",
-   "(d(p,q)+d(q,q)) <= (d(p,r)+d(q,r))",
-   "(d(q,q)+d(q,r)) <= (d(p,q)+d(p,r))"
-  ],
-  "check": "python3 rsc/spatium/rsc_laws.py check H1"
- },
- {
-  "kind": "breaks a law of its neighbours",
-  "space": "H2",
-  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
-  "laws": 3,
-  "examples": [
-   "d(p,p) = d(exp(p,w),exp(p,w))",
-   "d(p,q) = (d(p,q)+d(q,q))",
-   "d(q,r) = (d(q,q)+d(q,r))"
-  ],
-  "check": "python3 rsc/spatium/rsc_laws.py check H2"
- },
- {
-  "kind": "breaks a law of its neighbours",
-  "space": "H4",
-  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
-  "laws": 3,
-  "examples": [
-   "d(p,p) = d(exp(p,w),exp(p,w))",
-   "d(p,q) = (d(p,q)+d(q,q))",
-   "d(q,r) = (d(q,q)+d(q,r))"
-  ],
-  "check": "python3 rsc/spatium/rsc_laws.py check H4"
- },
- {
-  "kind": "breaks a law of its neighbours",
-  "space": "S2xH2",
-  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
-  "laws": 1,
-  "examples": [
-   "d(p,p) = d(exp(p,w),exp(p,w))"
-  ],
-  "check": "python3 rsc/spatium/rsc_laws.py check S2xH2"
- },
- {
-  "kind": "breaks a law of its neighbours",
   "space": "S2xS2",
   "claim": "d(p,exp(p,u/2)) <= 2*d(p,exp(p,u))",
   "laws": 2,

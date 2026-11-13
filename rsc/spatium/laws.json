@@ -1,8 +1,8 @@
 {
  "tuples": 732,
  "max_size": 7,
- "terms": 790,
- "merged": 357,
+ "terms": 787,
+ "merged": 360,
  "spaces": [
   "E1",
   "E3",
@@ -1433,6 +1433,16 @@
    "rhs_form": "(mul 2 (d p q))"
   },
   {
+   "lhs": "(d(p,q)+d(q,q))",
+   "rel": "=",
+   "rhs": "d(p,q)",
+   "size": 10,
+   "hold": "all",
+   "defined": "all",
+   "lhs_form": "(add (d p q) (d q q))",
+   "rhs_form": "(d p q)"
+  },
+  {
    "lhs": "(d(p,q)+d(r,r))",
    "rel": "=",
    "rhs": "d(p,q)",
@@ -1453,6 +1463,16 @@
    "rhs_form": "(mul 2 (d p r))"
   },
   {
+   "lhs": "(d(p,r)+d(q,q))",
+   "rel": "=",
+   "rhs": "d(p,r)",
+   "size": 10,
+   "hold": "all",
+   "defined": "all",
+   "lhs_form": "(add (d p r) (d q q))",
+   "rhs_form": "(d p r)"
+  },
+  {
    "lhs": "(d(p,r)+d(r,r))",
    "rel": "=",
    "rhs": "d(p,r)",
@@ -1471,6 +1491,16 @@
    "defined": "all",
    "lhs_form": "(add (d q q) (d q q))",
    "rhs_form": "(mul 2 (d q q))"
+  },
+  {
+   "lhs": "(d(q,q)+d(q,r))",
+   "rel": "=",
+   "rhs": "d(q,r)",
+   "size": 10,
+   "hold": "all",
+   "defined": "all",
+   "lhs_form": "(add (d q q) (d q r))",
+   "rhs_form": "(d q r)"
   },
   {
    "lhs": "(d(q,r)+d(q,r))",
@@ -1907,16 +1937,6 @@
    "rel": "=",
    "rhs": "d(q,q)",
    "size": 4,
-   "hold": "1111111000111010111100111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "0",
-   "rhs_form": "(d q q)"
-  },
-  {
-   "lhs": "0",
-   "rel": "<=",
-   "rhs": "d(q,q)",
-   "size": 4,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "0",
@@ -2123,36 +2143,6 @@
    "rhs_form": "(log p (exp p w))"
   },
   {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 6,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(d p q)"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 6,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(d p r)"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "d(q,r)",
-   "size": 6,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(d q r)"
-  },
-  {
    "lhs": "g_p(2u,-u)",
    "rel": "<=",
    "rhs": "0",
@@ -2327,50 +2317,10 @@
    "rel": "=",
    "rhs": "(d(p,p)+d(q,q))",
    "size": 8,
-   "hold": "1111111000111010111100111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "0",
-   "rhs_form": "(add (d p p) (d q q))"
-  },
-  {
-   "lhs": "0",
-   "rel": "<=",
-   "rhs": "(d(p,p)+d(q,q))",
-   "size": 8,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "0",
    "rhs_form": "(add (d p p) (d q q))"
-  },
-  {
-   "lhs": "0",
-   "rel": "=",
-   "rhs": "(d(p,p)+d(r,r))",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "0",
-   "rhs_form": "(add (d p p) (d r r))"
-  },
-  {
-   "lhs": "0",
-   "rel": "=",
-   "rhs": "d(q,q)*d(q,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "0",
-   "rhs_form": "(mul (d q q) (d q q))"
-  },
-  {
-   "lhs": "0",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(r,r))",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "0",
-   "rhs_form": "(add (d q q) (d r r))"
   },
   {
    "lhs": "0",
@@ -2495,6 +2445,66 @@
   {
    "lhs": "d(p,p)",
    "rel": "<=",
+   "rhs": "d(p,exp(p,u))",
+   "size": 8,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d p p)",
+   "rhs_form": "(d p (exp p u))"
+  },
+  {
+   "lhs": "d(p,p)",
+   "rel": "<=",
+   "rhs": "d(p,exp(p,w))",
+   "size": 8,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d p p)",
+   "rhs_form": "(d p (exp p w))"
+  },
+  {
+   "lhs": "d(p,p)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,u))",
+   "size": 8,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d p p)",
+   "rhs_form": "(d q (exp p u))"
+  },
+  {
+   "lhs": "d(p,p)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,w))",
+   "size": 8,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d p p)",
+   "rhs_form": "(d q (exp p w))"
+  },
+  {
+   "lhs": "d(p,p)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,u))",
+   "size": 8,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d p p)",
+   "rhs_form": "(d r (exp p u))"
+  },
+  {
+   "lhs": "d(p,p)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,w))",
+   "size": 8,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d p p)",
+   "rhs_form": "(d r (exp p w))"
+  },
+  {
+   "lhs": "d(p,p)",
+   "rel": "<=",
    "rhs": "1/2*d(p,q)",
    "size": 8,
    "hold": "1111111111111010111111111",
@@ -2511,16 +2521,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p p)",
    "rhs_form": "(mul 1/2 (d p r))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
-   "rhs": "1/2*d(q,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(mul 1/2 (d q q))"
   },
   {
    "lhs": "d(p,p)",
@@ -2555,142 +2555,12 @@
   {
    "lhs": "d(p,p)",
    "rel": "<=",
-   "rhs": "2*d(q,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(mul 2 (d q q))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
    "rhs": "2*d(q,r)",
    "size": 8,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p p)",
    "rhs_form": "(mul 2 (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(d p q)"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(d p q)"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(d p r)"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(d p r)"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 1/2 (d p q))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 1/2 (d p r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(q,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 1/2 (d q r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,q)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 2 (d p q))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 2 (d p r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(q,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 2 (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(q,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(d q r)"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(q,r)",
-   "size": 8,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(d q r)"
   },
   {
    "lhs": "2u",
@@ -2711,6 +2581,166 @@
    "defined": "1111111111111111111111111",
    "lhs_form": "(scale 2 w)",
    "rhs_form": "(vadd w (log p (exp p w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(p,exp(p,2u))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d p (exp p (scale 2 u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(p,exp(p,u/2))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d p (exp p (scale 1/2 u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(p,exp(p,2w))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d p (exp p (scale 2 w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(p,exp(p,w/2))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d p (exp p (scale 1/2 w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,2u))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d q (exp p (scale 2 u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,u/2))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d q (exp p (scale 1/2 u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,-u))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d q (exp p (neg u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,2w))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d q (exp p (scale 2 w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,w/2))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d q (exp p (scale 1/2 w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(q,exp(p,-w))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d q (exp p (neg w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,2u))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d r (exp p (scale 2 u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,u/2))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d r (exp p (scale 1/2 u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,-u))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d r (exp p (neg u)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,2w))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d r (exp p (scale 2 w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,w/2))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d r (exp p (scale 1/2 w)))"
+  },
+  {
+   "lhs": "d(q,q)",
+   "rel": "<=",
+   "rhs": "d(r,exp(p,-w))",
+   "size": 9,
+   "hold": "1111111111111010111111111",
+   "defined": "1111111111111010111111111",
+   "lhs_form": "(d q q)",
+   "rhs_form": "(d r (exp p (neg w)))"
   },
   {
    "lhs": "g_p(u,u)",
@@ -2815,16 +2845,6 @@
   {
    "lhs": "d(p,p)",
    "rel": "<=",
-   "rhs": "1/2*1/2*d(q,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d q q)))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
    "rhs": "1/2*1/2*d(q,r)",
    "size": 10,
    "hold": "1111111111111010111111111",
@@ -2855,16 +2875,6 @@
   {
    "lhs": "d(p,p)",
    "rel": "<=",
-   "rhs": "2*2*d(q,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(mul 2 (mul 2 (d q q)))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
    "rhs": "2*2*d(q,r)",
    "size": 10,
    "hold": "1111111111111010111111111",
@@ -2877,7 +2887,7 @@
    "rel": "=",
    "rhs": "d(exp(p,u),exp(p,u))",
    "size": 10,
-   "hold": "1111111000111010111100111",
+   "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p p)",
    "rhs_form": "(d (exp p u) (exp p u))"
@@ -2887,7 +2897,7 @@
    "rel": "=",
    "rhs": "d(exp(p,w),exp(p,w))",
    "size": 10,
-   "hold": "1111111000111010111101111",
+   "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p p)",
    "rhs_form": "(d (exp p w) (exp p w))"
@@ -2905,16 +2915,6 @@
   {
    "lhs": "d(p,p)",
    "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
    "rhs": "(d(p,q)+d(q,r))",
    "size": 10,
    "hold": "1111111111111010111111111",
@@ -2925,62 +2925,12 @@
   {
    "lhs": "d(p,p)",
    "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
    "rhs": "(d(p,r)+d(q,r))",
    "size": 10,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p p)",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "d(p,p)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p p)",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(d p q)"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(d p q)"
-  },
-  {
-   "lhs": "(d(p,p)+d(q,q))",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p p) (d q q))",
-   "rhs_form": "(d p q)"
   },
   {
    "lhs": "d(p,q)",
@@ -2994,26 +2944,6 @@
   },
   {
    "lhs": "d(p,q)",
-   "rel": "=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 10,
-   "hold": "1111111000111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p q)",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "d(p,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p q)",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "d(p,q)",
    "rel": "<=",
    "rhs": "(d(p,q)+d(q,r))",
    "size": 10,
@@ -3031,46 +2961,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p q)",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "(d(q,q)+d(r,r))",
-   "rel": "<=",
-   "rhs": "d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d r r))",
-   "rhs_form": "(d p q)"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(d p r)"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(d p r)"
-  },
-  {
-   "lhs": "(d(p,p)+d(q,q))",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p p) (d q q))",
-   "rhs_form": "(d p r)"
   },
   {
    "lhs": "d(p,r)",
@@ -3094,26 +2984,6 @@
   },
   {
    "lhs": "d(p,r)",
-   "rel": "=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 10,
-   "hold": "1111111000111010111100111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p r)",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "d(p,r)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p r)",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "d(p,r)",
    "rel": "<=",
    "rhs": "(d(p,r)+d(q,r))",
    "size": 10,
@@ -3123,174 +2993,44 @@
    "rhs_form": "(add (d p r) (d q r))"
   },
   {
-   "lhs": "(d(q,q)+d(r,r))",
-   "rel": "<=",
-   "rhs": "d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d r r))",
-   "rhs_form": "(d p r)"
-  },
-  {
    "lhs": "d(q,q)",
    "rel": "<=",
-   "rhs": "1/2*1/2*d(p,q)",
+   "rhs": "d(p,exp(p,(u+w)))",
    "size": 10,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d q q)",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p q)))"
+   "rhs_form": "(d p (exp p (vadd u w)))"
   },
   {
    "lhs": "d(q,q)",
    "rel": "<=",
-   "rhs": "1/2*1/2*d(p,r)",
+   "rhs": "d(q,exp(p,(u+w)))",
    "size": 10,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d q q)",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p r)))"
+   "rhs_form": "(d q (exp p (vadd u w)))"
   },
   {
    "lhs": "d(q,q)",
    "rel": "<=",
-   "rhs": "1/2*1/2*d(q,r)",
+   "rhs": "d(r,exp(p,(u+w)))",
    "size": 10,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d q q)",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d q r)))"
+   "rhs_form": "(d r (exp p (vadd u w)))"
   },
   {
    "lhs": "d(q,q)",
    "rel": "<=",
-   "rhs": "2*2*d(p,q)",
+   "rhs": "d(exp(p,u),exp(p,w))",
    "size": 10,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(d q q)",
-   "rhs_form": "(mul 2 (mul 2 (d p q)))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 2 (mul 2 (d p r)))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(mul 2 (mul 2 (d q r)))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "=",
-   "rhs": "(d(p,p)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d p p) (d q q))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "d(q,q)",
-   "rel": "=",
-   "rhs": "(d(q,q)+d(r,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q q)",
-   "rhs_form": "(add (d q q) (d r r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(d q r)"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(d q r)"
+   "rhs_form": "(d (exp p u) (exp p w))"
   },
   {
    "lhs": "d(q,r)",
@@ -3321,26 +3061,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(d q r)",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "d(q,r)",
-   "rel": "=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 10,
-   "hold": "1111111000111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q r)",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "d(q,r)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q r)",
-   "rhs_form": "(add (d q q) (d q r))"
   },
   {
    "lhs": "(u+w)",
@@ -3491,126 +3211,6 @@
    "defined": "1111111111111111111111111",
    "lhs_form": "(g p (scale 1/2 w) (neg w))",
    "rhs_form": "(g p w w)"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 1/2 (d p q))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 1/2 (d p q))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 1/2 (d p r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 1/2 (d p r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 1/2 (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 2 (d p q))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 2 (d p r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 2 (d q r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 1/2 (d q r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,q)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 2 (d p q))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 2 (d p r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(q,r)",
-   "size": 10,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 2 (d q r))"
   },
   {
    "lhs": "g_p(u,u/2)",
@@ -4203,26 +3803,6 @@
    "rhs_form": "(g p (scale 1/2 w) (neg w))"
   },
   {
-   "lhs": "d(p,exp(q,log(q,p)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,u))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p (exp q (log q p)))",
-   "rhs_form": "(d p (exp p u))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,u))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(d p (exp p u))"
-  },
-  {
    "lhs": "log(p,exp(p,u))",
    "rel": "=",
    "rhs": "-log(p,exp(p,-u))",
@@ -4231,26 +3811,6 @@
    "defined": "1111111111111111111111111",
    "lhs_form": "(log p (exp p u))",
    "rhs_form": "(neg (log p (exp p (neg u))))"
-  },
-  {
-   "lhs": "d(p,exp(q,log(q,p)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,w))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p (exp q (log q p)))",
-   "rhs_form": "(d p (exp p w))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,w))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(d p (exp p w))"
   },
   {
    "lhs": "log(p,exp(p,w))",
@@ -4263,106 +3823,6 @@
    "rhs_form": "(neg (log p (exp p (neg w))))"
   },
   {
-   "lhs": "d(p,exp(q,log(q,p)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,u))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p (exp q (log q p)))",
-   "rhs_form": "(d q (exp p u))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,u))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(d q (exp p u))"
-  },
-  {
-   "lhs": "d(p,exp(q,log(q,p)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,w))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p (exp q (log q p)))",
-   "rhs_form": "(d q (exp p w))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,w))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(d q (exp p w))"
-  },
-  {
-   "lhs": "d(p,exp(q,log(q,p)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,u))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p (exp q (log q p)))",
-   "rhs_form": "(d r (exp p u))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,u))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(d r (exp p u))"
-  },
-  {
-   "lhs": "d(p,exp(q,log(q,p)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,w))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d p (exp q (log q p)))",
-   "rhs_form": "(d r (exp p w))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,w))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(d r (exp p w))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 1/2 (d p q))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 1/2 (d p q))"
-  },
-  {
    "lhs": "1/2*d(p,q)",
    "rel": "<=",
    "rhs": "(d(p,q)+d(p,r))",
@@ -4371,16 +3831,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (d p q))",
    "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "1/2*d(p,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d p q))",
-   "rhs_form": "(add (d p q) (d q q))"
   },
   {
    "lhs": "1/2*d(p,q)",
@@ -4401,26 +3851,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (d p q))",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 1/2 (d p r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 1/2 (d p r))"
   },
   {
    "lhs": "1/2*d(p,r)",
@@ -4445,162 +3875,12 @@
   {
    "lhs": "1/2*d(p,r)",
    "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d p r))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "1/2*d(p,r)",
-   "rel": "<=",
    "rhs": "(d(p,r)+d(q,r))",
    "size": 12,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (d p r))",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p q)))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p r)))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d q r)))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d p q)))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d p r)))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d q r)))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q q))",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 1/2 (d q r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 1/2 (d q r))"
   },
   {
    "lhs": "1/2*d(q,r)",
@@ -4631,226 +3911,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (d q r))",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*d(q,r)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (d q r))",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 2 (d p q))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 2 (d p q))"
-  },
-  {
-   "lhs": "(d(p,q)+d(q,q))",
-   "rel": "<=",
-   "rhs": "2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p q) (d q q))",
-   "rhs_form": "(mul 2 (d p q))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 2 (d p r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 2 (d p r))"
-  },
-  {
-   "lhs": "(d(p,r)+d(q,q))",
-   "rel": "<=",
-   "rhs": "2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p r) (d q q))",
-   "rhs_form": "(mul 2 (d p r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p q)))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p r)))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d q r)))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,q)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d p q)))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d p r)))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d q r)))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (d q q))",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 2 (d q r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 2 (d q r))"
-  },
-  {
-   "lhs": "(d(q,q)+d(q,r))",
-   "rel": "<=",
-   "rhs": "2*d(q,r)",
-   "size": 12,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d q r))",
-   "rhs_form": "(mul 2 (d q r))"
   },
   {
    "lhs": "(u/2+-u)",
@@ -5613,26 +4673,6 @@
    "rhs_form": "(g p (scale 1/2 w) (neg w))"
   },
   {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,2u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d p (exp p (scale 2 u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,2u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d p (exp p (scale 2 u)))"
-  },
-  {
    "lhs": "1/2*d(p,exp(p,u))",
    "rel": "<=",
    "rhs": "d(p,exp(p,2u))",
@@ -5673,26 +4713,6 @@
    "rhs_form": "(d p (exp p (scale 2 u)))"
   },
   {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,u/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d p (exp p (scale 1/2 u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,u/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d p (exp p (scale 1/2 u)))"
-  },
-  {
    "lhs": "d(p,exp(p,u/2))",
    "rel": "=",
    "rhs": "1/2*d(p,exp(p,u))",
@@ -5721,26 +4741,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p (exp p (scale 1/2 u)))",
    "rhs_form": "(mul 2 (d p (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,2w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d p (exp p (scale 2 w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,2w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d p (exp p (scale 2 w)))"
   },
   {
    "lhs": "1/2*d(p,exp(p,w))",
@@ -5783,26 +4783,6 @@
    "rhs_form": "(d p (exp p (scale 2 w)))"
   },
   {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,w/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d p (exp p (scale 1/2 w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,w/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d p (exp p (scale 1/2 w)))"
-  },
-  {
    "lhs": "d(p,exp(p,w/2))",
    "rel": "=",
    "rhs": "1/2*d(p,exp(p,w))",
@@ -5831,246 +4811,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(d p (exp p (scale 1/2 w)))",
    "rhs_form": "(mul 2 (d p (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,2u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (scale 2 u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,2u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (scale 2 u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,u/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (scale 1/2 u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,u/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (scale 1/2 u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,-u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (neg u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,-u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (neg u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,2w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (scale 2 w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,2w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (scale 2 w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,w/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (scale 1/2 w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,w/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (scale 1/2 w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,-w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (neg w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,-w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (neg w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,2u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (scale 2 u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,2u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (scale 2 u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,u/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (scale 1/2 u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,u/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (scale 1/2 u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,-u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (neg u)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,-u))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (neg u)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,2w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (scale 2 w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,2w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (scale 2 w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,w/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (scale 1/2 w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,w/2))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (scale 1/2 w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,-w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (neg w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,-w))",
-   "size": 13,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (neg w)))"
   },
   {
    "lhs": "(u+(u+2u))",
@@ -6993,26 +5733,6 @@
    "rhs_form": "(vadd u (neg (vadd u (scale 2 w))))"
   },
   {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,(u+w)))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d p (exp p (vadd u w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(p,exp(p,(u+w)))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d p (exp p (vadd u w)))"
-  },
-  {
    "lhs": "1/2*d(p,exp(p,u))",
    "rel": "<=",
    "rhs": "d(p,exp(p,(u+w)))",
@@ -7043,146 +5763,6 @@
    "rhs_form": "(vadd u (log p (exp p w)))"
   },
   {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "1/2*d(p,exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 1/2 (d p (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "1/2*d(p,exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 1/2 (d p (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "1/2*d(q,exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 1/2 (d q (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "1/2*d(q,exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 1/2 (d q (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "1/2*d(r,exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 1/2 (d r (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "1/2*d(r,exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 1/2 (d r (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "2*d(p,exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 2 (d p (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "2*d(p,exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 2 (d p (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "2*d(q,exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 2 (d q (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "2*d(q,exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 2 (d q (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "2*d(r,exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 2 (d r (exp p u)))"
-  },
-  {
-   "lhs": "d(q,exp(p,log(p,q)))",
-   "rel": "<=",
-   "rhs": "2*d(r,exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp p (log p q)))",
-   "rhs_form": "(mul 2 (d r (exp p w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,(u+w)))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d q (exp p (vadd u w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(q,exp(p,(u+w)))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d q (exp p (vadd u w)))"
-  },
-  {
    "lhs": "1/2*1/2*d(p,q)",
    "rel": "<=",
    "rhs": "d(q,exp(p,(u+w)))",
@@ -7193,36 +5773,6 @@
    "rhs_form": "(d q (exp p (vadd u w)))"
   },
   {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,(u+w)))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d r (exp p (vadd u w)))"
-  },
-  {
-   "lhs": "d(q,exp(r,log(r,q)))",
-   "rel": "<=",
-   "rhs": "d(exp(p,u),exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d q (exp r (log r q)))",
-   "rhs_form": "(d (exp p u) (exp p w))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(r,exp(p,(u+w)))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d r (exp p (vadd u w)))"
-  },
-  {
    "lhs": "1/2*1/2*d(p,r)",
    "rel": "<=",
    "rhs": "d(r,exp(p,(u+w)))",
@@ -7231,36 +5781,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (mul 1/2 (d p r)))",
    "rhs_form": "(d r (exp p (vadd u w)))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(exp(p,u),exp(p,u))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d (exp p u) (exp p u))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(exp(p,u),exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d (exp p u) (exp p w))"
-  },
-  {
-   "lhs": "d(r,exp(q,log(q,r)))",
-   "rel": "<=",
-   "rhs": "d(exp(p,w),exp(p,w))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d r (exp q (log q r)))",
-   "rhs_form": "(d (exp p w) (exp p w))"
   },
   {
    "lhs": "exp(p,log(p,exp(p,u)))",
@@ -7303,26 +5823,6 @@
    "rhs_form": "(exp r (log r (exp p w)))"
   },
   {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,q)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p q)))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,q)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p q)))"
-  },
-  {
    "lhs": "1/2*1/2*d(p,q)",
    "rel": "<=",
    "rhs": "(d(p,q)+d(p,r))",
@@ -7331,16 +5831,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (mul 1/2 (d p q)))",
    "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(p,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d p q)))",
-   "rhs_form": "(add (d p q) (d q q))"
   },
   {
    "lhs": "1/2*1/2*d(p,q)",
@@ -7361,26 +5851,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (mul 1/2 (d p q)))",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p r)))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(p,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d p r)))"
   },
   {
    "lhs": "1/2*1/2*d(p,r)",
@@ -7405,132 +5875,12 @@
   {
    "lhs": "1/2*1/2*d(p,r)",
    "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d p r)))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "1/2*1/2*d(p,r)",
-   "rel": "<=",
    "rhs": "(d(p,r)+d(q,r))",
    "size": 14,
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (mul 1/2 (d p r)))",
    "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(q,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d q r)))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,q)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 2 (mul 2 (d p q)))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 2 (mul 2 (d p r)))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(q,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(mul 2 (mul 2 (d q r)))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q q)))",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "1/2*1/2*d(q,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 1/2 (mul 1/2 (d q r)))"
   },
   {
    "lhs": "1/2*1/2*d(q,r)",
@@ -7560,236 +5910,6 @@
    "hold": "1111111111111010111111111",
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul 1/2 (mul 1/2 (d q r)))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "1/2*1/2*d(q,r)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 1/2 (mul 1/2 (d q r)))",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,q)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 2 (mul 2 (d p q)))"
-  },
-  {
-   "lhs": "(d(p,q)+d(q,q))",
-   "rel": "<=",
-   "rhs": "2*2*d(p,q)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p q) (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d p q)))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(p,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 2 (mul 2 (d p r)))"
-  },
-  {
-   "lhs": "(d(p,r)+d(q,q))",
-   "rel": "<=",
-   "rhs": "2*2*d(p,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p r) (d q q))",
-   "rhs_form": "(mul 2 (mul 2 (d p r)))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "2*2*d(q,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(mul 2 (mul 2 (d q r)))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "2*2*d(q,q)",
-   "rel": "<=",
-   "rhs": "(d(q,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(mul 2 (mul 2 (d q q)))",
-   "rhs_form": "(add (d q q) (d q r))"
-  },
-  {
-   "lhs": "(d(q,q)+d(q,r))",
-   "rel": "<=",
-   "rhs": "2*2*d(q,r)",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d q r))",
-   "rhs_form": "(mul 2 (mul 2 (d q r)))"
-  },
-  {
-   "lhs": "d(exp(p,u),exp(p,u))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p u) (exp p u))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "d(exp(p,u),exp(p,u))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p u) (exp p u))",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "d(exp(p,u),exp(p,u))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p u) (exp p u))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "d(exp(p,u),exp(p,u))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p u) (exp p u))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "d(exp(p,u),exp(p,u))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p u) (exp p u))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "d(exp(p,w),exp(p,w))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p w) (exp p w))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "d(exp(p,w),exp(p,w))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p w) (exp p w))",
-   "rhs_form": "(add (d p q) (d q q))"
-  },
-  {
-   "lhs": "d(exp(p,w),exp(p,w))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p w) (exp p w))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "d(exp(p,w),exp(p,w))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,q))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p w) (exp p w))",
-   "rhs_form": "(add (d p r) (d q q))"
-  },
-  {
-   "lhs": "d(exp(p,w),exp(p,w))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(d (exp p w) (exp p w))",
    "rhs_form": "(add (d p r) (d q r))"
   },
   {
@@ -7821,96 +5941,6 @@
    "defined": "1111111111111010111111111",
    "lhs_form": "(mul (d p p) (d p p))",
    "rhs_form": "(mul (d q r) (d q r))"
-  },
-  {
-   "lhs": "(d(p,q)+d(q,q))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p q) (d q q))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "(d(p,r)+d(q,q))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p r) (d q q))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "(d(q,q)+d(q,r))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(p,r))",
-   "size": 14,
-   "hold": "1111111011111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d q r))",
-   "rhs_form": "(add (d p q) (d p r))"
-  },
-  {
-   "lhs": "(d(p,q)+d(q,q))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p q) (d q q))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "(d(p,q)+d(q,q))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111011111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p q) (d q q))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "(d(p,r)+d(q,q))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p r) (d q q))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "(d(q,q)+d(q,r))",
-   "rel": "<=",
-   "rhs": "(d(p,q)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d q r))",
-   "rhs_form": "(add (d p q) (d q r))"
-  },
-  {
-   "lhs": "(d(p,r)+d(q,q))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d p r) (d q q))",
-   "rhs_form": "(add (d p r) (d q r))"
-  },
-  {
-   "lhs": "(d(q,q)+d(q,r))",
-   "rel": "<=",
-   "rhs": "(d(p,r)+d(q,r))",
-   "size": 14,
-   "hold": "1111111111111010111111111",
-   "defined": "1111111111111010111111111",
-   "lhs_form": "(add (d q q) (d q r))",
-   "rhs_form": "(add (d p r) (d q r))"
   },
   {
    "lhs": "g_p(u,(u+2w))",
