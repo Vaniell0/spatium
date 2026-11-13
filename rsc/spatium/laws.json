@@ -30,12 +30,7 @@
   "SPD2-affinexS2",
   "CylinderxE3"
  ],
- "missing": [
-  {
-   "space": "SPD2-affine",
-   "operation": "unary minus on a tangent"
-  }
- ],
+ "missing": [],
  "laws": [
   {
    "lhs": "d(q,p)",
