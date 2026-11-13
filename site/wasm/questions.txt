@@ -15,6 +15,11 @@ sin(x) = 0.5 on [0, 10]
 exp(x) = x + 2
 cos(x) = x
 x^4 = 0
+d/dx sin(x)^2 * exp(-x)
+d/dx x^3 / 3 at 2
+d/dx log(x) at 0
+rows {"rows": [["Delimiter", ["Sequence", ["D", ["Delimiter", ["Power", "x", 3]], "x"], ["Equal", "x", 2]], {"str": ","}]]}
+rows {"rows": [{"text": "p in [0.5, 4]"}, {"text": "g = d/dp exp(-p^2) * p"}]}
 rows {"rows": [{"text": "p in [0.5, 4]"}, {"text": "x: abs(x - 1) - p = 0 on [1, 10]"}]}
 rows {"rows": [{"text": "p in [0.5, 4]"}, {"text": "x: x^2 - p = 0 on [0, 10]"}]}
 rows {"rows": [{"text": "p in [0, 3]"}, {"text": "I = integral exp(p * log(x)) dx on [0, 1]"}]}

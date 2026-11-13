@@ -23,6 +23,7 @@
 
 #include <spatium/answer/synthesis.hpp>
 #include <spatium/io/document.hpp>
+#include <spatium/io/field_derivative.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/algebra/quadrature.hpp>
 #include <spatium/algebra/roots.hpp>
@@ -137,6 +138,7 @@ struct Unfolded {
     Expr f;                          // a value's expression, a root's left side less its right, an integrand
     // a root's left side less its right as written: `f` before its constants are folded, which
     // rounds 1/3 and sqrt(2) to doubles; what an exact route reads
+    // (a derivative's function before it is differentiated, every chosen value in but its variable's)
     Expr written;
     Expr lo, hi;                     // the bracket or the limits, where written
     std::string bound;               // the name it binds itself: a root's unknown, an integral's variable
@@ -159,12 +161,16 @@ inline spatium::Result<Unfolded> unfolded(const spatium::io::build::Document& do
         if (!(number(p->lo.field) <= value && value <= number(p->hi.field)))
             return refuse(std::format("{} = {} is not on its interval [{}, {}]", name, value, p->lo.text, p->hi.text));
     }
-    const auto unfold = [&](Expr e) {
+    const auto values_in = [&](Expr e) {
         for (auto it = doc.statements.rbegin(); it != doc.statements.rend(); ++it)
             if (it->kind == bd::StatementKind::Value) e = e.bind(it->name, it->value.field);
+        return e;
+    };
+    const auto chosen_in = [&](Expr e) {
         for (const auto& [name, value] : chosen) e = e.bind(name, Expr(value));
         return e;
     };
+    const auto unfold = [&](Expr e) { return chosen_in(values_in(std::move(e))); };
     Unfolded out;
     switch (d.kind) {
         case bd::StatementKind::Root:
@@ -177,6 +183,22 @@ inline spatium::Result<Unfolded> unfolded(const spatium::io::build::Document& do
             }
             break;
         case bd::StatementKind::Integral: out.f = unfold(d.value.field), out.bound = d.variable; break;
+        case bd::StatementKind::Derivative: {
+            // differentiated before a chosen value is put in, which would make its variable a number;
+            // a variable that is no parameter is the derivative's own, as an integral's is
+            const Expr f = values_in(d.value.field);
+            auto g = bd::derivative(f, d.variable);
+            if (!g) return refuse(g.error().message);
+            out.f = chosen_in(*g);
+            // the function itself, every chosen value in but its variable's: what a dual number
+            // differentiates to check the rules by
+            out.written = f;
+            for (const auto& [name, value] : chosen)
+                if (name != d.variable) out.written = out.written.bind(name, Expr(value));
+            const bd::Statement* v = doc.find(d.variable);
+            if (!v || v->kind != bd::StatementKind::Parameter) out.bound = d.variable;
+            break;
+        }
         case bd::StatementKind::Parameter: out.f = unfold(Expr::symbol(d.name)); break;
         default: out.f = unfold(d.value.field); break;
     }

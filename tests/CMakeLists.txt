@@ -121,6 +121,7 @@ add_executable(spatium_tests
     test_field_simplify.cpp
     test_field_parse.cpp
     test_document.cpp
+    test_field_derivative.cpp
     test_io_roundtrip.cpp
     test_solution_steps.cpp
     test_scene_symbols.cpp

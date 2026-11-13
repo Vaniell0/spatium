@@ -10,13 +10,13 @@ export type Operator = (typeof operators)[number];
 export const constants = ["pi", "inf", "nan"] as const;
 export type Constant = (typeof constants)[number];
 
-export const statements = ["value", "parameter", "root", "integral", "shape"] as const;
+export const statements = ["value", "parameter", "root", "integral", "shape", "derivative"] as const;
 export type StatementKind = (typeof statements)[number];
 
 export const relations = ["=", "<", "<=", ">", ">="] as const;
 export type Relation = (typeof relations)[number];
 
-export const routes = ["at infinity", "evaluate", "expression", "closed form", "linear system", "interval method", "every root, proved", "root on a bracket", "integral", "synthesis"] as const;
+export const routes = ["at infinity", "evaluate", "expression", "derivative", "closed form", "linear system", "interval method", "every root, proved", "root on a bracket", "integral", "synthesis"] as const;
 export type Route = (typeof routes)[number];
 
 export const arithmetics = ["double", "float", "rational", "decimal", "real50"] as const;

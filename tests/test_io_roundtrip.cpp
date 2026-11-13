@@ -44,6 +44,9 @@ const Case cases[] = {
     {"", "x, y: x = 2y, y = 1", "x = 2y\ny = 1"},   // x reads a name below it: a system, not two definitions
     {"p in [0.5, 4]\n", "I = integral exp(-p * t^2) dt on [0, 1]", ""},
     {"r = 0.5\n", "S0 = torus(2, r)", ""},
+    {"", "answer = d/dx sin(x)^2", "d/dx sin(x)^2"},
+    {"", "answer = d/dx x^3 at 2", "d/dx x^3 at 2"},
+    {"p in [0.5, 4]\n", "g = d/dp exp(-p^2)", ""},
 };
 
 bd::Document read(const Case& c) {
