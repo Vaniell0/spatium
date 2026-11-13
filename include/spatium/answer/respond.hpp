@@ -227,6 +227,7 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
                 value = e.exact->den() == 1 ? *d
                         : spatium::io::build::detail::fraction_latex(*e.exact) + (d ? " = " + *d : "");
             }
+            if (e.shortest) value = *bd::to_latex(*e.shortest) + " \\approx " + value;
             out.emplace_back("latex", *bd::to_latex(e.written) + " = " + value);
             if (!e.steps.empty()) {
                 Array steps;
@@ -240,19 +241,19 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
         }
         case Route::Expression:
             out.emplace_back("reads", e.free.front());
-            out.emplace_back("latex", *bd::to_latex(e.written));
-            out.emplace_back("text", *bd::to_text(e.written));
+            out.emplace_back("latex", *bd::to_latex(e.shortest.value_or(e.written)));
+            out.emplace_back("text", *bd::to_text(e.shortest.value_or(e.written)));
             break;
         case Route::Derivative: {
             out.emplace_back("variable", e.variable);
-            out.emplace_back("text", *bd::to_text(e.written));
+            out.emplace_back("text", *bd::to_text(e.shortest.value_or(e.written)));
             if (e.at) {
                 out.emplace_back("at", *e.at);
                 out.emplace_back("value", e.values.front());
                 out.emplace_back("latex", std::format("{} = {}", *bd::to_latex(e.written), bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex)));
                 if (e.proved) out.emplace_back("proved", proved_json(*e.proved));
             } else {
-                out.emplace_back("latex", *bd::to_latex(e.written));
+                out.emplace_back("latex", *bd::to_latex(e.shortest.value_or(e.written)));
             }
             Array steps;
             for (const auto& st : e.candidates[*e.taken].steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
@@ -554,6 +555,9 @@ inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& 
         } else if (e.proved && !e.proved->exact && e.proved->digits > 0) {
             value = "\\approx " + e.proved->text;
         }
+        // a number that is no fraction, in its exact form beside its digits: 7\sqrt{6} \approx 17.146
+        if (e.shortest && c.route == Route::Evaluate)
+            value = *bd::to_latex(*e.shortest) + (value.starts_with("\\approx") ? " " : " = ") + value;
         result = (e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + (value.starts_with("\\approx") ? " " : " = ")) + value;
         if (e.proved && e.proved->exact) guarantee = "exact", strength = "exact";
         else if (e.proved && e.proved->digits > 0)
@@ -566,7 +570,7 @@ inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& 
     };
     const std::optional<Route> route = e.route();
     // the result in one line, as the route gives it; the cases below write their own
-    if (e.taken && route == Route::Expression) result = *bd::to_latex(e.written);
+    if (e.taken && route == Route::Expression) result = *bd::to_latex(e.shortest.value_or(e.written));
     if (e.taken && route == Route::Enclosed) result = enclosed_latex(e);
 
     if (!e.taken) {
@@ -621,7 +625,7 @@ inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& 
                 notes.push_back(std::format("the derivative at {} = {}", e.variable, text_of(*e.at)));
             } else {
                 outcome = "function", guarantee = "exact", strength = "exact";
-                result = named + *bd::to_latex(e.written);
+                result = named + *bd::to_latex(e.shortest.value_or(e.written));
                 notes.push_back(std::format("a function of {}, by the rules of each operation", e.variable));
             }
             Array steps;
