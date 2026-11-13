@@ -42,6 +42,7 @@
 #include <spatium/core/rational.hpp>
 #include <spatium/io/document.hpp>
 #include <spatium/io/field_pod.hpp>
+#include <spatium/io/field_shortest.hpp>
 #include <spatium/io/steps_text.hpp>
 
 #include <algorithm>
@@ -50,6 +51,7 @@
 #include <cstddef>
 #include <format>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -197,6 +199,9 @@ struct Evaluation {
     // the value, as the route taken gives it
     std::vector<double> values;          // the taken candidate's: a number, or the real roots a closed form keeps
     Expr written;                        // a value's expression as written, and as the function it is when free
+    // the expression a page shows, where its shortest form (io/field_shortest.hpp) shows less than
+    // `written`: a function's, a derivative's, or the exact form of a number, 7 sqrt(6)
+    std::optional<Expr> shortest;
     std::optional<ClosedForm> closed;
     std::optional<LinearSystem> linear;   // a system's solution, every unknown's value
     std::optional<Axis> axis;             // an inequality's solution
@@ -332,8 +337,13 @@ inline bool prove(const Expr& f, Arithmetic a, Evaluation& out) {
         return true;
     }
     // where every operation is one on fractions, the value is the fraction it is, exactly: the
-    // twelve a page of exercises asks for, not 12.000000000000002 and its proved digits
-    if (!bd::beyond<spatium::Rational>(*pod)) {
+    // twelve a page of exercises asks for, not 12.000000000000002 and its proved digits. Not where
+    // it reads pi, which is no fraction: the double nearest it read as one made 2 pi "exactly"
+    // 3141592653589793/500000000000000
+    const bool reads_pi = std::ranges::any_of(pod->ops, [](const auto& n) {
+        return static_cast<bd::Op>(n.code) == bd::Op::Const && std::abs(n.value) == std::numbers::pi;
+    });
+    if (!reads_pi && !bd::beyond<spatium::Rational>(*pod)) {
         const auto r = bd::interpret(bd::converted<spatium::Rational>(*pod), spatium::Rational(0), spatium::Rational(0));
         if (r.ok()) {
             const auto decimal = r.decimal();
@@ -348,6 +358,13 @@ inline bool prove(const Expr& f, Arithmetic a, Evaluation& out) {
 #endif
     (void)a;
     return prove<double>(*pod, out);
+}
+
+// what a page shows of an expression: its shortest form, where it is not the expression itself
+inline std::optional<Expr> shortest_of(const Expr& e) {
+    Expr s = spatium::io::build::shortest(e);
+    if (spatium::io::build::to_text(s).value_or("") == spatium::io::build::to_text(e).value_or("")) return std::nullopt;
+    return s;
 }
 
 inline std::string plain(double v) {
@@ -743,6 +760,8 @@ inline void evaluate_value(const RouteInput& in, Evaluation& out) {
             out.candidates.push_back({Route::Evaluate, 1, {}, {number(in.u.f)}, Arithmetic::Double, {}});
     }
     const bool real = prove(in.u.f, in.engine.arithmetic, out);
+    // the exact form of a number that is no fraction: sqrt(24) + sqrt(150) is 7 sqrt(6)
+    if (real && !out.exact) out.shortest = shortest_of(in.u.f);
     if (auto steps = spatium::io::build::evaluation_steps(in.u.f)) out.steps = std::move(*steps);
     // no real number, though a double gives inf or NaN: refused, naming the operation that has none
     if (!real) {
@@ -760,6 +779,7 @@ inline void evaluate_value(const RouteInput& in, Evaluation& out) {
 
 inline void expression(const RouteInput& in, Evaluation& out) {
     out.written = in.u.f;   // the function, exact, in the parameter's name
+    out.shortest = shortest_of(out.written);
     out.candidates.push_back({Route::Expression, 0, {}, {}, Arithmetic::Double, {}});
 }
 
@@ -807,6 +827,8 @@ inline void derivative(const RouteInput& in, Evaluation& out) {
             std::format("\\max \\left|\\Delta\\right| = {}", bd::detail::number_text(agreed.difference, bd::detail::TextStyle::Latex)))}});
     }
     out.written = g;
+    if ((out.shortest = shortest_of(g)))
+        c.steps.emplace_back("like terms collected, over one denominator", "= " + *bd::to_latex(*out.shortest));
     if (!out.at) return out.candidates.push_back(std::move(c));
     const Expr there = g.bind(x, Expr(*out.at));
     c.values = {number(there)};
