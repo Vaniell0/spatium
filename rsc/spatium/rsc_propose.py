@@ -121,8 +121,9 @@ def main():
     commits = git("log", "--oneline", f"{a.base}..{branch}").strip().splitlines()
     report = {"task": task, "index": a.task, "branch": branch, "proposer": proposer, "commits": commits}
     if commits:
-        j = subprocess.run([sys.executable, str(ROOT / "rsc" / "spatium" / "rsc_judge.py"), branch, "--task", str(a.task),
-                            "--base", a.base], cwd=ROOT, capture_output=True, text=True)
+        # inside the flake's shell, as every build here is: outside it the tests do not find Catch2
+        j = subprocess.run(["nix", "develop", "-c", "python3", str(ROOT / "rsc" / "spatium" / "rsc_judge.py"), branch,
+                            "--task", str(a.task), "--base", a.base], cwd=ROOT, capture_output=True, text=True)
         try:
             report["verdict"] = json.loads(j.stdout)
         except json.JSONDecodeError:
