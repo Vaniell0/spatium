@@ -217,6 +217,9 @@ jobs:
       - name: The rules of the law check (what a change is, what a task is)
         run: python3 rsc/spatium/test_rsc_laws.py
 
+      - name: The rules of the judge (size, tests no weaker, a task done, a regression)
+        run: python3 rsc/spatium/test_rsc_judge.py
+
       - name: The laws of the spaces still hold where they held
         run: nix develop --command bash -c 'python3 rsc/spatium/rsc_laws.py check'
 
