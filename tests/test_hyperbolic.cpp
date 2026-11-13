@@ -10,6 +10,7 @@
 
 using namespace spatium;
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 
 TEST_CASE("Hyperbolic concept satisfaction", "[hyperbolic]") {
     static_assert(RiemannianManifold<H2>);
@@ -41,6 +42,29 @@ TEST_CASE("Hyperbolic distance: same point", "[hyperbolic]") {
     H2 space;
     auto o = H2::origin();
     CHECK_THAT(space.distance(o, o), WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("Hyperbolic distance: a point is at distance 0 from itself far from the origin", "[hyperbolic][distance_self]") {
+    // -<p,p> is 1 plus rounding once p is a few units out, and acosh of that
+    // was 1e-8 (d(p,p) = d(exp(p,w), exp(p,w)) failed on H^n).
+    H2 space;
+    auto p = H2::origin();
+    for (double s : {0.5, 3.0, 8.0, 12.0}) {
+        p = space.exp_map(p, Vec3{0.0, 0.8, 0.6}, s);
+        CHECK(space.distance(p, p) == 0.0);
+    }
+    Hyperbolic<4> h4;
+    auto q4 = h4.exp_map(Hyperbolic<4>::origin(), Vec<double, 5>{0.0, 0.3, -0.5, 0.7, 0.1}, 9.0);
+    CHECK(h4.distance(q4, q4) == 0.0);
+}
+
+TEST_CASE("Hyperbolic distance: far from the origin agrees with the closed form", "[hyperbolic][distance_self]") {
+    // Two points on one geodesic through the origin are |s - t| apart.
+    H2 space;
+    for (auto [s, t] : {std::pair{7.0, 7.5}, std::pair{10.0, -4.0}, std::pair{1e-4, 2e-4}}) {
+        Vec3 a{std::cosh(s), std::sinh(s), 0.0}, b{std::cosh(t), std::sinh(t), 0.0};
+        CHECK_THAT(space.distance(a, b), WithinRel(std::abs(s - t), 1e-9));
+    }
 }
 
 TEST_CASE("Hyperbolic distance: known values", "[hyperbolic]") {
