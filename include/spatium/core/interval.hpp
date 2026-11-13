@@ -364,6 +364,13 @@ template<Scalar T> Interval<T> log(const Interval<T>& x) {
     return interval_detail::log_ends(x);
 }
 
+// atan rises everywhere, so its ends are the ends' arctangents, each moved by the function's error.
+template<Scalar T> Interval<T> atan(const Interval<T>& x) {
+    using std::atan;
+    using namespace interval_detail;
+    return {fdown(T(atan(x.lo)), T(1), 2), fup(T(atan(x.hi)), T(1), 2)};
+}
+
 namespace interval_detail {
 // Whether some phase + 2 pi k may lie on [lo, hi], k an integer: decided by where the ends fall in
 // periods, with a margin for the rounding of that division, so that "may" is never "no" wrongly.

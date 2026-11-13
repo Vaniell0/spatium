@@ -29,6 +29,10 @@ export import :dual;
 export import :ode;
 export import :linear_solve;
 export import :calculus;
+// algebra/zeta.hpp stays header-only: as a partition, the quadrature, series and min/max
+// instantiations its inline functions make were taken by importers as emitted there and were
+// not, so a consumer of std::clamp<double> in spatium.render failed to link (GCC 15 modules-ts,
+// the class of the Sky int-vector link failure). Module consumers `#include` it directly.
 // algebra/eigen_interop.hpp stays header-only in Phase 1 — SSE intrinsics
 // pulled by Eigen/Core and by vec_simd's GMF cause conflicting language linkage
 // when both BMIs land in the same TU. Revisit once header units (or a SIMD

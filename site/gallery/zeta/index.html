@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riemann zeta</title>
+<meta name="description" content="Hardy's Z(t) with its zeros proved, zeta over the plane, and notes the library writes.">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../../vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../../style.css">
+<script>
+  // the theme and text size before the first paint, so the page does not flash
+  try {
+    const s = JSON.parse(localStorage.getItem("spatium.settings") || "{}");
+    if (s.theme === "light" || s.theme === "dark") document.documentElement.dataset.theme = s.theme;
+    if (s.scale) document.documentElement.style.setProperty("--scale", s.scale);
+  } catch {}
+</script>
+<script defer src="../../vendor/katex/katex.min.js"></script>
+<script type="module" src="../../pkg/src/zeta.js"></script>
+</head>
+<body>
+<header class="bar">
+  <a class="mark" href="../../">spatium</a>
+  <span class="beta">beta</span>
+  <nav class="seg preset" aria-label="Page">
+    <a href="../../">Calculator</a>
+    <a href="../../#canvas">Canvas</a>
+  </nav>
+  <nav class="add" aria-label="Pages">
+    <a href="../../#ref">Reference</a>
+    <a href="../" aria-current="page">Gallery</a>
+  </nav>
+</header>
+<main class="zeta" aria-label="Riemann zeta">
+  <div class="zhead">
+    <h1>Riemann zeta</h1>
+    <form class="zwin" aria-label="Window">
+      <label>t from <input name="t0" inputmode="decimal" class="mono" value="0"></label>
+      <label>to <input name="t1" inputmode="decimal" class="mono" value="50"></label>
+      <button class="quiet dense">Show</button>
+      <span class="zpresets"></span>
+    </form>
+  </div>
+  <section class="view wide" id="v-hardy"><h2>Z(t) on the critical line, s = ½ + it</h2><p class="gist"></p><div id="hardy" class="zbox"></div><ul id="zero-list" class="zero-list"></ul></section>
+  <section class="view" id="v-map"><h2>ζ(σ + it)</h2><p class="gist"></p><div id="map" class="zmap"><canvas></canvas></div></section>
+  <section class="view" id="v-notes"><h2>Notes</h2><ol id="notes" class="notes"></ol></section>
+</main>
+</body>
+</html>

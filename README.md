@@ -41,6 +41,24 @@ described the scene as spaces buys.
 
 More in [`gallery/`](gallery/).
 
+## Computed: the sixth moment of zeta to 2·10⁸
+
+The integral of |ζ(½ + it)|⁶ from 0 to T = 2·10⁸, 85 times past the last table of it (Conrey, Farmer,
+Keating, Rubinstein and Snaith 2005, to 2.35·10⁶), against their conjectured polynomial: the ratio is
+0.99998 at 2·10⁸, and the remainder grows as √T·log⁶T would. Their table's computed column turns out
+low by 2·10⁻⁷ to 4·10⁻⁶ in every block, which three separate routes here agree on. Z is held against the
+proved Z, mpmath and Odlyzko's tables of zeros (all 9998 near zero number 10¹² found, to 2.5·10⁻⁹);
+the cut of the Riemann–Siegel formula is bounded by Gabcke's estimate. A block of 50 000 at t = 10⁸
+takes 18 s on one laptop core: the phases of the sum turn from one unit of t to the next instead of
+being recomputed. It needs the headers and a C++23 compiler, nothing else:
+
+```bash
+g++ -std=c++23 -O3 -march=native -pthread -Iinclude examples/zeta_moments.cpp -o zeta_moments
+./zeta_moments 3 0 2350000 50000 12    # k, from, to, block, threads: CFKRS's whole table, 42 s
+```
+
+Data, method and error budget: [docs/zeta/sixth-moment.md](docs/zeta/sixth-moment.md).
+
 ## Features
 
 **Spaces.** The concept hierarchy — Set, TopologicalSpace, MetricSpace,
