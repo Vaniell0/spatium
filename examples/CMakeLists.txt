@@ -76,6 +76,7 @@ spatium_add_example(NAME chess_zero OPTIONS -O3 -march=native INCLUDE_DIRS ${PRO
 # The moments of zeta on the critical line, block by block in threads, beside the integral of the
 # polynomial the moment conjecture of Conrey, Farmer, Keating, Rubinstein and Snaith gives.
 spatium_add_example(NAME zeta_moments OPTIONS -O3 -march=native)
+spatium_add_example(NAME zeta_laws)
 
 # The gallery of solved questions the page reads, site/gallery/gallery.json: equations solved in
 # closed form with their steps, questions with a parameter answered by synthesis, a scene in LaTeX.
