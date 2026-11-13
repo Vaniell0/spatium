@@ -4,6 +4,7 @@
     python3 rsc/spatium/rsc_laws.py discover [--size N]          enumerate; write laws.json, laws-report.md, tasks.json
     python3 rsc/spatium/rsc_laws.py check [SPACE ...]            the laws of laws.json again on those spaces (all if none)
     python3 rsc/spatium/rsc_laws.py check --changed REV          on the spaces whose headers changed since REV
+    python3 rsc/spatium/rsc_laws.py missing                      the arithmetic a space's tangent lacks, now
 
 `discover` runs rsc_laws.cpp: terms over the operations of core/access.hpp, typed by sort and by
 degree in length, evaluated on every space of the connectivity matrix on inputs a breaker moves,
@@ -254,6 +255,17 @@ def check(only, changed):
     return 1 if changes else 0
 
 
+def missing():
+    with tempfile.TemporaryDirectory() as work:
+        exe = build(pathlib.Path(work))
+        r = subprocess.run([str(exe), "missing"], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit("rsc_laws missing failed:\n" + r.stderr[-4000:])
+    rows = [dict(zip(("space", "operation"), line.split("\t"))) for line in r.stdout.splitlines()]
+    print(json.dumps(rows))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -262,7 +274,10 @@ def main():
     c = sub.add_parser("check")
     c.add_argument("spaces", nargs="*")
     c.add_argument("--changed", metavar="REV")
+    sub.add_parser("missing")
     a = ap.parse_args()
+    if a.mode == "missing":
+        return missing()
     if a.mode == "discover":
         discover(a.size)
         return 0

@@ -749,7 +749,15 @@ int check(const std::vector<std::string>& only) {
 
 // rsc_laws [max size]            discover: enumerate, print the laws as JSON
 // rsc_laws check space...        check: laws on stdin, evaluated on those spaces alone
+// rsc_laws missing               the arithmetic each space's tangent lacks, a line each, no enumeration
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "check") return laws::check(std::vector<std::string>(argv + 2, argv + argc));
+    if (argc > 1 && std::string(argv[1]) == "missing") {
+        laws::World w;
+        laws::all_spaces(w);
+        for (auto& s : w.spaces)
+            for (auto& m : s->missing()) std::printf("%s\t%s\n", s->name.c_str(), m.c_str());
+        return 0;
+    }
     return laws::run(argc > 1 ? std::atoi(argv[1]) : 6);
 }
