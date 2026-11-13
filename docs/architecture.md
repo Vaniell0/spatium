@@ -265,7 +265,7 @@ algebra/                                — linear algebra, complex, polynomials
   models/softmax.hpp                     LinearSoftmax<K, T> — softmax over a linear score, gradient, no allocation
   models/network.hpp                     TanhNet<F, H, T> — one hidden tanh layer, squared loss, backward pass
   models/tree.hpp                        ScoreTree<K, T> — column thresholds scoring a row, bits; softmax of scores
-  analysis/optimize.hpp                  AdaGrad<N, T>, Adam<N, T> — step rules given a gradient
+  analysis/optimize.hpp                  AdaGrad<N, T>, Adam<N, T>, Muon<N, R, C, T> — step rules given a gradient
 
 spaces/                                 — concrete mathematical spaces
   euclidean.hpp          94 lines        Euclidean<N,T> — flat space, satisfies all concepts

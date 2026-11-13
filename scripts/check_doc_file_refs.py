@@ -144,6 +144,7 @@ NOT_IN_TREE = {
     # -- generated at build time, so it only ever exists inside a build dir
         # -- another project's tree
     "micro_wkv.py": "lives in the noesis repository, not this one",
+    "muon.py": "the reference Muon optimizer, github.com/KellerJordan/Muon; read whole for algebra/analysis/optimize.hpp",
 }
 
 
