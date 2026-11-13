@@ -10,8 +10,8 @@ step that fails:
 
   size        the change against the base: files touched, lines added and removed,
               S = touched / (net growth + 1), reported, never a reason to refuse
-  no weaker   the tests may grow and may not shrink: TEST_CASEs and assertions under tests/ are
-              counted on both sides
+  no weaker   the tests may grow and may not shrink: every TEST_CASE of the base is still there by
+              name, and TEST_CASEs and assertions under tests/ are counted on both sides
   builds      the test binary builds
   tests       every test case passes but the connectivity matrix's (which has its own job in CI)
   the task    for a law: rsc_laws.py check on the task's space reports the task's law as now
@@ -81,6 +81,18 @@ def strength(sources):
     return {"test_cases": cases, "assertions": asserts}
 
 
+def case_names(sources):
+    return {m for s in sources for m in re.findall(r'\bTEST_CASE\s*\(\s*"((?:[^"\\]|\\.)*)"', s)}
+
+
+def weaker(before_sources, after_sources):
+    """What makes the tests weaker: a test case of the base gone (by name), or fewer of either count.
+    A count alone can be kept by removing a test and adding an empty one; a name cannot."""
+    gone = sorted(case_names(before_sources) - case_names(after_sources))
+    b, a = strength(before_sources), strength(after_sources)
+    return gone, [k for k in b if a[k] < b[k]], b, a
+
+
 def law_changes(output):
     """The lines of rsc_laws.py check: (space, law, what) for each change it lists."""
     out = []
@@ -139,9 +151,11 @@ def judge(branch, base, task):
     step("size", True, size, t)
 
     t = time.time()
-    before, after = strength(test_sources(merge_base)), strength(test_sources(branch))
-    weaker = [k for k in before if after[k] < before[k]]
-    if not step("no weaker", not weaker, {"before": before, "after": after}, t):
+    gone, fewer, before, after = weaker(test_sources(merge_base), test_sources(branch))
+    seen = {"before": before, "after": after}
+    if gone:
+        seen["test cases gone"] = gone[:10]
+    if not step("no weaker", not gone and not fewer, seen, t):
         return steps
 
     t = time.time()

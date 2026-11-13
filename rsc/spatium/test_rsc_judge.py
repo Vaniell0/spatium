@@ -40,6 +40,24 @@ class Strength(unittest.TestCase):
         self.assertEqual(rj.strength(["bool checked(int); recheck(1);"])["assertions"], 0)
 
 
+class Weaker(unittest.TestCase):
+    BASE = ['TEST_CASE("one") { CHECK(a); CHECK(b); }', 'TEST_CASE("two", "[t]") { REQUIRE(c); }']
+
+    def test_a_test_added_is_no_weaker(self):
+        gone, fewer, _, _ = rj.weaker(self.BASE, self.BASE + ['TEST_CASE("three") { CHECK(d); }'])
+        self.assertEqual((gone, fewer), ([], []))
+
+    def test_a_test_swapped_for_another_is_caught_by_name(self):
+        after = [self.BASE[0], 'TEST_CASE("an empty one") { CHECK(true); }']
+        gone, fewer, _, _ = rj.weaker(self.BASE, after)
+        self.assertEqual(gone, ["two"])
+        self.assertEqual(fewer, [])
+
+    def test_an_assertion_dropped_is_caught_by_count(self):
+        gone, fewer, _, _ = rj.weaker(self.BASE, ['TEST_CASE("one") { CHECK(a); }', self.BASE[1]])
+        self.assertEqual((gone, fewer), ([], ["assertions"]))
+
+
 class Laws(unittest.TestCase):
     def test_the_check_output_is_read_line_by_line(self):
         self.assertEqual(rj.law_changes(CHECK), [
