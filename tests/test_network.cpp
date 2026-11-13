@@ -114,6 +114,36 @@ TEST_CASE("Adam's first step is the rate, signed, and its steps barely see the g
     }
 }
 
+TEST_CASE("Muon's step of a matrix is orthogonal, and does not see the gradient's scale", "[network][muon]") {
+    // a 6 by 3 gradient whose singular values are 10, 1 and 0.1, along rows 0, 2, 4
+    std::array<double, 18> g{};
+    g[0 * 3 + 0] = 10, g[2 * 3 + 1] = 1, g[4 * 3 + 2] = 0.1;
+    const auto o = Muon<18, 6, 3>::orthogonalized(g, 1e-7);
+    // the case it must fail: the gradient itself is a hundred times longer one way than another
+    CHECK(g[0] / g[4 * 3 + 2] == 100);
+    for (std::size_t i = 0; i < 18; ++i) {
+        const bool kept = i == 0 || i == 2 * 3 + 1 || i == 4 * 3 + 2;
+        if (kept) CHECK((o[i] > 0.5 && o[i] < 1.5));   // each singular value moved into about (0.5, 1.5)
+        else CHECK(std::abs(o[i]) < 1e-12);              // and the directions kept
+    }
+    std::array<double, 18> scaled = g;
+    for (double& v : scaled) v *= 1000;
+    const auto o2 = Muon<18, 6, 3>::orthogonalized(scaled, 1e-7);
+    for (std::size_t i = 0; i < 18; ++i) CHECK_THAT(o2[i], WithinAbs(o[i], 1e-7));   // the 1e-7 beside the norm, and nothing else
+}
+
+TEST_CASE("fitted by Muon, the net learns the function it is shown", "[network][fit][muon]") {
+    const auto train = points(11, 6000);
+    const auto held_out = points(99, 300);
+    Net net = Net::random(1);
+    Muon<Net::weight_count, hidden, inputs> rule;   // the hidden layer, H by F, by Muon; the rest by Adam
+    std::mt19937_64 rng(5);
+    statistics::fit_pass(net.weights(), rule, std::span<const Point>(train), 0.02, rng, [&](const Point& p) {
+        return statistics::Fit<Net::Weights>{net.loss(p.x, p.target), net.gradient(p.x, p.target)};
+    });
+    CHECK(mean_error(net, held_out) < 0.01);
+}
+
 TEST_CASE("fitted by Adam, the net learns the function it is shown", "[network][fit]") {
     const auto train = points(11, 6000);
     const auto held_out = points(99, 300);
