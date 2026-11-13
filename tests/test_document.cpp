@@ -328,6 +328,10 @@ TEST_CASE("to_trace: a parameter is drawn at the value chosen for it, and what a
     CHECK(scene_latex(text) == "p: a parameter on [0.5, 4], drawn at a value it is not given");
     CHECK(scene_latex(text, {{"p", 5.0}}) == "p: choose(p): the value is not on its interval");
     CHECK(scene_latex("I = integral t dt on [0, 1]\nS = sphere(I)") == "I: an integral, which is not a number a scene takes");
+    // a derivative is a number at its point or at its parameter's chosen value, and a function otherwise
+    CHECK(scene_latex("r = d/dx x^2 / 4 at 2\nS = sphere(r)").find("\\operatorname{sphere}\\left(1\\right)") != std::string::npos);
+    CHECK(scene_latex("p in [0.5, 4]\nr = d/dp p^2\nS = sphere(r)", {{"p", 1.5}}).find("\\operatorname{sphere}\\left(3\\right)") != std::string::npos);
+    CHECK(scene_latex("r = d/dx x^2\nS = sphere(r)").starts_with("r: a derivative in x is a function of it"));
     CHECK(scene_latex("S = sphere(1)\nT = scatter(S, S, 2.5)") == "T: scatter: '2.5' is 2.5, not a whole number from 0 to 1000000000");
     CHECK(scene_latex("r = 1") == "the document has no shape");
     // a builder's own refusal, named by the line it came from: an open base has no offset

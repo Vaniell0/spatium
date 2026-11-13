@@ -52,19 +52,22 @@ struct Function {
     std::string_view mathjson;  // the head a LaTeX editor's MathJSON names it by (field_mathjson.hpp)
     Op op;                      // the op of the field it is
     std::string_view latex;     // how a page writes it, its arguments in {0} and {1} (field_text.hpp)
+    // its derivative in each argument, in the language, the arguments read as a and b: what the
+    // chain rule multiplies each argument's own derivative by (field_derivative.hpp)
+    std::array<std::string_view, 2> derivative = {};
 };
 
 inline constexpr std::array<Function, 9> functions{{
-    {"sin", 1, "sine, of an angle in radians", "every x", "sin(pi / 6)", "Sin", Op::Sin, "\\sin\\left({0}\\right)"},
-    {"cos", 1, "cosine, of an angle in radians", "every x", "cos(pi / 3)", "Cos", Op::Cos, "\\cos\\left({0}\\right)"},
-    {"log", 1, "natural logarithm, the inverse of exp", "x > 0", "log(10)", "Ln", Op::Log, "\\ln\\left({0}\\right)"},
-    {"exp", 1, "exponential, e raised to x", "every x", "exp(1)", "Exp", Op::Exp, "\\exp\\left({0}\\right)"},
-    {"sqrt", 1, "square root", "x >= 0", "sqrt(2)", "Sqrt", Op::Sqrt, "\\sqrt{{{0}}}"},
-    {"abs", 1, "absolute value, the size of x", "every x", "abs(-3)", "Abs", Op::Abs, "\\left|{0}\\right|"},
-    {"min", 2, "the smaller of two numbers", "every x, y", "min(2, 3)", "Min", Op::Min, "\\min\\left({0}, {1}\\right)"},
-    {"max", 2, "the larger of two numbers", "every x, y", "max(2, 3)", "Max", Op::Max, "\\max\\left({0}, {1}\\right)"},
+    {"sin", 1, "sine, of an angle in radians", "every x", "sin(pi / 6)", "Sin", Op::Sin, "\\sin\\left({0}\\right)", {"cos(a)"}},
+    {"cos", 1, "cosine, of an angle in radians", "every x", "cos(pi / 3)", "Cos", Op::Cos, "\\cos\\left({0}\\right)", {"-sin(a)"}},
+    {"log", 1, "natural logarithm, the inverse of exp", "x > 0", "log(10)", "Ln", Op::Log, "\\ln\\left({0}\\right)", {"1 / a"}},
+    {"exp", 1, "exponential, e raised to x", "every x", "exp(1)", "Exp", Op::Exp, "\\exp\\left({0}\\right)", {"exp(a)"}},
+    {"sqrt", 1, "square root", "x >= 0", "sqrt(2)", "Sqrt", Op::Sqrt, "\\sqrt{{{0}}}", {"1 / (2 * sqrt(a))"}},
+    {"abs", 1, "absolute value, the size of x", "every x", "abs(-3)", "Abs", Op::Abs, "\\left|{0}\\right|", {"a / abs(a)"}},
+    {"min", 2, "the smaller of two numbers", "every x, y", "min(2, 3)", "Min", Op::Min, "\\min\\left({0}, {1}\\right)", {"less(a, b)", "1 - less(a, b)"}},
+    {"max", 2, "the larger of two numbers", "every x, y", "max(2, 3)", "Max", Op::Max, "\\max\\left({0}, {1}\\right)", {"less(b, a)", "1 - less(b, a)"}},
     {"less", 2, "1 where the first is below the second, else 0: a step that composes by multiplication",
-     "every x, y", "less(1, 2)", "", Op::Less, "\\left[{0} < {1}\\right]"},   // MathJSON's Iverson bracket is Boole
+     "every x, y", "less(1, 2)", "", Op::Less, "\\left[{0} < {1}\\right]", {"0", "0"}},   // MathJSON's Iverson bracket is Boole
 }};
 
 // A function of the table applied to its arguments, as many as its arity: the one place a name of

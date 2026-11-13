@@ -27,27 +27,29 @@ In the formula editor, what is typed becomes the formula shown, which reads as t
 | $f = g \\ h = k$ | a system: one row per equation, an equation per unknown | $x + y = 3$<br>$x - y = 1$ | Exact, by elimination in fractions |
 | $p \in [c, d]$ | a parameter: a row below that reads it is answered as a function of p, synthesised and certified | $p \in \left[0.5, 4\right]$<br>$x^{2} - p = 0, x \in \left[0, 10\right]$ | Relative error below 10⁻¹⁵, certified on 2001 points |
 | $I = \int_a^b f\,dt$ | an integral; a limit may be a parameter above | $x \in \left[0.5, 6\right]$<br>$\mathrm{Si} = \int_{0}^{x} \frac{\sin\left(t\right)}{t}\,dt$ | Relative error below 10⁻¹², certified on 2001 points |
+| $\frac{d}{dx} f$ | a derivative, by the rule of each operation, checked against a dual number | $\frac{d}{dx}\left(\sin\left(x\right)^{2}\right)$ | Exact, a function of x, by the rules of each operation, checked by a dual number |
+| $\frac{d}{dx} f,\ x = a$ | a derivative at a point, its digits proved | $\frac{d}{dx}\left(\frac{x^{3}}{3}\right), x = 2$ | Exact, the derivative at x = 2, checked by a dual number |
 
 ## Functions
 
-The editor's notation, the language's text, where each has a value, and an example.
+The editor's notation, the language's text, where each has a value, its derivative in each argument a and b, and an example.
 
-| written | in the language | | defined for | example |
-|---|---|---|---|---|
-| $\sin x$ | `sin` | sine, of an angle in radians | every x | `sin(pi / 6)` |
-| $\cos x$ | `cos` | cosine, of an angle in radians | every x | `cos(pi / 3)` |
-| $\tan x$ | `sin(pi / 4) / cos(pi / 4)` | tangent, sin x / cos x | every x where cos x is not 0 | `sin(pi / 4) / cos(pi / 4)` |
-| $\exp x$ | `exp` | exponential, e raised to x | every x | `exp(1)` |
-| $\ln x$ | `log` | natural logarithm, the inverse of exp | x > 0 | `log(2)` |
-| $\lg x$ | `log(100) / log(10)` | logarithm in base 10; \log x alone is the same | x > 0 | `log(100) / log(10)` |
-| $\log_{b} x$ | `log(81) / log(3)` | logarithm in base b | x > 0, b > 0, b not 1 | `log(81) / log(3)` |
-| $\log_{2} x$ | `log(8) / log(2)` | logarithm in base 2 | x > 0 | `log(8) / log(2)` |
-| $\sqrt{x}$ | `sqrt` | square root | x >= 0 | `sqrt(2)` |
-| $\sqrt[n]{x}$ | `8^(1/3)` | the n-th root | x > 0 | `8^(1/3)` |
-| $\left\|x\right\|$ | `abs` | absolute value, the size of x | every x | `abs(-3)` |
-| $\min\left(x, y\right)$ | `min` | the smaller of two numbers | every x, y | `min(2, 3)` |
-| $\max\left(x, y\right)$ | `max` | the larger of two numbers | every x, y | `max(2, 3)` |
-| $\left[x < y\right]$ | `less` | 1 where the first is below the second, else 0: a step that composes by multiplication | every x, y | `less(1, 2)` |
+| written | in the language | | defined for | derivative | example |
+|---|---|---|---|---|---|
+| $\sin x$ | `sin` | sine, of an angle in radians | every x | `cos(a)` | `sin(pi / 6)` |
+| $\cos x$ | `cos` | cosine, of an angle in radians | every x | `-sin(a)` | `cos(pi / 3)` |
+| $\tan x$ | `sin(pi / 4) / cos(pi / 4)` | tangent, sin x / cos x | every x where cos x is not 0 |  | `sin(pi / 4) / cos(pi / 4)` |
+| $\exp x$ | `exp` | exponential, e raised to x | every x | `exp(a)` | `exp(1)` |
+| $\ln x$ | `log` | natural logarithm, the inverse of exp | x > 0 | `1 / a` | `log(2)` |
+| $\lg x$ | `log(100) / log(10)` | logarithm in base 10; \log x alone is the same | x > 0 |  | `log(100) / log(10)` |
+| $\log_{b} x$ | `log(81) / log(3)` | logarithm in base b | x > 0, b > 0, b not 1 |  | `log(81) / log(3)` |
+| $\log_{2} x$ | `log(8) / log(2)` | logarithm in base 2 | x > 0 |  | `log(8) / log(2)` |
+| $\sqrt{x}$ | `sqrt` | square root | x >= 0 | `1 / (2 * sqrt(a))` | `sqrt(2)` |
+| $\sqrt[n]{x}$ | `8^(1/3)` | the n-th root | x > 0 |  | `8^(1/3)` |
+| $\left\|x\right\|$ | `abs` | absolute value, the size of x | every x | `a / abs(a)` | `abs(-3)` |
+| $\min\left(x, y\right)$ | `min` | the smaller of two numbers | every x, y | `less(a, b)`, `1 - less(a, b)` | `min(2, 3)` |
+| $\max\left(x, y\right)$ | `max` | the larger of two numbers | every x, y | `less(b, a)`, `1 - less(b, a)` | `max(2, 3)` |
+| $\left[x < y\right]$ | `less` | 1 where the first is below the second, else 0: a step that composes by multiplication | every x, y | `0`, `0` | `less(1, 2)` |
 
 ## Operators
 
@@ -84,6 +86,7 @@ A document is lines, a definition each; a line reads the names the lines above i
 | `x, y: f = g, h = k` | a system: an equation for each unknown | `x, y: x + y = 3, x - y = 1` | $x + y = 3$<br>$x - y = 1$ |
 | `p in [a, b]` | a parameter: a line that reads it is answered as a function of it | `p in [0.5, 4]<br>x: x^2 - p = 0 on [0, 10]` | $p \in \left[0.5, 4\right]$<br>$x^{2} - p = 0, x \in \left[0, 10\right]$ |
 | `I = integral f dt on [a, b]` | an integral in the variable after d | `I = integral t^2 dt on [0, 1]` | $I = \int_{0}^{1} t^{2}\,dt$ |
+| `g = d/dx f` | a derivative in the variable after d/d: a function of it, or its value at a point after at | `g = d/dx sin(x)^2<br>h = d/dx x^3 at 2` | $g = \frac{d}{dx}\left(\sin\left(x\right)^{2}\right)$<br>$h = \frac{d}{dx}\left(x^{3}\right), x = 2$ |
 | `S = torus(R, r)` | a shape, from the operations below; another reads it by name | `S0 = torus(2, 0.5)<br>S1 = offset(S0, 0.1)` |  |
 | `# words` | a comment, to the end of the line | `r = 2  # the radius` | $r = 2$ |
 

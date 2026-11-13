@@ -58,7 +58,7 @@
 
 namespace spatium::answer {
 
-enum class Route { AtInfinity, Evaluate, Expression, ClosedForm, Linear, Intervals, Enclosed, Bracket, Integral, Synthesis };
+enum class Route { AtInfinity, Evaluate, Expression, Derivative, ClosedForm, Linear, Intervals, Enclosed, Bracket, Integral, Synthesis };
 
 enum class Arithmetic { Double, Float, Rational, Decimal, Real50 };
 
@@ -215,6 +215,9 @@ struct Evaluation {
     // a value that reads an infinity, as its limit with every infinity one x growing without bound
     std::optional<spatium::LimitResult<double>> limit;
     std::string parameter;               // the name the answer's pieces read as U
+    // a derivative: the variable it is in, and the point it is taken at, where it is a number there
+    std::string variable;
+    std::optional<double> at;
 
     // the route of the value, or of the first refusal when there is none
     std::optional<Route> route() const {
@@ -593,6 +596,47 @@ inline Candidate interval_method(const Expr& f, const Expr& written, const std::
     return c;
 }
 
+// A derivative its rules write (io/field_derivative.hpp) against the one a dual number computes
+// from the function by its own rules (algebra/dual.hpp), both in intervals, at each point: where
+// both have a value they must overlap. A point where they do not is a fault in one of the two.
+struct DualAgreement {
+    std::size_t compared = 0;          // points where both have a value
+    double difference = 0;             // the largest gap between the two midpoints there
+    std::optional<double> disagrees;   // the first point where they do not overlap
+    std::string refused;               // why nothing could be compared
+};
+
+inline DualAgreement agree_with_dual(const Expr& f, const Expr& df, const std::string& x, const std::vector<double>& points) {
+    namespace bd = spatium::io::build;
+    using I = spatium::Interval<double>;
+    using D = spatium::Dual<I>;
+    DualAgreement out;
+    const auto pf = bd::lower(f), pd = bd::lower(df);
+    if (!pf || !pd) return out.refused = (!pf ? pf : pd).error().message, out;
+    if (const auto op = bd::beyond<D>(*pf)) return out.refused = std::format("a dual number has no {} in it", bd::op_name(*op)), out;
+    if (const auto op = bd::beyond<I>(*pd)) return out.refused = std::format("an interval has no {} in it", bd::op_name(*op)), out;
+    const auto in_dual = bd::converted<D>(*pf);
+    const auto in_interval = bd::converted<I>(*pd);
+    for (const double p : points) {
+        const spatium::Undecided undecided;
+        std::vector<D> fs(pf->symbols.size(), D{I{0}});
+        for (std::size_t k = 0; k < fs.size(); ++k)
+            if (pf->symbols[k] == x) fs[k] = D{I{p}, I{1}};
+        std::vector<I> ds(pd->symbols.size(), I{0});
+        for (std::size_t k = 0; k < ds.size(); ++k)
+            if (pd->symbols[k] == x) ds[k] = I{p};
+        const I by_dual = bd::interpret(in_dual, D{I{0}}, D{I{0}}, fs).deriv;
+        const I by_rules = bd::interpret(in_interval, I{0}, I{0}, ds);
+        const auto valued = [](const I& v) { return !v.is_empty() && std::isfinite(v.lo) && std::isfinite(v.hi); };
+        if (undecided.raised() || !valued(by_dual) || !valued(by_rules)) continue;
+        ++out.compared;
+        out.difference = std::max(out.difference, std::abs(by_dual.mid() - by_rules.mid()));
+        if ((by_rules.hi < by_dual.lo || by_dual.hi < by_rules.lo) && !out.disagrees) out.disagrees = p;
+    }
+    if (!out.compared) out.refused = "neither has a value at any point compared";
+    return out;
+}
+
 } // namespace detail
 
 // ── The routes, as a table ────────────────────────────────────────
@@ -717,6 +761,63 @@ inline void evaluate_value(const RouteInput& in, Evaluation& out) {
 inline void expression(const RouteInput& in, Evaluation& out) {
     out.written = in.u.f;   // the function, exact, in the parameter's name
     out.candidates.push_back({Route::Expression, 0, {}, {}, Arithmetic::Double, {}});
+}
+
+// a derivative: the function its rules write, checked against a dual number at sixteen points of
+// its variable's interval (of [-2, 2] for a variable of its own); at a point, its value there,
+// proved in intervals as a value is, and checked at that point
+inline void derivative(const RouteInput& in, Evaluation& out) {
+    namespace bd = spatium::io::build;
+    Candidate c{Route::Derivative, 0, {}, {}, Arithmetic::Double, {}};
+    const std::string& x = in.d.variable;
+    out.variable = x;
+    const bd::Statement* parameter = in.doc.find(x);
+    if (parameter && parameter->kind != Kind::Parameter) parameter = nullptr;
+    if (bd::has_bracket(in.d)) {
+        if (const auto open = in.u.lo.free_symbols(); !open.empty())
+            return c.refused = std::format("the point reads {}; it is a number", open.front()), out.candidates.push_back(std::move(c));
+        out.at = number(in.u.lo);
+    } else if (const auto chosen = std::ranges::find(in.chosen, x, &Chosen::value_type::first); chosen != in.chosen.end()) {
+        out.at = chosen->second;
+    }
+    const Expr& g = in.u.f;
+    for (const auto& n : g.free_symbols())
+        if (n != x) return c.refused = std::format("the derivative reads {} as well as {}; give it a value", n, x), out.candidates.push_back(std::move(c));
+    std::vector<double> points;
+    if (out.at) {
+        points = {*out.at};
+    } else {
+        const double lo = parameter ? number(parameter->lo.field) : -2.0, hi = parameter ? number(parameter->hi.field) : 2.0;
+        for (int k = 0; k < 16; ++k) points.push_back(lo + (hi - lo) * (k + 0.5) / 16);
+    }
+    const DualAgreement agreed = agree_with_dual(in.u.written, g, x, points);
+    c.cost = 2 * points.size();
+    const std::string name = bd::detail::name_latex(x);
+    const std::string written = std::format("\\frac{{d}}{{d{}}}\\left({}\\right)", name, *bd::to_latex(in.d.value.field));
+    c.steps.emplace_back("each operation by its rule, the chain rule between them", written + " = " + *bd::to_latex(g));
+    if (agreed.disagrees) {
+        c.refused = std::format("the rules and a dual number disagree on the derivative at {} = {}", x, *agreed.disagrees);
+        return out.candidates.push_back(std::move(c));
+    }
+    if (agreed.compared) {
+        const std::string where = out.at ? std::format("at {} = {}", x, plain(*out.at))
+                                         : std::format("at {} points of [{}, {}]", agreed.compared, plain(points.front()), plain(points.back()));
+        c.checks.push_back({"a dual number", {spatium::io::build::Step(
+            std::format("the derivative a dual number computes from the function, in intervals, {}: they overlap", where),
+            std::format("\\max \\left|\\Delta\\right| = {}", bd::detail::number_text(agreed.difference, bd::detail::TextStyle::Latex)))}});
+    }
+    out.written = g;
+    if (!out.at) return out.candidates.push_back(std::move(c));
+    const Expr there = g.bind(x, Expr(*out.at));
+    c.values = {number(there)};
+    if (!prove(there, in.engine.arithmetic, out)) {
+        c.refused = std::format("the derivative has no value at {} = {}", x, plain(*out.at));
+        c.values.clear();
+    } else {
+        c.steps.emplace_back(std::format("at {} = {}", x, plain(*out.at)),
+                             std::format("{} = {}", *bd::to_latex(g), bd::detail::number_text(c.values.front(), bd::detail::TextStyle::Latex)));
+    }
+    out.candidates.push_back(std::move(c));
 }
 
 // a root, as fractions when the engine asks for them: the roots as they are, or why they are not
@@ -853,6 +954,12 @@ inline constexpr detail::RouteRow route_table[] = {
      [](const detail::RouteInput& in, const Evaluation&) { return detail::is_value(in) && in.u.free.empty(); }, detail::evaluate_value},
     {Route::Expression, "expression", "The expression as written, a function of the parameter it reads.",
      [](const detail::RouteInput& in, const Evaluation&) { return detail::is_value(in) && !in.u.free.empty(); }, detail::expression},
+    {Route::Derivative, "derivative",
+     "Differentiated by rules: each operation by its own, the chain rule between them, a function of the "
+     "language by the rule its row of the table writes. The result is checked against the derivative a dual "
+     "number computes from the function by its own rules, both in intervals, at sixteen points of the "
+     "variable's interval, or at the point it is taken at, where its value is proved as a value's is.",
+     [](const detail::RouteInput& in, const Evaluation&) { return in.d.kind == detail::Kind::Derivative; }, detail::derivative},
     {Route::ClosedForm, "closed form",
      "Solved in closed form. The coefficients are read from the equation's own values and the degree "
      "is checked at more points; the roots come from the quadratic formula in the form that keeps the "
@@ -888,7 +995,10 @@ inline constexpr detail::RouteRow route_table[] = {
      "Synthesised. The library computes the question's value at each parameter by its own solvers; the "
      "answer is the shortest expression in the parameter that matches it, searched bottom up, or a "
      "Chebyshev polynomial where none of a few terms does, checked against those values on a dense grid.",
-     [](const detail::RouteInput& in, const Evaluation&) { return !detail::is_value(in) && !in.u.free.empty(); }, detail::synthesis},
+     [](const detail::RouteInput& in, const Evaluation&) {
+         return !detail::is_value(in) && in.d.kind != detail::Kind::Derivative && !in.u.free.empty();
+     },
+     detail::synthesis},
 };
 
 static_assert([] {

@@ -30,6 +30,7 @@ SPATIUM_EXPORT namespace spatium::io::build {
 //   x: x^2 - p = 0 on [0, 10]            a root: the x on [0, 10] for which the equation holds
 //   y: 2y^2 - 3y - 5 = 0                 a root with no bracket: every y it holds for, in closed form
 //   I = integral exp(-p * t^2) dt on [0, 1]  an integral over t, named by its dt
+//   g = d/dx sin(x)^2 at 0               a derivative in x, as a function of x, or at a point
 //   S0 = torus(2, r)                     a shape: an operation on numbers and the shapes above
 //   S1 = offset(S0, h)
 //   # a comment, to the end of the line
@@ -50,10 +51,10 @@ struct Written {
     std::string text;   // as written; for a field built in code, its `to_text`
 };
 
-enum class StatementKind { Value, Parameter, Root, Integral, Shape };
+enum class StatementKind { Value, Parameter, Root, Integral, Shape, Derivative };
 
 inline constexpr StatementKind statement_kinds[] = {StatementKind::Value, StatementKind::Parameter, StatementKind::Root,
-                                                    StatementKind::Integral, StatementKind::Shape};
+                                                    StatementKind::Integral, StatementKind::Shape, StatementKind::Derivative};
 
 inline const char* statement_kind_name(StatementKind k) {
     switch (k) {
@@ -62,6 +63,7 @@ inline const char* statement_kind_name(StatementKind k) {
         case StatementKind::Root: return "root";
         case StatementKind::Integral: return "integral";
         case StatementKind::Shape: return "shape";
+        case StatementKind::Derivative: return "derivative";
     }
     return "?";
 }
@@ -109,8 +111,10 @@ struct Statement {
     std::string name;
     Written value;            // a value's expression, an integral's integrand, a root's left side
     Written rhs;              // a root's right side
-    std::string variable;     // an integral's variable (a root's unknown is its own name)
-    Written lo, hi;           // the interval of a parameter, a root or an integral; a root's may be unwritten
+    std::string variable;     // an integral's or a derivative's variable (a root's unknown is its own name)
+    // the interval of a parameter, a root or an integral, a root's may be unwritten; a derivative's
+    // point in `lo`, where it is taken at one
+    Written lo, hi;
     std::string operation;    // a shape's operation, one of `shape_operations`
     std::vector<Written> args;   // and its arguments, a shape's by its name
     // a root's relation: "=" for an equation, or an inequality's "<", "<=", ">", ">=", whose
@@ -149,7 +153,7 @@ struct Document {
 struct StatementForm {
     StatementKind kind;
     std::string_view line, latex = {};          // latex empty: a form no row of an editor writes
-    std::string_view on = {}, on_latex = {};    // a root's bracket, where it has one
+    std::string_view on = {}, on_latex = {};    // a root's bracket, or a derivative's point, where it has one
     std::string_view mathjson = {};
 };
 
@@ -171,8 +175,20 @@ inline constexpr StatementForm statement_forms[] = {
      .line = "<name> in [<lo>, <hi>]",
      .latex = "<name> \\in \\left[<lo>, <hi>\\right]",
      .mathjson = R"([["Element", "<name>", ["Interval", "<lo>", "<hi>"]]])"},
+    // a derivative's d/dx, and its point after `at`; in an editor's row the point is the variable's value
+    // beside it. After the root's and the parameter's forms, so their rows are refused as before
+    {.kind = StatementKind::Derivative,
+     .line = "<name> = d/d<variable> <value>",
+     .latex = "<named>\\frac{d}{d<variable>}\\left(<value>\\right)",
+     .on = " at <lo>",
+     .on_latex = ", <variable> = <lo>",
+     .mathjson = R"([["Equal", "<name>", ["D", "<value>", "<variable>"]],
+                     ["Sequence", ["Equal", "<name>", ["D", "<value>", "<variable>"]], ["Equal", "<variable>", "<lo>"]],
+                     ["D", "<value>", "<variable>"],
+                     ["Sequence", ["D", "<value>", "<variable>"], ["Equal", "<variable>", "<lo>"]]])"},
     {.kind = StatementKind::Root, .line = "<names>: <equations>"},   // a system, an equation a row (`to_latex_rows`)
-    // shorthands: an equation or inequality, on a bracket or not; an expression, `2 + 2` or `2 + 2 =`
+    // shorthands: a derivative; an equation or inequality, on a bracket or not; an expression, `2 + 2` or `2 + 2 =`
+    {.kind = StatementKind::Derivative, .line = "d/d<variable> <value>", .on = " at <lo>"},
     {.kind = StatementKind::Root, .line = "<lhs> <relation> <rhs>", .on = " on [<lo>, <hi>]",
      .mathjson = R"([["<relation>", "<lhs>", "<rhs>"]])"},
     {.kind = StatementKind::Value, .line = "<value>", .mathjson = R"(["<value>"])"},
@@ -184,6 +200,7 @@ inline constexpr std::pair<std::string_view, std::string_view> mathjson_nodes[] 
     {"Element", "a name and its interval are written x \\in [a, b]"},
     {"Interval", "an interval is written [a, b]"},
     {"Integrate", "an integral is written with its ends and its d, \\int_a^b f\\,dt"},
+    {"D", "a derivative is written \\frac{d}{dx} f, and at a point with the point beside it: \\frac{d}{dx} f, x = 2"},
     {"Limits|Tuple", "an integral here has both ends, \\int_a^b"},
     {"Sequence", "a row holds one statement, or an equation or inequality and its unknown's interval: x^2 = 2, x \\in [0, 2]"},
 };
@@ -263,7 +280,7 @@ inline std::string_view trim(std::string_view s) {
 }
 
 inline bool reserved_name(std::string_view name) {
-    if (name == "in" || name == "on" || name == "integral") return true;
+    if (name == "in" || name == "on" || name == "at" || name == "integral") return true;
     if (detail::shape_operation(name)) return true;
     if (std::ranges::any_of(functions, [&](const Function& f) { return f.name == name; })) return true;
     return std::ranges::any_of(constants, [&](const Constant& c) { return c.name == name; });
@@ -307,9 +324,22 @@ inline std::string integral_variable(std::string_view text) {
     return {};
 }
 
+// the variable a derivative names by its d/d: the word after `d/d`, standing as a word of its own
+inline std::string derivative_variable(std::string_view text) {
+    const auto name_char = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    for (std::size_t at = text.find("d/d"); at != std::string_view::npos; at = text.find("d/d", at + 1)) {
+        if (at > 0 && name_char(text[at - 1])) continue;
+        std::size_t end = at + 3;
+        while (end < text.size() && name_char(text[end])) ++end;
+        if (end > at + 3 && std::isalpha(static_cast<unsigned char>(text[at + 3]))) return std::string(text.substr(at + 3, end - at - 3));
+    }
+    return {};
+}
+
 } // namespace detail
 
-// Whether a root is sought on a bracket; one written without is solved in closed form.
+// Whether a root is sought on a bracket, or a derivative taken at a point; a root written without
+// one is solved in closed form, a derivative written without one is a function.
 inline bool has_bracket(const Statement& d) { return !d.lo.text.empty(); }
 
 // The names a definition reads that it does not bind itself.
@@ -355,6 +385,16 @@ inline Result<void> check(const Document& doc, const std::vector<std::size_t>& l
             if (d.variable.empty()) return detail::doc_error(line(i), "an integral names its variable by d, as in exp(-t^2) dt");
             if (d.variable == d.name || defined_above(d.variable))
                 return detail::doc_error(line(i), std::format("the variable '{}' of the integral is a name already", d.variable));
+        }
+        // a derivative's variable is a new name, or a parameter above, which the point is then chosen from
+        if (d.kind == StatementKind::Derivative) {
+            if (d.variable.empty()) return detail::doc_error(line(i), "a derivative names its variable by d/d, as in d/dx sin(x)");
+            if (detail::reserved_name(d.variable)) return detail::doc_error(line(i), std::format("'{}' is a word of the language, not a name", d.variable));
+            const Statement* v = defined_above(d.variable) ? doc.find(d.variable) : nullptr;
+            if (d.variable == d.name || (v && v->kind != StatementKind::Parameter))
+                return detail::doc_error(line(i), std::format("the variable '{}' of the derivative is a name already, and not a parameter", d.variable));
+            if (v && has_bracket(d))
+                return detail::doc_error(line(i), std::format("the derivative in the parameter {} is taken where it is chosen; a point after 'at' is for a new variable", d.variable));
         }
         if (d.kind == StatementKind::Parameter)
             for (const Written* w : {&d.lo, &d.hi})
@@ -427,9 +467,10 @@ struct FormRead {
 };
 
 inline FormRead read_form(const StatementForm& form, std::string_view text) {
-    const std::string variable = integral_variable(text);
+    const std::string variable = form.kind == StatementKind::Derivative ? derivative_variable(text) : integral_variable(text);
     std::vector<std::string> reserved{"in", "on", "integral"};
-    if (!variable.empty()) reserved.push_back("d" + variable);
+    if (form.kind == StatementKind::Derivative) reserved.push_back("at");
+    else if (!variable.empty()) reserved.push_back("d" + variable);
     FormRead out{Statement{}, FieldReader(text, "", "", std::move(reserved)), {}, false};
     FieldReader& r = out.reader;
     Statement& d = *out.statement;
@@ -501,6 +542,12 @@ inline FormRead read_form(const StatementForm& form, std::string_view text) {
             if (is_slot) {
                 if (!slot(p)) return false;
                 word_before = p == "operation" ? std::string_view(d.operation) : std::string_view{};
+            } else if (p == "d" && k + 2 < parts.size() && parts[k + 1].text == "/") {
+                // a derivative's d/d and its variable: committed only once all of it is read, so a
+                // name d divided by something is still a value
+                if (variable.empty() || !r.take_word("d") || !r.take('/') || !r.take_word("d" + variable))
+                    return stop(r.fail("d/d and the variable, as in d/dx"));
+                d.variable = variable, k += 3, out.committed = true;
             } else if (p == "d" && k + 1 < parts.size() && parts[k + 1].text == "variable") {
                 // an integral's d and its variable, one word
                 if (variable.empty() || !r.take_word("d" + variable)) return stop(r.fail("the variable, as in dt"));
@@ -765,6 +812,10 @@ inline Result<Statement> read_shorthand(std::string_view line, const Document& a
             if (!above.find(n)) out.push_back(std::move(n));
         return out;
     };
+    if (d.kind == StatementKind::Derivative) {
+        d.name = "answer";
+        return d;
+    }
     if (d.kind == StatementKind::Value) {
         if (const auto names = open(d.value.field); !names.empty())
             return refuse(std::format("the expression reads '{}', which has no value; to find it, write an equation ({} = 0)",
@@ -871,6 +922,9 @@ inline Result<void> mathjson_bind(const JsonValue& p, const JsonValue& v, const 
         }
         auto n = mathjson_name(v, path);
         if (!n) return std::unexpected(n.error());
+        // a derivative names its variable twice, in its d/dx and beside its point
+        if (slot == "variable" && !d.variable.empty() && d.variable != *n)
+            return mathjson_error(path, std::format("the derivative is in {}, and the point is given for {}", d.variable, *n));
         (slot == "variable" ? d.variable : d.name) = std::move(*n);
         return {};
     }
@@ -897,17 +951,23 @@ inline Result<std::string> mathjson_row_text(const JsonValue& row) {
                         !r[1].as_array().empty() && r[1].as_array()[0].is_string() && r[1].as_array()[0].as_string() == "Sequence";
     const JsonValue& v = listed ? r[1] : row;
     const std::string at = listed ? "[1]" : "";
+    // a row that holds to a pattern and departs from it is refused where it departs, unless a later
+    // pattern of a form fits it whole: a root's and a derivative's rows both start as a Sequence
+    std::optional<std::unexpected<Error>> departed;
     for (const auto& form : statement_forms) {
         if (form.mathjson.empty()) continue;
         const auto patterns = spatium::io::parse(form.mathjson);
         for (const auto& p : patterns->as_array()) {
+            // the pattern that reads any expression does not answer a row another held to
+            if (departed && !p.is_array()) return *departed;
             bool held = false;
             std::optional<detail::Departure> off;
             if (!detail::mathjson_fits(p, v, at, held, off)) {
-                if (!held) continue;
+                if (!held || departed) continue;
                 const auto said = std::ranges::find(mathjson_nodes, off ? off->head : "", &std::pair<std::string_view, std::string_view>::first);
-                return detail::mathjson_error(off ? off->path : at, said != std::end(mathjson_nodes) ? std::string(said->second)
-                                                                                                      : "a row holds one statement");
+                departed = detail::mathjson_error(off ? off->path : at, said != std::end(mathjson_nodes) ? std::string(said->second)
+                                                                                                          : "a row holds one statement");
+                continue;
             }
             Statement d;
             d.kind = form.kind;
@@ -917,6 +977,7 @@ inline Result<std::string> mathjson_row_text(const JsonValue& row) {
             return *detail::fill(form.line, part) + (detail::written_on(d) ? *detail::fill(form.on, part) : "");
         }
     }
+    if (departed) return *departed;
     return detail::mathjson_error(at, "no form of a statement reads the row");   // the last form reads any expression
 }
 

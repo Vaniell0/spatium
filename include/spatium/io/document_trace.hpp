@@ -5,6 +5,7 @@
 #  include <spatium/core/error.hpp>
 #  include <spatium/io/build.hpp>
 #  include <spatium/io/document.hpp>
+#  include <spatium/io/field_derivative.hpp>
 #  include <cmath>
 #  include <cstdint>
 #  include <format>
@@ -87,6 +88,18 @@ inline Result<DocumentScene> to_trace(const Document& doc,
                     break;
                 }
                 case StatementKind::Integral: return refuse(d, "an integral, which is not a number a scene takes");
+                case StatementKind::Derivative: {
+                    // a number: at its point, or at the value chosen for its parameter
+                    const Statement* v = doc.find(d.variable);
+                    if (!has_bracket(d) && !(v && v->kind == StatementKind::Parameter))
+                        return refuse(d, std::format("a derivative in {} is a function of it, which is not a number a scene takes; "
+                                                     "take it at a point, at a", d.variable));
+                    auto df = derivative(d.value.field, d.variable);
+                    if (!df) return refuse(d, df.error().message);
+                    if (has_bracket(d)) *df = df->bind(d.variable, d.lo.field);
+                    t.let(d.name, detail::scene_number(t, Written{*df, d.name}, "derivative"));
+                    break;
+                }
                 case StatementKind::Shape: {
                     const auto& a = d.args;
                     const auto n = [&](std::size_t k) { return detail::scene_number(t, a[k], d.operation.c_str()); };

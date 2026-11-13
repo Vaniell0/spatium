@@ -243,6 +243,22 @@ inline spatium::io::JsonValue::ObjectType evaluation_json(const Evaluation& e, s
             out.emplace_back("latex", *bd::to_latex(e.written));
             out.emplace_back("text", *bd::to_text(e.written));
             break;
+        case Route::Derivative: {
+            out.emplace_back("variable", e.variable);
+            out.emplace_back("text", *bd::to_text(e.written));
+            if (e.at) {
+                out.emplace_back("at", *e.at);
+                out.emplace_back("value", e.values.front());
+                out.emplace_back("latex", std::format("{} = {}", *bd::to_latex(e.written), bd::detail::number_text(e.values.front(), bd::detail::TextStyle::Latex)));
+                if (e.proved) out.emplace_back("proved", proved_json(*e.proved));
+            } else {
+                out.emplace_back("latex", *bd::to_latex(e.written));
+            }
+            Array steps;
+            for (const auto& st : e.candidates[*e.taken].steps) steps.push_back(Object{{"label", st.label}, {"latex", st.latex}});
+            out.emplace_back("steps", steps);
+            break;
+        }
         case Route::ClosedForm: {
             const auto& c = *e.closed;
             Array steps;
@@ -372,6 +388,7 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
     const char* route = rel == std::string_view::npos || (q[rel] == '=' && trimmed(q.substr(rel + 1)).empty()) ? "evaluate"
                         : q.find_first_of("<>") != std::string_view::npos                                      ? "interval method"
                                                                                                                 : "closed form";
+    if (q.starts_with("d/d")) route = "derivative";
     auto st = bd::read_shorthand(q, above);
     if (!st) return Shorthand{std::unexpected(std::pair{route, st.error().message})};
     if (st->kind == bd::StatementKind::Value) route = "evaluate";
@@ -427,6 +444,18 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Evaluati
                              .hi = {{}, std::format("{}", hi)}}) + "\n" +
                 bd::to_text({.name = name, .value = {{}, std::format("({}) - ({})", wanted->value.text, wanted->rhs.text)}});
         return request(std::move(text), name, wanted->name);
+    }
+    // a derivative as a function, along its variable: a parameter's interval, or [-2, 2] for a
+    // variable of its own, written in as a parameter
+    if (how == Route::Derivative && !e.at) {
+        const std::string& x = wanted->variable;
+        std::string text;
+        for (const auto& d : asked.document.statements) {
+            if (&d == wanted && !asked.document.find(x))
+                text += bd::to_text({.kind = bd::StatementKind::Parameter, .name = x, .lo = {{}, "-2"}, .hi = {{}, "2"}}) + "\n";
+            text += bd::to_text(d) + "\n";
+        }
+        return request(std::move(text), wanted->name, x);
     }
     if (parameters.size() != 1) return std::nullopt;
     const std::string& p = parameters.front()->name;
@@ -515,6 +544,26 @@ inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& 
         if (e.name != "answer") facts.push_back(fact("Asks for", bd::detail::name_latex(e.name), true));
         section("Input", false, "facts", facts);
     }
+    // a number: the value alone, or the name and its value -- the question stands above it, and a
+    // long one would push the answer off a phone's screen -- and how much of it is proved
+    const auto number_of = [&](const Candidate& c) {
+        std::string value = number_latex(c, e.values.front());
+        if (e.exact && c.arithmetic == Arithmetic::Double) {
+            const auto d = e.exact->decimal();
+            value = e.exact->den() == 1 ? *d : bd::detail::fraction_latex(*e.exact) + (d ? " = " + *d : "");
+        } else if (e.proved && !e.proved->exact && e.proved->digits > 0) {
+            value = "\\approx " + e.proved->text;
+        }
+        result = (e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + (value.starts_with("\\approx") ? " " : " = ")) + value;
+        if (e.proved && e.proved->exact) guarantee = "exact", strength = "exact";
+        else if (e.proved && e.proved->digits > 0)
+            guarantee = "proved", strength = std::format("proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
+        else if (e.proved)
+            guarantee = "none", ok = false, strength = "no digit proved",
+            notes.push_back(std::isfinite(e.proved->bound) ? std::format("within {} of zero", decade_label(e.proved->bound))
+                                                           : std::string("past the largest double"));
+        else guarantee = "computed", ok = false, strength = "computed in double";
+    };
     const std::optional<Route> route = e.route();
     // the result in one line, as the route gives it; the cases below write their own
     if (e.taken && route == Route::Expression) result = *bd::to_latex(e.written);
@@ -547,25 +596,7 @@ inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& 
             break;
         }
         case Route::Evaluate: {
-            // the value alone, or the name and its value: the question stands above it, and a long
-            // one would push the answer off a phone's screen
-            const Candidate& c = e.candidates[*e.taken];
-            std::string value = number_latex(c, e.values.front());
-            if (e.exact && c.arithmetic == Arithmetic::Double) {
-                const auto d = e.exact->decimal();
-                value = e.exact->den() == 1 ? *d : bd::detail::fraction_latex(*e.exact) + (d ? " = " + *d : "");
-            } else if (e.proved && !e.proved->exact && e.proved->digits > 0) {
-                value = "\\approx " + e.proved->text;
-            }
-            result = (e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + (value.starts_with("\\approx") ? " " : " = ")) + value;
-            if (e.proved && e.proved->exact) guarantee = "exact", strength = "exact";
-            else if (e.proved && e.proved->digits > 0)
-                guarantee = "proved", strength = std::format("proved to {} digit{}", e.proved->digits, e.proved->digits == 1 ? "" : "s");
-            else if (e.proved)
-                guarantee = "none", ok = false, strength = "no digit proved",
-                notes.push_back(std::isfinite(e.proved->bound) ? std::format("within {} of zero", decade_label(e.proved->bound))
-                                                               : std::string("past the largest double"));
-            else guarantee = "computed", ok = false, strength = "computed in double";
+            number_of(e.candidates[*e.taken]);
             if (e.steps.size() > 1) {
                 Array steps;
                 for (const auto& st : e.steps) steps.push_back(step_json(st));
@@ -580,6 +611,28 @@ inline Object sheet_of(const Evaluation& e, const spatium::io::build::Document& 
         case Route::Expression: {
             outcome = "function", guarantee = "exact", ok = false;
             strength = "exact", notes.push_back(std::format("a function of {}, as written", e.free.empty() ? std::string("its parameter") : e.free.front()));
+            break;
+        }
+        case Route::Derivative: {
+            const Candidate& c = e.candidates[*e.taken];
+            const std::string named = e.name == "answer" ? std::string() : bd::detail::name_latex(e.name) + " = ";
+            if (e.at) {
+                number_of(c);
+                notes.push_back(std::format("the derivative at {} = {}", e.variable, text_of(*e.at)));
+            } else {
+                outcome = "function", guarantee = "exact", strength = "exact";
+                result = named + *bd::to_latex(e.written);
+                notes.push_back(std::format("a function of {}, by the rules of each operation", e.variable));
+            }
+            Array steps;
+            for (const auto& st : c.steps) steps.push_back(step_json(st));
+            section("Steps", true, "steps", steps, Object{{"gist", "by rules, the chain rule between them"}});
+            Array facts;
+            for (const auto& k : c.checks)
+                for (const auto& st : k.steps) facts.push_back(fact(st.label, st.latex, true, true));
+            if (facts.empty()) facts.push_back(fact("A dual number", "neither has a value at any point compared", false, false));
+            else notes.push_back("checked by a dual number");
+            section("Check", false, "facts", facts);
             break;
         }
         case Route::ClosedForm: {
@@ -1044,8 +1097,8 @@ inline spatium::io::JsonValue plot_request(std::string_view request) {
         if (!doc) return refuse(doc.error().message);
         const bd::Statement* d = doc->find(name);
         if (!d) return refuse(std::format("the document defines no '{}'", name));
-        if (d->kind != bd::StatementKind::Value)
-            return refuse(std::format("{} is a {}; a graph is drawn of a value", d->name, bd::statement_kind_name(d->kind)));
+        if (d->kind != bd::StatementKind::Value && d->kind != bd::StatementKind::Derivative)
+            return refuse(std::format("{} is a {}; a graph is drawn of a value or a derivative", d->name, bd::statement_kind_name(d->kind)));
         auto u = detail::unfolded(*doc, *d, {});
         if (!u) return refuse(u.error().message);
         if (std::ranges::find(u->free, along) == u->free.end())
