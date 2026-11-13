@@ -12,12 +12,12 @@
 //                      shader whose slots are the other parameters, and with a grid, F at each
 //                      pixel as the shader's check mode computes it, in fp32
 //   zeta(request)      the zeta page's data: Z(t), the zeros proved, Gram points, zeta on a
-//                      grid, and the notes, from the proved zeta (rsc/spatium/zeta_request.hpp)
+//                      grid, and the notes, from the proved zeta (include/spatium/answer/zeta_request.hpp)
 //
 // Built by build.sh with Emscripten; check.mjs holds it against the host build of the same calls.
 
 #include <spatium/answer/respond.hpp>
-#include <rsc/spatium/zeta_request.hpp>
+#include <spatium/answer/zeta_request.hpp>
 #include <spatium/io/field_parse.hpp>
 #include <spatium/io/field_text.hpp>
 #include <spatium/io/json.hpp>
@@ -49,7 +49,7 @@ const char* spatium_evaluate(const char* request) { return hand_back(spatium::an
 
 const char* spatium_plot(const char* request) { return hand_back(spatium::answer::plot_request(request).dump()); }
 
-const char* spatium_zeta(const char* request) { return hand_back(rsc::zeta_request(request).dump()); }
+const char* spatium_zeta(const char* request) { return hand_back(spatium::answer::zeta_request(request).dump()); }
 
 
 }

@@ -26,9 +26,9 @@
 #include <string_view>
 #include <vector>
 
-namespace rsc {
+namespace spatium::answer {
 
-namespace zeta_detail {
+namespace detail {
 
 using spatium::io::JsonValue;
 using Object = JsonValue::ObjectType;
@@ -167,10 +167,10 @@ inline JsonValue notes(double t0, double t1) {
     return Object{{"notes", std::move(out)}};
 }
 
-} // namespace zeta_detail
+} // namespace detail
 
 inline spatium::io::JsonValue zeta_request(std::string_view request) {
-    using namespace zeta_detail;
+    using namespace detail;
     const auto refuse = [](std::string why) { return JsonValue(Object{{"refused", std::move(why)}}); };
     const auto json = spatium::io::parse(request);
     if (!json || !json->is_object()) return refuse("the request is not a JSON object");
@@ -216,4 +216,4 @@ inline spatium::io::JsonValue zeta_request(std::string_view request) {
     return refuse("what is none of hardy, zeros, gram, grid, notes");
 }
 
-} // namespace rsc
+} // namespace spatium::answer

@@ -2,7 +2,7 @@
 // must agree, and the zeros on the critical line below 100 against those mpmath gives to 25 digits.
 
 #include <catch2/catch_test_macros.hpp>
-#include <rsc/spatium/zeta_request.hpp>
+#include <spatium/answer/zeta_request.hpp>
 #include <spatium/algebra/zeta.hpp>
 
 #include <cmath>
@@ -133,12 +133,12 @@ TEST_CASE("Gram's law first fails at g_126; Lehmer's pair is two changes of sign
 }
 
 TEST_CASE("the page's zeta requests answer, and refuse a window that is none", "[zeta]") {
-    const auto zeros = rsc::zeta_request(R"({"what": "zeros", "t0": 0, "t1": 30})");
+    const auto zeros = answer::zeta_request(R"({"what": "zeros", "t0": 0, "t1": 30})");
     CHECK(zeros.find("zeros")->as_array().size() == 3);
     CHECK(zeros.find("complete")->as_bool());
-    CHECK(rsc::zeta_request(R"({"what": "hardy", "t0": 5, "t1": 1})").find("refused") != nullptr);
+    CHECK(answer::zeta_request(R"({"what": "hardy", "t0": 5, "t1": 1})").find("refused") != nullptr);
     // below 0 the mirror: the zeros at -t for those at t, the window across 0 counted as a whole
-    const auto both = rsc::zeta_request(R"({"what": "zeros", "t0": -30, "t1": 30})");
+    const auto both = answer::zeta_request(R"({"what": "zeros", "t0": -30, "t1": 30})");
     const auto& z = both.find("zeros")->as_array();
     REQUIRE(z.size() == 6);
     CHECK(both.find("complete")->as_bool());
