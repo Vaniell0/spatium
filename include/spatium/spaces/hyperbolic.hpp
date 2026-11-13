@@ -49,13 +49,43 @@ struct Hyperbolic {
 
     // As Sphere::exp_map: the arc length t |v|_L is signed and linear in t,
     // so exp is smooth through t = 0 and a Dual t carries its derivative v.
+    // |v|_L^2 of a tangent at p with no cancellation. Far from the origin a
+    // tangent's coordinates grow like e^d while its length does not, and
+    // -v0^2 + |v_s|^2 loses e^{2d} of the arithmetic's digits (2.6e-4 of a
+    // unit step from a point 8 away, all of them 12 away). With v0 = v_s.p_s / p0
+    // the same number is (|v_s|^2 + |v_s|^2 |p_s|^2 - (v_s.p_s)^2) / p0^2, and
+    // Lagrange's identity writes the difference as a sum of squares.
+    static constexpr T tangent_norm_sq(const PointType& p, const TangentVector& v) {
+        T spatial{0}, wedge{0};
+        for (std::size_t i = 1; i <= N; ++i) {
+            spatial += v[i] * v[i];
+            for (std::size_t j = i + 1; j <= N; ++j) {
+                const T w = v[i] * p[j] - v[j] * p[i];
+                wedge += w * w;
+            }
+        }
+        return (spatial + wedge) / (p[0] * p[0]);
+    }
+
+    // As Sphere::exp_map: the arc length t |v|_L is signed and linear in t,
+    // so exp is smooth through t = 0 and a Dual t carries its derivative v.
     PointType exp_map(const PointType& p, const TangentVector& v, ScalarType t) const {
-        using std::abs;
         // p cosh(s) + v t sinhc(s) with s^2 = t^2 |v|_L^2, smooth in v
         // through v = 0 (see spaces/cos_sinc.hpp).
-        const T s2 = t * t * abs(minkowski(v, v));
+        const T s2 = t * t * tangent_norm_sq(p, v);
         const auto [c, sinhc] = cos_sinc_of_square(s2, /*hyperbolic=*/true);
-        return PointType{p * c + v * (t * sinhc)};
+        // The time coordinate put back on the sheet as project() does, from the
+        // spatial ones with nothing cancelling. A tangent that is tangent only to
+        // rounding otherwise moves each point a little off the sheet, and an
+        // iteration (the Frechet mean) carries it there step after step: 1e-6
+        // off after fifty steps at H^8, where log, which reads sinh d off the
+        // inner product, no longer agrees with the point.
+        PointType r{p * c + v * (t * sinhc)};
+        using std::sqrt;
+        T spatial{0};
+        for (std::size_t i = 1; i <= N; ++i) spatial += r[i] * r[i];
+        r[0] = sqrt(T{1} + spatial);
+        return r;
     }
 
     TangentVector log_map(const PointType& p, const PointType& q) const {
@@ -65,9 +95,17 @@ struct Hyperbolic {
         auto d = acosh(inner);
         if (d < epsilon<T>()) return TangentVector{};
         auto proj = q + p * minkowski(p, q);
-        auto proj_norm_sq = minkowski(proj, proj);
-        if (abs(proj_norm_sq) < epsilon<T>() * epsilon<T>()) return TangentVector{};
-        auto proj_norm = sqrt(abs(proj_norm_sq));
+        // |proj|_L is sinh d. Read off proj it cancels as exp's length does;
+        // past d = 1 it is taken from the inner product, sqrt((x - 1)(x + 1)),
+        // where nothing cancels. Below that proj is short and its own length
+        // is the better one.
+        T proj_norm;
+        if (inner > T{2}) proj_norm = sqrt((inner - T{1}) * (inner + T{1}));
+        else {
+            auto proj_norm_sq = minkowski(proj, proj);
+            if (abs(proj_norm_sq) < epsilon<T>() * epsilon<T>()) return TangentVector{};
+            proj_norm = sqrt(abs(proj_norm_sq));
+        }
         return proj * (d / proj_norm);
     }
 
