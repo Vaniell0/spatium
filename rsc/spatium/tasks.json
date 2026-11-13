@@ -103,11 +103,5 @@
   ],
   "check": "python3 rsc/spatium/rsc_laws.py check Torus-typed",
   "triaged": "the law holds where the geodesic symmetry at p is an isometry -- a symmetric space -- and a torus of revolution is not one; past the cut locus the two sides are different points' logs"
- },
- {
-  "kind": "missing operation",
-  "space": "SPD2-affine",
-  "claim": "unary minus on a tangent",
-  "check": "python3 rsc/spatium/rsc_laws.py discover"
  }
 ]

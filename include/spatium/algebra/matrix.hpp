@@ -65,6 +65,15 @@ struct Matrix {
         return result;
     }
 
+    // -m, as a vector has it: a tangent of a space whose points are matrices (SPD's affine-invariant
+    // metric) is one, and a product with such a factor negates a tangent through it.
+    constexpr Matrix operator-() const {
+        Matrix result;
+        for (std::size_t i = 0; i < R * C; ++i)
+            result.data[i] = -data[i];
+        return result;
+    }
+
     constexpr Matrix operator*(T s) const {
         Matrix result;
         for (std::size_t i = 0; i < R * C; ++i)

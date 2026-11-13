@@ -31,13 +31,12 @@ Written by `rsc/spatium/rsc_laws.py discover`; checked by `rsc_laws.py check`. T
 | E4, S7 | 2 | -- | `g_p(u,-(u+w)) <= g_p(w,(u+w)/2)` |
 | S7 | 2 | -- | `1/2*d(p,exp(p,u)) <= d(p,exp(p,(u+w)))` |
 
-## Tasks (5 open, 4 triaged)
+## Tasks (4 open, 4 triaged)
 
 - H1: breaks a law of its neighbours (5 laws): `d(p,p) = d(exp(p,w),exp(p,w))`
 - H2: breaks a law of its neighbours (3 laws): `d(p,p) = d(exp(p,w),exp(p,w))`
 - H4: breaks a law of its neighbours (3 laws): `d(p,p) = d(exp(p,w),exp(p,w))`
 - S2xH2: breaks a law of its neighbours (1 laws): `d(p,p) = d(exp(p,w),exp(p,w))`
-- SPD2-affine: missing operation: `unary minus on a tangent`
 
 Triaged, no defect:
 
