@@ -10,7 +10,7 @@ interface Zeros { zeros: Zero[]; counted: [number, number] | null; expected: num
 interface Gram { n: number; t: number; good: boolean | null }
 interface Note { title: string; text: string; strength: string; anchor: { t?: number; t0?: number; t1?: number } }
 
-const PRESETS: [string, number, number][] = [["First zeros", 0, 50], ["Gram failure", 280, 284], ["Lehmer pair", 7004.5, 7005.5]];
+const PRESETS: [string, number, number][] = [["First zeros", 0, 50], ["Both sides of 0", -40, 40], ["Gram failure", 280, 284], ["Lehmer pair", 7004.5, 7005.5]];
 const SVG = "http://www.w3.org/2000/svg";
 
 const core = new Core({ glue: "../../wasm/spatium_core.js", wasm: "../../wasm/spatium_core.wasm", worker: "../../core-worker.js", cache: false });
@@ -86,7 +86,7 @@ function mapOverlay(box: HTMLElement, zeros: Zeros | null) {
   const s = svg("svg", { viewBox: "0 0 300 300", preserveAspectRatio: "none", class: "zoverlay", "aria-hidden": "true" });
   const x = (sigma: number) => ((sigma + 1) / 3) * 300, y = (t: number) => 300 - ((t - win[0]) / (win[1] - win[0])) * 300;
   s.append(svg("line", { x1: x(0.5), x2: x(0.5), y1: 0, y2: 300, class: "crit" }), svg("line", { x1: x(1), x2: x(1), y1: 0, y2: 300, class: "edge" }));
-  if (win[0] <= 0) s.append(svg("path", { d: `M${x(1) - 4},${y(0) - 4}l8,8m0,-8l-8,8`, class: "pole" }));
+  if (win[0] <= 0 && 0 <= win[1]) s.append(svg("path", { d: `M${x(1) - 4},${y(0) - 4}l8,8m0,-8l-8,8`, class: "pole" }));
   for (const r of zeros?.zeros ?? []) s.append(svg("circle", { cx: x(0.5), cy: y((r.lo + r.hi) / 2), r: 3, class: "ring" }));
   box.querySelector(".zoverlay")?.remove();
   box.append(s);
@@ -129,7 +129,7 @@ async function show() {
     if (g) mapOverlay(map, zeros);
     if (size === 64) gist("v-map", "Refining");
   }
-  gist("v-map", "σ from −1 to 2; hue is arg ζ, rings where |ζ| is a power of 2");
+  gist("v-map", "s = σ + it: σ = Re s across, from −1 to 2, t = Im s up; hue is arg ζ, rings where |ζ| is a power of 2");
   const list = await ask<{ notes: Note[] }>(keys.notes, { what: "notes", t0, t1 });
   if (mine !== asked) return;
   notes.replaceChildren(...(list?.notes ?? []).map((nt, i) => el("li", { class: "note" },
@@ -141,13 +141,13 @@ async function show() {
 }
 
 function main() {
-  const m = /#t=([\d.]+),([\d.]+)/.exec(location.hash);
+  const m = /#t=(-?[\d.]+),(-?[\d.]+)/.exec(location.hash);
   if (m && +m[1] < +m[2]) win = [+m[1], +m[2]];
   const form = $<HTMLFormElement>(".zwin")!;
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const a = +form.t0.value, b = +form.t1.value;
-    if (a >= 0 && a < b && b <= 100000) { win = [a, b]; void show(); }
+    if (a >= -100000 && a < b && b <= 100000) { win = [a, b]; void show(); }
   });
   $(".zpresets")!.append(...PRESETS.map(([name, a, b]) => el("button", { type: "button", class: "quiet dense", text: name,
     onclick: () => { win = [a, b]; void show(); } })));

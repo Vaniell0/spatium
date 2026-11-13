@@ -18,10 +18,13 @@
 #include <spatium/core/interval.hpp>
 #include <spatium/io/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <format>
+#include <numbers>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rsc {
 
@@ -57,13 +60,46 @@ inline JsonValue gram_json(const std::vector<spatium::GramPoint<double>>& g) {
 
 inline std::string number(double x, int digits) { return std::format("{:.{}f}", x, digits); }
 
+// Below t = 0 everything is the mirror of what is above: zeta(conj s) = conj zeta(s), so Z(-t) = Z(t),
+// a zero at 1/2 - it for each at 1/2 + it, and theta odd, so g_{-n} = -g_n.
+inline I flip(const I& r) { return r.is_empty() ? r : I(-r.hi, -r.lo); }
+
+inline spatium::CriticalZeros<double> zeros_on(double t0, double t1) {
+    if (t0 >= 0) return spatium::critical_zeros(t0, t1);
+    const auto mirrored = [](spatium::CriticalZeros<double> z) {
+        std::ranges::reverse(z.zeros);
+        for (I& r : z.zeros) r = flip(r);
+        z.counted = flip(z.counted);
+        return z;
+    };
+    if (t1 <= 0) return mirrored(spatium::critical_zeros(-t1, -t0));
+    auto below = mirrored(spatium::critical_zeros(0.0, -t0));
+    const auto above = spatium::critical_zeros(0.0, t1);
+    below.zeros.insert(below.zeros.end(), above.zeros.begin(), above.zeros.end());
+    const bool counted = below.expected >= 0 && above.expected >= 0;
+    below.counted = counted ? I(below.counted.lo, above.counted.hi) : I::empty();
+    below.expected = counted ? below.expected + above.expected : -1;
+    below.complete = below.complete && above.complete;
+    below.evaluations += above.evaluations;
+    return below;
+}
+
+inline std::vector<spatium::GramPoint<double>> gram_on(double t0, double t1) {
+    std::vector<spatium::GramPoint<double>> out;
+    if (t0 < 0)
+        for (auto p : spatium::gram_points(std::max(0.0, -t1), -t0)) out.insert(out.begin(), {-p.n, flip(p.t), p.good});
+    if (t1 > 0)
+        for (const auto& p : spatium::gram_points(std::max(0.0, t0), t1)) out.push_back(p);
+    return out;
+}
+
 // The notes are what this window's zeros and Gram points show, each with where it is.
 inline JsonValue notes(double t0, double t1) {
     Array out;
     const auto note = [&](std::string title, std::string text, std::string strength, JsonValue anchor) {
         out.push_back(Object{{"title", std::move(title)}, {"text", std::move(text)}, {"strength", std::move(strength)}, {"anchor", std::move(anchor)}});
     };
-    const auto z = spatium::critical_zeros(t0, t1);
+    const auto z = zeros_on(t0, t1);
     std::size_t inside = 0;
     for (const I& r : z.zeros) inside += t0 <= r.mid() && r.mid() <= t1;
     if (z.complete)
@@ -76,7 +112,7 @@ inline JsonValue notes(double t0, double t1) {
         note("Zeros found, their count not proved",
              std::format("Z changes sign {} times here. N(T) was not decided at both ends, so these are not proved to be all.", z.zeros.size()),
              "computed here", Object{{"t0", t0}, {"t1", t1}});
-    const auto g = spatium::gram_points(t0, t1);
+    const auto g = gram_on(t0, t1);
     for (const auto& p : g)
         if (p.good == spatium::Truth::No)
             note(std::format("Gram's law fails at Gram point {}", p.n),
@@ -91,6 +127,40 @@ inline JsonValue notes(double t0, double t1) {
                              number(a, 6), number(b, 6), number(b - a, 4), number((b - a) / mean, 3)),
                  "proved here", Object{{"t0", a}, {"t1", b}});
     }
+    // the zeros of zeta' here, right of the line as Speiser's theorem ties to the Riemann hypothesis
+    const auto critical = spatium::zeta_prime_zeros({-1, std::max(t0, 1.0)}, {3, t1});
+    if (!critical.empty()) {
+        double leftmost = critical.front().re;
+        for (const auto& z : critical) leftmost = std::min(leftmost, z.re);
+        note("Zeros of zeta' found here",
+             std::format("Newton's method on \\(\\zeta'\\) from a grid of starts finds {} zeros of \\(\\zeta'\\) with \\(-1 \\le \\sigma \\le 3\\) here; "
+                         "the leftmost has \\(\\sigma \\approx {}\\), right of the critical line.",
+                         critical.size(), number(leftmost, 4)),
+             "computed here", Object{{"s", Array{critical.front().re, critical.front().im}}});
+        note("Where the zeros of zeta' lie",
+             "The Riemann hypothesis holds exactly when \\(\\zeta'\\) has no zero with \\(0 < \\sigma < \\tfrac12\\).", "theorem",
+             Object{{"source", "Speiser 1934; Levinson and Montgomery 1974"}});
+    }
+    // the moments over [0, t1], beside their asymptotics, where that integral is short
+    if (0 < t1 && t1 <= 1000) {
+        const double T = t1, pi = std::numbers::pi, gamma = std::numbers::egamma;
+        const auto m1 = spatium::zeta_moment(1, T), m2 = spatium::zeta_moment(2, T);
+        const double a1 = T * std::log(T / (2 * pi)) + (2 * gamma - 1) * T, a2 = T * std::pow(std::log(T), 4) / (2 * pi * pi);
+        note("Moments of zeta on the line",
+             std::format("\\(M_1({0}) = {1}\\), \\(M_1 / (T\\log\\tfrac{{T}}{{2\\pi}} + (2\\gamma - 1)T) = {2}\\); "
+                         "\\(M_2({0}) = {3}\\), \\(M_2 / \\tfrac{{T\\log^4 T}}{{2\\pi^2}} = {4}\\), still far from its limit 1 at this height.",
+                         number(T, 0), number(m1.value, 4), number(m1.value / a1, 4), number(m2.value, 2), number(m2.value / a2, 4)),
+             "computed here", Object{{"t0", 0.0}, {"t1", T}});
+        note("The moments for k at least 3",
+             "\\(M_k(T) \\sim c_k\\, T \\log^{k^2} T\\) with \\(c_1, c_2\\) known (Hardy and Littlewood, Ingham); for \\(k \\ge 3\\) the "
+             "constant is conjectured (Conrey and Ghosh, Keating and Snaith), not proved.",
+             "conjecture", Object{{"source", "Keating and Snaith 2000"}});
+    }
+    if (t0 < 0)
+        note("Below t = 0, the mirror",
+             "\\(\\zeta(\\bar s) = \\overline{\\zeta(s)}\\), so \\(Z(-t) = Z(t)\\): each zero \\(\\tfrac12 + it\\) has its twin \\(\\tfrac12 - it\\), "
+             "and the zeros and Gram points below 0 are those above, reflected.",
+             "theorem", Object{});
     note("Z is real on the critical line",
          "\\(Z(t) = e^{i\\theta(t)}\\zeta(\\tfrac12 + it)\\) and \\(|Z(t)| = |\\zeta(\\tfrac12 + it)|\\): a zero of \\(\\zeta\\) on the line is a change of Z's sign.",
          "theorem", Object{});
@@ -107,7 +177,7 @@ inline spatium::io::JsonValue zeta_request(std::string_view request) {
     const std::string what = json->string_or("what", "");
     const double t0 = json->number_or("t0", 0), t1 = json->number_or("t1", 50);
     if (what == "hardy" || what == "zeros" || what == "gram" || what == "notes")
-        if (!(t0 < t1) || t1 > 1e5 || t0 < 0) return refuse("the window is not 0 <= t0 < t1 <= 100000");
+        if (!(t0 < t1) || t1 > 1e5 || t0 < -1e5) return refuse("the window is not -100000 <= t0 < t1 <= 100000");
     if (what == "hardy") {
         const int n = static_cast<int>(json->number_or("n", 512));
         if (n < 2 || n > 8192) return refuse("n is not between 2 and 8192");
@@ -120,8 +190,8 @@ inline spatium::io::JsonValue zeta_request(std::string_view request) {
         }
         return Object{{"t", std::move(ts)}, {"z", std::move(zs)}};
     }
-    if (what == "zeros") return zeros_json(spatium::critical_zeros(t0, t1));
-    if (what == "gram") return gram_json(spatium::gram_points(t0, t1));
+    if (what == "zeros") return zeros_json(zeros_on(t0, t1));
+    if (what == "gram") return gram_json(gram_on(t0, t1));
     if (what == "notes") return notes(t0, t1);
     if (what == "grid") {
         const auto corner = [&](const char* key) -> std::pair<double, double> {
