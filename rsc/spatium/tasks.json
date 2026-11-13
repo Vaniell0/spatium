@@ -1,0 +1,113 @@
+[
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "H1",
+  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
+  "laws": 5,
+  "examples": [
+   "d(p,p) = d(exp(p,w),exp(p,w))",
+   "d(p,q) = (d(p,q)+d(q,q))",
+   "d(q,r) = (d(q,q)+d(q,r))",
+   "(d(p,q)+d(q,q)) <= (d(p,r)+d(q,r))",
+   "(d(q,q)+d(q,r)) <= (d(p,q)+d(p,r))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check H1"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "H2",
+  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
+  "laws": 3,
+  "examples": [
+   "d(p,p) = d(exp(p,w),exp(p,w))",
+   "d(p,q) = (d(p,q)+d(q,q))",
+   "d(q,r) = (d(q,q)+d(q,r))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check H2"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "H4",
+  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
+  "laws": 3,
+  "examples": [
+   "d(p,p) = d(exp(p,w),exp(p,w))",
+   "d(p,q) = (d(p,q)+d(q,q))",
+   "d(q,r) = (d(q,q)+d(q,r))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check H4"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "S2xH2",
+  "claim": "d(p,p) = d(exp(p,w),exp(p,w))",
+  "laws": 1,
+  "examples": [
+   "d(p,p) = d(exp(p,w),exp(p,w))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check S2xH2"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "S2xS2",
+  "claim": "d(p,exp(p,u/2)) <= 2*d(p,exp(p,u))",
+  "laws": 2,
+  "examples": [
+   "d(p,exp(p,u/2)) <= 2*d(p,exp(p,u))",
+   "d(p,exp(p,w/2)) <= 2*d(p,exp(p,w))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check S2xS2",
+  "triaged": "a compact space: past the cut locus exp(p, u) can come back near p while exp(p, u/2) does not, so the law is local; whether a long sample lands there depends on how u splits between the factors"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "Sphere-implicit",
+  "claim": "p = exp(q,log(q,p))",
+  "laws": 24,
+  "examples": [
+   "p = exp(q,log(q,p))",
+   "p = exp(r,log(r,p))",
+   "q = exp(p,log(p,q))",
+   "q = exp(r,log(r,q))",
+   "r = exp(p,log(p,r))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check Sphere-implicit",
+  "triaged": "an erased level set: its log is a retraction, the chord projected on the tangent plane, and the library withholds its distance for that reason (core/access.hpp)"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "Torus-chart",
+  "claim": "p = exp(q,log(q,p))",
+  "laws": 24,
+  "examples": [
+   "p = exp(q,log(q,p))",
+   "p = exp(r,log(r,p))",
+   "q = exp(p,log(p,q))",
+   "q = exp(r,log(r,q))",
+   "r = exp(p,log(p,r))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check Torus-chart",
+  "triaged": "an erased chart: its exp is project(p + v t), a retraction, so exp after log is not the identity"
+ },
+ {
+  "kind": "breaks a law of its neighbours",
+  "space": "Torus-typed",
+  "claim": "-log(p,exp(p,u)) = log(p,exp(p,-u))",
+  "laws": 8,
+  "examples": [
+   "-log(p,exp(p,u)) = log(p,exp(p,-u))",
+   "-log(p,exp(p,w)) = log(p,exp(p,-w))",
+   "log(p,exp(p,u)) = -log(p,exp(p,-u))",
+   "log(p,exp(p,w)) = -log(p,exp(p,-w))",
+   "d(p,exp(p,2u)) <= 2*d(p,exp(p,u))"
+  ],
+  "check": "python3 rsc/spatium/rsc_laws.py check Torus-typed",
+  "triaged": "the law holds where the geodesic symmetry at p is an isometry -- a symmetric space -- and a torus of revolution is not one; past the cut locus the two sides are different points' logs"
+ },
+ {
+  "kind": "missing operation",
+  "space": "SPD2-affine",
+  "claim": "unary minus on a tangent",
+  "check": "python3 rsc/spatium/rsc_laws.py discover"
+ }
+]

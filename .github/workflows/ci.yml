@@ -212,6 +212,14 @@ jobs:
       - name: Regenerate and compare
         run: nix develop --command bash -c 'python3 rsc/spatium/rsc_find.py --all --check -j 4'
 
+      # The laws of the spaces: rsc/spatium/laws.json is what rsc_laws.py discover found; each law is
+      # evaluated again on every space of the matrix, and a space where one starts or stops holding fails.
+      - name: The rules of the law check (what a change is, what a task is)
+        run: python3 rsc/spatium/test_rsc_laws.py
+
+      - name: The laws of the spaces still hold where they held
+        run: nix develop --command bash -c 'python3 rsc/spatium/rsc_laws.py check'
+
   dependency-graph:
     name: dependency graph is up to date
     runs-on: ubuntu-24.04
