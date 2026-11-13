@@ -12,6 +12,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <algorithm>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -69,7 +70,7 @@ std::size_t count(const std::string& s, std::string_view what) {
 } // namespace
 
 TEST_CASE("round trip: a statement read back from its text is the statement", "[io][roundtrip]") {
-    const Case& c = GENERATE(from_range(cases));
+    const Case& c = GENERATE(from_range(std::begin(cases), std::end(cases)));
     INFO(c.line);
     const auto doc = read(c);
     const auto again = bd::read_document(bd::to_text(doc));
@@ -79,7 +80,7 @@ TEST_CASE("round trip: a statement read back from its text is the statement", "[
 }
 
 TEST_CASE("round trip: a statement read back from its JSON is the statement", "[io][roundtrip]") {
-    const Case& c = GENERATE(from_range(cases));
+    const Case& c = GENERATE(from_range(std::begin(cases), std::end(cases)));
     INFO(c.line);
     const auto doc = read(c);
     const auto direct = bd::document_from_json(bd::to_json(doc));
@@ -93,7 +94,7 @@ TEST_CASE("round trip: a statement read back from its JSON is the statement", "[
 }
 
 TEST_CASE("round trip: the LaTeX rows of a statement hold all of it", "[io][roundtrip]") {
-    const Case& c = GENERATE(from_range(cases));
+    const Case& c = GENERATE(from_range(std::begin(cases), std::end(cases)));
     INFO(c.line);
     const auto doc = read(c);
     const bd::Statement& s = doc.statements.back();
@@ -110,7 +111,7 @@ TEST_CASE("round trip: the LaTeX rows of a statement hold all of it", "[io][roun
 }
 
 TEST_CASE("round trip: the document an answer says it read is the one typed", "[io][roundtrip]") {
-    const Case& c = GENERATE(from_range(cases));
+    const Case& c = GENERATE(from_range(std::begin(cases), std::end(cases)));
     INFO(c.line);
     const auto doc = read(c);
     const auto answer = spatium::answer::respond(std::string(c.above) + c.line);
@@ -121,7 +122,7 @@ TEST_CASE("round trip: the document an answer says it read is the one typed", "[
 }
 
 TEST_CASE("round trip: a shorthand is read as the statement it stands for", "[io][roundtrip]") {
-    const Case& c = GENERATE(from_range(cases));
+    const Case& c = GENERATE(from_range(std::begin(cases), std::end(cases)));
     if (std::string_view(c.typed).empty()) return;
     INFO(c.typed);
     const auto doc = read(c);
@@ -146,7 +147,7 @@ TEST_CASE("round trip: every form a statement is written in reads one of the cas
 }
 
 TEST_CASE("round trip: the rows an answer writes for its question read back as it", "[io][roundtrip]") {
-    const Case& c = GENERATE(from_range(cases));
+    const Case& c = GENERATE(from_range(std::begin(cases), std::end(cases)));
     INFO(c.line);
     const auto doc = read(c);
     const auto answer = spatium::answer::respond(std::string(c.above) + c.line);
