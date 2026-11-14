@@ -237,7 +237,6 @@ const addRows = (rows: string[] | undefined, text: string) => {
   if (cards.document.preset === "calculator") intoLine(written);
   else cards.append([math(written)]);
 };
-const addText = (text: string) => addRows(undefined, text);
 
 // The reference: a drawer of sections, as a page of docs is -- how to write, the questions, the
 // functions, the operators, the constants, the canvas's language, what an answer promises -- each
@@ -408,9 +407,30 @@ function wire() {
     if (e.key !== "Escape") return;
     if (!$("#keys")!.hidden) { setKeys(false); return; }
     if (!$("#panel")!.hidden) { panel(null); return; }
-    if (cards.document.preset === "calculator" && Date.now() - escAt < 1000) { escAt = 0; commitLine(false); }
-    else escAt = Date.now();
+    if (cards.document.preset === "calculator" && Date.now() - escAt < 1000) {
+      escAt = 0;
+      const was = structuredClone(calc);
+      if (blank(calc.line)) return;
+      commitLine(false);
+      undoStrip("Line cleared", () => { calc = was; cards.setDoc(lineDoc()); past.render(calc); changed(); });
+    } else escAt = Date.now();
   });
+  // Ctrl+Z undoes what the strip offers to; inside a formula that has something in it, the editor's
+  // own undo goes first
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== "z" || !undoing) return;
+    const field = document.activeElement?.closest("math-field") as (HTMLElement & { value: string }) | null;
+    if (field?.value || (document.activeElement instanceof HTMLTextAreaElement && document.activeElement.value)) return;
+    e.preventDefault();
+    undoing();
+    undoing = null;
+    $("#undo")!.hidden = true;
+  });
+  // a press anywhere on the keyboard's window keeps the formula written in focused: the keys type
+  // into the focused field, and a press on the window's edge must not leave none
+  $("#keys")!.addEventListener("pointerdown", () => {
+    if (!document.activeElement?.closest("math-field") && activeField && document.body.contains(activeField)) activeField.focus();
+  }, true);
   // forgetting asks once, in place: the button becomes Forget and Cancel
   const forgetRow = () => $("#forget-row")!.replaceChildren(el("button", { type: "button", class: "quiet warn", text: "Forget history and canvas",
     onclick: () => $("#forget-row")!.replaceChildren(
@@ -475,7 +495,7 @@ past = new History(calc, {
   },
   use: (e) => intoLine(e.written),
   changed: (c) => { calc = c; saveCalc(calc); },
-  ask: (text) => addText(text),
+  ask: (text, rows) => addRows(rows, text),
   undo: undoStrip,
 });
 past.render(calc);
@@ -486,7 +506,7 @@ cards = new Cards(doc, {
   focused: (f) => { activeField = f; placeKeys(); },
   hint,
   curve: (cell) => (at) => answers.curve(cell, at),
-  ask: (text) => addText(text),
+  ask: (text, rows) => addRows(rows, text),
   commit: () => commitLine(true),
 });
 $("#sheet")!.append(cards.root, past.root);

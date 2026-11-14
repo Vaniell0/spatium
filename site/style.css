@@ -338,7 +338,7 @@ table.roots td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-fa
 .keys-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 4px 12px; border-bottom: 1px solid var(--line);
   cursor: grab; touch-action: none; user-select: none; }
 .keys-head:active { cursor: grabbing; }
-.keys-body { position: relative; height: 236px; overflow: hidden; border-radius: 0 0 var(--r-panel) var(--r-panel); }
+.keys-body { position: relative; height: var(--keys-height, 288px); overflow: hidden; border-radius: 0 0 var(--r-panel) var(--r-panel); }
 .keys-body .ML__keyboard { --keyboard-zindex: 0; }
 /* MathLive slides its keyboard up from below its container; in a window of its own it simply fills it */
 .keys-body .MLK__backdrop { inset: 0 !important; height: auto !important; transform: none !important; box-shadow: none !important; border: 0 !important; }

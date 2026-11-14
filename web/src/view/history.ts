@@ -12,7 +12,7 @@ export interface HistoryHost {
   sheet(entry: Entry): Promise<Answer | null>;    // the entry's whole answer, asked again
   use(entry: Entry): void;                        // its question in the line
   changed(calc: Calc): void;                      // the history changed: keep it
-  ask: (text: string) => void;                    // a question a sheet offers
+  ask: (text: string, rows?: string[]) => void;   // a question a sheet offers, as its text and rows
   undo(message: string, restore: () => void): void;
 }
 

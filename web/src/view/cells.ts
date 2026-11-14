@@ -18,7 +18,7 @@ export interface CardsHost {
   focused(field: HTMLElement): void;  // a row took the focus (the keyboard goes there)
   hint(word: string): [name: string, caption: string, example: string] | null;  // what the reference says of a word
   curve: (cell: Cell) => GraphOptions["curve"];                                 // a graph's curve in doubles
-  ask: (text: string) => void;                                                   // a question the sheet offers, as a new card
+  ask: (text: string, rows?: string[]) => void;                                 // a question the sheet offers, as a new card
   commit?: () => void;                                                           // the calculator's line is done: into the history
 }
 
@@ -147,6 +147,15 @@ export class Cards {
     }
     // the calculator's line is cleared by x: what it asked goes into the history first
     if (this.line) {
+      // a row below the last, as Shift+Enter writes one: rows of equations are a system
+      const row = el("button", { type: "button", class: "icon clear", "aria-label": "Add a row: rows of equations are a system", onclick: () => {
+        if (cell.kind !== "math" || !("rows" in cell.written)) return;
+        cell.written.rows.push("");
+        this.build(cell, cell.written.rows.length - 1);
+        this.host.changed();
+      } });
+      row.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+      head.append(row);
       const x = el("button", { type: "button", class: "icon clear", "aria-label": "Clear the line", onclick: () => this.line?.() });
       x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
       head.append(x);
@@ -191,6 +200,12 @@ export class Cards {
       written.rows.forEach((latex, k) => {
         const mf = document.createElement("math-field") as MathField;
         mf.mathVirtualKeyboardPolicy = "manual";
+        // `inf`, as the reference names it, is typed as the infinity the reader takes (the editor's
+        // options can be read only once it is on the page)
+        mf.addEventListener("mount", () => {
+          const o = mf as unknown as { inlineShortcuts: Record<string, string> };
+          o.inlineShortcuts = { ...o.inlineShortcuts, inf: "\\infty" };
+        }, { once: true });
         mf.setAttribute("aria-label", written.rows.length > 1 ? `Row ${k + 1}` : "Formula");
         mf.value = latex;
         const look = () => tell(wordBefore(mf.getValue(0, mf.position, "latex")));
