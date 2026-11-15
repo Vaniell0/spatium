@@ -135,19 +135,21 @@ export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?:
     return el("li", {}, ask ? el("button", { type: "button", class: "ask", onclick: () => ask(n.text, [n.latex]) }, ...inner) : el("div", {}, ...inner));
   })));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
-  return foldable(sec.title, gist, sec.open, body);
+  // the steps are the product: shown whatever `open` says, and never folded
+  return foldable(sec.title, gist, sec.steps ? true : sec.open, body, undefined, Boolean(sec.steps));
 }
 
 // a titled part that folds, open as the person last left one of that title, else as `open`; `fill`
-// builds its body the first time it opens, so what is never opened is never built
-export function foldable(title: string, gist: HTMLElement | null, open: boolean, body: HTMLElement, fill?: () => void) {
-  const summary = el("summary", {}, title, gist);
+// builds its body the first time it opens, so what is never opened is never built; a `fixed` one
+// stays open
+export function foldable(title: string, gist: HTMLElement | null, open: boolean, body: HTMLElement, fill?: () => void, fixed = false) {
+  const summary = el("summary", { class: fixed ? "fixed" : undefined }, title, gist);
   const d = el("details", { class: "sec" }, summary, body);
   const fillOnce = () => { if (d.open && fill && !body.firstChild) fill(); };
   d.addEventListener("toggle", fillOnce);
   // only a person's choice is kept: a click (or Enter) on the title, not the core's default opening it
-  summary.addEventListener("click", () => keep("spatium.open", title, !d.open));
-  if (kept<boolean>("spatium.open")[title] ?? open) d.setAttribute("open", "");
+  summary.addEventListener("click", (e) => { if (fixed) e.preventDefault(); else keep("spatium.open", title, !d.open); });
+  if (fixed || (kept<boolean>("spatium.open")[title] ?? open)) d.setAttribute("open", "");
   fillOnce();
   return d;
 }

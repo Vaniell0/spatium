@@ -8,7 +8,7 @@ import type { Answer } from "../core.js";
 import { type Cell, type Doc, graph, math, presets, setting, splitLines } from "../doc.js";
 import { nameOf, wordBefore } from "../answers.js";
 import { answerView, foldable } from "./answer.js";
-import { el } from "./dom.js";
+import { el, icon } from "./dom.js";
 import { graphView, type GraphOptions, type View } from "./graph.js";
 
 export interface CardsHost {
@@ -32,8 +32,6 @@ const CHOICES = {
   numbers: { title: "Numbers", values: [["decimal", "decimal"], ["exact", "exact"]] },
   steps: { title: "Steps", values: [[true, "shown"], [false, "hidden"]] },
 } as const;
-
-const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6-1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4Z"/></svg>';
 
 const filled = (cell: Cell) => cell.kind === "math" && ("rows" in cell.written ? cell.written.rows.some((r) => r.trim()) : cell.written.text.trim() !== "");
 
@@ -132,10 +130,13 @@ export class Cards {
     head.append(hint);
     this.fill(cell, rows, hint);
     box.append(head);
+    // the line's tools show once something is written
+    const blank = () => box.classList.toggle("blank", !filled(cell));
+    head.addEventListener("input", blank);
+    blank();
     if (policy.settings.length || this.doc.cells.length > 1) {
       const panel = el("div", { class: "options", hidden: true });
-      const gear = el("button", { type: "button", class: "gear", "aria-label": "This card's settings", "aria-expanded": "false" });
-      gear.innerHTML = GEAR;
+      const gear = el("button", { type: "button", class: "gear", "aria-label": "This card's settings", "aria-expanded": "false" }, icon("sliders"));
       gear.addEventListener("click", () => {
         const open = panel.hidden;
         panel.hidden = !open;
@@ -148,17 +149,13 @@ export class Cards {
     // the calculator's line is cleared by x: what it asked goes into the history first
     if (this.line) {
       // a row below the last, as Shift+Enter writes one: rows of equations are a system
-      const row = el("button", { type: "button", class: "icon clear", "aria-label": "Add a row: rows of equations are a system", onclick: () => {
+      head.append(el("button", { type: "button", class: "icon clear", "aria-label": "Add a row: rows of equations are a system", onclick: () => {
         if (cell.kind !== "math" || !("rows" in cell.written)) return;
         cell.written.rows.push("");
         this.build(cell, cell.written.rows.length - 1);
         this.host.changed();
-      } });
-      row.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
-      head.append(row);
-      const x = el("button", { type: "button", class: "icon clear", "aria-label": "Clear the line", onclick: () => this.line?.() });
-      x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
-      head.append(x);
+      } }, icon("plus")));
+      head.append(el("button", { type: "button", class: "icon clear", "aria-label": "Clear the line", onclick: () => this.line?.() }, icon("x")));
     }
     box.append(el("div", { class: "answer", "aria-live": "polite" }), el("div", { class: "also" }));
     this.shown.set(cell, { box, answer: null, above: 0, name: null });
@@ -207,6 +204,7 @@ export class Cards {
           o.inlineShortcuts = { ...o.inlineShortcuts, inf: "\\infty" };
         }, { once: true });
         mf.setAttribute("aria-label", written.rows.length > 1 ? `Row ${k + 1}` : "Formula");
+        if (written.rows.length === 1 && this.line) mf.setAttribute("placeholder", "2x^2-3x-5=0");
         mf.value = latex;
         const look = () => tell(wordBefore(mf.getValue(0, mf.position, "latex")));
         mf.addEventListener("input", () => { written.rows[k] = mf.value; look(); this.host.changed(); });

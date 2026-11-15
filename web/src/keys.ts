@@ -1,31 +1,45 @@
-// The on-screen keyboard's one layout, given to MathLive: the functions the language has as keys
-// of their own (no shift layer that swaps them in and out), digits, operators and the arrows.
-// Each function key inserts its call with a placeholder for the argument, as the reader takes it.
+// The on-screen keyboard's layers: three of them, eight keys by four each, with no shift layer
+// that swaps keys in and out. A key inserts LaTeX with placeholders for what is still to be
+// written, as the reader takes it, or runs one of the line's own commands. A key whose insert is
+// a call carries an example of that call filled in, which a test reads through the parser: no key
+// inserts what the page would then refuse.
 
-export interface Key { label: string; insert: string; example: string }   // example: the key's call filled in
+export interface Key {
+  label: string;        // what the key shows; LaTeX where `tex` is set, so it is rendered once
+  tex?: boolean;
+  insert?: string;      // LaTeX put at the caret, `#0` a placeholder, `#@` the selection
+  command?: "left" | "right" | "backspace" | "commit";
+  example?: string;     // the insert filled in, for the test
+}
 
-export const functionKeys: Key[] = [
-  { label: "sin", insert: "\\sin\\left(#0\\right)", example: "\\sin\\left(1\\right)" },
-  { label: "cos", insert: "\\cos\\left(#0\\right)", example: "\\cos\\left(1\\right)" },
-  { label: "ln", insert: "\\ln\\left(#0\\right)", example: "\\ln\\left(2\\right)" },
-  { label: "lg", insert: "\\lg\\left(#0\\right)", example: "\\lg\\left(100\\right)" },
-  { label: "log_□", insert: "\\log_{#0}\\left(#0\\right)", example: "\\log_{2}\\left(8\\right)" },
-  { label: "√", insert: "\\sqrt{#0}", example: "\\sqrt{2}" },
-  { label: "□²", insert: "#@^{2}", example: "3^{2}" },
-  { label: "□^□", insert: "#@^{#0}", example: "2^{10}" },
+const k = (label: string, insert = label, example?: string): Key => ({ label, insert, example });
+const tex = (label: string, insert: string, example?: string): Key => ({ label, tex: true, insert, example });
+const fn = (name: string, example: string): Key => k(name, `\\${name}\\left(#0\\right)`, example);
+const LEFT: Key = { label: "←", command: "left" }, RIGHT: Key = { label: "→", command: "right" };
+const BACK: Key = { label: "⌫", command: "backspace" }, ENTER: Key = { label: "⏎", command: "commit" };
+
+export const layers: { name: string; keys: Key[] }[] = [
+  { name: "123", keys: [
+    k("7"), k("8"), k("9"), k("÷", "\\div"), k("("), k(")"), LEFT, RIGHT,
+    k("4"), k("5"), k("6"), k("×", "\\times"), k("["), k("]"), tex("\\square^{\\square}", "#@^{#0}", "2^{10}"), tex("\\square^{2}", "#@^{2}", "3^{2}"),
+    k("1"), k("2"), k("3"), k("−", "-"), tex("\\frac{\\square}{\\square}", "\\frac{#0}{#0}", "\\frac{1}{2}"), tex("\\sqrt{\\square}", "\\sqrt{#0}", "\\sqrt{2}"), k("π", "\\pi"), k("y"),
+    k("0"), k("."), k(","), k("+"), k("="), k("x"), BACK, ENTER,
+  ] },
+  { name: "f(x)", keys: [
+    fn("sin", "\\sin\\left(1\\right)"), fn("cos", "\\cos\\left(1\\right)"), fn("ln", "\\ln\\left(2\\right)"), fn("lg", "\\lg\\left(100\\right)"),
+    tex("\\log_{\\square}", "\\log_{#0}\\left(#0\\right)", "\\log_{2}\\left(8\\right)"), tex("e^{\\square}", "e^{#0}", "e^{1}"),
+    tex("\\left|\\square\\right|", "\\left|#0\\right|", "\\left|-2\\right|"), tex("\\sqrt{\\square}", "\\sqrt{#0}", "\\sqrt{2}"),
+    k("min", "\\min\\left(#0, #0\\right)", "\\min\\left(1, 2\\right)"), k("max", "\\max\\left(#0, #0\\right)", "\\max\\left(1, 2\\right)"),
+    tex("\\int_{\\square}^{\\square}", "\\int_{#0}^{#0} #0\\,dx", "\\int_{0}^{1} x^{2}\\,dx"), k("∈", "\\in"),
+    k("<"), k(">"), k("≤", "\\le"), k("≥", "\\ge"),
+    k("π", "\\pi"), k("e"), k("∞", "\\infty"), k("x"), k("t"), k("p"), k("("), k(")"),
+    k("["), k("]"), k(","), k("="), LEFT, RIGHT, BACK, ENTER,
+  ] },
+  { name: "abc", keys: [
+    ..."abcdefghijklmnopqrstuvwxyz".split("").map((c) => k(c)),
+    k(","), k("="), LEFT, RIGHT, BACK, ENTER,
+  ] },
 ];
 
-// MathLive's layout object: rows of keycaps, a keycap a string of LaTeX or {label, insert}
-export function layout() {
-  const f = functionKeys.map((k) => ({ label: k.label, insert: k.insert, class: "small" }));
-  return {
-    label: "123",
-    rows: [
-      [...f.slice(0, 5), "\\pi", "e", "[backspace]"],
-      ["7", "8", "9", "\\div", "(", ")", f[5], "x"],
-      ["4", "5", "6", "\\times", f[6], f[7], "\\le", "y"],
-      ["1", "2", "3", "-", "=", "<", ">", "\\ge"],
-      ["0", ".", ",", "+", "[left]", "[right]", { label: "[return]", width: 2 }],
-    ],
-  };
-}
+// every key that inserts a call, with the example the test reads
+export const functionKeys = layers.flatMap((l) => l.keys).filter((key): key is Key & { example: string } => Boolean(key.example));
