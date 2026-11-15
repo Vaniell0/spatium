@@ -151,6 +151,23 @@ measured each.
 - An attempt by a proposer is bounded by building, not by thinking: two
   builds from cold, the proposer's and the judge's, are about 25 of its 50
   minutes.
+- The law check would not have caught the library's past fixes: replayed on
+  the 22 of 47 that touched core, algebra or spaces, it saw none of the 13 it
+  could build, and its fixed tolerance (1e-6) cannot see an accuracy fix at
+  1e-10; the other 9 trees predate its samplers. One finder covers a narrow
+  slice, and the past fixes are the measure of which finder to build next.
+- The shape of the call map says little about where bugs were. Per function,
+  against size, fan-in, fan-out and calls against the main direction between
+  modules separate files that had a fix with AUC 0.65-0.72 here and 0.57-0.58
+  on a second project (GoodNet); how far a function sits from its module's
+  pattern, 0.55-0.57. The number of tests reaching a file looked strongest and
+  is leaked: a fix enters the corpus with its test. Structure says where to
+  look; only a check gives a verdict.
+- Why the bugs happened, in 113 past fixes of the two projects: a contract
+  no code checked, at a boundary -- the edge of a domain here (degenerate,
+  extreme, not finite), the edge of a module there (who may call, in what
+  order, what a limit of 0 means) -- and one meaning written twice in two
+  places (one shutdown fault fixed three times, in three sibling plugins).
 
 ## The loop of tasks
 
