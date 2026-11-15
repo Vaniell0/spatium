@@ -5,7 +5,7 @@
 // synthesis is cancelled. Nothing here reads or changes an answer.
 
 export type Answer = Record<string, unknown>;
-export type Kind = "rows" | "text" | "plot";
+export type Kind = "rows" | "text" | "plot" | "zeta";
 export type State = "loading" | "ready" | "busy" | "failed";
 
 export interface CoreOptions {

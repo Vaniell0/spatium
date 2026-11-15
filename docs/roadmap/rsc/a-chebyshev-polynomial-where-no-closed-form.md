@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: where no short expression answers a piece, a Chebyshev polynomial does, and says so
-files: [rsc/spatium/synthesis.hpp, rsc/spatium/query.hpp, rsc/spatium/respond.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_rsc_synthesis.cpp, tests/test_rsc_query.cpp]
+files: [include/spatium/answer/synthesis.hpp, include/spatium/answer/query.hpp, include/spatium/answer/respond.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_answer_synthesis.cpp, tests/test_answer_query.cpp]
 resolves: [algebra/a-limit-that-moves-with-the-parameter#1]
 ---
 

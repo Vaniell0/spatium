@@ -115,6 +115,9 @@ ordinary header of the library under the library's tests.
 | Mechanics assemblies, straightening, the error budget, IR passes | designed | this page |
 | Surrogates, IR rewriting, structure building | not attempted | the catalogue in the prototype's notes |
 | Browser solver | not started | gated on a WASM build |
+| Laws of the spaces found by enumeration, with no concept told | built, in CI | `rsc/spatium/rsc_laws.py`, `laws.json`; at size 7, 834 laws in 25 classes on the 25 spaces of the matrix; `Distanced` comes out exactly; `check` re-evaluates the snapshot a column per space |
+| A judge of whether a branch does a task and nothing gets worse | built | `rsc/spatium/rsc_judge.py`; a control branch accepted on every step, one that removed a test refused |
+| A proposer for a task, run headless and judged | built, one attempt | `rsc/spatium/rsc_propose.py`; the first task taken (a hyperbolic distance of a point from itself) fixed in 1913 s for $0.71 and accepted |
 
 ## Measured borders
 
@@ -136,6 +139,63 @@ measured each.
 - A dispatcher needs a call site with a real alternative.
 - A setting changes cost and never correctness only without a budget: under a
   finite budget a policy can change the answer (finding B8).
+- Laws found on samples are mostly chance until two things are added: a
+  number's degree in length as part of its type, so that quantities of
+  different degree are never compared, and a breaker that moves the inputs
+  (each subset drawn toward one point, coincident and aligned inputs, tangents
+  past the cut locus). Without them the laws drew 970 classes of spaces,
+  with them 25.
+- A fix that removes a defect shortens the description: the hyperbolic
+  distance made exact took the laws from 834 to 637, the 197 that went being
+  consequences of one term that is now 0.
+- An attempt by a proposer is bounded by building, not by thinking: two
+  builds from cold, the proposer's and the judge's, are about 25 of its 50
+  minutes.
+- The law check would not have caught the library's past fixes: replayed on
+  the 22 of 47 that touched core, algebra or spaces, it saw none of the 13 it
+  could build, and its fixed tolerance (1e-6) cannot see an accuracy fix at
+  1e-10; the other 9 trees predate its samplers. One finder covers a narrow
+  slice, and the past fixes are the measure of which finder to build next.
+- The shape of the call map says little about where bugs were. Per function,
+  against size, fan-in, fan-out and calls against the main direction between
+  modules separate files that had a fix with AUC 0.65-0.72 here and 0.57-0.58
+  on a second project (GoodNet); how far a function sits from its module's
+  pattern, 0.55-0.57. The number of tests reaching a file looked strongest and
+  is leaked: a fix enters the corpus with its test. Structure says where to
+  look; only a check gives a verdict.
+- Why the bugs happened, in 113 past fixes of the two projects: a contract
+  no code checked, at a boundary -- the edge of a domain here (degenerate,
+  extreme, not finite), the edge of a module there (who may call, in what
+  order, what a limit of 0 means) -- and one meaning written twice in two
+  places (one shutdown fault fixed three times, in three sibling plugins).
+
+## The loop of tasks
+
+Measured on this library since 2026-11-13, and kept for what it showed.
+
+- **The judge is the centre, not a model.** Finders raise tasks, each with the
+  check that says when it is done; a proposer, a person or an agent, hands in a
+  branch; a judge decides by running checks. Whoever proposes cannot persuade
+  the judge, which is why a general model may propose before any model of ours
+  is trained.
+- **A survey once, a snapshot for regression.** The enumeration of laws is
+  dear and run when a branch is grown; what it leaves is data, and the
+  regression is that data evaluated again a column per space. The snapshot
+  does not grow while nothing changes, and a new space is one column.
+- **A class of spaces is what a law holds on.** One that matches a concept of
+  the library confirms it; one the library has no name for is a proposal
+  (spaces where log is global, the symmetric spaces); a concept no law tells
+  apart from another is told apart only by syntax.
+- **A space that breaks what its neighbours keep is a task; one looked at and
+  found to be a class boundary is recorded with its reason** (an erased
+  surface's log is a retraction; a torus of revolution is not symmetric).
+- **The judge's rules grow from loopholes.** Each way a branch slipped through
+  becomes a rule and a case that rule must refuse: the tests are compared by
+  the names of the base's test cases, because a branch that removed one and
+  added another kept their count.
+- **What a fix is worth is a difference, not a score:** the laws gained and
+  lost on the spaces it touched, and the length of the description before and
+  after.
 
 ## The design, in the order it will be built
 
@@ -256,7 +316,9 @@ re-creates anything that earns a consumer.
 The removal rule above was applied on 2026-10-20: the prototype listed below
 left the tree, and the tag `rsc-prototype-final` marks the last commit that
 has it. The tree now holds `rsc/core` and `rsc/spatium`, described in the
-root `CLAUDE.md`.
+root `CLAUDE.md`. On 2026-11-12 the door a page calls -- a value by its routes,
+the sheet, closed forms, synthesis -- moved to `include/spatium/answer/`: it
+answers a document and runs no search. `rsc/spatium` keeps the finder.
 
 - `include/`: the registry, tasks, dispatcher, trainer, chains, checkpoint
   and the per-domain ops and tasks; `include/generated/` holds the one shipped

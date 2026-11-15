@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: the page is windows of questions, asked as rows of a LaTeX editor, with their graphs
-files: [site/index.html, site/style.css, site/core-worker.js, site/wasm/build.sh, rsc/spatium/respond.hpp, tests/test_rsc_respond.cpp]
+files: [site/index.html, site/style.css, site/core-worker.js, site/wasm/build.sh, include/spatium/answer/respond.hpp, tests/test_answer_respond.cpp]
 open:
   - the workspace is not in the link yet (#w=); #solve?q= still opens one question as text
   - the page is not published on GitHub Pages yet

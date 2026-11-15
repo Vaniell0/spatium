@@ -1,7 +1,7 @@
 ---
 date: 2026-10-29
 title: a field as text, and an answer that reads as a formula in its own variable
-files: [include/spatium/io/field_text.hpp, rsc/spatium/synthesis.hpp, tests/test_rsc_synthesis.cpp]
+files: [include/spatium/io/field_text.hpp, include/spatium/answer/synthesis.hpp, tests/test_answer_synthesis.cpp]
 open:
   - the text is the lowered ops written out, with no simplification: a coefficient of 1 and a sum of two copies of a term stay as they are
   - plain text only; LaTeX or MathML for a page is the same walk with another spelling, not written

@@ -9,7 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <regex>
-#include <rsc/spatium/respond.hpp>
+#include <spatium/answer/respond.hpp>
 
 #include <cmath>
 #include <string>
@@ -28,28 +28,31 @@ const JsonValue& at(const JsonValue& v, std::string_view key) {
 } // namespace
 
 TEST_CASE("respond: an expression with no unknown is evaluated, as a calculator does", "[rsc][respond]") {
-    const auto four = rsc::respond("2+2");
+    const auto four = spatium::answer::respond("2+2");
     CHECK(at(four, "route").as_string() == "evaluate");
     CHECK(at(four, "value").as_number() == 4);
     CHECK(at(four, "latex").as_string() == "2 + 2 = 4");
-    CHECK(at(rsc::respond("2 + 2 ="), "value").as_number() == 4);
+    CHECK(at(spatium::answer::respond("2 + 2 ="), "value").as_number() == 4);
     // the value is the field's, evaluated once: the same bits as the expression in code
-    CHECK(at(rsc::respond("sqrt(2) * 3 - 1/3"), "value").as_number() == std::sqrt(2.0) * 3 - 1.0 / 3);
-    CHECK(at(rsc::respond("2(3 + 4)^2"), "value").as_number() == 98);
+    CHECK(at(spatium::answer::respond("sqrt(2) * 3 - 1/3"), "value").as_number() == std::sqrt(2.0) * 3 - 1.0 / 3);
+    CHECK(at(spatium::answer::respond("2(3 + 4)^2"), "value").as_number() == 98);
     // the case it must fail: a name with no value is not evaluated, and the reason says what to write
-    CHECK(at(rsc::respond("x + 1"), "refused").as_string().find("write an equation (x + 1 = 0)") != std::string::npos);
-    CHECK(at(rsc::respond("2 +"), "refused").as_string().find("column") != std::string::npos);
+    CHECK(at(spatium::answer::respond("x + 1"), "refused").as_string().find("write an equation (x + 1 = 0)") != std::string::npos);
+    CHECK(at(spatium::answer::respond("2 +"), "refused").as_string().find("column") != std::string::npos);
 }
 
 TEST_CASE("respond: an equation is answered in closed form with its steps", "[rsc][respond]") {
-    const auto r = rsc::respond("2x^2 - 3x - 5 = 0");
+    const auto r = spatium::answer::respond("2x^2 - 3x - 5 = 0");
     CHECK(at(r, "route").as_string() == "closed form");
     CHECK(at(r, "unknown").as_string() == "x");
     const auto& steps = at(r, "steps").as_array();
-    const auto direct = rsc::solve_closed_form("2x^2 - 3x - 5 = 0");
+    const auto direct = spatium::answer::solve_closed_form("2x^2 - 3x - 5 = 0");
     REQUIRE(direct.has_value());
-    REQUIRE(steps.size() == direct->steps.size());
-    for (std::size_t i = 0; i < steps.size(); ++i) {
+    // the solution's steps, then its check by Vieta's formulas, a step of its own
+    REQUIRE(direct->check);
+    REQUIRE(steps.size() == direct->steps.size() + 1);
+    CHECK(at(steps.back(), "latex").as_string() == spatium::io::build::to_step(*direct->check, "x").latex);
+    for (std::size_t i = 0; i < direct->steps.size(); ++i) {
         CHECK(at(steps[i], "label").as_string() == direct->steps[i].label);
         // the roots as they are, then their decimals: what the solver alone, given no written form, cannot say
         if (direct->steps[i].label != "roots") CHECK(at(steps[i], "latex").as_string() == direct->steps[i].latex);
@@ -61,7 +64,7 @@ TEST_CASE("respond: an equation is answered in closed form with its steps", "[rs
 
 TEST_CASE("respond: a question with a parameter is answered by synthesis, with its certificate", "[rsc][respond]") {
     const std::string q = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
-    const auto r = rsc::respond(q, {.tolerance = 1e-10});
+    const auto r = spatium::answer::respond(q, {.tolerance = 1e-10});
     CHECK(at(r, "route").as_string() == "synthesis");
     CHECK(at(r, "answered").as_bool());
     const auto& c = at(r, "certificate");
@@ -74,10 +77,10 @@ TEST_CASE("respond: a question with a parameter is answered by synthesis, with i
     // the bound is above every piece's error, and not ten times the largest
     const auto doc = spatium::io::build::read_document(q);
     REQUIRE(doc.has_value());
-    auto asked = rsc::query_of(*doc, "x");
+    auto asked = spatium::answer::query_of(*doc, "x");
     REQUIRE(asked.has_value());
     asked->tolerance = 1e-10;
-    const auto a = rsc::answer(*asked);
+    const auto a = spatium::answer::answer(*asked);
     double worst = 0;
     for (const auto& s : a.pieces) worst = std::max(worst, s.error);
     const double below = at(c, "error_below").as_number();
@@ -88,31 +91,31 @@ TEST_CASE("respond: a question with a parameter is answered by synthesis, with i
 
 TEST_CASE("respond: a text that is no question is refused with the library's reason", "[rsc][respond]") {
     // a fourfold root: no closed form, and no step can prove it, so the refusal says both and where it may be
-    const auto fourfold = at(rsc::respond("x^4 = 0"), "refused").as_string();
+    const auto fourfold = at(spatium::answer::respond("x^4 = 0"), "refused").as_string();
     CHECK(fourfold.find("degree at most two") != std::string::npos);
     CHECK(fourfold.find("one may lie in") != std::string::npos);
-    CHECK(at(rsc::respond("hello"), "refused").as_string().find("reads 'hello'") != std::string::npos);
-    CHECK(at(rsc::respond("x: x - p = 0 on [0, 1]"), "refused").as_string().find("'p'") != std::string::npos);
-    CHECK(at(rsc::respond("p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]"), "refused").as_string().find("no value")
+    CHECK(at(spatium::answer::respond("hello"), "refused").as_string().find("reads 'hello'") != std::string::npos);
+    CHECK(at(spatium::answer::respond("x: x - p = 0 on [0, 1]"), "refused").as_string().find("'p'") != std::string::npos);
+    CHECK(at(spatium::answer::respond("p in [0.5, 4]\nx: x^2 + p = 0 on [0, 10]"), "refused").as_string().find("no value")
           != std::string::npos);
-    CHECK(at(rsc::respond("2x^2 - 3x - 5 = 0"), "refused").is_null());
+    CHECK(at(spatium::answer::respond("2x^2 - 3x - 5 = 0"), "refused").is_null());
 }
 
 TEST_CASE("respond: several lines are a document and its question", "[rsc][respond]") {
     // a name defined above is no unknown: 3a with a = 2 + 2 is a value, not an equation to write
-    const auto twelve = rsc::respond("a = 2 + 2\n3a");
+    const auto twelve = spatium::answer::respond("a = 2 + 2\n3a");
     CHECK(at(twelve, "route").as_string() == "evaluate");
     CHECK(at(twelve, "value").as_number() == 12);
     // one line that is a statement, not a shorthand: answered as the same document asks for it
-    const auto root = rsc::respond("x: x^2 - 2 = 0 on [0, 2]");
-    const auto by_document = rsc::evaluate_request(R"({"document": "x: x^2 - 2 = 0 on [0, 2]", "name": "x"})");
+    const auto root = spatium::answer::respond("x: x^2 - 2 = 0 on [0, 2]");
+    const auto by_document = spatium::answer::evaluate_request(R"({"document": "x: x^2 - 2 = 0 on [0, 2]", "name": "x"})");
     CHECK(at(root, "route").as_string() == "closed form");
     CHECK(at(root, "steps").dump() == at(by_document, "steps").dump());
     // the cases it must fail: a line above that does not read, and a question reading an undefined name
-    const auto bad = rsc::respond("p in [1, 0.5\nx^2 - p = 0");
+    const auto bad = spatium::answer::respond("p in [1, 0.5\nx^2 - p = 0");
     CHECK(at(bad, "route").as_string() == "document");
     CHECK(at(bad, "refused").as_string().find("line 1") != std::string::npos);
-    CHECK(at(rsc::respond("a = 2\nb + a"), "refused").as_string().find("reads 'b'") != std::string::npos);
+    CHECK(at(spatium::answer::respond("a = 2\nb + a"), "refused").as_string().find("reads 'b'") != std::string::npos);
 }
 
 TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as", "[rsc][respond]") {
@@ -120,31 +123,31 @@ TEST_CASE("respond: the rows of a LaTeX editor answer as the lines they read as"
     const std::string rows = R"({"rows": [["Element", "p", ["Interval", {"num": "0.5"}, 4]],
         ["Delimiter", ["Sequence", ["Equal", ["Subtract", ["Power", "x", 2], "p"], {"num": "0"}],
          ["Element", "x", ["Interval", {"num": "0"}, 10]]], {"str": ","}]]})";
-    const auto by_rows = rsc::respond_rows(rows);
-    const auto by_text = rsc::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
+    const auto by_rows = spatium::answer::respond_rows(rows);
+    const auto by_text = spatium::answer::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
     CHECK(at(by_rows, "route").as_string() == "synthesis");
     CHECK(by_rows.dump() == by_text.dump());
     // 2x^2 - 3x - 5 = 0 as typed in the editor, and as typed in the language: the same steps
-    const auto typed = rsc::respond_rows(R"({"rows": [["Equal", ["Subtract", ["Subtract", ["InvisibleOperator", 2, ["Power", "x", 2]],
+    const auto typed = spatium::answer::respond_rows(R"({"rows": [["Equal", ["Subtract", ["Subtract", ["InvisibleOperator", 2, ["Power", "x", 2]],
         ["InvisibleOperator", 3, "x"]], 5], {"num": "0"}]]})");
     CHECK(at(typed, "route").as_string() == "closed form");
-    CHECK(at(typed, "steps").dump() == at(rsc::respond("2x^2 - 3x - 5 = 0"), "steps").dump());
+    CHECK(at(typed, "steps").dump() == at(spatium::answer::respond("2x^2 - 3x - 5 = 0"), "steps").dump());
     // a row may be a line already in the language beside rows of MathJSON: the same document
-    const auto mixed = rsc::respond_rows(R"({"rows": [["Element", "p", ["Interval", {"num": "0.5"}, 4]],
+    const auto mixed = spatium::answer::respond_rows(R"({"rows": [["Element", "p", ["Interval", {"num": "0.5"}, 4]],
         {"text": "x: x^2 - p = 0 on [0, 10]"}]})");
     CHECK(mixed.dump() == by_text.dump());
     // the cases it must fail: a row the language cannot say is refused with its number, and no rows
-    const auto integral_inside = rsc::respond_rows(R"({"rows": [["Element", "p", ["Interval", 0, 1]], ["Add", "p", ["D", "p"]]]})");
+    const auto integral_inside = spatium::answer::respond_rows(R"({"rows": [["Element", "p", ["Interval", 0, 1]], ["Add", "p", ["D", "p"]]]})");
     CHECK(at(integral_inside, "row").as_number() == 2);
     CHECK(at(integral_inside, "refused").as_string() == "row 2: at [2]: 'D' is not in the language");
-    CHECK(at(rsc::respond_rows(R"({"rows": []})"), "refused").as_string() == "the request has no rows");
-    const auto bad_text = rsc::respond_rows(R"({"rows": [{"text": "x: x^2 - p = 0 on [0, 10]"}, {"text": "1 +"}]})");
+    CHECK(at(spatium::answer::respond_rows(R"({"rows": []})"), "refused").as_string() == "the request has no rows");
+    const auto bad_text = spatium::answer::respond_rows(R"({"rows": [{"text": "x: x^2 - p = 0 on [0, 10]"}, {"text": "1 +"}]})");
     CHECK(at(bad_text, "refused").is_string());
 }
 
 TEST_CASE("respond: rows that are equations in as many unknowns are one system", "[rsc][respond]") {
     // in fractions: x = 1, y = 2 exactly, and each equation holds at it
-    const auto r = rsc::respond("x + 2y = 5\n3x - y = 1");
+    const auto r = spatium::answer::respond("x + 2y = 5\n3x - y = 1");
     CHECK(at(r, "route").as_string() == "linear system");
     CHECK(at(at(r, "exact"), "y").as_string() == "2");
     const auto& s = at(r, "sheet");
@@ -153,24 +156,24 @@ TEST_CASE("respond: rows that are equations in as many unknowns are one system",
     CHECK(at(s, "result").as_string() == "x = 1,\\quad y = 2");
     CHECK(at(r, "question_latex").as_array().size() == 2);
     // the same rows from the editor, and the same system written as a document's line
-    const auto rows = rsc::respond_rows(R"({"rows": [["Equal", ["Add", "x", ["Multiply", 2, "y"]], 5], ["Equal", ["Subtract", ["Multiply", 3, "x"], "y"], 1]]})");
+    const auto rows = spatium::answer::respond_rows(R"({"rows": [["Equal", ["Add", "x", ["Multiply", 2, "y"]], 5], ["Equal", ["Subtract", ["Multiply", 3, "x"], "y"], 1]]})");
     CHECK(at(rows, "sheet").dump() == s.dump());
-    CHECK(at(rsc::respond("x, y: x + 2y = 5, 3x - y = 1"), "sheet").dump() == s.dump());
+    CHECK(at(spatium::answer::respond("x, y: x + 2y = 5, 3x - y = 1"), "sheet").dump() == s.dump());
     // fractions where they are: 1/3 is a third, not its double
-    CHECK(at(at(rsc::respond("3x + y = 1\nx - y = 0"), "exact"), "x").as_string() == "1/4");
+    CHECK(at(at(spatium::answer::respond("3x + y = 1\nx - y = 0"), "exact"), "x").as_string() == "1/4");
     // a coefficient with no fraction, sqrt(2): in doubles, checked by putting the solution back
-    const auto in_double = rsc::respond("sqrt(2) x + y = 1\nx - y = 0");
+    const auto in_double = spatium::answer::respond("sqrt(2) x + y = 1\nx - y = 0");
     CHECK(at(at(in_double, "sheet"), "guarantee").as_string() == "computed");
     CHECK(std::abs(at(at(in_double, "solution"), "x").as_number() - 1 / (std::sqrt(2.0) + 1)) < 1e-15);
     // the case it must fail: equations that are not independent (one not linear goes to its roots, below)
-    CHECK(at(rsc::respond("x + y = 1\n2x + 2y = 2"), "refused").as_string().find("not independent") != std::string::npos);
+    CHECK(at(spatium::answer::respond("x + y = 1\n2x + 2y = 2"), "refused").as_string().find("not independent") != std::string::npos);
     // rows in more names than equations stay rows of a document
-    CHECK(at(rsc::respond("x + y = 1\nx - y = z"), "route").as_string() != "linear system");
+    CHECK(at(spatium::answer::respond("x + y = 1\nx - y = z"), "route").as_string() != "linear system");
 }
 
 TEST_CASE("respond: a system that is not linear has every root proved", "[rsc][respond]") {
     // x^2 + y^2 = 4 and x - y = 1 meet at x = (1 ± √7)/2, y = x - 1: both proved, none other on the plane
-    const auto r = rsc::respond("x^2 + y^2 = 4\nx - y = 1");
+    const auto r = spatium::answer::respond("x^2 + y^2 = 4\nx - y = 1");
     CHECK(at(r, "route").as_string() == "every root, proved");
     CHECK(at(at(r, "sheet"), "label").as_string() == "Proved, 2 roots, no other on the box");
     const auto& v = at(r, "values").as_array();
@@ -184,12 +187,12 @@ TEST_CASE("respond: a system that is not linear has every root proved", "[rsc][r
     // the linear route was asked first and said why not
     CHECK(at(r, "candidates").as_array().front().string_or("refused", "") == "equation 1 is not linear in the unknowns");
     // the case it must fail: a circle and a line that do not meet have no real root, proved
-    CHECK(rsc::respond("x^2 + y^2 = 1\nx + y = 3").string_or("refused", "").find("no real root") != std::string::npos);
+    CHECK(spatium::answer::respond("x^2 + y^2 = 1\nx + y = 3").string_or("refused", "").find("no real root") != std::string::npos);
 }
 
 TEST_CASE("respond: an inequality is the set where it holds, by the interval method", "[rsc][respond]") {
     const auto set = [](const char* q) {
-        const auto r = rsc::respond(q);
+        const auto r = spatium::answer::respond(q);
         return r.find("set") ? at(r, "set").as_string() : "refused: " + r.string_or("refused", "?");
     };
     // its ends are the roots, as fractions where they are, in brackets where equality holds
@@ -208,21 +211,21 @@ TEST_CASE("respond: an inequality is the set where it holds, by the interval met
     // on a bracket: sin(x) > 0 on [0, 10] is (0, π) and (2π, 3π)
     CHECK(set("x: sin(x) > 0 on [0, 10]").starts_with("x \\in (0, 3.14159265358979"));
     // the sheet: proved, an axis to draw; the rows of the editor ask the same
-    const auto r = rsc::respond("x^2 - 4 > 0");
+    const auto r = spatium::answer::respond("x^2 - 4 > 0");
     CHECK(at(r, "route").as_string() == "interval method");
     const auto& s = at(r, "sheet");
     CHECK(at(s, "outcome").as_string() == "set");
     CHECK(at(s, "label").as_string() == "Proved, by the interval method");
-    CHECK(at(rsc::respond_rows(R"({"rows": [["Greater", ["Subtract", ["Power", "x", 2], 4], 0]]})"), "sheet").dump() == s.dump());
+    CHECK(at(spatium::answer::respond_rows(R"({"rows": [["Greater", ["Subtract", ["Power", "x", 2], 4], 0]]})"), "sheet").dump() == s.dump());
     // the case it must not claim: a double root, where Newton's step cannot prove x^2 > 0 fails at 0 alone
-    CHECK(at(at(rsc::respond("x^2 > 0"), "sheet"), "label").as_string().find("undecided") != std::string::npos);
+    CHECK(at(at(spatium::answer::respond("x^2 > 0"), "sheet"), "label").as_string().find("undecided") != std::string::npos);
     // and one it must refuse: an inequality in two unknowns
-    CHECK(rsc::respond("x + y > 0").string_or("refused", "").find("one unknown") != std::string::npos);
+    CHECK(spatium::answer::respond("x + y > 0").string_or("refused", "").find("one unknown") != std::string::npos);
 }
 
 TEST_CASE("respond: a synthesis of one piece is its formula, of more how many", "[rsc][respond][sheet]") {
     // the error function has no closed form here: one Chebyshev piece, written as its sum
-    const auto one = rsc::respond("x in [0.25, 3]\nE = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]");
+    const auto one = spatium::answer::respond("x in [0.25, 3]\nE = integral 2 / sqrt(pi) * exp(-t^2) dt on [0, x]");
     REQUIRE(at(one, "answer").as_array().size() == 1);
     CHECK(at(at(one, "sheet"), "result").as_string().starts_with("E = \\sum_{k=0}"));
     // the case it must not be: a count of one
@@ -232,43 +235,43 @@ TEST_CASE("respond: a synthesis of one piece is its formula, of more how many", 
 TEST_CASE("respond: rows are computed in the arithmetic their engine names", "[rsc][respond]") {
     // x^2 - 2 = 0 in fractions: the roots as the closed form writes them, the steps evaluate_request gives
     const std::string row = R"(["Equal", ["Subtract", ["Power", "x", 2], 2], 0])";
-    const auto exact = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "rational"}})");
-    const auto in_double = rsc::respond_rows(R"({"rows": [)" + row + "]}");
-    const auto by_document = rsc::evaluate_request(R"({"document": "x: x^2 - 2 = 0", "name": "x", "engine": {"arithmetic": "rational"}})");
+    const auto exact = spatium::answer::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "rational"}})");
+    const auto in_double = spatium::answer::respond_rows(R"({"rows": [)" + row + "]}");
+    const auto by_document = spatium::answer::evaluate_request(R"({"document": "x: x^2 - 2 = 0", "name": "x", "engine": {"arithmetic": "rational"}})");
     CHECK(at(at(exact, "sheet"), "result").as_string() == "x_{1,2} = \\pm \\sqrt{2} \\approx \\pm 1.41421356237");
     CHECK(at(exact, "steps").dump() == at(by_document, "steps").dump());
     // in double too, the roots as they are beside their decimals
     CHECK(at(at(in_double, "sheet"), "result").as_string() == at(at(exact, "sheet"), "result").as_string());
     // the case it must fail: an arithmetic the engine does not have is refused, naming those it has
-    const auto unknown = rsc::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "quaternion"}})");
+    const auto unknown = spatium::answer::respond_rows(R"({"rows": [)" + row + R"(], "engine": {"arithmetic": "quaternion"}})");
     CHECK(at(unknown, "refused").as_string().starts_with("the engine has no arithmetic 'quaternion'; it has double"));
 }
 
 TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][respond]") {
     // an equation: its left side less its right along the unknown, over the roots 5/2 and -1 and a margin
-    const auto quadratic = rsc::respond("2x^2 - 3x - 5 = 0");
+    const auto quadratic = spatium::answer::respond("2x^2 - 3x - 5 = 0");
     const auto& g = at(quadratic, "graph");
     CHECK(at(g, "document").as_string() == "x in [-2.75, 4.25]\ngraph = (2x^2 - 3x - 5) - (0)");
     // the second route: the graph drawn changes sign over its interval, as a function with those roots does
-    const auto drawn = rsc::plot_request(g.dump());
+    const auto drawn = spatium::answer::plot_request(g.dump());
     REQUIRE(at(drawn, "refused").is_null());
     const auto& range = at(drawn, "range").as_array();
     CHECK(range[0].as_number() < 0);
     CHECK(range[1].as_number() > 0);
     // a synthesised answer: its expression along its parameter, reaching sqrt(4) at the end
-    const auto root = rsc::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
+    const auto root = spatium::answer::respond("p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]");
     CHECK(at(at(root, "graph"), "document").as_string() == "p in [0.5, 4]\nx = sqrt(p)");
-    const auto root_drawn = rsc::plot_request(at(root, "graph").dump());
+    const auto root_drawn = spatium::answer::plot_request(at(root, "graph").dump());
     const auto& r = at(root_drawn, "range").as_array();
     REQUIRE(r.size() == 2);
     CHECK(r[0].as_number() >= std::sqrt(0.5f) - 1e-6);
     CHECK(r[1].as_number() <= 2.0 + 1e-6);
     CHECK(r[1].as_number() > 1.99);
     // the cases it must fail: a number has no graph, and neither has a refusal
-    CHECK(at(rsc::respond("2 + 2"), "graph").is_null());
-    CHECK(at(rsc::respond("x^4 = 0"), "graph").is_null());
+    CHECK(at(spatium::answer::respond("2 + 2"), "graph").is_null());
+    CHECK(at(spatium::answer::respond("x^4 = 0"), "graph").is_null());
     // a root proved where no closed form is: drawn about it, as a closed form's are
-    const auto cubic = rsc::respond("x^3 - 1 = 0");
+    const auto cubic = spatium::answer::respond("x^3 - 1 = 0");
     CHECK(at(cubic, "route").as_string() == "every root, proved");
     const std::string cubic_drawn = at(at(cubic, "graph"), "document").as_string();
     CHECK(cubic_drawn.starts_with("x in ["));
@@ -276,15 +279,15 @@ TEST_CASE("respond: an answer carries the graph a page draws of it", "[rsc][resp
 }
 
 TEST_CASE("respond: a new name on the left is a definition, not an equation in it", "[rsc][respond]") {
-    const auto four = rsc::respond("a = 2 + 2");
+    const auto four = spatium::answer::respond("a = 2 + 2");
     CHECK(at(four, "route").as_string() == "evaluate");
     CHECK(at(four, "value").as_number() == 4);
     // a value of one parameter, as a person writes it under the parameter, has a graph along it
-    const auto f = rsc::respond("a in [0.5, 2]\nf = a^2 + 1");
+    const auto f = spatium::answer::respond("a in [0.5, 2]\nf = a^2 + 1");
     CHECK(at(f, "refused").is_null());
     CHECK(at(at(f, "graph"), "along").as_string() == "a");
     // the case it must fail: a name the right side reads is an equation in it
-    CHECK(at(rsc::respond("x = x^2 - 2"), "route").as_string() == "closed form");
+    CHECK(at(spatium::answer::respond("x = x^2 - 2"), "route").as_string() == "closed form");
 }
 
 TEST_CASE("respond: an exercise as a page of problems writes it, exact, with its steps", "[rsc][respond][steps]") {
@@ -292,7 +295,7 @@ TEST_CASE("respond: an exercise as a page of problems writes it, exact, with its
     //   : 62 1/20 + 1,364 : 0,124, as the formula editor's parser writes it once the page has put its
     // colons and decimal commas in that parser's notation (web/src/answers.ts, `notation`)
     const std::string row = R"(["Add",["Divide",["Delimiter",["Subtract",["Divide",["Divide",["Delimiter",["Subtract",{"num":"3.2"},{"num":"1.7"}]],{"num":"0.003"}],["Multiply",["Delimiter",["Subtract",["Divide",29,35],["Divide",3,7]]],["Divide",4,{"num":"0.2"}]]],["Divide",["Multiply",["Delimiter",["Subtract",["InvisibleOperator",1,["Divide",13,20]],{"num":"1.5"}]],{"num":"1.5"}],["Multiply",["Delimiter",["Add",{"num":"2.44"},["InvisibleOperator",1,["Divide",14,25]]]],["Divide",1,8]]]]],["InvisibleOperator",62,["Divide",1,20]]],["Divide",{"num":"1.364"},{"num":"0.124"}]])";
-    const auto r = rsc::respond_rows(R"({"rows": [)" + row + "]}");
+    const auto r = spatium::answer::respond_rows(R"({"rows": [)" + row + "]}");
     CHECK(at(r, "route").as_string() == "evaluate");
     // twelve, exactly: the double's 12.000000000000002 is not the answer
     CHECK(at(at(r, "proved"), "exact").as_bool());
@@ -322,9 +325,12 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
              {"I = integral exp(-t^2) dt on [0, 1]", "number", "estimated", "Error below 10⁻¹⁶, estimated", true},
              {"p in [1, 2]", "parameter", "exact", "A parameter", false},
              {"x^4 = 0", "refused", "none", "Not answered", false},
+             {"2^2000", "number", "none", "No digit proved, past the largest double", false},
+             {"1/0", "refused", "none", "Not answered, by evaluate", false},
+             {"max(1, inf)", "number", "exact", "Exact, the limit, each inf one x → ∞, growing like x", true},
          }) {
         INFO(w.question);
-        const auto r = rsc::respond(w.question);
+        const auto r = spatium::answer::respond(w.question);
         const auto& s = at(r, "sheet");
         CHECK(at(s, "outcome").as_string() == w.outcome);
         CHECK(at(s, "guarantee").as_string() == w.guarantee);
@@ -348,7 +354,7 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
         }
     }
     // the closed form's roots, each inside an interval the second route proved to hold one
-    const auto q = at(rsc::respond("2x^2 - 3x - 5 = 0"), "sheet");
+    const auto q = at(spatium::answer::respond("2x^2 - 3x - 5 = 0"), "sheet");
     bool held = false;
     for (const auto& sec : at(q, "sections").as_array())
         if (at(sec, "title").as_string() == "Check")
@@ -359,7 +365,7 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
 
 TEST_CASE("respond: every route that answered shows its own chain", "[rsc][respond][sheet]") {
     // a quadratic: the closed form, its check by Vieta's formulas, and every root proved, each a chain
-    const auto s = at(rsc::respond("2x^2 - 3x - 5 = 0"), "sheet");
+    const auto s = at(spatium::answer::respond("2x^2 - 3x - 5 = 0"), "sheet");
     std::vector<std::string> names;
     int taken = 0;
     for (const auto& r : at(s, "routes").as_array()) {
@@ -381,14 +387,14 @@ TEST_CASE("respond: every route that answered shows its own chain", "[rsc][respo
                           "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x^4 = 0"}) {
         INFO(q);
         int n = 0;
-        for (const auto& r : at(at(rsc::respond(q), "sheet"), "routes").as_array()) {
+        for (const auto& r : at(at(spatium::answer::respond(q), "sheet"), "routes").as_array()) {
             CHECK_FALSE(at(r, "steps").as_array().empty());
             n += at(r, "taken").as_bool();
         }
         CHECK(n <= 1);
     }
     // a system's roots: each with its box, and each equation on it an interval holding zero
-    const auto sys = at(rsc::respond("x^2 + y^2 = 4\nx - y = 1"), "sheet");
+    const auto sys = at(spatium::answer::respond("x^2 + y^2 = 4\nx - y = 1"), "sheet");
     bool box = false, held = true;
     int checked = 0;
     for (const auto& sec : at(sys, "sections").as_array()) {
@@ -404,7 +410,7 @@ TEST_CASE("respond: every route that answered shows its own chain", "[rsc][respo
 TEST_CASE("respond: what else a question can become, each a question the library answers", "[rsc][respond][sheet]") {
     const auto next_of = [](const char* q) {
         std::vector<std::string> texts;
-        for (const auto& sec : at(at(rsc::respond(q), "sheet"), "sections").as_array())
+        for (const auto& sec : at(at(spatium::answer::respond(q), "sheet"), "sections").as_array())
             if (const auto* n = sec.find("next"))
                 for (const auto& item : n->as_array()) {
                     CHECK_FALSE(item.string_or("latex", "").empty());
@@ -421,7 +427,7 @@ TEST_CASE("respond: what else a question can become, each a question the library
     for (const auto& t : {quadratic, inequality, next_of("x: sin(x) = 0.5 on [0, 10]")})
         for (const auto& q : t) {
             INFO(q);
-            CHECK_FALSE(at(at(rsc::respond(q), "sheet"), "outcome").as_string() == "refused");
+            CHECK_FALSE(at(at(spatium::answer::respond(q), "sheet"), "outcome").as_string() == "refused");
         }
     // the case it must fail: a system and a number offer nothing yet
     CHECK(next_of("x + 2y = 5\n3x - y = 1").empty());
@@ -430,14 +436,14 @@ TEST_CASE("respond: what else a question can become, each a question the library
 
 TEST_CASE("respond: rows above the last are rows of the page, an expression among them", "[rsc][respond][rows]") {
     // a row below an expression is answered: the expression is a statement of its own, answer_1
-    CHECK(at(at(rsc::respond("2(3 + 4)^2 - 1/4\n1 + 2"), "sheet"), "result").as_string() == "3");
-    CHECK(at(at(rsc::respond("2(3 + 4)^2 - 1/4\nanswer_1 + 1"), "sheet"), "result").as_string() == "\\frac{395}{4} = 98.75");
+    CHECK(at(at(spatium::answer::respond("2(3 + 4)^2 - 1/4\n1 + 2"), "sheet"), "result").as_string() == "3");
+    CHECK(at(at(spatium::answer::respond("2(3 + 4)^2 - 1/4\nanswer_1 + 1"), "sheet"), "result").as_string() == "\\frac{395}{4} = 98.75");
     // an equation above, then a parameter and a root in a document's own words
-    const auto below = rsc::respond("2x^2 - 3x - 5 = 0\np in [0.5, 4]\ny: y^2 - p = 0 on [0, 10]");
+    const auto below = spatium::answer::respond("2x^2 - 3x - 5 = 0\np in [0.5, 4]\ny: y^2 - p = 0 on [0, 10]");
     CHECK(at(at(below, "sheet"), "result").as_string() == "y = \\sqrt{p}");
     // the cases it must refuse, by the row they are on
-    CHECK(at(rsc::respond("1 +\n2 + 2"), "refused").as_string().starts_with("line 1: parse: at column 4"));
-    CHECK(at(rsc::respond("p in [0.5, 4]\nx: x^2 - q = 0 on [0, 10]"), "refused").as_string() ==
+    CHECK(at(spatium::answer::respond("1 +\n2 + 2"), "refused").as_string().starts_with("line 1: parse: at column 4"));
+    CHECK(at(spatium::answer::respond("p in [0.5, 4]\nx: x^2 - q = 0 on [0, 10]"), "refused").as_string() ==
           "line 2: x reads 'q', which no line above defines");
 }
 
@@ -447,7 +453,7 @@ TEST_CASE("respond: a number is shown with the digits it holds, no zeros after t
     for (const char* q : {"sin(pi/6)*2", "sqrt(2)*sqrt(2)", "x^2 - 2 = 0", "2^x = 8", "x^2 - 4 > 0", "x^2 + y^2 = 4\nx - y = 1",
                           "2(3 + 4)^2 - 1/4", "0.1 + 0.2", "x: sin(x) = 0.5 on [0, 10]"}) {
         INFO(q);
-        const auto r = rsc::respond(q);
+        const auto r = spatium::answer::respond(q);
         std::vector<std::string> shown{at(r, "sheet").string_or("result", "")};
         for (const auto& sec : at(at(r, "sheet"), "sections").as_array())
             if (const auto* steps = sec.find("steps"))
@@ -460,6 +466,17 @@ TEST_CASE("respond: a number is shown with the digits it holds, no zeros after t
         }
     }
     // the second route: the digits a step shows are those of the value, 0.5 * 2 is about 1
-    const auto steps = at(rsc::respond("sin(pi/6)*2"), "steps").as_array();
+    const auto steps = at(spatium::answer::respond("sin(pi/6)*2"), "steps").as_array();
     CHECK(steps.back().string_or("latex", "").ends_with("\\approx 1"));
+}
+
+TEST_CASE("respond: a synthesis in several pieces lists every one of them", "[rsc][respond][sheet]") {
+    const auto r = spatium::answer::respond("p in [0.1, 10]\nx: x^5 + x - p = 0 on [0, 10]");
+    const double n = at(r, "pieces").as_number();
+    REQUIRE(n > 2);
+    const JsonValue* pieces = nullptr;
+    for (const auto& section : at(at(r, "sheet"), "sections").as_array())
+        if (at(section, "title").as_string() == "Pieces") pieces = &section;
+    REQUIRE(pieces);
+    CHECK(static_cast<double>(at(at(*pieces, "table"), "rows").as_array().size()) == n);
 }

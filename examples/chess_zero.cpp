@@ -1,7 +1,7 @@
 // chess_zero -- the tree search of rsc/core learning chess from nothing, by playing itself.
 //
 //   chess_zero [--iterations N] [--games G] [--sims S] [--threads T] [--seed X]
-//              [--eval-games E] [--eval-sims S] [--eval-every K] [--cap PLIES]
+//              [--eval-games E] [--eval-sims S] [--eval-every K] [--cap PLIES] [--rule adam|muon]
 //
 // What it knows of chess is the legal moves of a position and the vectors each piece moves by: a
 // move is a row of numbers (examples/chess_rows.hpp), a position is thirteen numbers (the
@@ -13,7 +13,8 @@
 //
 // One iteration: G games are played by searching every move (S simulations of the tree), the
 // first twelve moves drawn in proportion to the visits so that games differ; the softmax is then
-// fitted to the visit counts by AdaGrad and the net to how each game ended by Adam, one pass of
+// fitted to the visit counts by AdaGrad and the net to how each game ended by Adam (or, with --rule
+// muon, its hidden layer by Muon), one pass of
 // statistics::fit_pass each, over the new positions and as many older ones drawn at random. A
 // game ends where the rules end it (discrete::outcome), or is cut at 120 plies and decided by
 // material if a side is ahead by three points; without that cut nearly every game between
@@ -266,10 +267,19 @@ void evaluate(const ChessNets& nets, int games, int simulations, std::uint64_t s
 }
 
 // One pass over `sample`: the softmax toward the visits, the net toward the results. Returns the
-// net's mean squared error before its steps.
+// net's mean squared error before its steps. The net moves by Adam, or with `muon` its hidden layer
+// (32 by 13) by Muon at the reference's rate 0.02 and the rest by the same Adam as without it, so
+// the two runs differ in that one matrix's rule alone.
 struct Trainer {
+    bool muon = false;
     spatium::AdaGrad<columns> policy_rule;
     spatium::Adam<Net::weight_count> net_rule;
+    spatium::Muon<Net::weight_count, hidden_units, state_columns> net_muon = [] {
+        spatium::Muon<Net::weight_count, hidden_units, state_columns> m;
+        m.rest = {};               // Adam's own betas and epsilon, as the run without Muon has
+        m.rest_rate = 0.003 / 0.02;  // and its rate, 0.003
+        return m;
+    }();
 
     double fit(ChessNets& nets, std::span<const rsc::Sample<Chess>> sample, std::mt19937_64& rng) {
         using spatium::statistics::Fit;
@@ -281,11 +291,14 @@ struct Trainer {
                                               nets.policy.cross_entropy(rows, target),
                                               nets.policy.gradient(rows, target)};
                                       });
-        return spatium::statistics::fit_pass(nets.net.weights(), net_rule, sample, 0.003, rng,
-                                             [&](const rsc::Sample<Chess>& s) {
-                                                 return Fit<Net::Weights>{nets.net.loss(s.features, s.outcome),
-                                                                          nets.net.gradient(s.features, s.outcome)};
-                                             });
+        const auto pass = [&](auto& rule, double rate) {
+            return spatium::statistics::fit_pass(nets.net.weights(), rule, sample, rate, rng,
+                                                 [&](const rsc::Sample<Chess>& s) {
+                                                     return Fit<Net::Weights>{nets.net.loss(s.features, s.outcome),
+                                                                              nets.net.gradient(s.features, s.outcome)};
+                                                 });
+        };
+        return muon ? pass(net_muon, 0.02) : pass(net_rule, 0.003);
     }
 };
 
@@ -295,6 +308,7 @@ int main(int argc, char** argv) {
     int iterations = 60, games = 24, simulations = 48, threads = 2, eval_games = 20,
         eval_simulations = 48, eval_every = 10, train_cap = 120;
     std::uint64_t seed = 1;
+    std::string rule = "adam";
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
@@ -316,6 +330,13 @@ int main(int argc, char** argv) {
             train_cap = std::atoi(next().c_str());
         else if (a == "--seed")
             seed = std::strtoull(next().c_str(), nullptr, 10);
+        else if (a == "--rule") {
+            rule = next();
+            if (rule != "adam" && rule != "muon") {
+                std::println(stderr, "--rule is adam or muon, not {}", rule);
+                return 2;
+            }
+        }
         else {
             std::println(stderr, "unknown argument {}", a);
             return 2;
@@ -325,6 +346,7 @@ int main(int argc, char** argv) {
     ChessNets nets;
     nets.net = Net::random(seed);
     Trainer trainer;
+    trainer.muon = rule == "muon";
     std::println("{} weights: {} in the softmax, {} in the net", ChessNets::weight_count, columns,
                  Net::weight_count);
     std::println("untrained:");

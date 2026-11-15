@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: the rows of a LaTeX editor are a document and its question
-files: [include/spatium/io/field_mathjson.hpp, rsc/spatium/respond.hpp, site/wasm/core.cpp, tests/test_field_mathjson.cpp, tests/test_rsc_respond.cpp, site/wasm/questions.txt]
+files: [include/spatium/io/field_mathjson.hpp, include/spatium/answer/respond.hpp, site/wasm/core.cpp, tests/test_field_mathjson.cpp, tests/test_answer_respond.cpp, site/wasm/questions.txt]
 open:
   - the page does not send rows yet: the question as rows of MathLive fields is the page's step
   - an equation with no interval below a parameter, x^2 - p = 0 under p in [0.5, 4], is refused by synthesis (x has no bracket); its roots as functions of p, ±√p, are a closed form the solver does not give yet

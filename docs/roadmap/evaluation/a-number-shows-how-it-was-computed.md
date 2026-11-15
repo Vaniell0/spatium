@@ -1,7 +1,7 @@
 ---
 date: 2026-11-04
 title: a number shows how it was computed, and is exact where it is a fraction
-files: [include/spatium/io/steps_text.hpp, include/spatium/io/field_mathjson.hpp, include/spatium/core/rational.hpp, rsc/spatium/evaluate.hpp, rsc/spatium/respond.hpp, web/src/answers.ts, web/src/page.ts, web/src/view/answer.ts, web/test/notation.test.ts, examples/gallery.cpp, site/gallery/gallery.json, site/wasm/questions.txt, tests/test_solution_steps.cpp, tests/test_rsc_evaluate.cpp, tests/test_rsc_respond.cpp]
+files: [include/spatium/io/steps_text.hpp, include/spatium/io/field_mathjson.hpp, include/spatium/core/rational.hpp, include/spatium/answer/evaluate.hpp, include/spatium/answer/respond.hpp, web/src/answers.ts, web/src/page.ts, web/src/view/answer.ts, web/test/notation.test.ts, examples/gallery.cpp, site/gallery/gallery.json, site/wasm/questions.txt, tests/test_solution_steps.cpp, tests/test_answer_evaluate.cpp, tests/test_answer_respond.cpp]
 open:
   - only an evaluated number has steps from its computation; a closed form's are still written by hand (`to_steps`), and the proof of roots has none
   - a program with one operation fractions do not have (a root, a sine) is in intervals throughout: 1/3 beside sqrt(2) is written 0.333333333333333, not 1/3

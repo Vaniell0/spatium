@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: a field read from text, and a question typed as one
-files: [include/spatium/io/field_parse.hpp, include/spatium/io/field_text.hpp, rsc/spatium/query.hpp, tests/test_field_parse.cpp, tests/test_rsc_query.cpp]
+files: [include/spatium/io/field_parse.hpp, include/spatium/io/field_text.hpp, include/spatium/answer/query.hpp, tests/test_field_parse.cpp, tests/test_answer_query.cpp]
 open:
   - the language is the field's own operations; no tan, no pi, no power with an exponent that is not a whole number from 1 to 64 (x^a is written exp(a * log(x)))
   - no implicit product: 2x is refused, 2 * x is read

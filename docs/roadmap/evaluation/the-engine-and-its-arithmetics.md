@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: how a value is computed is the engine's, and the arithmetic is one of its settings
-files: [include/spatium/core/rational.hpp, include/spatium/core/decimal.hpp, include/spatium/io/field_pod.hpp, rsc/spatium/evaluate.hpp, rsc/spatium/respond.hpp, tests/test_rsc_evaluate.cpp, site/wasm/questions.txt, site/gallery/gallery.json]
+files: [include/spatium/core/rational.hpp, include/spatium/core/decimal.hpp, include/spatium/io/field_pod.hpp, include/spatium/answer/evaluate.hpp, include/spatium/answer/respond.hpp, tests/test_answer_evaluate.cpp, site/wasm/questions.txt, site/gallery/gallery.json]
 open:
   - only a value with nothing left to read is computed in the engine's arithmetic; a root, an integral and a synthesis still compute in a double and say so
   - the roots of a closed form are not yet exact (5/2, or (3 ± √17)/4) where its coefficients are fractions

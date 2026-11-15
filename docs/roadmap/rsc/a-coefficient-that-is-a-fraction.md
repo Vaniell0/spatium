@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: a synthesised coefficient that is a small fraction is written as one, and certified again
-files: [rsc/spatium/synthesis.hpp, tests/test_rsc_synthesis.cpp]
+files: [include/spatium/answer/synthesis.hpp, tests/test_answer_synthesis.cpp]
 open:
   - fractions up to a denominator of 1000 and to nine digits; a coefficient such as pi or sqrt 2 stays a number, since the operations have no constant for it
   - each coefficient is tried alone and the others are not refitted around it

@@ -35,7 +35,7 @@ and it costs the syntax nothing.
 `torus(2, 0.5)` determines its result, so it is parsed: deterministic,
 testable, refused at the column where it stops being the language. What a
 description leaves open -- evaluate or synthesise, which root finder, how
-fine a grid -- is chosen by the evaluation layer (`rsc/spatium/evaluate.hpp`
+fine a grid -- is chosen by the evaluation layer (`include/spatium/answer/evaluate.hpp`
 tries every route that applies, keeps each with its cost or its refusal,
 and takes one in `take`). A trained model belongs only on the second side,
 and that is where it would sit: the candidates are what it chooses among.

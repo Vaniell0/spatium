@@ -1,7 +1,7 @@
 ---
 date: 2026-11-04
 title: every root of an equation on its box, each proved alone in its interval
-files: [include/spatium/core/interval.hpp, include/spatium/algebra/roots.hpp, include/spatium/algebra/dual.hpp, include/spatium/io/field_pod.hpp, modules/algebra/roots.cppm, rsc/spatium/evaluate.hpp, rsc/spatium/respond.hpp, web/src/view/answer.ts, examples/gallery.cpp, site/gallery/gallery.json, site/wasm/questions.txt, tests/test_interval.cpp, tests/test_rsc_evaluate.cpp, tests/test_rsc_respond.cpp]
+files: [include/spatium/core/interval.hpp, include/spatium/algebra/roots.hpp, include/spatium/algebra/dual.hpp, include/spatium/io/field_pod.hpp, modules/algebra/roots.cppm, include/spatium/answer/evaluate.hpp, include/spatium/answer/respond.hpp, web/src/view/answer.ts, examples/gallery.cpp, site/gallery/gallery.json, site/wasm/questions.txt, tests/test_interval.cpp, tests/test_answer_evaluate.cpp, tests/test_answer_respond.cpp]
 resolves: [evaluation/a-number-proved-to-its-digits#2]
 open:
   - the ends of the doubles: where x^2 overflows (past a quarter of the largest double for 2x^2 - 3x - 5) a piece stays undecided; a chart at infinity, x = 1/t with `Series`, would close it

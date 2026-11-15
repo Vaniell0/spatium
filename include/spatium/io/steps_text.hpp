@@ -167,7 +167,9 @@ inline Step to_step(const VietaCheck<double>& v, std::string_view unknown = "x")
 // program as it ran, never worked out again from the answer. The values are fractions where every
 // operation is one on fractions (`Rational`), and otherwise the digits an interval of the same
 // program proves (core/interval.hpp), written with \approx. A leaf -- a number, a name -- is no
-// step. The label is the operation's, from the language's own table (`functions`), the one the
+// step. The chain ends at the first operation with no value -- 1/0, the root of a negative -- in
+// a step that says so (`lead` "No value", `note` the operation as text), or past what a double
+// holds, 2^{2000} > 10^{308}; an infinity read in is a value, \infty. The label is the operation's, from the language's own table (`functions`), the one the
 // reference shows.
 
 namespace detail {
@@ -216,8 +218,11 @@ inline Result<std::vector<Step>> evaluation_steps(const Field<double>& whole) {
         return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("an interval has no {} in it", op_name(*op))));
     const auto count = static_cast<std::uint32_t>(pod->ops.size());
     // each operation as written, and its value: a fraction where it is one, else proved digits
-    std::vector<Spelled> written(count), value(count);
-    for (std::uint32_t i = 0; i < count; ++i) written[i] = spell_op(f.op(i), written, "u", "v", TextStyle::Latex);
+    std::vector<Spelled> written(count), value(count), plain(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        written[i] = spell_op(f.op(i), written, "u", "v", TextStyle::Latex);
+        plain[i] = spell_op(f.op(i), plain, "u", "v", TextStyle::Plain);
+    }
     std::vector<Rational> fraction(count);
     const bool fractions = !beyond<Rational>(*pod);
     if (fractions) {
@@ -228,7 +233,8 @@ inline Result<std::vector<Step>> evaluation_steps(const Field<double>& whole) {
     const auto in = converted<I>(*pod);
     std::vector<I> enclosed(count);
     interpret(in.ops.data(), count, in.tables.data(), in.points.data(), enclosed.data(), FieldInputs<I>{I{0}, I{0}});
-    std::vector<bool> approximate(count, false);
+    std::vector<bool> approximate(count, false), none(count, false);
+    std::vector<std::string> past(count);   // how a value past what a double holds is said
     for (std::uint32_t i = 0; i < count; ++i) {
         if (is_leaf(f.op(i).op)) {
             value[i] = written[i];   // a number or a name as it was written
@@ -238,6 +244,12 @@ inline Result<std::vector<Step>> evaluation_steps(const Field<double>& whole) {
             const Rational& r = fraction[i];
             value[i] = Spelled{fraction_latex(r), r.num() < 0 ? Binding::Sum : Binding::Atom, r.num() == 1 && r.den() == 1,
                                r.num() < 0, r.den() != 1};
+        } else if (const I& v = enclosed[i]; v.is_empty()) {
+            none[i] = true;
+        } else if (v.lo == v.hi && std::isinf(v.lo)) {
+            value[i] = Spelled{v.lo > 0 ? "\\infty" : "-\\infty", v.lo > 0 ? Binding::Atom : Binding::Sum, false, v.lo < 0, false};
+        } else if (std::isinf(v.lo) || std::isinf(v.hi)) {
+            past[i] = v.lo > 0 ? " > 10^{308}" : v.hi < 0 ? " < -10^{308}" : " \\text{ has no bound a double holds}";
         } else {
             // where no digit is proved, how far from zero the value may be: 10^20 + 1 - 10^20 is
             // 1, which a double's interval holds only within 2^14 of zero
@@ -261,6 +273,14 @@ inline Result<std::vector<Step>> evaluation_steps(const Field<double>& whole) {
         const auto& n = f.op(i);
         if (is_leaf(n.op) || continued[i]) continue;
         const std::string on = spell_op(n, value, "u", "v", TextStyle::Latex).text;
+        if (none[i]) {
+            out.push_back({step_label(n.op), on + " \\text{ has no value}", "No value", plain[i].text});
+            return out;
+        }
+        if (!past[i].empty()) {
+            out.push_back({step_label(n.op), on + past[i]});
+            return out;
+        }
         if (on == value[i].text) continue;   // a fraction as written, 1/4, is its own value
         // a chain of products of one base is a power, and named so
         const std::string label = written[i].power > 1 ? "power" : step_label(n.op);

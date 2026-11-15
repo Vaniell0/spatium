@@ -829,6 +829,15 @@ public:
         return out;
     }
 
+    // What op `i` computes, as a field of its own: the ops it reads, in the same order. A rewrite
+    // that works op by op (a derivative) reads each op's operands as fields this way.
+    Field subfield(std::size_t i) const {
+        Field f = *this;
+        f.ops_.resize(i + 1);
+        f.index_reset();
+        return f.reachable_from_root();
+    }
+
     // A copy that appends without looking for equal ops, so a test can
     // build the same expression both ways and compare the results. Fields
     // composed from it stay unmerged (the left operand decides); it is the

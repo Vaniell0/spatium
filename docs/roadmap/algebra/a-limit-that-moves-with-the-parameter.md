@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: a limit that moves with the parameter, and the special functions it writes as questions
-files: [rsc/spatium/query.hpp, include/spatium/io/field_parse.hpp, include/spatium/io/field_text.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_rsc_query.cpp]
+files: [include/spatium/answer/query.hpp, include/spatium/io/field_parse.hpp, include/spatium/io/field_text.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_answer_query.cpp]
 resolves: [ir/a-question-typed-as-text#1]
 open:
   - a function with no closed form in the operations comes back in many pieces of a few short terms (Si on [0.5, 6] in 59, erf on [0.25, 3] in 46, the Fresnel C on [0.25, 2] in 93); a polynomial of higher degree per piece would take a few

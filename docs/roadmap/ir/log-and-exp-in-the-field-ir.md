@@ -1,7 +1,7 @@
 ---
 date: 2026-10-29
 title: Log and Exp in the field IR, and what the logarithm buys the synthesis next to the critical impact parameter
-files: [include/spatium/io/field.hpp, include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, tests/test_field_pod.cpp, rsc/spatium/synthesis.hpp, tests/test_rsc_synthesis.cpp]
+files: [include/spatium/io/field.hpp, include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, tests/test_field_pod.cpp, include/spatium/answer/synthesis.hpp, tests/test_answer_synthesis.cpp]
 open:
   - GLSL's log and exp are checked as emitted text here; their numbers on a device are not compared with the host's in this change, and fp32 on a device will differ from fp64 on the host
   - a metric field still refuses Log and Exp; no metric has asked for them

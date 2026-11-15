@@ -121,6 +121,9 @@ add_executable(spatium_tests
     test_field_simplify.cpp
     test_field_parse.cpp
     test_document.cpp
+    test_field_derivative.cpp
+    test_field_shortest.cpp
+    test_io_roundtrip.cpp
     test_solution_steps.cpp
     test_scene_symbols.cpp
     test_static_cache.cpp
@@ -132,10 +135,12 @@ add_executable(spatium_tests
     test_spacetime_scene.cpp
     test_chart.cpp
     test_rsc_graph.cpp
-    test_rsc_synthesis.cpp
-    test_rsc_query.cpp
-    test_rsc_respond.cpp
-    test_rsc_evaluate.cpp
+    test_answer_synthesis.cpp
+    test_answer_query.cpp
+    test_answer_respond.cpp
+    test_answer_evaluate.cpp
+    test_answer_law.cpp
+    test_zeta.cpp
 )
 
 target_include_directories(spatium_tests PRIVATE

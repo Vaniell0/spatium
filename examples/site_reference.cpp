@@ -5,7 +5,7 @@
 //
 // Written from the library's own tables (`functions`, `operators`, `constants` in
 // io/field_parse.hpp; `statement_kinds`, `relations`, `shape_operations` in io/document.hpp;
-// `routes`, `arithmetics` in rsc/spatium/evaluate.hpp), so the reference cannot name a word the
+// `route_table`, `arithmetics` in spatium/answer/evaluate.hpp), so the reference cannot name a word the
 // library does not know or miss one it does; every example is answered through `respond`, the
 // page's door, so each one shown is one the library reads, and its value and LaTeX are the
 // library's. `--check` is a ctest.
@@ -13,8 +13,8 @@
 //   site_reference --write site/data/reference.json web/src/gen/language.ts docs/language.md
 //   site_reference --check site/data/reference.json web/src/gen/language.ts docs/language.md
 
-#include <rsc/spatium/evaluate.hpp>
-#include <rsc/spatium/respond.hpp>
+#include <spatium/answer/evaluate.hpp>
+#include <spatium/answer/respond.hpp>
 #include <spatium/io/document.hpp>
 #include <spatium/io/field_mathjson.hpp>
 #include <spatium/io/field_parse.hpp>
@@ -43,7 +43,7 @@ using Array = JsonValue::ArrayType;
 // twelve digits (the last ones are the libm's, and the page shows as many as its setting says), or
 // its route
 JsonValue answered(std::string_view example) {
-    const JsonValue r = rsc::respond(example);
+    const JsonValue r = spatium::answer::respond(example);
     Object out;
     for (const auto& [k, v] : r.as_object()) {
         if (k == "route" || k == "refused" || k == "question_latex") out.emplace_back(k, v);
@@ -86,11 +86,21 @@ constexpr Notation notation[] = {
     {"Abs", "\\left|x\\right|", "\\left|-3\\right|", "abs(-3)", "", ""},
     {"Min", "\\min\\left(x, y\\right)", "\\min\\left(2, 3\\right)", "min(2, 3)", "", ""},
     {"Max", "\\max\\left(x, y\\right)", "\\max\\left(2, 3\\right)", "max(2, 3)", "", ""},
+    {"Boole", "\\left[x < y\\right]", "\\left[1 < 2\\right]", "less(1, 2)", "", ""},
 };
 // the heads that are forms, not functions: the Writing and Operators sections show them
 constexpr std::string_view forms[] = {"Add", "Subtract", "Negate", "Multiply", "InvisibleOperator", "Divide", "Rational",
                                       "Half", "Power", "Square", "Delimiter", "Equal", "Less", "LessEqual", "Greater",
                                       "GreaterEqual", "Error"};
+
+// a function's derivative in each argument, as its row of the table writes it; none where the
+// notation is no function of the language
+Array derivative(const bd::Function* f) {
+    Array out;
+    if (f)
+        for (int k = 0; k < f->arity; ++k) out.push_back(std::string(f->derivative[static_cast<std::size_t>(k)]));
+    return out;
+}
 
 // the language's function a notation's example calls first, if it is one
 const bd::Function* function_of(std::string_view example) {
@@ -100,10 +110,15 @@ const bd::Function* function_of(std::string_view example) {
 }
 
 std::string reference() {
-    for (const auto& h : bd::mathjson_heads) {
-        bool placed = std::ranges::find(forms, h.name) != std::end(forms);
-        for (const auto& n : notation) placed = placed || h.name == n.head;
-        if (!placed) throw std::runtime_error(std::format("the editor's {} has no row in the reference", h.name));
+    // every head the reader takes -- a form, a composition, or a function of the language by its row
+    std::vector<std::string_view> heads;
+    for (const auto& h : bd::mathjson_heads) heads.push_back(h.name);
+    for (const auto& f : bd::functions)
+        if (!f.mathjson.empty()) heads.push_back(f.mathjson);
+    for (const auto h : heads) {
+        bool placed = std::ranges::find(forms, h) != std::end(forms);
+        for (const auto& n : notation) placed = placed || h == n.head;
+        if (!placed) throw std::runtime_error(std::format("the editor's {} has no row in the reference", h));
     }
     Array writing, functions, operators, constants, questions;
     // how the formula editor takes keystrokes: what is typed, and the line of the language the rows
@@ -121,10 +136,12 @@ std::string reference() {
         std::string reads;   // what the reader makes of it, as field_mathjson.hpp says
         for (const auto& h : bd::mathjson_heads)
             if (h.name == n.head) reads = std::string(h.caption);
+        for (const auto& g : bd::functions)
+            if (g.mathjson == n.head) reads = std::string(g.name) + (g.arity == 1 ? "(a)" : "(a, b)");
         functions.push_back(Object{{"head", n.head}, {"form", n.form}, {"reads", reads}, {"name", f ? std::string(f->name) : std::string()}, {"arity", f ? f->arity : 1},
                                    {"caption", f ? std::string(f->caption) : std::string(n.caption)},
-                                   {"domain", f ? std::string(f->domain) : std::string(n.domain)}, {"rows", Array{n.rows}},
-                                   {"example", n.example}, {"answer", answered(n.example)}});
+                                   {"domain", f ? std::string(f->domain) : std::string(n.domain)}, {"derivative", derivative(f)},
+                                   {"rows", Array{n.rows}}, {"example", n.example}, {"answer", answered(n.example)}});
     }
     // a function of the language no notation calls: the language's text only
     for (const auto& f : bd::functions) {
@@ -132,7 +149,7 @@ std::string reference() {
         for (const auto& n : notation) shown = shown || std::string_view(n.example).starts_with(std::string(f.name) + "(");
         if (!shown)
             functions.push_back(Object{{"name", std::string(f.name)}, {"arity", f.arity}, {"caption", std::string(f.caption)},
-                                       {"domain", std::string(f.domain)}, {"example", std::string(f.example)},
+                                       {"domain", std::string(f.domain)}, {"derivative", derivative(&f)}, {"example", std::string(f.example)},
                                        {"answer", answered(f.example)}});
     }
     for (const auto& o : bd::operators)
@@ -154,7 +171,10 @@ std::string reference() {
                           Kind{"p \\in [c, d]", "a parameter: a row below that reads it is answered as a function of p, "
                                               "synthesised and certified", "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"},
                           Kind{"I = \\int_a^b f\\,dt", "an integral; a limit may be a parameter above",
-                               "x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]"}})
+                               "x in [0.5, 6]\nSi = integral sin(t)/t dt on [0, x]"},
+                          Kind{"\\frac{d}{dx} f", "a derivative, by the rule of each operation, checked against a dual number",
+                               "d/dx sin(x)^2"},
+                          Kind{"\\frac{d}{dx} f,\\ x = a", "a derivative at a point, its digits proved", "d/dx x^3 / 3 at 2"}})
         questions.push_back(Object{{"form", k.form}, {"caption", k.caption}, {"example", k.example},
                                    {"answer", answered(k.example)}});
     // the canvas's text: a line of the language a definition, each example read by the library and
@@ -170,6 +190,8 @@ std::string reference() {
                           Line{"p in [a, b]", "a parameter: a line that reads it is answered as a function of it",
                                "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]"},
                           Line{"I = integral f dt on [a, b]", "an integral in the variable after d", "I = integral t^2 dt on [0, 1]"},
+                          Line{"g = d/dx f", "a derivative in the variable after d/d: a function of it, or its value at a point after at",
+                               "g = d/dx sin(x)^2\nh = d/dx x^3 at 2"},
                           Line{"S = torus(R, r)", "a shape, from the operations below; another reads it by name",
                                "S0 = torus(2, 0.5)\nS1 = offset(S0, 0.1)"},
                           Line{"# words", "a comment, to the end of the line", "r = 2  # the radius"}}) {
@@ -178,9 +200,8 @@ std::string reference() {
         Array latex;
         for (const auto& st : doc->statements) {
             seen.push_back(st.kind);
-            if (const auto row = bd::to_latex(st)) latex.push_back(*row);
-            for (const auto& e : st.also)   // a system: an equation a row, as respond writes them
-                if (const auto row = bd::to_latex(e)) latex.push_back(*row);
+            if (const auto rows = bd::to_latex_rows(st))
+                for (const auto& row : *rows) latex.push_back(row);
         }
         language.push_back(Object{{"form", l.form}, {"caption", l.caption}, {"example", l.example}, {"latex", latex}});
     }
@@ -199,12 +220,12 @@ std::string reference() {
     for (const auto k : bd::statement_kinds) statements.push_back(Object{{"name", bd::statement_kind_name(k)}});
     for (const auto r : bd::relations)
         relations.push_back(Object{{"written", std::string(r)}, {"latex", bd::detail::relation_latex(r)}});
-    for (const auto r : rsc::routes) routes.push_back(Object{{"name", rsc::route_name(r)}, {"caption", rsc::route_caption(r)}});
-    for (const auto a : rsc::arithmetics) arithmetics.push_back(Object{{"name", rsc::arithmetic_name(a)}});
+    for (const auto& r : spatium::answer::route_table) routes.push_back(Object{{"name", r.name}, {"caption", r.caption}});
+    for (const auto a : spatium::answer::arithmetics) arithmetics.push_back(Object{{"name", spatium::answer::arithmetic_name(a)}});
     for (const auto& o : bd::shape_operations)
         shapes.push_back(Object{{"name", std::string(o.name)}, {"arguments", std::string(o.arguments)},
                                 {"required", o.required}, {"variadic", o.variadic}, {"caption", std::string(o.caption)}});
-    for (const auto& g : rsc::guarantees)
+    for (const auto& g : spatium::answer::guarantees)
         guarantees.push_back(Object{{"name", std::string(g.name)}, {"title", std::string(g.title)}, {"promise", std::string(g.promise)}});
     const std::pair<const char*, const Array*> sections[] = {
         {"writing", &writing},       {"functions", &functions},   {"operators", &operators},
@@ -244,8 +265,8 @@ std::string language_ts() {
     list("constants", "Constant", names(bd::constants, [](const auto& c) { return c.name; }));
     list("statements", "StatementKind", names(bd::statement_kinds, bd::statement_kind_name));
     list("relations", "Relation", names(bd::relations, [](std::string_view r) { return r; }));
-    list("routes", "Route", names(rsc::routes, rsc::route_name));
-    list("arithmetics", "Arithmetic", names(rsc::arithmetics, rsc::arithmetic_name));
+    list("routes", "Route", names(spatium::answer::route_table, [](const auto& r) { return r.name; }));
+    list("arithmetics", "Arithmetic", names(spatium::answer::arithmetics, spatium::answer::arithmetic_name));
     list("shapes", "ShapeOperation", names(bd::shape_operations, [](const auto& o) { return o.name; }));
     return out;
 }
@@ -285,12 +306,17 @@ std::string language_md(const std::string& json) {
     for (const auto& q : rows("questions"))
         out += std::format("| {} | {} | {} | {} |\n", tex(q.string_or("form", "")), cell(q.string_or("caption", "")), shown(q),
                            cell(q.find("answer")->string_or("label", "")));
-    out += "\n## Functions\n\nThe editor's notation, the language's text, where each has a value, and an example.\n\n"
-           "| written | in the language | | defined for | example |\n|---|---|---|---|---|\n";
-    for (const auto& f : rows("functions"))
-        out += std::format("| {} | {} | {} | {} | {} |\n", tex(f.string_or("form", "")),
+    out += "\n## Functions\n\nThe editor's notation, the language's text, where each has a value, its derivative in each "
+           "argument a and b, and an example.\n\n"
+           "| written | in the language | | defined for | derivative | example |\n|---|---|---|---|---|---|\n";
+    for (const auto& f : rows("functions")) {
+        std::string d;
+        if (const JsonValue* ds = f.find("derivative"))
+            for (const auto& x : ds->as_array()) d += (d.empty() ? "" : ", ") + code(x.as_string());
+        out += std::format("| {} | {} | {} | {} | {} | {} |\n", tex(f.string_or("form", "")),
                            code(f.string_or("name", "").empty() ? f.string_or("example", "") : f.string_or("name", "")),
-                           cell(f.string_or("caption", "")), cell(f.string_or("domain", "")), code(f.string_or("example", "")));
+                           cell(f.string_or("caption", "")), cell(f.string_or("domain", "")), d, code(f.string_or("example", "")));
+    }
     out += "\n## Operators\n\nTightest last.\n\n| written | | example |\n|---|---|---|\n";
     for (const auto& o : rows("operators"))
         out += std::format("| {} | {} | {} |\n", code(o.string_or("written", "")), cell(o.string_or("caption", "")),

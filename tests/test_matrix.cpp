@@ -31,6 +31,18 @@ TEST_CASE("Matrix arithmetic", "[matrix]") {
     CHECK(s(1, 1) == 8);
 }
 
+TEST_CASE("Matrix negation is minus one times the matrix, and undoes itself", "[matrix]") {
+    Mat2 a;
+    a(0, 0) = 1; a(0, 1) = -2;
+    a(1, 0) = 3; a(1, 1) = 0;
+    const Mat2 n = -a;
+    for (std::size_t i = 0; i < 2; ++i)
+        for (std::size_t j = 0; j < 2; ++j) {
+            CHECK(n(i, j) == (a * -1.0)(i, j));
+            CHECK((-n)(i, j) == a(i, j));
+        }
+}
+
 TEST_CASE("Matrix multiply", "[matrix]") {
     auto I = Mat3::identity();
     Mat3 a;

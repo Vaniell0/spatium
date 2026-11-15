@@ -344,3 +344,18 @@ TEST_CASE("a double root stays undecided, and says where it may be", "[interval]
     REQUIRE(both.undecided.size() == 1);
     CHECK(both.undecided[0].contains(1));
 }
+
+TEST_CASE("the empty interval, a value with no real number, stays empty through what reads it", "[interval]") {
+    const I none = I{1} / I{0};
+    REQUIRE(none.is_empty());
+    // a product with zero, a quotient by it, the smaller or larger of it and a number: none of
+    // them is a number either
+    CHECK((none * I{0}).is_empty());
+    CHECK((I{0} * none).is_empty());
+    CHECK((I{1} / none).is_empty());
+    CHECK((none + I{1}).is_empty());
+    CHECK(min(I{1}, none).is_empty());
+    CHECK(min(none, I{1}).is_empty());
+    CHECK(max(I{1}, none).is_empty());
+    CHECK(max(none, I{1}).is_empty());
+}

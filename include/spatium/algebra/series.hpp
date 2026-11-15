@@ -411,6 +411,15 @@ Series<T, N> pow(const Series<T, N>& f, int n) {
     return pow(f, T(n));
 }
 
+// f^g: a constant exponent as above, any other as exp(g log f) -- which is a series only where
+// f starts at a positive constant, so 2^x at infinity is not one and says so.
+template<Scalar T, int N>
+Series<T, N> pow(const Series<T, N>& f, const Series<T, N>& g) {
+    if (!g.ok()) return g;
+    if (g.is_exact_constant()) return pow(f, g.coefficient(0));
+    return exp(g * log(f));
+}
+
 template<Scalar T, int N>
 Series<T, N> sqrt(const Series<T, N>& f) { return pow(f, T{1} / T{2}); }
 

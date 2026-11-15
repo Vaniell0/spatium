@@ -427,3 +427,45 @@ body { --keyboard-background: var(--raised); --keycap-background: var(--surface)
 .card.pending > .answer { opacity: .48; transition: opacity .15s; }
 .card .status { display: flex; align-items: center; gap: 16px; margin: 0; padding: 8px 24px; font-size: var(--t-label); color: var(--ink-2); border-bottom: 1px solid var(--line-faint); }
 @media (prefers-reduced-motion: reduce) { .card.pending > .answer { transition: none; } }
+
+/* ── the zeta page: Z(t), zeta as colour, the notes ── */
+.zeta { max-width: 1280px; margin: 0 auto; padding: 32px 24px 64px; display: grid; gap: 24px;
+  grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+.zhead, .zeta .wide { grid-column: 1 / -1; }
+.zhead { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+.zeta h1 { margin: 0; font-size: var(--t-page); font-weight: 600; }
+.zwin { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: var(--t-label); color: var(--ink-2); }
+.zwin input { width: 96px; height: var(--dense); padding: 0 8px; border: 0; border-radius: var(--r-control);
+  background: var(--raised); color: var(--ink); font-size: var(--t-label); }
+.zpresets { display: flex; flex-wrap: wrap; gap: 8px; }
+.zeta .view { background: var(--surface); border-radius: var(--r-panel); padding: 16px; display: grid; gap: 8px; min-width: 0; }
+.zeta .view h2 { margin: 0; font-size: var(--t-label); font-weight: 500; color: var(--ink-2); }
+.zeta .gist { margin: 0; font-size: var(--t-label); color: var(--ink-3); }
+.zbox { overflow: hidden; }
+.zplot { display: block; width: 100%; height: auto; }
+.zaxis { stroke: var(--line); stroke-width: 1; }
+.zcurve { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+.zzero { fill: var(--accent); stroke: var(--surface); stroke-width: 1; }
+.gram { stroke: var(--ink-3); stroke-width: 1; }
+.gram.bad { stroke: var(--warn); stroke-width: 2; }
+.gram-label { fill: var(--warn); font: 12px var(--f-mono); text-anchor: middle; }
+.zero-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--t-label); color: var(--ink-2); }
+.zmap { position: relative; aspect-ratio: 1; border-radius: var(--r-control); overflow: hidden; background: var(--raised); }
+.zmap canvas, .zoverlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.zmap canvas { image-rendering: auto; }
+.zoverlay .crit { stroke: var(--ink); stroke-opacity: .4; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.zoverlay .edge { stroke: var(--ink); stroke-opacity: .3; stroke-dasharray: 1 3; vector-effect: non-scaling-stroke; }
+.zoverlay .ring { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.zoverlay .pole { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
+.note { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+.note .badge { width: 24px; height: 24px; border-radius: 50%; background: var(--raised); display: grid; place-items: center;
+  font: var(--t-label) var(--f-mono); }
+.note h3 { margin: 0; font-size: var(--t-label); font-weight: 500; }
+.note-text { margin: 4px 0; font-size: var(--t-label); color: var(--ink-2); max-width: 48ch; }
+.note .strength { font-size: var(--t-label); color: var(--ink-3); }
+.note .strength.ok { color: var(--ok); }
+@media (max-width: 760px) { .zeta { grid-template-columns: minmax(0, 1fr); padding: 24px 16px 48px; } }
+.ztile { display: grid; gap: 8px; }
+.ztile-title { font-size: var(--t-section); font-weight: 500; }
+@media (max-width: 760px) { .zero-list { display: grid; grid-template-columns: 1fr; } }

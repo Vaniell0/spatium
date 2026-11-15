@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
 title: a net is one op of the field IR, and its weights are data
-files: [include/spatium/io/field.hpp, include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, include/spatium/io/field_text.hpp, include/spatium/io/plot_glsl.hpp, rsc/spatium/respond.hpp, tests/test_field_net.cpp, tests/test_field_pod.cpp, site/wasm/plot_check.html, site/wasm/check.mjs, site/wasm/questions.txt]
+files: [include/spatium/io/field.hpp, include/spatium/io/field_pod.hpp, include/spatium/io/field_glsl.hpp, include/spatium/io/field_text.hpp, include/spatium/io/plot_glsl.hpp, include/spatium/answer/respond.hpp, tests/test_field_net.cpp, tests/test_field_pod.cpp, site/wasm/plot_check.html, site/wasm/check.mjs, site/wasm/questions.txt]
 open:
   - a net reads one to three inputs, the arity of an op; a wider input needs a vector the IR does not have
   - a Vulkan kernel binds no buffer for the weights yet; there a net is refused by name

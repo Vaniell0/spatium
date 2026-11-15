@@ -1,0 +1,22 @@
+[
+ {
+  "space": "Sphere-implicit",
+  "claim": "p = exp(q,log(q,p))",
+  "reason": "an erased level set: its log is a retraction, the chord projected on the tangent plane, and the library withholds its distance for that reason (core/access.hpp)"
+ },
+ {
+  "space": "Torus-chart",
+  "claim": "p = exp(q,log(q,p))",
+  "reason": "an erased chart: its exp is project(p + v t), a retraction, so exp after log is not the identity"
+ },
+ {
+  "space": "Torus-typed",
+  "claim": "-log(p,exp(p,u)) = log(p,exp(p,-u))",
+  "reason": "the law holds where the geodesic symmetry at p is an isometry -- a symmetric space -- and a torus of revolution is not one; past the cut locus the two sides are different points' logs"
+ },
+ {
+  "space": "S2xS2",
+  "claim": "d(p,exp(p,u/2)) <= 2*d(p,exp(p,u))",
+  "reason": "a compact space: past the cut locus exp(p, u) can come back near p while exp(p, u/2) does not, so the law is local; whether a long sample lands there depends on how u splits between the factors"
+ }
+]

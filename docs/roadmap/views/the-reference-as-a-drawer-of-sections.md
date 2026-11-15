@@ -1,7 +1,7 @@
 ---
 date: 2026-11-05
 title: the reference as a drawer of sections, written by the library, and docs/language.md beside it
-files: [examples/site_reference.cpp, examples/gallery.cpp, examples/CMakeLists.txt, rsc/spatium/respond.hpp, site/wasm/check.mjs, site/data/reference.json, docs/language.md, web/src/page.ts, web/test/registry.test.ts, site/index.html, site/style.css]
+files: [examples/site_reference.cpp, examples/gallery.cpp, examples/CMakeLists.txt, include/spatium/answer/respond.hpp, site/wasm/check.mjs, site/data/reference.json, docs/language.md, web/src/page.ts, web/test/registry.test.ts, site/index.html, site/style.css]
 open:
   - the canvas still shares the calculator's page; the drawer puts a canvas example at the end of the cards, not at the centre of a view
   - the logarithm in base 10 is proved to 15 digits, not exact: the core takes log(100) / log(10) in intervals
@@ -28,7 +28,7 @@ same run writes `docs/language.md`, so the page and the docs cannot differ (`--c
   line. Each example is read by the library and shown with its rows. Shape operations follow, and
   then what the library says of a document it does not take, in its own words.
 - **Answers**: the seven guarantees and what each promises. The table moved into
-  `rsc/spatium/respond.hpp`, so the gallery's groups and the reference read one list (the gallery's
+  `include/spatium/answer/respond.hpp`, so the gallery's groups and the reference read one list (the gallery's
   file is unchanged).
 
 On the calculator an entry shows LaTeX first; on the canvas the language first. An example puts its

@@ -175,7 +175,11 @@ private:
                 // The magnitude check runs BEFORE truncating to a
                 // long long -- doing it the other way risks undefined
                 // behavior converting an out-of-range double.
-                if (std::abs(number_) < 1e15 && number_ == std::floor(number_)) {
+                // JSON has no infinity and no NaN: such a number is written as null, which a
+                // reader (JSON.parse among them) takes, where `inf` would stop it.
+                if (!std::isfinite(number_)) {
+                    out += "null";
+                } else if (std::abs(number_) < 1e15 && number_ == std::floor(number_)) {
                     out += std::to_string(static_cast<long long>(number_));
                 } else {
                     char buf[64];

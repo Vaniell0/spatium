@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: the page, which shows what the library answers and composes nothing
-files: [site/index.html, site/style.css, site/vendor/katex/LICENSE, site/wasm/core.cpp, include/spatium/io/field_text.hpp, include/spatium/io/steps_text.hpp, rsc/spatium/query.hpp, examples/gallery.cpp]
+files: [site/index.html, site/style.css, site/vendor/katex/LICENSE, site/wasm/core.cpp, include/spatium/io/field_text.hpp, include/spatium/io/steps_text.hpp, include/spatium/answer/query.hpp, examples/gallery.cpp]
 resolves: [views/the-core-in-webassembly#1]
 open:
   - the page is not published; it is served from `site/` by any static server

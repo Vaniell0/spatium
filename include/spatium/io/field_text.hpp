@@ -3,6 +3,7 @@
 #include <spatium/_export_macro.hpp>
 #ifndef SPATIUM_BUILDING_MODULE
 #  include <spatium/io/field.hpp>
+#  include <spatium/io/field_parse.hpp>
 #  include <algorithm>
 #  include <array>
 #  include <cctype>
@@ -47,6 +48,7 @@ struct Spelled {
     bool one = false;        // the constant 1 exactly, which a product leaves out
     bool negative = false;   // a negative constant, or in LaTeX a term led by a minus: a sum writes it as a subtraction
     bool fraction = false;   // a LaTeX \frac, which a power's base puts in parentheses
+    bool minus = false;      // in text, -a: the reader binds it tighter than a product, so a product's left factor needs no parentheses
     // a product of one op with itself, k times, multiplied left to right: written base^k
     std::uint32_t base = std::numeric_limits<std::uint32_t>::max();
     int power = 1;
@@ -124,6 +126,12 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
     const auto call = [&](std::string_view plain, std::string_view latex, const std::string& inside) {
         return tex ? std::format("{}\\left({}\\right)", latex, inside) : std::format("{}({})", plain, inside);
     };
+    // a function of the language, as its row of the table writes it: name(a, b) in text, its LaTeX on a page
+    if (const Function* fn = function_of_op(n.op)) {
+        const std::string a = arg(n.a).text, b = fn->arity > 1 ? arg(n.b).text : std::string();
+        if (tex) return {std::vformat(fn->latex, std::make_format_args(a, b))};
+        return {std::string(fn->name) + "(" + a + (fn->arity > 1 ? ", " + b : std::string()) + ")"};
+    }
     switch (n.op) {
         case Op::Const: {
             const Binding b = std::signbit(n.value) ? Binding::Sum : Binding::Atom;
@@ -171,7 +179,11 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
             // Not a number, which after a minus would be read as one negative number instead
             if (!tex && arg(n.a).negative && arg(n.a).text == "-1" &&
                 !(arg(n.b).text.size() && std::isdigit(static_cast<unsigned char>(arg(n.b).text.front()))))
-                return {"-" + grouped(arg(n.b), Binding::Power, style), Binding::Sum};
+            {
+                Spelled out{"-" + grouped(arg(n.b), Binding::Power, style), Binding::Sum};
+                out.minus = true;
+                return out;
+            }
             const std::string right = grouped(arg(n.b), right_of_product, style);
             // on a page a number or a fraction before a name is written next to it, 2x and \frac{1}{6} p,
             // as a person writes them; two numbers, a number in powers of ten, and a fraction or an
@@ -184,7 +196,8 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
                 out.negative = true;
                 return out;
             }
-            return {grouped(arg(n.a), Binding::Product, style) + (tex ? " \\cdot " : " * ") + right, Binding::Product};
+            const std::string left = !tex && arg(n.a).minus ? arg(n.a).text : grouped(arg(n.a), Binding::Product, style);
+            return {left + (tex ? " \\cdot " : " * ") + right, Binding::Product};
         }
         case Op::Div:
             if (tex) {
@@ -199,14 +212,8 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
             }
             return {grouped(arg(n.a), Binding::Product, style) + " / " + grouped(arg(n.b), Binding::Power, style),
                     Binding::Product};
-        case Op::Min:  return {call("min", "\\min", arg(n.a).text + ", " + arg(n.b).text)};
-        case Op::Max:  return {call("max", "\\max", arg(n.a).text + ", " + arg(n.b).text)};
-        case Op::Sin:  return {call("sin", "\\sin", arg(n.a).text)};
-        case Op::Cos:  return {call("cos", "\\cos", arg(n.a).text)};
-        case Op::Log:  return {call("log", "\\ln", arg(n.a).text)};
-        case Op::Exp:  return {call("exp", "\\exp", arg(n.a).text)};
-        case Op::Sqrt: return {tex ? std::format("\\sqrt{{{}}}", arg(n.a).text) : call("sqrt", "", arg(n.a).text)};
-        case Op::Abs:  return {tex ? std::format("\\left|{}\\right|", arg(n.a).text) : call("abs", "", arg(n.a).text)};
+        case Op::Min: case Op::Max: case Op::Sin: case Op::Cos: case Op::Log: case Op::Exp: case Op::Sqrt: case Op::Abs:
+        case Op::Less: break;   // the table's, above
         case Op::Pow: {
             // a^b; in text an exponent that is a whole number from 1 to 64 keeps its parentheses,
             // since x^2 bare is read back as the product x * x, another op
@@ -222,10 +229,6 @@ inline Spelled spell_op(const FieldOp<double>& n, const std::vector<Spelled>& at
             return {grouped(arg(n.a), Binding::Atom, style) + "^" + (whole ? "(" + b.text + ")" : grouped(b, Binding::Atom, style)),
                     Binding::Power};
         }
-        case Op::Less:
-            // 1 where a < b and 0 elsewhere: an Iverson bracket on a page
-            return {tex ? std::format("\\left[{} < {}\\right]", arg(n.a).text, arg(n.b).text)
-                        : call("less", "", arg(n.a).text + ", " + arg(n.b).text)};
         case Op::Noise:
             return {call("noise", "\\operatorname{noise}",
                          arg(n.a).text + ", " + arg(n.b).text + ", " + arg(n.c).text)};

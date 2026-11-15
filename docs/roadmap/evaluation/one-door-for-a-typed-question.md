@@ -1,7 +1,7 @@
 ---
 date: 2026-10-30
 title: one door for a question typed as text, answered as JSON, with what its certificate is worth
-files: [rsc/spatium/respond.hpp, rsc/spatium/synthesis.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_rsc_respond.cpp]
+files: [include/spatium/answer/respond.hpp, include/spatium/answer/synthesis.hpp, examples/gallery.cpp, site/gallery/gallery.json, tests/test_answer_respond.cpp]
 open:
   - the libm a certificate was computed with is not recorded
   - a power is printed as the product it is read into: 2(3 + 4)^2 reads back as 2 * (3 + 4) * (3 + 4)
