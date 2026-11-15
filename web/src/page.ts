@@ -6,16 +6,16 @@
 import { Answers, notation, type Parse } from "./answers.js";
 import { type Calc, type Entry, blank, commit, empty, load as loadCalc, save as saveCalc } from "./calc.js";
 import { Core, type State } from "./core.js";
-import { layout } from "./keys.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
 import { Cards } from "./view/cells.js";
-import { $, el, math as tex } from "./view/dom.js";
+import { $, el, icon, math as tex } from "./view/dom.js";
 import type { Sheet } from "./view/answer.js";
 import { History } from "./view/history.js";
+import { Keys } from "./view/keys.js";
 
 // ── settings of the page (a cell's own are in the document) ─────────────
 
-const DEFAULTS = { theme: "system", scale: "1", formulas: "rendered", keyboard: "on", cache: "on" };
+const DEFAULTS = { theme: "system", scale: "1", formulas: "rendered", keyboard: "auto", cache: "on" };
 type PageSettings = typeof DEFAULTS;
 const settings: PageSettings = { ...DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem("spatium.settings") || "{}")); } catch {}
@@ -46,10 +46,9 @@ function toast(text: string, bad = false) {
   if (!bad) toastTimer = setTimeout(() => { t.hidden = true; }, 3000);
 }
 
-function dot(state: State, title: string) {
-  const d = $("#core-dot")!;
-  d.className = `core-dot ${state === "loading" ? "" : state}`;
-  d.title = title;
+// the core's state is the dot's colour; its words are in the settings dialog
+function dot(state: State) {
+  $("#core-dot")!.className = `core-dot ${state === "loading" ? "" : state}`;
 }
 
 // ── the core, the editor, the library's files ───────────────────────────
@@ -74,9 +73,6 @@ async function loadEditor() {
     ml.MathfieldElement.fontsDirectory = new URL("vendor/katex/fonts/", location.href).href;
     ml.MathfieldElement.soundsDirectory = null;
     ml.MathfieldElement.computeEngine = null;
-    const kb = (window as unknown as { mathVirtualKeyboard: { container: Element; layouts: unknown } }).mathVirtualKeyboard;
-    kb.container = $("#keys-body")!;
-    kb.layouts = [layout()];
     editor.parse = (latex: string) => ls.parse(notation(latex));
     editor.toLatex = ml.convertAsciiMathToLatex;
     editor.ready = true;
@@ -175,12 +171,12 @@ async function copyLink() {
   clearTimeout(saveTimer);
   await save();
   // said in place: the icon turns into a check for a moment, and a screen reader hears it
-  const button = $("#copy-link")!, was = button.innerHTML;
+  const button = $("#copy-link")!;
   try {
     await navigator.clipboard.writeText(location.href);
-    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+    button.replaceChildren(icon("check"));
     $("#said")!.textContent = "Link copied";
-    setTimeout(() => { button.innerHTML = was; $("#said")!.textContent = ""; }, 1500);
+    setTimeout(() => { button.replaceChildren(icon("link")); $("#said")!.textContent = ""; }, 1500);
   } catch {
     toast("The address bar holds the link to this document");
   }
@@ -196,6 +192,7 @@ function usePreset(preset: Preset) {
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-preset]")) b.setAttribute("aria-pressed", String(b.dataset.preset === preset));
   document.body.dataset.preset = preset;
   past.root.hidden = preset !== "calculator";
+  showExamples();
   if (preset !== now.preset) cards.setDoc(preset === "calculator" ? lineDoc() : canvas);
   else cards.build();
   changed();
@@ -216,6 +213,7 @@ function commitLine(open: boolean) {
   calc.line = empty();
   cards.setDoc(lineDoc());
   past.render(calc, opened);
+  showExamples();
   changed();
 }
 
@@ -258,8 +256,7 @@ function panel(which: "ref" | null) {
   box.dataset.preset = cards.document.preset;
   const r = data.reference;
   const dslFirst = cards.document.preset === "canvas";
-  const close = el("button", { type: "button", class: "icon", "aria-label": "Close the reference", onclick: () => panel(null) });
-  close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  const close = el("button", { type: "button", class: "icon", "aria-label": "Close the reference", onclick: () => panel(null) }, icon("x"));
   const filter = el("input", { class: "filter", type: "search", placeholder: "Find in the reference", "aria-label": "Find in the reference" });
   const index = el("nav", { class: "ref-index", "aria-label": "Sections" });
   const doc = el("div", { class: "ref" });
@@ -325,49 +322,34 @@ function hint(word: string): [string, string, string] | null {
   return w ? [w.shown, w.caption + (w.domain ? `, for ${w.domain}` : ""), w.example] : null;
 }
 
-// ── the keyboard: MathLive's own, in a window near the row being written ─
+// ── the keyboard: the page's own panel over the line ────────────────────
 
 let activeField: HTMLElement | null = null;
+let keys: Keys;
+const coarse = () => matchMedia("(pointer: coarse)").matches;
 
+// the row being written, or the line's first row
+const field = () => {
+  if (!activeField || !document.body.contains(activeField)) activeField = document.querySelector("math-field");
+  return activeField as (HTMLElement & { executeCommand(c: unknown): void }) | null;
+};
+
+// the panel floats over the page and adds nothing to it: the live cell's ask row turns sticky so
+// the line stays above the keys. On touch the hidden textarea takes no OS keyboard while it is open.
 function setKeys(open: boolean) {
-  const keys = $("#keys")!;
-  keys.hidden = !open;
+  keys.root.hidden = !open;
+  document.documentElement.style.setProperty("--bar-bottom", `${Math.round($(".bar")!.getBoundingClientRect().bottom)}px`);
+  document.body.classList.toggle("keys-open", open);
   $("#open-keys")!.setAttribute("aria-expanded", String(open));
-  const kb = (window as unknown as { mathVirtualKeyboard?: { show(): void; hide(): void } }).mathVirtualKeyboard;
-  if (!editor.ready || !kb) return;
-  if (open) {
-    if (!activeField || !document.body.contains(activeField)) activeField = document.querySelector("math-field");
-    activeField?.focus();
-    kb.show();
-  } else kb.hide();
-  placeKeys();
+  const mf = field();
+  mf?.shadowRoot?.querySelector("textarea, [contenteditable]")?.setAttribute("inputmode", open && coarse() ? "none" : "");
+  if (open) mf?.focus();
 }
 
-// the keyboard is a window of its own over the page: it takes no room from the page, is moved by
-// its title bar, and comes back where it was left (kept in this browser), inside the viewport
-function placeKeys() {
-  const keys = $("#keys")!;
-  if (keys.hidden) return;
-  let at: { x: number; y: number } | null = null;
-  try { at = JSON.parse(localStorage.getItem("spatium.keys") ?? "null"); } catch { /* where CSS puts it */ }
-  if (!at) { keys.style.left = keys.style.top = keys.style.bottom = keys.style.transform = ""; return; }
-  const x = Math.min(Math.max(0, at.x), innerWidth - keys.offsetWidth), y = Math.min(Math.max(0, at.y), innerHeight - keys.offsetHeight);
-  Object.assign(keys.style, { left: `${x}px`, top: `${y}px`, bottom: "auto", transform: "none" });
-}
-
-function dragKeys() {
-  const keys = $("#keys")!, head = keys.querySelector<HTMLElement>(".keys-head")!;
-  head.addEventListener("pointerdown", (e) => {
-    if ((e.target as Element).closest("button")) return;
-    const r = keys.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
-    head.setPointerCapture(e.pointerId);
-    const move = (m: PointerEvent) => {
-      try { localStorage.setItem("spatium.keys", JSON.stringify({ x: m.clientX - dx, y: m.clientY - dy })); } catch { /* not kept */ }
-      placeKeys();
-    };
-    head.addEventListener("pointermove", move);
-    head.addEventListener("pointerup", () => head.removeEventListener("pointermove", move), { once: true });
-  });
+// a row took the focus: the keyboard opens as the setting says -- always, or on touch
+function rowFocused(f: HTMLElement) {
+  activeField = f;
+  if (settings.keyboard === "on" || (settings.keyboard === "auto" && coarse())) setKeys(true);
 }
 
 // ── settings of the page ────────────────────────────────────────────────
@@ -377,8 +359,8 @@ function applySettings() {
   if (settings.theme === "system") delete root.dataset.theme;
   else root.dataset.theme = settings.theme;
   root.style.setProperty("--scale", settings.scale);
-  $("#open-keys")!.hidden = settings.keyboard !== "on" || !editor.ready;
-  if (settings.keyboard !== "on") setKeys(false);
+  $("#open-keys")!.hidden = settings.keyboard === "off" || !editor.ready;
+  if (settings.keyboard === "off") setKeys(false);
   for (const seg of document.querySelectorAll<HTMLElement>(".seg[data-setting]"))
     for (const b of seg.querySelectorAll<HTMLButtonElement>("button"))
       b.setAttribute("aria-pressed", String(b.value === settings[seg.dataset.setting as keyof PageSettings]));
@@ -399,13 +381,12 @@ function wire() {
   $("#scrim")!.addEventListener("click", () => panel(null));
   $("#copy-link")!.addEventListener("click", copyLink);
   $("#open-keys")!.addEventListener("pointerdown", (e) => e.preventDefault());
-  $("#open-keys")!.addEventListener("click", () => setKeys($("#keys")!.hidden === true));
-  $("#close-keys")!.addEventListener("click", () => setKeys(false));
+  $("#open-keys")!.addEventListener("click", () => setKeys(keys.root.hidden));
   // Esc closes the keyboard; with it closed, Esc twice within a second clears the line
   let escAt = 0;
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (!$("#keys")!.hidden) { setKeys(false); return; }
+    if (!keys.root.hidden) { setKeys(false); return; }
     if (!$("#panel")!.hidden) { panel(null); return; }
     if (cards.document.preset === "calculator" && Date.now() - escAt < 1000) {
       escAt = 0;
@@ -426,11 +407,6 @@ function wire() {
     undoing = null;
     $("#undo")!.hidden = true;
   });
-  // a press anywhere on the keyboard's window keeps the formula written in focused: the keys type
-  // into the focused field, and a press on the window's edge must not leave none
-  $("#keys")!.addEventListener("pointerdown", () => {
-    if (!document.activeElement?.closest("math-field") && activeField && document.body.contains(activeField)) activeField.focus();
-  }, true);
   // forgetting asks once, in place: the button becomes Forget and Cancel
   const forgetRow = () => $("#forget-row")!.replaceChildren(el("button", { type: "button", class: "quiet warn", text: "Forget history and canvas",
     onclick: () => $("#forget-row")!.replaceChildren(
@@ -440,8 +416,6 @@ function wire() {
       } }),
       el("button", { type: "button", class: "quiet", text: "Cancel", onclick: forgetRow })) }));
   forgetRow();
-  addEventListener("resize", placeKeys);
-  dragKeys();
   const dialog = $<HTMLDialogElement>("#settings")!;
   $("#open-settings")!.addEventListener("click", () => { showCoreState(); dialog.showModal(); });
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
@@ -470,12 +444,38 @@ function wire() {
   });
 }
 
+// ── examples: three of the gallery's questions, shown while the history is empty ──
+
+const examples = el("section", { class: "examples", "aria-label": "Examples", hidden: true });
+
+async function loadExamples() {
+  interface Card { question_latex?: string[]; sheet?: { guarantee: string; result: string; verdict?: { strength: string } } }
+  const g = await fetch("gallery/gallery.json").then((x) => x.json() as Promise<{ groups: { guarantee: string }[]; cards: Card[] }>).catch(() => null);
+  // one of each of the first three guarantees, the shortest question of each: the range, not the depth
+  const short = (c: Card) => c.question_latex!.join("").length;
+  const picks = (g?.groups ?? []).map((grp) => (g?.cards ?? []).filter((c) => c.question_latex?.length && c.sheet?.result && c.sheet.guarantee === grp.guarantee)
+    .sort((a, b) => short(a) - short(b))[0]).filter((c): c is Card => Boolean(c)).slice(0, 3);
+  if (!picks.length) return;
+  examples.replaceChildren(el("div", { class: "history-head" }, el("h2", { text: "Examples" })), ...picks.map((c) => {
+    const rows = c.question_latex!;
+    return el("article", { class: "cell hcell" },
+      el("div", { class: "ask" }, el("span", { class: "prompt", "aria-hidden": "true", text: "›" }), el("span", { class: "q" }, ...rows.map((r) => tex(r, { cls: "math" })))),
+      el("button", { type: "button", class: "result-row", "aria-label": "Put in the line", onclick: () => intoLine({ rows: [...rows] }) },
+        tex(c.sheet!.result, { cls: "math res" }), c.sheet!.verdict ? el("span", { class: "strength ok", text: c.sheet!.verdict.strength }) : null));
+  }));
+  showExamples();
+}
+
+const showExamples = () => { if (cards) examples.hidden = cards.document.preset !== "calculator" || calc.history.length > 0 || !examples.childElementCount; };
+
 // ── start ───────────────────────────────────────────────────────────────
 
+keys = new Keys({ field, commit: () => commitLine(true), close: () => setKeys(false) });
+document.body.append(keys.root);
 wire();
 applySettings();
 const coreLoaded = core.load();
-await Promise.all([loadData(), loadEditor()]);
+await Promise.all([loadData(), loadEditor(), loadExamples()]);
 applySettings();
 answers = new Answers(core, (latex) => editor.parse(latex));
 const asked = await fromAddress();
@@ -494,7 +494,7 @@ past = new History(calc, {
     return got;
   },
   use: (e) => intoLine(e.written),
-  changed: (c) => { calc = c; saveCalc(calc); },
+  changed: (c) => { calc = c; saveCalc(calc); showExamples(); },
   ask: (text, rows) => addRows(rows, text),
   undo: undoStrip,
 });
@@ -503,13 +503,14 @@ cards = new Cards(doc, {
   editor: editor.ready,
   source: () => settings.formulas === "source",
   changed,
-  focused: (f) => { activeField = f; placeKeys(); },
+  focused: rowFocused,
   hint,
   curve: (cell) => (at) => answers.curve(cell, at),
   ask: (text, rows) => addRows(rows, text),
   commit: () => commitLine(true),
 });
-$("#sheet")!.append(cards.root, past.root);
+$("#sheet")!.append(cards.root, examples, past.root);
+showExamples();
 usePreset(doc.preset);
 // the gallery's bar links here by name: the canvas, or the reference open
 if (location.hash === "#canvas") usePreset("canvas");

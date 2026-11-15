@@ -5,7 +5,7 @@
 import type { Answer } from "../core.js";
 import type { Calc, Entry } from "../calc.js";
 import { answerView } from "./answer.js";
-import { el, math } from "./dom.js";
+import { el, icon, math } from "./dom.js";
 
 export interface HistoryHost {
   source: () => boolean;                          // formulas as LaTeX source
@@ -15,11 +15,6 @@ export interface HistoryHost {
   ask: (text: string, rows?: string[]) => void;   // a question a sheet offers, as its text and rows
   undo(message: string, restore: () => void): void;
 }
-
-const ICON = {
-  up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
-  x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
-};
 
 export class History {
   readonly root = el("section", { class: "history", "aria-label": "History" });
@@ -51,15 +46,12 @@ export class History {
     const tex = (latex: string, cls = "math") => math(latex, { cls, source: this.host.source() });
     const rows = "rows" in e.written ? e.written.rows.filter((r) => r.trim()) : [];
     const question = rows.length ? el("span", { class: "q" }, ...rows.map((r) => tex(r))) : el("span", { class: "q mono", text: "text" in e.written ? e.written.text : "" });
-    const icon = (name: keyof typeof ICON, label: string, act: () => void) => {
-      const b = el("button", { type: "button", class: "icon dense", "aria-label": label, onclick: act });
-      b.innerHTML = ICON[name];
-      return b;
-    };
+    const act = (name: "up" | "x", label: string, on: () => void) =>
+      el("button", { type: "button", class: "icon dense", "aria-label": label, onclick: on }, icon(name));
     const ask = el("div", { class: "ask" }, el("span", { class: "prompt", "aria-hidden": "true", text: "›" }), question,
       el("span", { class: "acts" },
-        icon("up", "Put in the line", () => this.host.use(e)),
-        icon("x", "Remove from history", () => {
+        act("up", "Put in the line", () => this.host.use(e)),
+        act("x", "Remove from history", () => {
           const was = this.calc;
           this.set({ ...this.calc, history: this.calc.history.filter((x) => x !== e) });
           this.host.undo("Removed from history", () => this.set(was));
