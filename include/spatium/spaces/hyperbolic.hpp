@@ -36,15 +36,29 @@ struct Hyperbolic {
         return abs(minkowski(p, p) + T{1}) < epsilon<T>() && p[0] > T{0};
     }
 
+    // cosh d - 1 with no cancellation. Read off -<a,b> - 1 a point at distance 0
+    // from itself, once exp has carried it a few units out, is 1 plus rounding
+    // (acosh of that is 1e-8, not 0). On the sheet a0 b0 = sqrt((1+|a|^2)(1+|b|^2)),
+    // and (a0 b0)^2 - (a.b + 1)^2 = |a - b|^2 + sum_{i<j} (a_i b_j - a_j b_i)^2 by
+    // Lagrange's identity, so cosh d - 1 is that sum of squares over a0 b0 + a.b + 1,
+    // a denominator of at least 1. Equal points give exactly 0, and d = 2 asinh
+    // sqrt((cosh d - 1)/2) keeps the digits of a short distance as well.
+    // A NaN coordinate stays NaN: every sum below carries it, and nothing is
+    // raised by a comparison or max() (which Boost drops a NaN through).
     ScalarType distance(const PointType& a, const PointType& b) const {
-        using std::acosh;
-        // Raised to 1 by a comparison, not by max(): max(NaN, 1) is NaN for
-        // double but 1 for a Boost number (its max drops the NaN), which made
-        // a NaN point sit at distance 0 -- found by the infinity probe over
-        // Real50. `NaN < 1` is false everywhere, so the NaN stays.
-        T inner = -minkowski(a, b);
-        if (inner < T{1}) inner = T{1};
-        return acosh(inner);
+        using std::asinh; using std::sqrt;
+        T diff{0}, wedge{0}, dot{0};
+        for (std::size_t i = 1; i <= N; ++i) {
+            const T d = a[i] - b[i];
+            diff += d * d;
+            dot += a[i] * b[i];
+            for (std::size_t j = i + 1; j <= N; ++j) {
+                const T w = a[i] * b[j] - a[j] * b[i];
+                wedge += w * w;
+            }
+        }
+        const T cosh_m1 = (diff + wedge) / (a[0] * b[0] + dot + T{1});
+        return T{2} * asinh(sqrt(cosh_m1 / T{2}));
     }
 
     // As Sphere::exp_map: the arc length t |v|_L is signed and linear in t,
