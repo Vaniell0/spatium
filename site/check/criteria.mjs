@@ -64,8 +64,8 @@ const js = async (expr) => {
   return r.result?.result?.value;
 };
 const key = async (k, mods = 0) => {
-  const code = { Escape: 27, Enter: 13, Backspace: 8, ArrowUp: 38 }[k];
-  const at = { key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: mods };
+  const code = { Escape: 27, Enter: 13, Backspace: 8, ArrowUp: 38 }[k] ?? k.toUpperCase().charCodeAt(0);
+  const at = { key: k, code: k.length === 1 ? `Key${k.toUpperCase()}` : k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: mods };
   await send("Input.dispatchKeyEvent", { type: "keyDown", ...at });
   await send("Input.dispatchKeyEvent", { type: "keyUp", ...at });
 };
@@ -120,7 +120,7 @@ async function write(latex, { settle = 4000 } = {}) {
     await sleep(100);
     if (await js(`!document.querySelector(".card.pending") && Boolean(document.querySelector(".card .answer > *"))`)) break;
   }
-  await sleep(150);
+  await sleep(600);
 }
 
 const line = () => js(`document.querySelector("math-field")?.value ?? null`);
@@ -180,6 +180,27 @@ const SMALLEST = `(() => { let out = []; for (const e of document.querySelectorA
   if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
   const px = parseFloat(getComputedStyle(e).fontSize); if (px < 14) out.push([e.tagName.toLowerCase() + "." + e.className, px]); }
   return out.slice(0, 8); })()`;
+
+// text set in a column narrower than 12 characters (one word per line), and blocks that spill past
+// their edge where no box of theirs scrolls: every section is opened for the measure and closed back
+const SQUEEZED = `(() => { const was = [...document.querySelectorAll("#sheet details.sec")].map((d) => [d, d.open]); for (const [d] of was) d.open = true;
+  const out = [];
+  const walker = document.createTreeWalker(document.querySelector("#sheet"), NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n.textContent.trim(), p = n.parentElement;
+    if (text.length < 12 || !p.checkVisibility() || p.closest(".katex, svg")) continue;
+    const range = document.createRange(); range.selectNodeContents(n);
+    const r = range.getBoundingClientRect(), cs = getComputedStyle(p);
+    if (r.width < 6 * parseFloat(cs.fontSize) && r.height > 1.5 * parseFloat(cs.lineHeight)) out.push("narrow " + p.tagName.toLowerCase() + "." + p.className + " " + Math.round(r.width) + "px: " + text.slice(0, 24));
+  }
+  for (const e of document.querySelectorAll("#sheet .cell *")) {
+    if (e instanceof SVGElement || e.closest(".katex") || !e.checkVisibility()) continue;
+    let box = e, scrolls = false;
+    for (; box && !box.classList.contains("cell"); box = box.parentElement) if (/auto|scroll|hidden|clip/.test(getComputedStyle(box).overflowX)) { scrolls = true; break; }
+    if (!scrolls && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push("spills " + e.tagName.toLowerCase() + "." + e.className + " by " + (e.scrollWidth - e.clientWidth) + "px");
+  }
+  for (const [d, open] of was) d.open = open;
+  return out.slice(0, 6); })()`;
 
 // ── the criteria ────────────────────────────────────────────────────────
 
@@ -250,7 +271,7 @@ await criterion("settings icon is sliders", async () => {
 // Type: the line's formula at 1.25 x body, controls 40 tall
 await criterion("line formula at 1.25 x body (21.25 px), controls 40 tall", async () => {
   const [mf, icons] = await js(`[parseFloat(getComputedStyle(document.querySelector("math-field")).fontSize),
-    [...document.querySelectorAll(".bar .icon")].map((b) => b.getBoundingClientRect().height)]`);
+    [...document.querySelectorAll(".bar .icon")].filter((b) => b.checkVisibility()).map((b) => b.getBoundingClientRect().height)]`);
   if (Math.abs(mf - 21.25) > .5) return `the line is set at ${mf} px`;
   const off = icons.filter((h) => Math.abs(h - 40) > .5);
   return off.length ? `icon buttons at ${off.join(", ")} px` : "";
@@ -271,7 +292,7 @@ await criterion("hint popover takes no space", async () => {
 // The quadratic answered: steps open, as the reference's chain
 await write(QUAD);
 await criterion("quadratic: answered with a result and the chain", async () => {
-  const [res, steps] = await js(`[document.querySelector(".card .result .math")?.textContent ?? "", document.querySelectorAll(".card ol.chain li").length]`);
+  const [res, steps] = await js(`[document.querySelector(".card .result > .math")?.textContent ?? "", document.querySelectorAll(".card ol.chain li").length]`);
   return res && steps >= 3 ? "" : `result ${JSON.stringify(res)}, ${steps} steps`;
 });
 
@@ -285,12 +306,45 @@ await criterion("steps rendered open and never fold", async () => {
   return (await js(`${sel}?.open`)) ? "" : "Steps folded on a click";
 });
 
-// Complaint 4: no graph hangs after the answer; Plot is a section, closed by default
-await criterion("plot is a closed section, no graph after the answer", async () => {
-  const [plots, open, loose] = await js(`(() => { const d = [...document.querySelectorAll(".card details.sec")].filter((d) => d.querySelector("summary")?.textContent.trim().toLowerCase().startsWith("plot"));
-    return [d.length, d.some((x) => x.open), document.querySelectorAll(".card > .also > *, .card > .graph").length]; })()`);
+// The plot is a section of the sheet, open, and drawn on its own once in view; no graph outside
+// the sheet; the pods in the order of immediacy: steps, plot, check, properties, routes, next
+await criterion("plot open and drawn on its own; pods in order: steps, plot, check, routes, next", async () => {
+  await js(`document.querySelector(".plot-slot")?.scrollIntoView()`);
+  await sleep(900);
+  const [open, drawn, loose, order] = await js(`(() => { const d = document.querySelector(".card .plot-slot details.sec");
+    const titles = [...document.querySelectorAll(".card .answer details.sec")].map((x) => x.querySelector("summary").firstChild.textContent.trim());
+    return [d?.open ?? null, Boolean(d?.querySelector("canvas.gl")), document.querySelectorAll(".card > .also > *, .card > .graph").length, titles.join(" > ")]; })()`);
   if (loose) return `${loose} graph elements outside the sheet`;
-  return plots === 1 && !open ? "" : `${plots} plot sections, open ${open}`;
+  if (open !== true || !drawn) return `plot open ${open}, drawn ${drawn}`;
+  const want = ["Steps", "Plot", "Check", "Properties", "How it was found", "Next"];
+  const got = order.split(" > ").filter((t) => want.includes(t));
+  return got.join(" > ") === want.join(" > ") ? "" : `order ${order}`;
+});
+
+// The head reads as the reference's top: how the question was read, above the result
+await criterion("head: read-as line above the result, no Input section", async () => {
+  const [kids, read, input] = await js(`[[...document.querySelector(".card .result").children].map((e) => e.className).join(","),
+    document.querySelector(".card .result .read")?.textContent ?? "", [...document.querySelectorAll(".card details.sec summary")].some((s) => /^input/i.test(s.textContent.trim()))]`);
+  if (!kids.startsWith("read,math")) return `head children ${kids}`;
+  if (!/read as/i.test(read) || !/asks for/i.test(read)) return `read line ${JSON.stringify(read)}`;
+  return input ? "an Input section remains" : "";
+});
+
+// The routes as a decision tree: a branch per route with its cost and what it gave, the taken one
+// marked, and a branch's chain opening that route's tab in Steps
+await criterion("routes as a tree: branches with cost and outcome, taken marked, a branch opens its chain", async () => {
+  const m = await js(`(() => { const t = document.querySelector(".card .tree"); if (!t) return ["no tree"]; const out = [];
+    const b = [...t.querySelectorAll(".branch")]; if (b.length < 2) out.push(b.length + " branches");
+    if (t.querySelectorAll(".branch.taken").length !== 1) out.push("taken branches " + t.querySelectorAll(".branch.taken").length);
+    if (!b.every((x) => /\\d/.test(x.querySelector(".cost")?.textContent ?? ""))) out.push("a branch without a cost");
+    if (!b.some((x) => !x.classList.contains("taken") && x.querySelector("button.steps"))) out.push("no other branch with a chain to open");
+    if (!t.closest("details").open) out.push("the tree is closed");
+    return out; })()`);
+  if (m.length) return m.join("; ");
+  const name = await js(`(() => { const b = [...document.querySelectorAll(".card .tree .branch")].find((x) => !x.classList.contains("taken") && x.querySelector("button.steps")); b.querySelector("button.steps").click(); return b.querySelector(".name").textContent; })()`);
+  await sleep(200);
+  const selected = await js(`document.querySelector(".card .route-tabs [aria-selected=true]")?.firstChild?.textContent ?? null`);
+  return selected === name ? "" : `clicked ${JSON.stringify(name)}, Steps shows ${JSON.stringify(selected)}`;
 });
 
 // Answer sheet anatomy: the cell measured against answer-sheet.html, value for value
@@ -298,7 +352,7 @@ await criterion("sheet measures as the reference", async () => {
   const m = await js(`(() => { const cs = (s) => getComputedStyle(document.querySelector(s)); const out = [];
     const cell = cs(".card.cell"); if (cell.borderTopWidth !== "1px" || cell.borderTopLeftRadius !== "8px") out.push("cell border " + cell.borderTopWidth + " radius " + cell.borderTopLeftRadius);
     const r = cs(".card .result"); if (r.paddingLeft !== "24px" || r.rowGap !== "8px") out.push("result padding " + r.paddingLeft + " gap " + r.rowGap);
-    const rm = cs(".card .result .math"); if (Math.abs(parseFloat(rm.fontSize) - 17 * 1.35) > .5) out.push("result at " + rm.fontSize);
+    const rm = cs(".card .result > .math"); if (Math.abs(parseFloat(rm.fontSize) - 17 * 1.35) > .5) out.push("result at " + rm.fontSize);
     const ink = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim();
     const st = cs(".card .verdict .strength"), ac = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
     const hex = (c) => "#" + c.match(/\\d+/g).slice(0, 3).map((n) => (+n).toString(16).padStart(2, "0")).join("");
@@ -316,10 +370,20 @@ await criterion("sheet measures as the reference", async () => {
 
 // Numbers: no run of trailing zeros, no 16-digit tail, no -0 in a result or a step (the core's rule)
 async function numbers() {
-  return js(`(() => { const t = [...document.querySelectorAll(".card .result .math .katex-mathml annotation, .card ol.chain .math .katex-mathml annotation")].map((a) => a.textContent);
+  return js(`(() => { const t = [...document.querySelectorAll(".card .result > .math .katex-mathml annotation, .card ol.chain .math .katex-mathml annotation")].map((a) => a.textContent);
     return t.filter((s) => /\\d\\.\\d*?0{2,}(?![\\d])/.test(s) || /\\d{16,}/.test(s) || /(?<![\\d.])-0(?![\\d.])/.test(s)).slice(0, 3); })()`);
 }
 await criterion("numbers: no trailing zeros, 16-digit tails or -0 (quadratic)", async () => (await numbers()).join(" | "));
+
+// Layout: no text squeezed to a word per line, nothing spilling past its card -- the quadratic's
+// note and routes, and the derivative's Check, whose label is long and whose formula is wide
+await criterion("no text squeezed to a column, nothing spills past its card (quadratic, derivative)", async () => {
+  const quad = await js(SQUEEZED);
+  await write("\\frac{d}{dx}\\sin(x)^2");
+  const deriv = await js(SQUEEZED);
+  await write(QUAD);
+  return [...quad, ...deriv].join("; ");
+});
 
 // Measured checks: no text under 14 px, at 1280
 await criterion("no text under 14 px at 1280", async () => (await js(SMALLEST)).map(([e, px]) => `${e} ${px}px`).join(", "));
@@ -343,6 +407,24 @@ await criterion("text token contrast at or above 4.5:1, both themes", async () =
   }
   await theme("light");
   return low.join("; ");
+});
+
+// The line: Ctrl+C puts its LaTeX on the clipboard even in a browser that fires no copy event for
+// a collapsed selection, and Ctrl+V pastes what the clipboard holds
+await criterion("copy and paste in the line, with no copy event from the browser", async () => {
+  await send("Browser.grantPermissions", { origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await js(`window.__nocopy = (e) => e.stopImmediatePropagation(); document.addEventListener("copy", window.__nocopy, { capture: true }); navigator.clipboard.writeText("nothing")`);
+  await js(`document.querySelector("math-field").focus()`);
+  await key("c", 2);
+  await sleep(300);
+  const copied = await js(`navigator.clipboard.readText()`);
+  await js(`document.removeEventListener("copy", window.__nocopy, { capture: true }); (() => { const mf = document.querySelector("math-field"); mf.value = ""; mf.focus(); })(); navigator.clipboard.writeText("x^2-7=0")`);
+  await key("v", 2);
+  await sleep(400);
+  const pasted = await line();
+  await write(QUAD);
+  return copied.replace(/\s/g, "") === QUAD && pasted === "x^2-7=0" ? "" : `copied ${JSON.stringify(copied)}, pasted ${JSON.stringify(pasted)}`;
 });
 
 // Complaint 14: Copy link confirms in place with a check icon, no toast, no tooltip
@@ -442,7 +524,7 @@ await criterion("sin, ln, lg, log keys answered", async () => {
   for (const [label, example] of keys) {
     await write(example);
     const a = await answerText();
-    if (!a || /refused|not answered|did not load/i.test(a) || !(await js(`Boolean(document.querySelector(".card .result .math"))`))) refused.push(label);
+    if (!a || /refused|not answered|did not load/i.test(a) || !(await js(`Boolean(document.querySelector(".card .result > .math"))`))) refused.push(label);
   }
   return refused.length ? `refused: ${refused.join(", ")}` : "";
 });
@@ -466,6 +548,18 @@ await criterion("reference drawer and settings: no body padding, scroll height u
   return same(drawer) && same(dialog) ? "" : `before ${before}, drawer ${drawer}, settings ${dialog}`;
 });
 
+// Reference: every section chip is within the drawer, none hidden past its edge
+await criterion("reference: every section chip in reach", async () => {
+  await clickOn("#open-ref");
+  await sleep(400);
+  const out = await js(`(() => { const d = document.querySelector("#panel").getBoundingClientRect(); const chips = [...document.querySelectorAll(".ref-index .chip")];
+    if (chips.length < 7) return [chips.length + " chips"];
+    return chips.filter((c) => { const r = c.getBoundingClientRect(); return r.right > d.right + 1 || r.left < d.left - 1 || r.bottom > d.bottom; }).map((c) => c.textContent + " out of reach"); })()`);
+  await key("Escape");
+  await sleep(200);
+  return out.join("; ");
+});
+
 // Settings: the rows of the dialog, the keyboard with Auto, and no digits setting anywhere
 await criterion("settings rows: theme, text size, keyboard auto/on/off, formulas, saved work; no digits", async () => {
   const m = await js(`(() => { const legends = [...document.querySelectorAll("#settings legend")].map((l) => l.textContent.trim().toLowerCase()); const out = [];
@@ -484,7 +578,7 @@ await criterion("slow answer: busy state, then Still working with Stop", async (
   await sleep(10200);
   const still = await js(`/still working/i.test(document.querySelector(".card .status")?.textContent ?? "") && Boolean(document.querySelector(".card .status button"))`);
   await sleep(2500);
-  const done = await js(`!document.querySelector(".card.pending") && Boolean(document.querySelector(".card .result .math"))`);
+  const done = await js(`!document.querySelector(".card.pending") && Boolean(document.querySelector(".card .result > .math"))`);
   return busy && still && done ? "" : `busy ${busy}, still working ${still}, answered ${done}`;
 });
 
@@ -493,7 +587,7 @@ await criterion("newest request wins", async () => {
   await js(`window.__hold = [3000]`);
   await write("3*3", { settle: 300 });
   await write("2*2", { settle: 5000 });
-  const r = await js(`document.querySelector(".card .result .math")?.textContent ?? ""`);
+  const r = await js(`document.querySelector(".card .result > .math")?.textContent ?? ""`);
   return r.includes("4") && !r.includes("9") ? "" : `result reads ${JSON.stringify(r)}`;
 });
 
@@ -523,6 +617,7 @@ if (thrown.length === 0) for (const width of [1280, 400]) {
           return sw <= cw ? "" : `scrollWidth ${sw} > ${cw}`;
         });
         await criterion("no text under 14 px at 400", async () => (await js(SMALLEST)).map(([e, px]) => `${e} ${px}px`).join(", "));
+        await criterion("no text squeezed to a column, nothing spills at 400", async () => (await js(SQUEEZED)).join("; "));
       }
     }
     await write(QUAD);
@@ -532,6 +627,46 @@ if (thrown.length === 0) for (const width of [1280, 400]) {
     await key("Escape");
   }
 }
+
+// Canvas shell: the toolbar in the bar, Layers with one row per node, nodes added with no hand
+// placement laid out in columns by dependency with no overlaps, wires by name, the Inspector on
+// the selected node, the Add menu naming every kind
+await criterion("canvas: toolbar, Layers, automatic placement by dependency, wires by name, Inspector", async () => {
+  await viewport(1280);
+  await theme("light");
+  await open();
+  await js(`document.querySelector('[data-preset="canvas"]').click()`);
+  await sleep(500);
+  const shown = await js(`[!document.querySelector(".canvas").hidden, !document.querySelector(".tools").hidden, document.querySelector(".cards").hidden]`);
+  if (!shown.every(Boolean)) return `canvas shown ${shown[0]}, tools ${shown[1]}, cards hidden ${shown[2]}`;
+  for (const line of ["a in [-10, 10]", "b = a + 1", "c = a^2", "d = b + c"]) {
+    await js(`document.querySelector(".add-node").click()`);
+    await sleep(100);
+    await js(`[...document.querySelectorAll(".add-menu button")].find((b) => b.textContent.startsWith("Formula")).click()`);
+    await sleep(200);
+    await js(`(() => { const t = document.querySelector(".node textarea"); if (!t) throw new Error("no node in edit"); t.value = ${JSON.stringify(line)}; t.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); })()`);
+    await sleep(700);
+  }
+  await shot("canvas-1280-light");
+  const m = await js(`(() => { const out = [];
+    const nodes = [...document.querySelectorAll(".node")].map((n) => { const [x, y] = n.style.transform.match(/-?\\d+/g).map(Number); return { id: n.dataset.id, x, y, w: n.offsetWidth, h: n.offsetHeight }; });
+    const by = Object.fromEntries(nodes.map((n) => [n.id, n]));
+    const rows = [...document.querySelectorAll(".layers .row")].map((r) => r.dataset.id);
+    if (rows.join() !== nodes.map((n) => n.id).join()) out.push("layers " + rows.join(" ") + " vs nodes " + nodes.map((n) => n.id).join(" "));
+    for (const a of nodes) for (const b of nodes) if (a.id < b.id && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) out.push(a.id + " overlaps " + b.id);
+    if (nodes.some((n) => n.x % 8 || n.y % 8)) out.push("off the 8 px grid");
+    // b and c read a; d reads b and c: columns 0, 1, 1, 2 after the starting node
+    const [a, b, c, d] = nodes.slice(-4);
+    if (!(b.x > a.x + a.w && c.x > a.x + a.w && d.x > b.x + b.w && d.x > c.x + c.w)) out.push("columns " + nodes.slice(-4).map((n) => n.x).join(" "));
+    if (b.x !== c.x) out.push("b and c in different columns");
+    if (document.querySelectorAll(".field .wire").length !== 4) out.push(document.querySelectorAll(".field .wire").length + " wires, not 4");
+    const sel = document.querySelector(".node.selected")?.dataset.id; const ins = document.querySelector(".inspector h2")?.textContent ?? "";
+    if (!sel || !ins.startsWith(sel)) out.push("inspector shows " + JSON.stringify(ins) + " for " + sel);
+    document.querySelector(".add-node").click(); const kinds = [...document.querySelectorAll(".add-menu button")].map((b) => b.firstChild.textContent); document.querySelector(".add-node").click();
+    for (const k of ["Formula", "Graph", "Solve", "Parameters", "Scene", "View", "Sound"]) if (!kinds.some((x) => x.startsWith(k))) out.push("no " + k + " in the Add menu");
+    return out; })()`);
+  return m.join("; ");
+});
 
 // Complaint 18: the gallery is a page of its own, linked from the bar, loading no core
 await criterion("gallery is its own page", async () => {

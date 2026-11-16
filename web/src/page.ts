@@ -7,6 +7,7 @@ import { Answers, notation, type Parse } from "./answers.js";
 import { type Calc, type Entry, blank, commit, empty, load as loadCalc, save as saveCalc } from "./calc.js";
 import { Core, type State } from "./core.js";
 import { type Doc, type Preset, fromJSON, fromLink, math, toJSON, toLink } from "./doc.js";
+import { Canvas, mountTools } from "./view/canvas.js";
 import { Cards } from "./view/cells.js";
 import { $, el, icon, math as tex } from "./view/dom.js";
 import type { Sheet } from "./view/answer.js";
@@ -133,13 +134,18 @@ function fromBrowser(): Doc | null {
 
 // ── asking and keeping ──────────────────────────────────────────────────
 
-let cards: Cards;
+let cards: Cards;             // the calculator's line, as cards
+let board: Canvas;            // the canvas
 let answers: Answers;
 let calc: Calc;              // the calculator's line and its history
 let canvas: Doc;             // the canvas's document, kept while the calculator is shown
 let past: History;
 type HistoryHostSheet = ConstructorParameters<typeof History>[1]["sheet"];
 let runTimer: ReturnType<typeof setTimeout> | 0 = 0, saveTimer: ReturnType<typeof setTimeout> | 0 = 0;
+
+// the view of the page shown: the canvas, or the calculator's cards
+const onCanvas = () => document.body.dataset.preset === "canvas";
+const view = () => (onCanvas() ? board : cards);
 
 function changed() {
   clearTimeout(runTimer);
@@ -150,16 +156,17 @@ function changed() {
 
 async function run() {
   if (!core.ready) {
-    if (core.failed) for (const c of cards.document.cells) cards.show(c, { refused: `the core did not load (${core.failed})` });
+    if (core.failed) for (const c of view().document.cells) view().show(c, { refused: `the core did not load (${core.failed})` });
     return;
   }
-  cards.clearDerived();
-  cards.pending(() => core.stop());
-  await answers.run(cards.document, (cell, answer, above, from) => cards.show(cell, answer, above, from));
+  const v = view();
+  v.clearDerived();
+  v.pending(() => core.stop());
+  await answers.run(v.document, (cell, answer, above, from) => v.show(cell, answer, above, from));
 }
 
 async function save() {
-  const doc = cards.document;
+  const doc = view().document;
   if (doc.preset === "calculator") {
     calc.line = doc.cells[0]?.kind === "math" ? doc.cells[0].written : empty();
     saveCalc(calc);
@@ -186,15 +193,16 @@ async function copyLink() {
 const lineDoc = (): Doc => ({ preset: "calculator", cells: [math(calc.line)] });
 
 function usePreset(preset: Preset) {
-  const now = cards.document;
+  const now = view().document;
   if (now.preset === "canvas") canvas = now;
   else if (now.cells[0]?.kind === "math") calc.line = now.cells[0].written;
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-preset]")) b.setAttribute("aria-pressed", String(b.dataset.preset === preset));
   document.body.dataset.preset = preset;
   past.root.hidden = preset !== "calculator";
+  cards.root.hidden = preset !== "calculator";
+  board.root.hidden = board.tools.hidden = preset !== "canvas";
   showExamples();
-  if (preset !== now.preset) cards.setDoc(preset === "calculator" ? lineDoc() : canvas);
-  else cards.build();
+  if (preset === "calculator") cards.setDoc(lineDoc()); else board.setDoc(canvas);
   changed();
 }
 
@@ -202,7 +210,7 @@ function usePreset(preset: Preset) {
 // line is empty again
 function commitLine(open: boolean) {
   const cell = cards.document.cells[0];
-  if (cards.document.preset !== "calculator" || cell?.kind !== "math") return;
+  if (onCanvas() || cell?.kind !== "math") return;
   const sheet = cards.answerOf(cell)?.sheet as Sheet | undefined;
   let opened: Entry | null = null;
   if (sheet && !blank(cell.written)) {
@@ -231,9 +239,9 @@ function intoLine(written: Calc["line"]) {
 // calculator, which takes formulas only, that line as a formula -- put in the calculator's line,
 // or added as a card at the end of the canvas
 const addRows = (rows: string[] | undefined, text: string) => {
-  const written = rows?.length ? { rows } : cards.document.preset === "calculator" && editor.ready ? { rows: [editor.toLatex(text)] } : { text };
-  if (cards.document.preset === "calculator") intoLine(written);
-  else cards.append([math(written)]);
+  const written = rows?.length && !onCanvas() ? { rows } : !onCanvas() && editor.ready ? { rows: [editor.toLatex(text)] } : { text };
+  if (!onCanvas()) intoLine(written);
+  else board.append([math(written)]);
 };
 
 // The reference: a drawer of sections, as a page of docs is -- how to write, the questions, the
@@ -252,10 +260,10 @@ function panel(which: "ref" | null) {
   // under the bar, which is two rows on a phone
   const top = `${Math.round($(".bar")!.getBoundingClientRect().bottom)}px`;
   box.style.top = top, $("#scrim")!.style.top = top;
-  if (box.dataset.preset === cards.document.preset && box.childElementCount) return;   // drawn already, for this page
-  box.dataset.preset = cards.document.preset;
+  if (box.dataset.preset === document.body.dataset.preset && box.childElementCount) return;   // drawn already, for this page
+  box.dataset.preset = document.body.dataset.preset;
   const r = data.reference;
-  const dslFirst = cards.document.preset === "canvas";
+  const dslFirst = onCanvas();
   const close = el("button", { type: "button", class: "icon", "aria-label": "Close the reference", onclick: () => panel(null) }, icon("x"));
   const filter = el("input", { class: "filter", type: "search", placeholder: "Find in the reference", "aria-label": "Find in the reference" });
   const index = el("nav", { class: "ref-index", "aria-label": "Sections" });
@@ -388,7 +396,7 @@ function wire() {
     if (e.key !== "Escape") return;
     if (!keys.root.hidden) { setKeys(false); return; }
     if (!$("#panel")!.hidden) { panel(null); return; }
-    if (cards.document.preset === "calculator" && Date.now() - escAt < 1000) {
+    if (!onCanvas() && Date.now() - escAt < 1000) {
       escAt = 0;
       const was = structuredClone(calc);
       if (blank(calc.line)) return;
@@ -426,7 +434,7 @@ function wire() {
       settings[seg.dataset.setting as keyof PageSettings] = b.value;
       saveSettings();
       applySettings();
-      if (seg.dataset.setting === "formulas") cards.build();
+      if (seg.dataset.setting === "formulas") view().build();
       changed();
     });
   $("#check-update")!.addEventListener("click", async () => {
@@ -440,7 +448,9 @@ function wire() {
   });
   addEventListener("hashchange", async () => {
     const doc = await fromAddress();
-    if (doc) { cards.setDoc(doc); usePreset(doc.preset); }
+    if (!doc) return;
+    if (doc.preset === "canvas") canvas = doc; else if (doc.cells[0]?.kind === "math") calc.line = doc.cells[0].written;
+    usePreset(doc.preset);
   });
 }
 
@@ -466,7 +476,7 @@ async function loadExamples() {
   showExamples();
 }
 
-const showExamples = () => { if (cards) examples.hidden = cards.document.preset !== "calculator" || calc.history.length > 0 || !examples.childElementCount; };
+const showExamples = () => { if (cards) examples.hidden = onCanvas() || calc.history.length > 0 || !examples.childElementCount; };
 
 // ── start ───────────────────────────────────────────────────────────────
 
@@ -484,7 +494,6 @@ canvas = fromBrowser() ?? starting();
 canvas.preset = "canvas";
 if (asked?.preset === "canvas") canvas = asked;
 else if (asked?.cells[0]?.kind === "math") calc.line = asked.cells[0].written;
-const doc = asked?.preset === "canvas" ? canvas : lineDoc();
 past = new History(calc, {
   source: () => settings.formulas === "source",
   sheet: async (e) => {
@@ -499,7 +508,7 @@ past = new History(calc, {
   undo: undoStrip,
 });
 past.render(calc);
-cards = new Cards(doc, {
+cards = new Cards(lineDoc(), {
   editor: editor.ready,
   source: () => settings.formulas === "source",
   changed,
@@ -509,9 +518,17 @@ cards = new Cards(doc, {
   ask: (text, rows) => addRows(rows, text),
   commit: () => commitLine(true),
 });
-$("#sheet")!.append(cards.root, examples, past.root);
+board = new Canvas(canvas, {
+  source: () => settings.formulas === "source",
+  changed,
+  curve: (cell) => (at) => answers.curve(cell, at),
+  ask: (text, rows) => addRows(rows, text),
+  undo: undoStrip,
+});
+mountTools(board.tools);
+$("#sheet")!.append(cards.root, board.root, examples, past.root);
 showExamples();
-usePreset(doc.preset);
+usePreset(asked?.preset === "canvas" ? "canvas" : "calculator");
 // the gallery's bar links here by name: the canvas, or the reference open
 if (location.hash === "#canvas") usePreset("canvas");
 if (location.hash === "#ref") panel("ref");

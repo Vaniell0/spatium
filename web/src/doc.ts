@@ -14,6 +14,7 @@ export interface Settings {
   numbers?: Numbers;
   steps?: boolean;            // the chain of steps under an answer
   window?: [number, number, number, number];  // a graph's view, x0 y0 x1 y1, as panned and zoomed
+  at?: [number, number];      // on the canvas: where a hand put the node (pinned); placed by the layout otherwise
 }
 
 export type Cell =
@@ -98,6 +99,8 @@ function settingsOf(x: unknown): Settings {
   const w = o.window;
   if (Array.isArray(w) && w.length === 4 && w.every((v) => typeof v === "number" && isFinite(v)) && w[0] < w[2] && w[1] < w[3])
     s.window = [w[0], w[1], w[2], w[3]];
+  const at = o.at;
+  if (Array.isArray(at) && at.length === 2 && at.every((v) => typeof v === "number" && isFinite(v))) s.at = [at[0], at[1]];
   return s;
 }
 

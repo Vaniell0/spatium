@@ -22,8 +22,8 @@ export interface CardsHost {
   commit?: () => void;                                                           // the calculator's line is done: into the history
 }
 
-type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string;
-  getValue(start: number, end: number, format: string): string };
+type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string; selection: { ranges: [number, number][] };
+  getValue(start: number, end: number, format: string): string; executeCommand(command: string): void };
 
 interface Shown { box: HTMLElement; answer: Answer | null; above: number; name: string | null; slow?: ReturnType<typeof setTimeout> }
 
@@ -71,10 +71,12 @@ export class Cards {
     if (from) {
       const box = this.shown.get(from)?.box;
       const slot = box?.querySelector(".answer .plot-slot") ?? box?.querySelector(".also");
-      // closed unless the person keeps plots open; drawn the first time it opens
+      // open, as the plot is part of the answer; drawn on its own once it is in view and the
+      // answer has stood for a moment, so typing does not build a graph per keystroke
       const body = el("div", { class: "body" });
-      if (slot && answer) slot.replaceChildren(foldable("Plot", null, false, body,
-        () => body.append(graphView(answer, { height: 260, curve: this.host.curve(cell) }))));
+      const along = (this.shown.get(from)?.answer?.graph as { along?: string } | undefined)?.along;
+      if (slot && answer) slot.replaceChildren(foldable("Plot", along ? el("span", { class: "tag", text: `along ${along}` }) : null, true, body,
+        () => this.whenSeen(body, () => body.append(graphView(answer, { height: 260, curve: this.host.curve(cell) })))));
       return;
     }
     const s = this.shown.get(cell);
@@ -98,6 +100,22 @@ export class Cards {
     }
     const typed = "text" in cell.written ? cell.written.text : "";
     out.replaceChildren(answerView(answer, typed, { steps: setting(this.doc, cell, "steps"), source: this.host.source(), ask: this.host.ask }));
+  }
+
+  // `draw` once `body` is in view and still on the page 300 ms later; a graph drawn before in
+  // this card gives its WebGL context back first
+  private whenSeen(body: HTMLElement, draw: () => void) {
+    const seen = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      seen.disconnect();
+      setTimeout(() => {
+        if (!body.isConnected || body.firstChild) return;
+        for (const c of this.root.querySelectorAll<HTMLCanvasElement>("canvas.gl")) if (!c.isConnected || !body.contains(c))
+          (c.getContext("webgl2") as WebGL2RenderingContext | null)?.getExtension("WEBGL_lose_context")?.loseContext();
+        draw();
+      }, 300);
+    });
+    seen.observe(body);
   }
 
   // every card is being asked again: its answer stays, dimmed, until the new one comes; one still
@@ -213,6 +231,7 @@ export class Cards {
         mf.addEventListener("focusout", () => tell(""));
         mf.addEventListener("keydown", (e) => this.rowKeys(e, cell, k, mf.value), { capture: true });
         mf.addEventListener("paste", (e) => this.pasted(e, cell, k), { capture: true });
+        mf.addEventListener("keydown", (e) => this.copied(e, mf), { capture: true });
         rows.append(mf);
       });
       return;
@@ -284,6 +303,23 @@ export class Cards {
     rows.splice(rows[k].trim() ? k + 1 : k, rows[k].trim() ? 0 : 1, ...lines);
     this.build(cell, rows.length - 1);
     this.host.changed();
+  }
+
+  // Ctrl+C and Ctrl+X on a row are the page's: the selection's LaTeX, or the whole row when nothing
+  // is selected, written to the clipboard as it is. The editor leaves them to the browser's copy
+  // event on its hidden sink, which some browsers never fire for a collapsed selection.
+  private copied(e: KeyboardEvent, mf: MathField) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || !["c", "x"].includes(e.key.toLowerCase()) || !navigator.clipboard) return;
+    const [from, to] = mf.selection.ranges[0] ?? [0, 0];
+    const whole = from === to;
+    const text = whole ? mf.value : mf.getValue(from, to, "latex");
+    if (!text) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    void navigator.clipboard.writeText(text).catch(() => { /* the browser kept its clipboard */ });
+    if (e.key.toLowerCase() !== "x") return;
+    if (whole) mf.value = ""; else mf.executeCommand("deleteBackward");
+    mf.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   private adder(): HTMLElement {

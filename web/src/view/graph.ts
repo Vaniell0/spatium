@@ -107,7 +107,7 @@ export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
       c.style.height = `${h}px`;
     }
     const css = getComputedStyle(document.documentElement);
-    const ink = rgb(css.getPropertyValue("--accent"));
+    const ink = rgb(css.getPropertyValue("--ink-2"));
     ctx!.viewport(0, 0, gl.width, gl.height);
     ctx!.useProgram(prog);
     const u = (n: string) => ctx!.getUniformLocation(prog, n);
@@ -126,7 +126,7 @@ export function graphView(answer: Answer, options: GraphOptions): HTMLElement {
     const key = JSON.stringify([view, held, w]);
     exact.hidden = !(fine && curve?.key === key);
     if (fine && curve?.key === key) {
-      drawCurve(axes, view, curve.values, dpr, css.getPropertyValue("--accent"));
+      drawCurve(axes, view, curve.values, dpr, css.getPropertyValue("--ink-2"));
       return;
     }
     ctx!.enable(ctx!.BLEND);
@@ -249,7 +249,7 @@ function drawAxes(canvas: HTMLCanvasElement, [x0, y0, x1, y1]: View, dpr: number
   const g = canvas.getContext("2d")!, W = canvas.width, H = canvas.height;
   const X = (x: number) => ((x - x0) / (x1 - x0)) * W, Y = (y: number) => H - ((y - y0) / (y1 - y0)) * H;
   g.clearRect(0, 0, W, H);
-  g.font = `${12 * dpr}px ${css.getPropertyValue("--f-mono")}`;
+  g.font = `${14 * dpr}px ${css.getPropertyValue("--f-mono")}`;
   g.lineWidth = dpr;
   g.strokeStyle = css.getPropertyValue("--line-faint");
   g.fillStyle = css.getPropertyValue("--ink-3");
