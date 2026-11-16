@@ -212,10 +212,10 @@ ol.chain li::before { content: counter(s); grid-row: span 2; font: 500 var(--t-l
 .op b { font-weight: 500; color: var(--ink); }
 li.pay .math { color: var(--accent); }
 /* facts: a name, then the number in mono; agreed in green, what does not hold in warn */
-dl.facts { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 24px; font-size: var(--t-label); }
+dl.facts { margin: 0; display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap: 8px 24px; font-size: var(--t-label); }
 dl.facts dt { color: var(--ink-3); }
 dl.facts dd { margin: 0; font-family: var(--f-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-dl.facts dd .math { font-family: var(--f-ui); }
+dl.facts dd .math { font-family: var(--f-ui); display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: top; }
 .agree { color: var(--ok); }
 dl.facts .no { color: var(--warn); }
 .gap { color: var(--ink-3); font-style: italic; }
@@ -226,6 +226,7 @@ table.roots td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-fa
 .how { font-size: var(--t-label); }
 .how table { border-collapse: collapse; width: 100%; }
 .how td, .how th { text-align: left; padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-faint); vertical-align: top; }
+.how td:first-child { white-space: nowrap; }
 .how th { color: var(--ink-3); font-weight: 500; }
 .how .taken { color: var(--accent); font-weight: 500; }
 .how .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -296,7 +297,7 @@ table.roots td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-fa
   .scrim:not([hidden]) { display: block; position: fixed; inset: 64px 0 0; z-index: 19; background: var(--scrim); }
 }
 .drawer-head { display: flex; gap: 8px; padding: 0 16px; }
-.ref-index { display: flex; gap: 8px; padding: 0 16px 8px; overflow-x: auto; scrollbar-width: none; }
+.ref-index { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 8px; }
 .ref-index .chip { flex: none; height: var(--dense); padding: 0 12px; border: 0; border-radius: 16px; background: var(--bg);
   color: var(--ink-2); font: 500 var(--t-label)/1 var(--f-ui); cursor: pointer; }
 .ref-index .chip:hover { color: var(--ink); }
@@ -474,13 +475,13 @@ body.keys-open .card > .ask { position: sticky; top: var(--bar-bottom, 64px); z-
 .zoverlay .ring { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .zoverlay .pole { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
-.note { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
-.note .badge { width: 24px; height: 24px; border-radius: 50%; background: var(--raised); display: grid; place-items: center;
+.notes .note { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+.notes .badge { width: 24px; height: 24px; border-radius: 50%; background: var(--raised); display: grid; place-items: center;
   font: var(--t-label) var(--f-mono); }
-.note h3 { margin: 0; font-size: var(--t-label); font-weight: 500; }
+.notes h3 { margin: 0; font-size: var(--t-label); font-weight: 500; }
 .note-text { margin: 4px 0; font-size: var(--t-label); color: var(--ink-2); max-width: 48ch; }
-.note .strength { font-size: var(--t-label); color: var(--ink-3); }
-.note .strength.ok { color: var(--ok); }
+.notes .strength { font-size: var(--t-label); color: var(--ink-3); }
+.notes .strength.ok { color: var(--ok); }
 @media (max-width: 760px) { .zeta { grid-template-columns: minmax(0, 1fr); padding: 24px 16px 48px; } }
 .ztile { display: grid; gap: 8px; }
 .ztile-title { font-size: var(--t-section); font-weight: 500; }

@@ -181,6 +181,27 @@ const SMALLEST = `(() => { let out = []; for (const e of document.querySelectorA
   const px = parseFloat(getComputedStyle(e).fontSize); if (px < 14) out.push([e.tagName.toLowerCase() + "." + e.className, px]); }
   return out.slice(0, 8); })()`;
 
+// text set in a column narrower than 12 characters (one word per line), and blocks that spill past
+// their edge where no box of theirs scrolls: every section is opened for the measure and closed back
+const SQUEEZED = `(() => { const was = [...document.querySelectorAll("#sheet details.sec")].map((d) => [d, d.open]); for (const [d] of was) d.open = true;
+  const out = [];
+  const walker = document.createTreeWalker(document.querySelector("#sheet"), NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n.textContent.trim(), p = n.parentElement;
+    if (text.length < 12 || !p.checkVisibility() || p.closest(".katex, svg")) continue;
+    const range = document.createRange(); range.selectNodeContents(n);
+    const r = range.getBoundingClientRect(), cs = getComputedStyle(p);
+    if (r.width < 6 * parseFloat(cs.fontSize) && r.height > 1.5 * parseFloat(cs.lineHeight)) out.push("narrow " + p.tagName.toLowerCase() + "." + p.className + " " + Math.round(r.width) + "px: " + text.slice(0, 24));
+  }
+  for (const e of document.querySelectorAll("#sheet .cell *")) {
+    if (e instanceof SVGElement || e.closest(".katex") || !e.checkVisibility()) continue;
+    let box = e, scrolls = false;
+    for (; box && !box.classList.contains("cell"); box = box.parentElement) if (/auto|scroll|hidden|clip/.test(getComputedStyle(box).overflowX)) { scrolls = true; break; }
+    if (!scrolls && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push("spills " + e.tagName.toLowerCase() + "." + e.className + " by " + (e.scrollWidth - e.clientWidth) + "px");
+  }
+  for (const [d, open] of was) d.open = open;
+  return out.slice(0, 6); })()`;
+
 // ── the criteria ────────────────────────────────────────────────────────
 
 const results = [];
@@ -320,6 +341,16 @@ async function numbers() {
     return t.filter((s) => /\\d\\.\\d*?0{2,}(?![\\d])/.test(s) || /\\d{16,}/.test(s) || /(?<![\\d.])-0(?![\\d.])/.test(s)).slice(0, 3); })()`);
 }
 await criterion("numbers: no trailing zeros, 16-digit tails or -0 (quadratic)", async () => (await numbers()).join(" | "));
+
+// Layout: no text squeezed to a word per line, nothing spilling past its card -- the quadratic's
+// note and routes, and the derivative's Check, whose label is long and whose formula is wide
+await criterion("no text squeezed to a column, nothing spills past its card (quadratic, derivative)", async () => {
+  const quad = await js(SQUEEZED);
+  await write("\\frac{d}{dx}\\sin(x)^2");
+  const deriv = await js(SQUEEZED);
+  await write(QUAD);
+  return [...quad, ...deriv].join("; ");
+});
 
 // Measured checks: no text under 14 px, at 1280
 await criterion("no text under 14 px at 1280", async () => (await js(SMALLEST)).map(([e, px]) => `${e} ${px}px`).join(", "));
@@ -466,6 +497,18 @@ await criterion("reference drawer and settings: no body padding, scroll height u
   return same(drawer) && same(dialog) ? "" : `before ${before}, drawer ${drawer}, settings ${dialog}`;
 });
 
+// Reference: every section chip is within the drawer, none hidden past its edge
+await criterion("reference: every section chip in reach", async () => {
+  await clickOn("#open-ref");
+  await sleep(400);
+  const out = await js(`(() => { const d = document.querySelector("#panel").getBoundingClientRect(); const chips = [...document.querySelectorAll(".ref-index .chip")];
+    if (chips.length < 7) return [chips.length + " chips"];
+    return chips.filter((c) => { const r = c.getBoundingClientRect(); return r.right > d.right + 1 || r.left < d.left - 1 || r.bottom > d.bottom; }).map((c) => c.textContent + " out of reach"); })()`);
+  await key("Escape");
+  await sleep(200);
+  return out.join("; ");
+});
+
 // Settings: the rows of the dialog, the keyboard with Auto, and no digits setting anywhere
 await criterion("settings rows: theme, text size, keyboard auto/on/off, formulas, saved work; no digits", async () => {
   const m = await js(`(() => { const legends = [...document.querySelectorAll("#settings legend")].map((l) => l.textContent.trim().toLowerCase()); const out = [];
@@ -523,6 +566,7 @@ if (thrown.length === 0) for (const width of [1280, 400]) {
           return sw <= cw ? "" : `scrollWidth ${sw} > ${cw}`;
         });
         await criterion("no text under 14 px at 400", async () => (await js(SMALLEST)).map(([e, px]) => `${e} ${px}px`).join(", "));
+        await criterion("no text squeezed to a column, nothing spills at 400", async () => (await js(SQUEEZED)).join("; "));
       }
     }
     await write(QUAD);
