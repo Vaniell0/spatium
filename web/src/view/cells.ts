@@ -22,8 +22,8 @@ export interface CardsHost {
   commit?: () => void;                                                           // the calculator's line is done: into the history
 }
 
-type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string;
-  getValue(start: number, end: number, format: string): string };
+type MathField = HTMLElement & { value: string; position: number; mathVirtualKeyboardPolicy: string; selection: { ranges: [number, number][] };
+  getValue(start: number, end: number, format: string): string; executeCommand(command: string): void };
 
 interface Shown { box: HTMLElement; answer: Answer | null; above: number; name: string | null; slow?: ReturnType<typeof setTimeout> }
 
@@ -213,6 +213,7 @@ export class Cards {
         mf.addEventListener("focusout", () => tell(""));
         mf.addEventListener("keydown", (e) => this.rowKeys(e, cell, k, mf.value), { capture: true });
         mf.addEventListener("paste", (e) => this.pasted(e, cell, k), { capture: true });
+        mf.addEventListener("keydown", (e) => this.copied(e, mf), { capture: true });
         rows.append(mf);
       });
       return;
@@ -284,6 +285,23 @@ export class Cards {
     rows.splice(rows[k].trim() ? k + 1 : k, rows[k].trim() ? 0 : 1, ...lines);
     this.build(cell, rows.length - 1);
     this.host.changed();
+  }
+
+  // Ctrl+C and Ctrl+X on a row are the page's: the selection's LaTeX, or the whole row when nothing
+  // is selected, written to the clipboard as it is. The editor leaves them to the browser's copy
+  // event on its hidden sink, which some browsers never fire for a collapsed selection.
+  private copied(e: KeyboardEvent, mf: MathField) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || !["c", "x"].includes(e.key.toLowerCase()) || !navigator.clipboard) return;
+    const [from, to] = mf.selection.ranges[0] ?? [0, 0];
+    const whole = from === to;
+    const text = whole ? mf.value : mf.getValue(from, to, "latex");
+    if (!text) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    void navigator.clipboard.writeText(text).catch(() => { /* the browser kept its clipboard */ });
+    if (e.key.toLowerCase() !== "x") return;
+    if (whole) mf.value = ""; else mf.executeCommand("deleteBackward");
+    mf.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   private adder(): HTMLElement {

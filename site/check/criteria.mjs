@@ -64,8 +64,8 @@ const js = async (expr) => {
   return r.result?.result?.value;
 };
 const key = async (k, mods = 0) => {
-  const code = { Escape: 27, Enter: 13, Backspace: 8, ArrowUp: 38 }[k];
-  const at = { key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: mods };
+  const code = { Escape: 27, Enter: 13, Backspace: 8, ArrowUp: 38 }[k] ?? k.toUpperCase().charCodeAt(0);
+  const at = { key: k, code: k.length === 1 ? `Key${k.toUpperCase()}` : k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: mods };
   await send("Input.dispatchKeyEvent", { type: "keyDown", ...at });
   await send("Input.dispatchKeyEvent", { type: "keyUp", ...at });
 };
@@ -374,6 +374,24 @@ await criterion("text token contrast at or above 4.5:1, both themes", async () =
   }
   await theme("light");
   return low.join("; ");
+});
+
+// The line: Ctrl+C puts its LaTeX on the clipboard even in a browser that fires no copy event for
+// a collapsed selection, and Ctrl+V pastes what the clipboard holds
+await criterion("copy and paste in the line, with no copy event from the browser", async () => {
+  await send("Browser.grantPermissions", { origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await js(`window.__nocopy = (e) => e.stopImmediatePropagation(); document.addEventListener("copy", window.__nocopy, { capture: true }); navigator.clipboard.writeText("nothing")`);
+  await js(`document.querySelector("math-field").focus()`);
+  await key("c", 2);
+  await sleep(300);
+  const copied = await js(`navigator.clipboard.readText()`);
+  await js(`document.removeEventListener("copy", window.__nocopy, { capture: true }); (() => { const mf = document.querySelector("math-field"); mf.value = ""; mf.focus(); })(); navigator.clipboard.writeText("x^2-7=0")`);
+  await key("v", 2);
+  await sleep(400);
+  const pasted = await line();
+  await write(QUAD);
+  return copied.replace(/\s/g, "") === QUAD && pasted === "x^2-7=0" ? "" : `copied ${JSON.stringify(copied)}, pasted ${JSON.stringify(pasted)}`;
 });
 
 // Complaint 14: Copy link confirms in place with a check icon, no toast, no tooltip
