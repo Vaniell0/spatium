@@ -34,6 +34,7 @@
 #include <stdexcept>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -469,7 +470,7 @@ void atoms(World& w, bool merge) {
     w.add({{Op::VarV, -1, -1, -1, 0.0, Sort::V, 0, 1, "u", 1, "u"}, {Op::VarV, -1, -1, -1, 1.0, Sort::V, 0, 1, "w", 1, "w"}}, merge);
 }
 
-int run(int max_size) {
+int run(int max_size, const char* derivations = nullptr) {
     World w;
     all_spaces(w);
     const int ns = int(w.spaces.size());
@@ -537,10 +538,19 @@ int run(int max_size) {
         }
         return false;
     };
+    // why two terms were joined: a kept law (its index), or congruence (-1): the same operation on
+    // arguments already equal
+    struct Edge { int x, y, why; int ax = -1, ay = -1; };   // congruence: the arguments already equal
     struct Closure {
         std::vector<int> up;
+        std::vector<Edge> edges;
         int find(int x) { while (up[x] != x) x = up[x] = up[up[x]]; return x; }
-        void join(int x, int y) { x = find(x); y = find(y); if (x != y) up[std::max(x, y)] = std::min(x, y); }
+        void join(int x, int y, int why = -1, int ax = -1, int ay = -1) {
+            const int rx = find(x), ry = find(y);
+            if (rx == ry) return;
+            edges.push_back({x, y, why, ax, ay});
+            up[std::max(rx, ry)] = std::min(rx, ry);
+        }
     };
     std::map<Mask, Closure> closures;
     auto close = [&](Closure& c) {
@@ -552,11 +562,47 @@ int run(int max_size) {
                 if (T.a < 0) continue;
                 const auto k = std::tuple{int(T.op), T.k, c.find(T.a), T.b < 0 ? -1 : c.find(T.b), T.c < 0 ? -1 : c.find(T.c)};
                 auto [it, fresh] = seen.emplace(k, t);
-                if (!fresh && c.find(it->second) != c.find(t)) { c.join(it->second, t); changed = true; }
+                if (!fresh && c.find(it->second) != c.find(t)) {
+                    // the first argument the two differ in, already equal: what makes them equal
+                    const auto &S = w.pool[it->second];
+                    int ax = -1, ay = -1;
+                    for (auto [x, y] : {std::pair{S.a, T.a}, std::pair{S.b, T.b}, std::pair{S.c, T.c}})
+                        if (x >= 0 && x != y) { ax = x, ay = y; break; }
+                    c.join(it->second, t, -1, ax, ay);
+                    changed = true;
+                }
             }
         }
     };
 
+    // A law the closure already holds, with the chain that shows it: each hop an equality, by a kept
+    // law or by congruence. `instance` is the kept law it is an instance of, in one hop.
+    struct Derived { Law law; std::vector<Edge> chain; int instance; };
+    std::vector<Derived> derived;
+    // the hops from a to b through the joins that made them one: a breadth-first search over the
+    // recorded edges, each taken in the direction walked
+    auto path = [&](const Closure& c, int a, int b) {
+        std::map<int, std::vector<std::pair<int, int>>> adj;   // term -> (other term, edge index)
+        for (int e = 0; e < int(c.edges.size()); ++e) {
+            adj[c.edges[e].x].push_back({c.edges[e].y, e});
+            adj[c.edges[e].y].push_back({c.edges[e].x, e});
+        }
+        std::map<int, std::pair<int, int>> from;   // term -> (previous term, edge)
+        std::vector<int> todo{a};
+        from[a] = {-1, -1};
+        for (std::size_t i = 0; i < todo.size() && !from.count(b); ++i)
+            for (auto [y, e] : adj[todo[i]])
+                if (!from.count(y)) from[y] = {todo[i], e}, todo.push_back(y);
+        std::vector<Edge> hops;
+        if (!from.count(b)) return hops;
+        for (int t = b; t != a; t = from[t].first) {
+            const Edge& e = c.edges[from[t].second];
+            const bool forward = e.x == from[t].first;
+            hops.push_back({from[t].first, t, e.why, forward ? e.ax : e.ay, forward ? e.ay : e.ax});
+        }
+        std::reverse(hops.begin(), hops.end());
+        return hops;
+    };
     std::vector<Law> kept;
     // The merges are laws of every space: their instances are no news either.
     for (auto& [t, o] : w.ghosts) {
@@ -565,20 +611,30 @@ int run(int max_size) {
     }
     const std::size_t seeded = kept.size();
     for (const auto& L : found) {
-        bool redundant = false;
-        for (const auto& K_ : kept)
-            if (K_.size < L.size && (K_.hold & L.hold) == L.hold && K_.le == L.le && instance_of(K_, L)) { redundant = true; break; }
-        if (redundant) continue;
+        int instance = -1;
+        for (std::size_t q = 0; q < kept.size(); ++q) {
+            const auto& K_ = kept[q];
+            if (K_.size < L.size && (K_.hold & L.hold) == L.hold && K_.le == L.le && instance_of(K_, L)) { instance = int(q); break; }
+        }
+        if (instance >= 0) {
+            if (!L.le) derived.push_back({L, {{L.a, L.b, instance}}, instance});
+            continue;
+        }
         auto [it, fresh] = closures.try_emplace(L.hold);
         auto& c = it->second;
         if (fresh) {
             c.up.resize(n);
             for (int t = 0; t < n; ++t) c.up[t] = t;
-            for (const auto& K_ : kept)
-                if (!K_.le && K_.a < n && K_.b < n && (K_.hold & L.hold) == L.hold) c.join(K_.a, K_.b);
+            for (std::size_t q = 0; q < kept.size(); ++q) {
+                const auto& K_ = kept[q];
+                if (!K_.le && K_.a < n && K_.b < n && (K_.hold & L.hold) == L.hold) c.join(K_.a, K_.b, int(q));
+            }
         }
         close(c);
-        if (c.find(L.a) == c.find(L.b)) continue;
+        if (c.find(L.a) == c.find(L.b)) {
+            if (!L.le && derivations) derived.push_back({L, path(c, L.a, L.b), -1});
+            continue;
+        }
         if (L.le) {
             // the same pair up to the equalities, one term on both sides up to a constant factor,
             // or 0 below what is known not to be negative
@@ -615,7 +671,7 @@ int run(int max_size) {
         }
         kept.push_back(L);
         if (!L.le)
-            for (auto& [m, cl] : closures) if ((L.hold & m) == m) cl.join(L.a, L.b);
+            for (auto& [m, cl] : closures) if ((L.hold & m) == m) cl.join(L.a, L.b, int(kept.size()) - 1);
     }
 
     auto bits = [&](Mask m) {
@@ -623,6 +679,71 @@ int run(int max_size) {
         for (int k = 0; k < ns; ++k) s += (m >> k & 1) ? '1' : '0';
         return s;
     };
+    // Each law the closure already held, as a question with its derivation: the premises its chain
+    // uses and a few others true on the same spaces, the equality asked, the chain an equality a hop,
+    // its depth, what a one-hop rule would answer, and near misses -- terms of the right side's form
+    // that a tuple of these spaces shows unequal to the left side. What noesis trains on.
+    if (derivations) {
+        std::FILE* out = std::fopen(derivations, "w");
+        if (!out) throw std::runtime_error(std::string("cannot write ") + derivations);
+        auto eq_text = [&](int x, int y) { return w.pool[x].text + " = " + w.pool[y].text; };
+        auto unequal_somewhere = [&](int x, int y, Mask m) {
+            for (int k = 0; k < ns; ++k) {
+                if (!(m >> k & 1)) continue;
+                const Rows &rx = w.spaces[k]->pool[x], &ry = w.spaces[k]->pool[y];
+                if (rx.defined() && ry.defined() && !rows_eq(rx, ry)) return true;
+            }
+            return false;
+        };
+        std::mt19937 rng(7);
+        std::map<int, int> histogram;
+        int id = 0;
+        for (const auto& D : derived) {
+            const auto& L = D.law;
+            const int depth = int(D.chain.size());
+            if (depth == 0 || L.a >= n || L.b >= n) continue;
+            if (!space_ops(w.pool[L.a].text) && !space_ops(w.pool[L.b].text)) continue;
+            ++histogram[depth];
+            std::vector<int> used;
+            for (const auto& h : D.chain)
+                if (h.why >= 0 && std::find(used.begin(), used.end(), h.why) == used.end()) used.push_back(h.why);
+            std::vector<int> others;
+            for (int q = 0; q < int(kept.size()); ++q)
+                if (!kept[q].le && kept[q].a < n && kept[q].b < n && (kept[q].hold & L.hold) == L.hold &&
+                    std::find(used.begin(), used.end(), q) == used.end() && space_ops(w.pool[kept[q].a].text + w.pool[kept[q].b].text))
+                    others.push_back(q);
+            std::shuffle(others.begin(), others.end(), rng);
+            others.resize(std::min<std::size_t>(others.size(), 4));
+            std::vector<int> premises = used;
+            premises.insert(premises.end(), others.begin(), others.end());
+            std::shuffle(premises.begin(), premises.end(), rng);
+            std::vector<int> misses;
+            for (int t = 0; t < n && misses.size() < 2; ++t) {
+                const auto &T = w.pool[t], &B = w.pool[L.b];
+                if (t == L.b || t == L.a || T.sort != B.sort || T.base != B.base || T.op != B.op || std::abs(T.size - B.size) > 1) continue;
+                if (unequal_somewhere(L.a, t, L.hold)) misses.push_back(t);
+            }
+            std::string spaces, prem, chain, miss;
+            for (int k = 0; k < ns; ++k)
+                if (L.hold >> k & 1) spaces += (spaces.empty() ? "" : ", ") + json_string(w.spaces[k]->name);
+            for (int q : premises) prem += (prem.empty() ? "" : ", ") + json_string(eq_text(kept[q].a, kept[q].b));
+            for (const auto& h : D.chain)
+                chain += std::string(chain.empty() ? "" : ", ") + "{\"from\": " + json_string(w.pool[h.x].text) + ", \"to\": " +
+                         json_string(w.pool[h.y].text) + ", \"by\": " +
+                         json_string(h.why >= 0 ? eq_text(kept[h.why].a, kept[h.why].b) : std::string("congruence")) +
+                         (h.why < 0 && h.ax >= 0 ? ", \"because\": " + json_string(eq_text(h.ax, h.ay)) : std::string()) + "}";
+            for (int t : misses) miss += (miss.empty() ? "" : ", ") + json_string(eq_text(L.a, t));
+            std::fprintf(out,
+                         "{\"id\": %d, \"spaces\": [%s], \"premises\": [%s], \"question\": %s, \"answer\": true, \"depth\": %d, "
+                         "\"chain\": [%s], \"shallow\": %s, \"false_candidates\": [%s]}\n",
+                         id++, spaces.c_str(), prem.c_str(), json_string(eq_text(L.a, L.b)).c_str(), depth, chain.c_str(),
+                         depth == 1 ? "true" : "false", miss.c_str());
+        }
+        std::fclose(out);
+        std::fprintf(stderr, "derivations: %d;", id);
+        for (auto [d, c] : histogram) std::fprintf(stderr, " depth %d: %d", d, c);
+        std::fprintf(stderr, "\n");
+    }
     std::printf("{\"tuples\": %d, \"max_size\": %d, \"terms\": %d, \"merged\": %zu,\n \"spaces\": [", K, max_size, n,
                 w.ghosts.size());
     for (int k = 0; k < ns; ++k) std::printf("%s%s", k ? ", " : "", json_string(w.spaces[k]->name).c_str());
@@ -759,5 +880,5 @@ int main(int argc, char** argv) {
             for (auto& m : s->missing()) std::printf("%s\t%s\n", s->name.c_str(), m.c_str());
         return 0;
     }
-    return laws::run(argc > 1 ? std::atoi(argv[1]) : 6);
+    return laws::run(argc > 1 ? std::atoi(argv[1]) : 6, argc > 2 ? argv[2] : nullptr);
 }
