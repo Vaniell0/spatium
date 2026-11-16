@@ -22,7 +22,7 @@
 // What it prints is JSON, which rsc_laws.py reads: the spaces, the laws with the spaces each holds
 // on and is defined on, and the operations a space's types do not have.
 //
-//   rsc_laws [max size]
+//   rsc_laws [max size] [derivations.jsonl]   the second writes each law the closure derived, with its chain
 #include "probes.hpp"
 
 #include <algorithm>
