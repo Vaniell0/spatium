@@ -256,6 +256,18 @@ TEST_CASE("evaluate: an identity is not read as a quadratic of rounding noise", 
     CHECK(contains(JsonValue(*spatium::answer::respond("x^2 - 1 = 0").find("values")).dump(), "-1"));
 }
 
+TEST_CASE("evaluate: a system in one line, its equations split by commas", "[rsc][evaluate]") {
+    // the same system as a line each; a comma inside a bracket does not split
+    const auto solution = [](std::string_view q) {
+        const JsonValue r = spatium::answer::respond(q);
+        const JsonValue* s = r.find("solution");
+        return s ? s->dump() : r.string_or("refused", "none");
+    };
+    CHECK(solution("x + y = 3, x - y = 1") == solution("x + y = 3\nx - y = 1"));
+    CHECK(contains(solution("x + y = 3, x - y = 1"), "\"x\":2"));
+    CHECK(contains(JsonValue(spatium::answer::respond("log(2, x) = 3")).dump(), "values"));
+}
+
 TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", "[rsc][evaluate]") {
     const std::string text = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
     JsonValue::ObjectType as_text{{"document", text}, {"name", "x"}, {"chosen", JsonValue::ObjectType{{"p", 2.0}}}};

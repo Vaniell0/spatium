@@ -855,6 +855,17 @@ inline Result<Statement> read_shorthand(std::string_view line, const Document& a
 // none where they are not, or where each line defines a new name by the names above it (`a = 2`
 // above `f = a^2 + 1`), as each alone would (`read_shorthand`).
 inline std::optional<Statement> read_system(std::string_view text) {
+    // one line of equations split by commas outside any bracket, `x + y = 3, x - y = 1`, is the
+    // same system written a line each
+    if (text.find('\n') == std::string_view::npos) {
+        std::string lines;
+        int depth = 0;
+        for (char ch : text) {
+            depth += (ch == '(' || ch == '[' || ch == '{') - (ch == ')' || ch == ']' || ch == '}');
+            lines += ch == ',' && depth == 0 ? '\n' : ch;
+        }
+        if (lines.find('\n') != std::string::npos) return read_system(lines);
+    }
     std::vector<std::string> names;
     std::vector<Statement> equations;
     Document defined;   // the lines so far, while each is a definition
