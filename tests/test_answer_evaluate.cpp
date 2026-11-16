@@ -246,6 +246,16 @@ TEST_CASE("evaluate: an inequality is drawn as its left side less its right", "[
     CHECK(contains(graph("x^2 + 1 > 0").string_or("document", ""), "x in [-5, 5]"));
 }
 
+TEST_CASE("evaluate: an identity is not read as a quadratic of rounding noise", "[rsc][evaluate]") {
+    // sin^2(a - pi/6) + sin^2(a + pi/6) - sin^2(a) is 1/2 for every a; its values at 0, 1, -1 are
+    // rounding, 1.1e-16 a^2 - 1.1e-16, which gave the roots +-1
+    const auto r = spatium::answer::respond("sin(a - pi/6)^2 + sin(a + pi/6)^2 - sin(a)^2 = 1/2");
+    CHECK(r.find("values") == nullptr);
+    CHECK(contains(r.string_or("refused", ""), "an identity, true for every a"));
+    // the case it must still answer: a quadratic whose coefficients are not noise
+    CHECK(contains(JsonValue(*spatium::answer::respond("x^2 - 1 = 0").find("values")).dump(), "-1"));
+}
+
 TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", "[rsc][evaluate]") {
     const std::string text = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
     JsonValue::ObjectType as_text{{"document", text}, {"name", "x"}, {"chosen", JsonValue::ObjectType{{"p", 2.0}}}};

@@ -299,14 +299,22 @@ inline spatium::Result<ClosedForm> solve_closed_form(const spatium::io::build::F
     const auto at = [&](double v) { return ++evaluations, f.bind(x, bd::Field<double>(v))(0.0, 0.0); };
     const double c = at(0), up = at(1), down = at(-1);
     const double a = (up + down) / 2 - c, b = (up - down) / 2;
+    // zero at every point to rounding is not a quadratic of tiny coefficients but an identity:
+    // sin^2(a - pi/6) + sin^2(a + pi/6) - sin^2(a) = 1/2 read 1.1e-16 a^2 - 1.1e-16 = 0, roots +-1
+    bool zero = std::abs(c) <= 1e-12 && std::abs(up) <= 1e-12 && std::abs(down) <= 1e-12;
     for (double v : {2.0, -2.0, 0.5, 3.0, -7.0}) {
         const double want = at(v), got = (a * v + b) * v + c;
+        zero = zero && std::abs(want) <= 1e-12;
         const double scale = std::max({std::abs(want), std::abs(a * v * v), std::abs(b * v), std::abs(c), 1.0});
         if (!(std::abs(want - got) <= 1e-12 * scale))
             return std::unexpected(Error(ErrorCode::InvalidArgument,
                 std::format("closed form: the equation is not a polynomial of degree at most two in {} "
                             "(at {} = {} it is {}, a quadratic through x = 0, 1, -1 gives {})", x, x, v, want, got)));
     }
+    if (zero)
+        return std::unexpected(Error(ErrorCode::InvalidArgument,
+            std::format("closed form: both sides are equal at every point tried, to rounding: an identity, "
+                        "true for every {} where it is defined", x)));
     ClosedForm out{x, std::nullopt, {}, spatium::solve_quadratic_steps(a, b, c), std::nullopt, {}, evaluations};
     out.check = spatium::check_vieta(out.solution);
     out.steps = bd::to_steps(out.solution, x);
