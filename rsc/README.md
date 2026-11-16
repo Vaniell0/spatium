@@ -1,331 +1,134 @@
-# RSC: Route Synthesis & Certification
+# RSC: a project that checks itself
 
-RSC finds, chooses and certifies alternative routes through Spatium, against
-Spatium's own definitions. A route is a chain of the library's operations or
-an assembly of its mechanics; the definition of the same result that the
-library already has is the oracle; a certificate says where the route agrees
-with it. Nothing outside the library is needed to grade a candidate, which is
-why the search can be trusted and the models in it are allowed to be wrong.
+RSC (route synthesis and certification) is the tools that make a project check
+itself: they find where it is wrong or says the same thing twice, have a fix
+proposed, and take the fix only on a check, never on anyone's word. The checks
+come from the project itself -- two paths to one answer must agree, a law that
+holds on a class of objects must hold on each of them -- so whoever proposes may
+be wrong. Spatium is where it is built and measured first; GoodNet, a plugin
+network kernel, is the second project it runs on. Where the idea came from is
+[`docs/open-problem-rsc.md`](../docs/open-problem-rsc.md).
 
-This page states what a test or a measurement holds and marks everything
-else as design. The prototype's notes (domain by domain, with the debugging
-history) are in git: `git show 924b98f:rsc/README.md`.
+One rule above the rest: **structure says where to look; only a check gives a
+verdict.**
 
-## The idea
+## The parts
 
-Treat the library as a graph. Nodes are types, spaces and representations;
-edges are operations, derivations and adapters (`lower`, `Real50`, `Dual`,
-GPU emission). Mathematics says that many pairs of paths between the same two
-nodes must agree, and every such pair is a free test
-([`docs/open-problem-rsc.md`](../docs/open-problem-rsc.md)). Two of the
-library's deepest bugs were found that way, by paths that disagreed, not by a
-test anyone wrote.
+| part | what it does | here | built or taken |
+|---|---|---|---|
+| map | who calls whom, who owns what | `rsc/spatium/graph.json`, the call map | built |
+| laws | contracts read off behaviour: what holds, on which objects | `rsc/spatium/rsc_laws.py`, `laws.json` (637 laws, 25 spaces) | built; consequence pruning to take from QuickSpec |
+| breaker | moves inputs, or sequences of calls, to where a contract breaks, and shrinks what it finds to the smallest case | the tuples `rsc_laws.cpp` evaluates on | inputs built; sequences and shrinking to take (RapidCheck) |
+| fixer | whoever writes the fix: a person or a general model run headless | `rsc/spatium/rsc_propose.py` | built |
+| judge | takes a fix only on checks, and cannot be talked round | `rsc/spatium/rsc_judge.py` | built; rules grow from loopholes |
+| sanitizers, fuzzing, mutation | the cheapest finders, and the strength of a test | ASan, TSan, libFuzzer, Mull | taken |
+| history | which past fixes a finder would have caught, files that change together | `scripts/replay_fixes.py` | built |
 
-Every RSC job has three roles:
+The breaker and the fixer are two players; the judge decides between them.
+Every case the breaker finds, shrunk, becomes a regression test.
 
-- **Reference**: a function or a relation the library already defines. The
-  library is the oracle.
-- **Search**: a way to find another route to the same result. Enumeration, a
-  trained policy, minimisation of continuous knobs, a decision tree fitted
-  to labels: any of them, and the job declares which.
-- **Certificate**: where, and how strongly, the route agrees with the
-  reference.
+## What a project needs
 
-A job without a reference or without a certificate is not an RSC job. The
-search is for a cheaper or independent path to an answer that is already
-known, not for the answer.
+A build in one command, tests addressable by name, a sanitizer configuration,
+and fix commits that can be found in its history. GoodNet adds one more: its
+bugs are about order (shutdown, completion after disconnect), and a check of
+order needs a scheduler that runs the same interleaving twice.
 
-Four verbs, one currency:
+## The loop
 
-| verb | meaning |
-|---|---|
-| choose | among routes that exist, by features of the query |
-| find | build a route that is missing (a red cell of the connectivity matrix) or cheaper than the reference |
-| witness | an independent second route becomes a test, even when it is not cheaper |
-| lower | the same route in a cheaper form (straightened, IR, GLSL, specialised to a scene), checked by a pair against the unlowered form |
+1. **Survey.** `rsc_laws.py discover` enumerates the laws and leaves them as
+   data; it is dear and run when a branch is grown.
+2. **Regression.** `rsc_laws.py check` evaluates that data again on every
+   change in CI, a column per object.
+3. **Task.** A finder writes a task: an object that breaks what its neighbours
+   keep, a contract clause no test reaches, a meaning written twice.
+4. **Proposal.** `rsc_propose.py --task N` hands it to the fixer in a work tree
+   of its own, on its own branch, with nothing it can push.
+5. **Verdict.** `rsc_judge.py BRANCH --task N` decides; a branch it accepts
+   becomes a pull request.
 
-The currency is cost (counters, not wall time) against tolerance (the
-certificate). A search that finds nothing within its budget leaves a record
-too: the class of the gap, "no glue" or "no footing", is a measured border.
+## Kinds of task and their check
 
-Online, the same machine runs as the loop recorded in
-[`docs/findings-2026-09.md`](../docs/findings-2026-09.md) section 4: refine,
-select, certify. Subsystems report their error as a certificate, a result's
-budget is divided between them, and a choice is made where to refine.
-
-## The contract
-
-**Job.** A declaration with typed fields: the reference (function or
-relation, the input region, the tolerance); the components a route may use;
-the cost measure; the search organisation; a budget; the certificate level
-required; where the artifact goes; the consumer.
-
-**Artifact.** A tuple: reference, route, region of inputs, certificate, cost,
-fallback to the reference. The region is a partition of the input manifold
-into cells, each with a route and a certificate; outside it the fallback runs.
-It ships as a generated header under a test, the pattern of
-[`rsc/include/generated/ccd_chooser_tree.hpp`](include/generated/ccd_chooser_tree.hpp).
-
-**Certificate.** Two axes, not one scale. The kind of reference: a function
-(agreement with it) or a relation (an axiom such as `exp` after `log`). The
-strength of the check: on a sample, or proved over a box of inputs (`Interval`,
-not built yet). A relation is not stronger or weaker than a function; it is a
-different thing, and an artifact says which it has.
-
-**Consumer.** A call site in `include/` on a path that a test in CI or a
-measured binary executes. No consumer, no job: a solution nothing calls is a
-note. `tests/symmetry/` counts as a consumer only for the outcome "witness".
-
-**Independence of a witness.** The transitive dependency graphs of the
-reference and of the route share no node outside a declared trusted base: a
-list of primitives (arithmetic, `exp`, `sqrt`, `acos`, `cos`), each held by
-its own pair against `Real50`. The graph comes from the `uses` that components
-declare; an instrumented build counts calls by name and fails when the
-declaration and the measurement differ. A witness that fails the check stays a
-test, marked dependent, and is not counted.
-
-**Freshness.** The pair test is the freshness check: a stale route fails its
-comparison with the reference. What was proved once over a box carries a hash
-of its dependency closure and drops to "sampled" when the closure changes,
-until the proof runs again.
-
-**One discipline.** Production and research are the same standard here.
-Nothing enters without a test, a certificate, a consumer and a roadmap entry.
-The only asymmetry is the direction of dependency: `rsc` depends on the
-library; the library does not depend on `rsc`; a generated artifact is an
-ordinary header of the library under the library's tests.
-
-## What exists, and how it is held
-
-| part | state | evidence |
+| kind | found by | the judge accepts when |
 |---|---|---|
-| Labels by running candidates against a reference | built | `include/comparison_task.hpp`, `tests/test_rsc_*.cpp` |
-| Connectivity matrix: every (scalar, space, probe) cell built and graded L0-L3 | built | `docs/connectivity.md` (1115 of 1168 cells at L2 or above), `tests/test_connectivity.cpp`, regenerated in CI |
-| Registry of pairs of paths with certificate tolerances | designed | stage 1 of the plan; `tests/test_space_access.cpp` is the shape |
-| A learned choice in a pipeline: the CCD chooser | built; consumer is a test only | `core/concepts.hpp` (`Chooser`), `surface_ccd.hpp` (chooser overload), `include/generated/ccd_chooser_tree.hpp`, `tests/test_rsc_ccd.cpp`; held out, time against the default 0.80 (torus-patch), 0.93, 0.94, 0.96, 0.97, 1.00; a choice per query is worth 5-20 %, the large factors came from the floors |
-| Seven dispatch domains (precision, geodesic, root finding, ODE, mesh strategy, linear solve, rigid integrator) | built as models | `include/*_ops.hpp`, `*_task.hpp`, `tests/test_rsc_*.cpp`; the models sit at the ceilings their features allow, except mesh and integrator ([findings](../docs/findings-2026-09.md) section 4); `solve_jacobi` has no caller outside RSC |
-| Search over chains: numbers, meshes, CCD primitives | built as tools | `tools/toy_search.hpp`, `tools/mesh_collisions.cpp`, `tools/ccd_synthesize.cpp` |
-| Structure transfers between spaces, constants do not | measured | `tools/transfer.cpp`: a relative spec 3 of 3, an absolute one 1 of 3 |
-| Calibration of a constant by an exact residual | tool built, not wired to a scene | `tools/metric_calibrate.cpp` (binary-merger boost; result in ROADMAP, 2026-09-29) |
-| Cross-entropy against REINFORCE on the base dispatcher | measured | `tools/supervised_vs_reinforce.cpp`: 0.955 against 0.551 at 2000 updates; the trainers still use REINFORCE (finding B10) |
-| Distillation of a dispatcher into a decision tree | built | `tools/distill_tree.cpp`; the cost figures did not reproduce exactly (finding B12), the order of magnitude did |
-| Where an explicit contact chain replaces Newton | measured, window mapped | `tools/explicit_contact_window.cpp`; one non-monotone cell unexplained |
-| `Certified<T>`, `Interval`, proof over a box | `Interval<T>` built, its first consumer a number's proved digits; `Certified<T>`, box splitting and the matrix's level designed | `core/interval.hpp`, `tests/test_interval.cpp`; plan stages 1b and 4 |
-| Jobs, the generator, the grown registry | designed | this page |
-| Mechanics assemblies, straightening, the error budget, IR passes | designed | this page |
-| Surrogates, IR rewriting, structure building | not attempted | the catalogue in the prototype's notes |
-| Browser solver | not started | gated on a WASM build |
-| Laws of the spaces found by enumeration, with no concept told | built, in CI | `rsc/spatium/rsc_laws.py`, `laws.json`; at size 7, 834 laws in 25 classes on the 25 spaces of the matrix; `Distanced` comes out exactly; `check` re-evaluates the snapshot a column per space |
-| A judge of whether a branch does a task and nothing gets worse | built | `rsc/spatium/rsc_judge.py`; a control branch accepted on every step, one that removed a test refused |
-| A proposer for a task, run headless and judged | built, one attempt | `rsc/spatium/rsc_propose.py`; the first task taken (a hyperbolic distance of a point from itself) fixed in 1913 s for $0.71 and accepted |
+| a bug | siblings disagree (implementations of one interface on the same inputs), a breaker's case, a sanitizer | the law or clause now holds and nothing else got worse |
+| a clause no test checks | a clause or law no test reaches, an attribute with no single owner | the new test passes on the code and fails on mutants the judge picks |
+| a missing abstraction | a type used in many places and owned by few, one technique repeated, files that always change together | tests and laws hold and the score below is positive |
 
-## Measured borders
+## What a person does
 
-These are recorded in the ROADMAP and the findings, with the tool that
-measured each.
+Four things, each a file with a format and a check, never a procedure in prose:
+how a plugin is set up for the shared conformance suite; the table from a
+contract's clauses to the tests that check them; the triage of what a finder
+raised and was no defect (`laws-triaged.json`, each with its reason); and yes
+or no on each norm harvested from past fixes, tests and contracts, each with
+its source.
 
-- Over numbers a chain space collapses: 9 765 625 paths at depth 10 reach
-  13 836 distinct states (706 times). A learned heuristic there is worse than
-  breadth-first search: 1.6 to 1.7 times the nodes, and it solves 90.8 % of
-  problems against 100 % (`tools/search_heuristic.cpp`).
-- Over meshes the branching stays at 4.66 of 6 and exhaustive search ends at
-  depth 8 or 9: 0.20 s at depth 5, 10.5 s at depth 7, a node costs 129 µs
-  against a policy evaluation of 608 ns.
-- Over continuous-collision primitives, 819 chains are 22 to 109 distinct
-  algorithms per kind of query once compared by their answers.
-- A label must check cost, not only correctness: the first labelling of the
-  linear-solve domain preferred an algorithm that is dearer at every size
-  tried (finding B5).
-- A dispatcher needs a call site with a real alternative.
-- A setting changes cost and never correctness only without a budget: under a
-  finite budget a policy can change the answer (finding B8).
-- Laws found on samples are mostly chance until two things are added: a
-  number's degree in length as part of its type, so that quantities of
-  different degree are never compared, and a breaker that moves the inputs
-  (each subset drawn toward one point, coincident and aligned inputs, tangents
-  past the cut locus). Without them the laws drew 970 classes of spaces,
-  with them 25.
+## Task format
+
+One row of `tasks.json` per task: its kind, the object, the check it names
+(a law, a clause, an invariant), the witness (an input or a sequence of
+calls), the neighbours that hold it, and the command that gives the verdict.
+
+## The judge's rules
+
+In order: the size of the change, the tests no weaker (every test case of the
+base kept by name, no fewer assertions), it builds, the tests pass, the task is
+done against the base's snapshot, no law stops holding where the change
+reached, the generated checks pass. Each way a branch slipped through becomes a
+rule and a case it must refuse. Holes known and not yet closed: an assertion
+weakened to a tolerance, an asynchronous test made to pass by a wait.
+
+A change is scored as a stake: its price grows faster than its size, and it is
+paid only for gain the judge measured -- a shorter description of the project,
+new laws or clauses checked, a lower counted cost -- growing faster than the
+gain, so a bold change that holds earns more than the small ones adding up to
+it. A refused change loses its stake. A reformat gains nothing and pays its
+size.
+
+## How a finder earns its place
+
+By the past: replayed on the trees before each of the project's fixes, it must
+catch some of them. A finder that catches none is a note, however good it looks.
+
+## What is measured
+
+Good and bad alike.
+
+- Over numbers a chain space collapses (9 765 625 paths at depth 10 reach 13 836
+  states); a learned heuristic there needs 1.6 to 1.7 times the nodes of
+  breadth-first search and solves 90.8 % against 100 %.
+- Laws found on samples are mostly chance until a number's degree in length is
+  part of its type and a breaker moves the inputs: 970 classes of spaces
+  without them, 25 with.
 - A fix that removes a defect shortens the description: the hyperbolic
-  distance made exact took the laws from 834 to 637, the 197 that went being
-  consequences of one term that is now 0.
-- An attempt by a proposer is bounded by building, not by thinking: two
-  builds from cold, the proposer's and the judge's, are about 25 of its 50
-  minutes.
-- The law check would not have caught the library's past fixes: replayed on
-  the 22 of 47 that touched core, algebra or spaces, it saw none of the 13 it
-  could build, and its fixed tolerance (1e-6) cannot see an accuracy fix at
-  1e-10; the other 9 trees predate its samplers. One finder covers a narrow
-  slice, and the past fixes are the measure of which finder to build next.
-- The shape of the call map says little about where bugs were. Per function,
-  against size, fan-in, fan-out and calls against the main direction between
-  modules separate files that had a fix with AUC 0.65-0.72 here and 0.57-0.58
-  on a second project (GoodNet); how far a function sits from its module's
-  pattern, 0.55-0.57. The number of tests reaching a file looked strongest and
-  is leaked: a fix enters the corpus with its test. Structure says where to
-  look; only a check gives a verdict.
-- Why the bugs happened, in 113 past fixes of the two projects: a contract
-  no code checked, at a boundary -- the edge of a domain here (degenerate,
-  extreme, not finite), the edge of a module there (who may call, in what
-  order, what a limit of 0 means) -- and one meaning written twice in two
-  places (one shutdown fault fixed three times, in three sibling plugins).
+  distance made exact took the laws from 834 to 637. That fix was proposed by a
+  general model run headless and taken by the judge.
+- An attempt is bounded by building, not by thinking: two builds from cold are
+  about 25 of its 50 minutes.
+- The law check would not have caught the library's past fixes: 0 of the 13 it
+  could build, and its tolerance of 1e-6 cannot see a fix at 1e-10.
+- The shape of the call map says little about where bugs were: AUC 0.65-0.72
+  here and 0.57-0.58 on GoodNet against size, as the literature finds;
+  history (churn, files changed together) is the stronger signal.
+- Why bugs happened, in 113 past fixes of the two projects: a contract no code
+  checked at a boundary, and one meaning written twice (one shutdown fault
+  fixed three times, in three sibling plugins).
+- A model of the law table (low rank) is better calibrated than the rules
+  (log-loss 0.19 against 0.23) and no better at anything else: not at
+  predicting a hidden space's laws, not at choosing which to check first (AUC
+  0.966 against 0.969). The table holds about 2 kbit.
+- On GoodNet, with sanitizers: 1523 tests, a leak at shutdown (a task posted
+  before shutdown that never runs keeps its state), and the project's own
+  sanitizer build no longer compiling with its compiler; the shared teardown
+  suite runs on 4 of its 9 link plugins.
 
-## The loop of tasks
+## Where things are
 
-Measured on this library since 2026-11-13, and kept for what it showed.
-
-- **The judge is the centre, not a model.** Finders raise tasks, each with the
-  check that says when it is done; a proposer, a person or an agent, hands in a
-  branch; a judge decides by running checks. Whoever proposes cannot persuade
-  the judge, which is why a general model may propose before any model of ours
-  is trained.
-- **A survey once, a snapshot for regression.** The enumeration of laws is
-  dear and run when a branch is grown; what it leaves is data, and the
-  regression is that data evaluated again a column per space. The snapshot
-  does not grow while nothing changes, and a new space is one column.
-- **A class of spaces is what a law holds on.** One that matches a concept of
-  the library confirms it; one the library has no name for is a proposal
-  (spaces where log is global, the symmetric spaces); a concept no law tells
-  apart from another is told apart only by syntax.
-- **A space that breaks what its neighbours keep is a task; one looked at and
-  found to be a class boundary is recorded with its reason** (an erased
-  surface's log is a retraction; a torus of revolution is not symmetric).
-- **The judge's rules grow from loopholes.** Each way a branch slipped through
-  becomes a rule and a case that rule must refuse: the tests are compared by
-  the names of the base's test cases, because a branch that removed one and
-  added another kept their count.
-- **What a fix is worth is a difference, not a score:** the laws gained and
-  lost on the spaces it touched, and the length of the description before and
-  after.
-
-## The design, in the order it will be built
-
-Everything below is design. Each item names the experiment that will keep or
-drop it.
-
-**Where space enters.** The input is a point of a manifold (a contact
-configuration, a metric, a chart), so anchors, geodesic nearest neighbours
-(`GeodesicBallTree`) and Fréchet means work without a model. The continuous
-part of a move is a point of a manifold (a split direction on a sphere, a
-rotation), so a policy is a distribution there, through `exp` and `log`. The
-parameters of a model are points of a space, so training can follow the Fisher
-information instead of the raw gradient, with exact Hessians through nested
-`Dual`. The architecture can be built from the problem's symmetry: invariant
-features, and a piecewise model whose gate is a partition. The search space
-itself collapses by equal results, a quotient of the space of paths.
-
-**The collapse number.** Paths divided by distinct states, measured on short
-depths and written into the job, chooses the organisation of the search:
-where it is large, exhaustive search over states is cheap and neither a tree
-nor a model is needed; where it is small, a value estimate pays.
-
-**A ladder of hypotheses.** A threshold on a derived invariant (a condition
-number, a scale ratio) → a decision tree → a boundary (a level set of the
-cost difference in one to three features, with a margin band and a fallback)
-→ nearest anchors → a small network → search with a depth estimator. The
-simplest rung that passes a held-out measure is what ships. Reinforcement
-learning, supervised learning with expert iteration, and distillation are
-ways to build any rung; reinforcement learning is for rewards that are a cost
-with no label.
-
-**Training the proposers.** The trainers are plain SGD on flat vectors and one
-network shape for every domain (`include/dispatcher.hpp`). The first
-experiment is diagnostic: exact full-batch training, then natural gradient,
-against SGD and REINFORCE at equal oracle calls on all seven domains. It
-separates domains whose ceiling is their features from those limited by the
-optimiser or the architecture. It is dropped if no domain moves. The further
-experiments, each with its threshold, are natural gradient where the reward is
-a cost, invariant against raw features for transfer between spaces, a
-piecewise model against one network and one tree, a policy on a manifold of
-actions for building structures, and a hyperbolic embedding of chain prefixes
-against a Euclidean one.
-
-**Mechanics.** The ladder of components runs from an expression, through a
-library function, to a mechanic (energy, constraint, integrator, nonlinear
-and linear solver, ordering, contact) and a scene. A job over mechanics is a
-sketch: the skeleton of a step with holes, and the holes are choices. The
-references are a slow accurate trajectory over a window and relations (no
-penetration, bounded energy drift, momentum). Certified contact is the spine of
-every assembly and is never bypassed by a proposal, so the periphery is
-searched freely and a wrong proposal is rejected, not turned into wrong
-physics. Proof over a box is for primitives and the spine; a whole scene gets
-a sample over its class of scenes plus the spine.
-
-**Lowering.** An iteration with a data-dependent exit cannot be an IR
-kernel. When a certificate gives a number of iterations that is enough on a
-region, the loop becomes a straight chain of fixed length with a guard that
-falls back outside the region. Then IR passes (common subexpressions, constant
-folding, evaluation schemes; bit-exact first, within a tolerance against
-`Real50` once intervals exist), fusion and layout, specialisation to a scene
-instance, and placement and precision (a lower precision on the device with a
-margin, the certificate on the host). Each step is a pair against the step
-before it (`interpret` against `eval_into`, host against device), so the
-registry of pairs checks the lowering.
-
-**The error budget of a stack.** Dividing a result's tolerance between layers
-is minimising the sum of the layers' costs under a bound on the sum of their
-errors weighted by the sensitivity of the result to each; the sensitivities are
-exact derivatives through `Dual`. `integrate_volume` already weighs the
-statuses of inner integrals by how much they matter. The search runs from the
-top down, family of mechanics first, then straightening, then IR passes, then
-placement, re-measuring after each, with the spine fixed.
-
-**Growth and shrinking.** A certified route that has shipped becomes a
-component with its declared cost, region, certificate and `uses`, so the next
-search is shorter. It is admitted when it reduces the size of the library
-plus everything expressed through it; two implementations that always agree
-leave one of them redundant. The weights of a model are a memory of searches
-that makes the next one cheaper to propose; the artifacts are what is
-certified. The two grow together, and a pinned feature contract (finding B9)
-keeps weights from going silently stale.
-
-**Using it.** Four entries, none of them a public interface yet. A library
-user gets `Auto` at a choice point and, on request, the route as steps
-(`describe_chain`). A job author writes a declaration and gets an artifact, a
-pair in the registry and a roadmap entry. A query through the scene language
-becomes a task whose route is composed step by step with explanations and a
-certificate. A route query over the graph, how to get B from A, uses the same
-machine over the library's own capability index.
-
-## Order
-
-1. The foundation: the registry of pairs, the levels of the matrix,
-   `Interval` and `Certified<T>`, cost counters and `uses` on components.
-2. First jobs, each with a consumer named: `Method::Auto` of the integration
-   door (reference: tanh-sinh at a strict tolerance, with a witness); a derived
-   `exp` against the closed forms; the CCD policy in the job format; the render
-   level; the explicit contact window; the choices in `include/` that have no
-   hook yet (the geodesic step, the ray constants of the black hole, the
-   budgets of `rigid_contact`, the bins of the BVH, the leaf of the ball tree).
-3. The diagnostic experiment on the weights, which blocks nothing.
-4. Filling red cells and witnesses in place of hand-written pairs.
-5. Surrogates through `L2Interval`, structure building, IR rewriting.
-6. A query as a route, baking, the browser solver after a WASM build.
-7. Physics as the consumer: the replacement of IPC is where lowering and the
-   budget pay, and what the line shows to be redundant or missing there
-   decides the physics concept.
-
-**The removal rule.** What has a consumer is a solution; what has none is a
-note. When the contact path of the physics stage is written, the CCD
-chooser's tree moves into it as its consumer, and the rest of this directory
-leaves the tree: the numbers stay in the findings and the ROADMAP, the code
-stays in history (a tag marks the last commit that has it), and a job
-re-creates anything that earns a consumer.
-
-## Layout today
-
-The removal rule above was applied on 2026-10-20: the prototype listed below
-left the tree, and the tag `rsc-prototype-final` marks the last commit that
-has it. The tree now holds `rsc/core` and `rsc/spatium`, described in the
-root `CLAUDE.md`. On 2026-11-12 the door a page calls -- a value by its routes,
-the sheet, closed forms, synthesis -- moved to `include/spatium/answer/`: it
-answers a document and runs no search. `rsc/spatium` keeps the finder.
-
-- `include/`: the registry, tasks, dispatcher, trainer, chains, checkpoint
-  and the per-domain ops and tasks; `include/generated/` holds the one shipped
-  artifact.
-- `tools/`: the searches, trainers and measurements named in the table above.
-  Build them with `-DSPATIUM_BUILD_RSC_TOOLS=ON -DSPATIUM_BOOST=ON`.
-- `checkpoints/`: the base checkpoint, pinned to a commit and a registry
-  snapshot.
-- Tests are `tests/test_rsc_*.cpp`.
-
+`rsc/core` is generic: a typed graph and the query for routes, and a tree search
+guided by a learned prior and value (`tree_search.hpp`); it includes nothing of
+the library. `rsc/spatium` binds it to this library: the graph (`gen_graph.py`),
+the routes and their witness pairs (`rsc_find.py`), the laws, the judge and the
+proposer, each described in the root `CLAUDE.md`. The prototype of 2026-09 left
+the tree on 2026-10-20 (tag `rsc-prototype-final`); its parts, the contract of a
+job and the design not built yet are in `docs/roadmap/rsc/README.md`.
