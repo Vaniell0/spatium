@@ -14,15 +14,21 @@ verdict.**
 
 ## The parts
 
-| part | what it does | here | built or taken |
+| part | what it does | here | state |
 |---|---|---|---|
 | map | who calls whom, who owns what | `rsc/spatium/graph.json`, the call map | built |
-| laws | contracts read off behaviour: what holds, on which objects | `rsc/spatium/rsc_laws.py`, `laws.json` (637 laws, 25 spaces) | built; consequence pruning to take from QuickSpec |
+| laws | contracts read off behaviour: what holds, on which objects | `rsc/spatium/rsc_laws.py`, `laws.json` (637 laws, 25 spaces); each law it derives with its chain (`rsc_laws <size> <file>`) | built; consequence pruning to take from QuickSpec |
+| trace invariants | what a stateful component always does across its calls: once per session, never after shutdown | a shim on the plugin table's calls | to build (Daikon's idea) |
 | breaker | moves inputs, or sequences of calls, to where a contract breaks, and shrinks what it finds to the smallest case | the tuples `rsc_laws.cpp` evaluates on | inputs built; sequences and shrinking to take (RapidCheck) |
+| siblings | implementations of one interface run on the same inputs or calls; the one that differs is the task | spaces by the laws; plugins of one table by a shared conformance suite | built for spaces; plugins to build |
+| scheduler | the same interleaving of asynchronous work run twice, so an ordering bug can be checked | an event loop on a fake clock, interleaving by seed | to build; the one heavy part |
+| structural queries | who may call what, which declared surface is empty, which size field goes unchecked | Joern or CodeQL | to take |
+| sanitizers, fuzzing, mutation | the cheapest finders, and the strength of a test | ASan, TSan, libFuzzer, Mull | taken |
+| history | which past fixes a finder would have caught; files that change together | `scripts/replay_fixes.py`; co-change from git | replay built; co-change to build |
 | fixer | whoever writes the fix: a person or a general model run headless | `rsc/spatium/rsc_propose.py` | built |
 | judge | takes a fix only on checks, and cannot be talked round | `rsc/spatium/rsc_judge.py` | built; rules grow from loopholes |
-| sanitizers, fuzzing, mutation | the cheapest finders, and the strength of a test | ASan, TSan, libFuzzer, Mull | taken |
-| history | which past fixes a finder would have caught, files that change together | `scripts/replay_fixes.py` | built |
+| task format | one row for every kind of task: the check, the witness, the neighbours that hold it, the verdict's command | `rsc/spatium/tasks.json` | laws' tasks built; one schema for all kinds to build |
+| axioms | what is meant, kept apart from what is observed: each norm with its source, yes or no from a person | `laws-triaged.json`; a norms file | triage built; norms to build |
 
 The breaker and the fixer are two players; the judge decides between them.
 Every case the breaker finds, shrunk, becomes a regression test.
