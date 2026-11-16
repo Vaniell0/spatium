@@ -228,6 +228,24 @@ TEST_CASE("evaluate: the calculator's shorthand is the document line it stands f
     CHECK(bd::to_text(*back) == "y: (y - 1)(y + 2) = 4 - y\n");
 }
 
+TEST_CASE("evaluate: an inequality is drawn as its left side less its right", "[rsc][evaluate][plot]") {
+    // around the roots on its axis, with a margin on each side; the request draws
+    const auto graph = [](std::string_view line) {
+        const auto r = spatium::answer::respond(line);
+        const JsonValue* g = r.find("graph");
+        REQUIRE(g);
+        return *g;
+    };
+    const auto g = graph("x^2 - 4 >= 0");
+    CHECK(g.string_or("along", "") == "x");
+    CHECK(contains(g.string_or("document", ""), "x in [-4, 4]"));
+    CHECK(contains(g.string_or("document", ""), "graph = (x^2 - 4) - (0)"));
+    const auto drawn = spatium::answer::plot_request(JsonValue(g.as_object()).dump());
+    CHECK(drawn.string_or("refused", "none") == "none");
+    // no root on the line: the sign about the origin
+    CHECK(contains(graph("x^2 + 1 > 0").string_or("document", ""), "x in [-5, 5]"));
+}
+
 TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", "[rsc][evaluate]") {
     const std::string text = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
     JsonValue::ObjectType as_text{{"document", text}, {"name", "x"}, {"chosen", JsonValue::ObjectType{{"p", 2.0}}}};

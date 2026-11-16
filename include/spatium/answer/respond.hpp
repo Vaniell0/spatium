@@ -404,7 +404,8 @@ inline Shorthand shorthand(std::string_view q, const spatium::io::build::Documen
 // What a page draws beside an answer, as the request `plot_request` takes: a value of one
 // parameter, the document it is defined in and the parameter along the x axis. A root in closed
 // form is drawn as its equation's left side less its right along the unknown, over its real
-// roots and a margin on each side (around the vertex when it has none); a synthesised answer of
+// roots and a margin on each side (around the vertex when it has none), and an inequality the
+// same way about the roots and breaks on its axis (its bracket, or [-5, 5], when it has none); a synthesised answer of
 // one expression as that expression along its parameter; a value reading one parameter as
 // itself. Anything else has no graph.
 inline std::optional<Object> graph_of(const AskedDocument& asked, const Evaluation& e) {
@@ -419,10 +420,18 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Evaluati
     const auto request = [](std::string document, std::string name, std::string along) {
         return Object{{"document", std::move(document)}, {"name", std::move(name)}, {"along", std::move(along)}};
     };
-    if ((how == Route::ClosedForm || how == Route::Enclosed) && wanted->kind == bd::StatementKind::Root) {
+    const bool inequality = how == Route::Intervals && e.axis;
+    if ((how == Route::ClosedForm || how == Route::Enclosed || inequality) && wanted->kind == bd::StatementKind::Root) {
+        // the points to show: an equation's real roots; an inequality's roots and breaks on its axis
         std::vector<double> roots;
-        for (double x : e.values)
-            if (std::isfinite(x)) roots.push_back(x);
+        if (inequality) {
+            for (const auto& p : e.axis->parts)
+                if ((p.kind == Axis::Kind::Root || p.kind == Axis::Kind::Break) && std::isfinite(p.lo) && std::isfinite(p.hi))
+                    roots.push_back(0.5 * (p.lo + p.hi));
+        } else {
+            for (double x : e.values)
+                if (std::isfinite(x)) roots.push_back(x);
+        }
         double lo = 0, hi = 0;
         if (!roots.empty()) {
             const auto [a, b] = std::ranges::minmax(roots);
@@ -432,6 +441,10 @@ inline std::optional<Object> graph_of(const AskedDocument& asked, const Evaluati
             const double a = e.closed->solution.a, b = e.closed->solution.b, D = e.closed->solution.discriminant;
             const double centre = -b / (2 * a), half = std::max(2.0, std::sqrt(std::abs(D)) / std::abs(a));
             lo = centre - half, hi = centre + half;
+        } else if (inequality && !e.axis->line && !e.axis->parts.empty()) {
+            lo = e.axis->parts.front().lo, hi = e.axis->parts.back().hi;   // a bracket with no root in it
+        } else if (inequality) {
+            lo = -5, hi = 5;   // holds or fails on every real number: the sign about the origin
         } else {
             return std::nullopt;
         }
