@@ -141,13 +141,14 @@ TEST_CASE("evaluate: a root with no bracket is solved in closed form, or proved 
     const auto x = spatium::answer::evaluate(d, "x");
     REQUIRE(x.route() == spatium::answer::Route::ClosedForm);
     CHECK(x.values == std::vector<double>{2.5, -1.0});
-    // the second path: the same two roots, each proved alone in its interval, on the whole line
+    // the second path: the same two roots, each proved alone in its interval, within Cauchy's bound
+    // (1 + max |b/a|, |c/a| = 3.5), past which a quadratic has none -- so no piece is left where 2x^2
+    // overflows a double, and the search is complete
     REQUIRE(x.candidates.size() == 2);
     REQUIRE(x.enclosed);
     REQUIRE(x.enclosed->roots.size() == 2);
-    // where 2x^2 overflows a double there is no telling: only there, past a quarter of the largest double, nothing is proved
-    REQUIRE(x.enclosed->undecided.size() == 1);
-    CHECK(x.enclosed->undecided.front().lo > 4e307);
+    CHECK(x.enclosed->undecided.empty());
+    CHECK(x.enclosed->complete());
     CHECK(x.enclosed->roots[0].contains(-1.0));
     CHECK(x.enclosed->roots[1].contains(2.5));
 
