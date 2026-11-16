@@ -21,7 +21,7 @@ In the formula editor, what is typed becomes the formula shown, which reads as t
 | form | what it asks | example | answer |
 |---|---|---|---|
 | $f$ | an expression, evaluated, its digits proved | $2\left(3 + 4\right)^{2} - \frac{1}{4}$ | Exact |
-| $f = g$ | an equation in one unknown: in closed form with its steps where it is a quadratic, and every real root proved | $2x^{2} - 3x - 5 = 0$ | Exact, closed form, checked by Vieta's formulas |
+| $f = g$ | an equation in one unknown: in closed form with its steps where it is a quadratic, and every real root proved | $2x^{2} - 3x - 5 = 0$ | Exact, closed form, checked by Vieta's formulas, no other real root |
 | $f = g,\ x \in [a, b]$ | every root on the interval, each proved alone in its own | $\sin\left(x\right) = 0.5, x \in \left[0, 10\right]$ | Proved, 4 roots, no other on the box |
 | $f > g$ | an inequality: where it holds, by the interval method | $x^{2} - 4 > 0$ | Proved, by the interval method |
 | $f = g \\ h = k$ | a system: one row per equation, an equation per unknown | $x + y = 3$<br>$x - y = 1$ | Exact, by elimination in fractions |

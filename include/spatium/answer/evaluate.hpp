@@ -944,7 +944,24 @@ inline bool not_linear(const Evaluation& out) {
 // is not linear, on every double of each unknown.
 inline void enclosed(const RouteInput& in, Evaluation& out) {
     if (!in.d.also.empty()) return out.candidates.push_back(enclosed_system(in.u.system, unknowns_of(in), out));
-    out.candidates.push_back(enclosed_roots(in.u.f.bind(in.u.bound, Expr::u()), box_of(in), in.d.name, out));
+    // An equation the closed form read as a polynomial of degree at most two has every root within
+    // Cauchy's bound, 1 + max |a_i / a_n|: the search is held there instead of the doubles' whole
+    // range, whose ends overflow and stay undecided, and the bound is a step of its own.
+    auto box = box_of(in);
+    std::optional<double> bound;
+    if (const auto& cf = out.closed; cf && box.lo == -std::numeric_limits<double>::max() && box.hi == std::numeric_limits<double>::max()) {
+        const auto& q = cf->solution;
+        using std::abs;
+        if (q.a != 0) bound = 1 + std::max(abs(q.b / q.a), abs(q.c / q.a));
+        else if (q.b != 0) bound = 1 + abs(q.c / q.b);
+        if (bound && std::isfinite(*bound)) box = spatium::Interval<double>{-2 * *bound, 2 * *bound};
+        else bound.reset();
+    }
+    auto c = enclosed_roots(in.u.f.bind(in.u.bound, Expr::u()), box, in.d.name, out);
+    if (bound)
+        c.steps.insert(c.steps.begin(), {"every root within Cauchy's bound, 1 + max |a_i / a_n|",
+                                         std::format("|{}| \\le {}", spatium::io::build::detail::name_latex(in.d.name), plain(*bound))});
+    out.candidates.push_back(std::move(c));
 }
 
 inline void bracket(const RouteInput& in, Evaluation& out) {

@@ -321,7 +321,7 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
              {"2(3 + 4)^2 - 1/4", "number", "exact", "Exact", true},
              {"sqrt(2) + 1", "number", "proved", "Proved to 16 digits", true},
              {"10^20 + 1 - 10^20", "number", "none", "No digit proved, within 10⁴ of zero", false},
-             {"2x^2 - 3x - 5 = 0", "roots", "exact", "Exact, closed form, checked by Vieta's formulas", true},
+             {"2x^2 - 3x - 5 = 0", "roots", "exact", "Exact, closed form, checked by Vieta's formulas, no other real root", true},
              {"2^x = 8", "roots", "complete", "Proved, 1 root, no other on the box", true},
              {"x: sin(x) = 0.5 on [0, 10]", "roots", "complete", "Proved, 4 roots, no other on the box", true},
              {"x + 2y = 5\n3x - y = 1", "system", "exact", "Exact, by elimination in fractions", true},
@@ -362,8 +362,11 @@ TEST_CASE("respond: every answer is one sheet, its sections in one order", "[rsc
     bool held = false;
     for (const auto& sec : at(q, "sections").as_array())
         if (at(sec, "title").as_string() == "Check")
-            for (const auto& f : at(sec, "facts").as_array())
+            for (const auto& f : at(sec, "facts").as_array()) {
                 if (at(f, "label").as_string() == "Every real root, proved") held = at(f, "ok").as_bool();
+                // searched within Cauchy's bound, not to the ends of the doubles, where it overflows
+                CHECK(at(f, "label").as_string() != "Undecided");
+            }
     CHECK(held);
 }
 
@@ -384,8 +387,10 @@ TEST_CASE("respond: every route that answered shows its own chain", "[rsc][respo
     }
     CHECK(taken == 1);
     CHECK(names == std::vector<std::string>{"closed form", "Vieta's formulas", "every root, proved"});
-    // a piece left undecided where the equation overflows a double says so
-    CHECK(at(s, "sections").dump().find("overflows a double") != std::string::npos);
+    // a quadratic's roots are searched within Cauchy's bound, so nothing is left where it overflows;
+    // a cubic, which no closed form here reads, still says where its search ran past the doubles
+    CHECK(at(s, "sections").dump().find("overflows a double") == std::string::npos);
+    CHECK(at(at(spatium::answer::respond("x^3 - x = 0"), "sheet"), "sections").dump().find("overflows a double") != std::string::npos);
     // every answer: each route with a chain, at most one taken
     for (const char* q : {"sin(pi/6)*2", "2^x = 8", "x^2 - 4 > 0", "x + 2y = 5\n3x - y = 1", "x^2 + y^2 = 4\nx - y = 1",
                           "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]", "x^4 = 0"}) {
