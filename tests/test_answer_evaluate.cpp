@@ -265,7 +265,7 @@ TEST_CASE("evaluate: a system in one line, its equations split by commas", "[rsc
     };
     CHECK(solution("x + y = 3, x - y = 1") == solution("x + y = 3\nx - y = 1"));
     CHECK(contains(solution("x + y = 3, x - y = 1"), "\"x\":2"));
-    CHECK(contains(JsonValue(spatium::answer::respond("log(2, x) = 3")).dump(), "values"));
+    CHECK(contains(JsonValue(spatium::answer::respond("max(x, 1) = 3")).dump(), "\"values\":[3]"));
 }
 
 TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", "[rsc][evaluate]") {
