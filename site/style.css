@@ -81,6 +81,7 @@ button { font: inherit; color: inherit; }
 .layout { max-width: 1280px; margin: 8px auto 0; display: flex; flex-wrap: wrap; gap: 24px; align-items: start; }
 #sheet { flex: 999 1 560px; min-width: 0; }
 .cards { display: grid; gap: 16px; }
+.cards[hidden] { display: none; }
 /* the calculator is one column, as the answer sheet is: 820 wide, centred; the reference opens over it */
 body[data-preset="calculator"] .layout { max-width: 820px; }
 /* a cell, as answer-sheet.html draws one: the ask row, the result, then the sheet's sections, each ruled off */
@@ -513,3 +514,84 @@ body.keys-open .card > .ask { position: sticky; top: var(--bar-bottom, 64px); z-
 .ztile { display: grid; gap: 8px; }
 .ztile-title { font-size: var(--t-section); font-weight: 500; }
 @media (max-width: 760px) { .zero-list { display: grid; grid-template-columns: 1fr; } }
+
+/* ── the canvas: Layers, the field, the Inspector; the toolbar in the bar ── */
+body[data-preset="canvas"] { padding-bottom: 0; }
+body[data-preset="canvas"] .layout { max-width: none; margin-top: 0; }
+.canvas { display: grid; grid-template-columns: 240px minmax(0, 1fr) 320px; height: calc(100vh - 64px); min-height: 480px; width: 100%; margin: 0;
+  border: 1px solid var(--line); border-radius: var(--r-panel) var(--r-panel) 0 0; overflow: hidden; background: var(--surface); }
+.canvas[hidden] { display: none; }
+.canvas .panel { background: var(--bg); padding: 16px; overflow: auto; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.canvas .layers { border-right: 1px solid var(--line); }
+.canvas .inspector { border-left: 1px solid var(--line); }
+.canvas .panel h2 { font: 500 var(--t-label)/20px var(--f-ui); letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.canvas .inspector h2 { text-transform: none; letter-spacing: 0; font-size: var(--t-section); color: var(--ink); }
+.canvas .inspector h2 .kind { font-weight: 400; font-size: var(--t-body); color: var(--ink-3); }
+.canvas .muted, .canvas .gist { font-size: var(--t-label); color: var(--ink-3); margin: 0; }
+.canvas .layers .row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: center; height: 40px; padding: 0 8px;
+  border: 0; border-radius: var(--r-control); background: none; color: var(--ink-2); font: inherit; font-size: var(--t-label); text-align: left; cursor: pointer; }
+.canvas .layers .row:hover { background: var(--surface); color: var(--ink); }
+.canvas .layers .row[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.canvas .layers .glyph { color: var(--ink-3); }
+.canvas .layers .row[aria-selected="true"] .glyph { color: var(--accent); }
+.canvas .layers .defs { color: var(--ink-3); font-size: var(--t-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80px; }
+/* the field: infinite, a dot grid that moves with it */
+.field { position: relative; overflow: hidden; outline: 0; cursor: default; touch-action: none;
+  background-image: radial-gradient(var(--line) 1px, transparent 1.5px); background-size: 32px 32px; }
+.field.hand, .field.panning { cursor: grab; }
+.field.panning { cursor: grabbing; }
+.field .sheet { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.field .wires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.field .wire { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: .9; }
+.field .wire.lit { stroke-width: 2; }
+.field .status.float { position: absolute; left: 16px; bottom: 16px; z-index: 2; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-control); box-shadow: var(--float); }
+/* a node: a box with a header that drags, pins at its edges, its body what the answer says */
+.node { position: absolute; left: 0; top: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); display: grid; min-width: 0;
+  transition: opacity .15s; }
+.node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.node.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.node.selected .head .id { color: var(--accent); }
+.node.pending { opacity: .48; }
+.node .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 40px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line-faint); cursor: grab;
+  font-size: var(--t-label); color: var(--ink-2); user-select: none; }
+.node .head .kind-note { color: var(--ink-3); }
+.node .nbody { display: grid; gap: 8px; padding: 12px 16px 16px; min-width: 0; }
+.node.graph .nbody { padding: 8px; }
+.node .line { font-size: var(--t-section); overflow-x: auto; }
+.node .src { font: 400 var(--t-label)/1.5 var(--f-mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.node .res { color: var(--accent); font-size: var(--t-body); overflow-x: auto; }
+.node .told { margin: 0; font-size: var(--t-label); color: var(--warn); }
+.node textarea.text { min-height: 0; font-size: var(--t-label); padding: 4px 8px; }
+.node .pin { position: absolute; top: 14px; width: 12px; height: 12px; border-radius: 50%; }
+.node .pin.out { right: -7px; background: var(--accent); }
+.node .pin.in { left: -7px; background: var(--surface); border: 2px solid var(--accent); }
+/* the toolbar in the bar: tools pressed in accent, the zoom in mono */
+.tools { display: flex; align-items: center; gap: 8px; margin-left: 24px; }
+.tools[hidden] { display: none; }
+.tools .icon[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.tools .glyph { font: 500 var(--t-label)/1 var(--f-mono); }
+.tools .zoom { height: var(--dense); padding: 0 8px; border: 0; border-radius: var(--r-control); background: none; color: var(--ink-2); font-size: var(--t-label); cursor: pointer; }
+.tools .zoom:hover { background: var(--surface); color: var(--ink); }
+.add-wrap { position: relative; }
+.add-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 40; min-width: 280px; display: grid; padding: 4px; border-radius: var(--r-control);
+  background: var(--raised); border: 1px solid var(--line); box-shadow: var(--float); }
+.add-menu[hidden] { display: none; }
+.add-menu button { display: grid; gap: 2px; padding: 8px 12px; border: 0; border-radius: 4px; background: none; color: var(--ink); font: inherit; font-size: var(--t-label); text-align: left; cursor: pointer; }
+.add-menu button:hover:not(:disabled) { background: var(--accent-soft); }
+.add-menu button:disabled { color: var(--ink-3); cursor: default; }
+.add-menu .what { color: var(--ink-3); }
+/* the Inspector's properties: labels 104 wide, values in mono, links in accent */
+.inspector .props { margin: 0; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px 16px; font-size: var(--t-label); align-items: baseline; }
+.inspector .props dt { color: var(--ink-3); }
+.inspector .props dd { margin: 0; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.inspector .props textarea.text { width: 100%; font-size: var(--t-label); padding: 4px 8px; min-height: 0; }
+.inspector .link { padding: 0; border: 0; background: none; font-size: var(--t-label); color: var(--accent); cursor: pointer; }
+.inspector .route-tabs { margin-bottom: 8px; }
+.inspector .answer, .inspector .result { padding: 0; }
+.inspector details.sec > summary { padding-left: 0; padding-right: 0; }
+.inspector .body { padding: 0 0 16px; }
+@media (max-width: 1100px) {
+  .canvas { grid-template-columns: minmax(0, 1fr); }
+  .canvas .panel { display: none; }
+}
+@media (max-width: 720px) { .tools { display: none; } }

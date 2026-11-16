@@ -271,7 +271,7 @@ await criterion("settings icon is sliders", async () => {
 // Type: the line's formula at 1.25 x body, controls 40 tall
 await criterion("line formula at 1.25 x body (21.25 px), controls 40 tall", async () => {
   const [mf, icons] = await js(`[parseFloat(getComputedStyle(document.querySelector("math-field")).fontSize),
-    [...document.querySelectorAll(".bar .icon")].map((b) => b.getBoundingClientRect().height)]`);
+    [...document.querySelectorAll(".bar .icon")].filter((b) => b.checkVisibility()).map((b) => b.getBoundingClientRect().height)]`);
   if (Math.abs(mf - 21.25) > .5) return `the line is set at ${mf} px`;
   const off = icons.filter((h) => Math.abs(h - 40) > .5);
   return off.length ? `icon buttons at ${off.join(", ")} px` : "";
@@ -627,6 +627,46 @@ if (thrown.length === 0) for (const width of [1280, 400]) {
     await key("Escape");
   }
 }
+
+// Canvas shell: the toolbar in the bar, Layers with one row per node, nodes added with no hand
+// placement laid out in columns by dependency with no overlaps, wires by name, the Inspector on
+// the selected node, the Add menu naming every kind
+await criterion("canvas: toolbar, Layers, automatic placement by dependency, wires by name, Inspector", async () => {
+  await viewport(1280);
+  await theme("light");
+  await open();
+  await js(`document.querySelector('[data-preset="canvas"]').click()`);
+  await sleep(500);
+  const shown = await js(`[!document.querySelector(".canvas").hidden, !document.querySelector(".tools").hidden, document.querySelector(".cards").hidden]`);
+  if (!shown.every(Boolean)) return `canvas shown ${shown[0]}, tools ${shown[1]}, cards hidden ${shown[2]}`;
+  for (const line of ["a in [-10, 10]", "b = a + 1", "c = a^2", "d = b + c"]) {
+    await js(`document.querySelector(".add-node").click()`);
+    await sleep(100);
+    await js(`[...document.querySelectorAll(".add-menu button")].find((b) => b.textContent.startsWith("Formula")).click()`);
+    await sleep(200);
+    await js(`(() => { const t = document.querySelector(".node textarea"); if (!t) throw new Error("no node in edit"); t.value = ${JSON.stringify(line)}; t.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); })()`);
+    await sleep(700);
+  }
+  await shot("canvas-1280-light");
+  const m = await js(`(() => { const out = [];
+    const nodes = [...document.querySelectorAll(".node")].map((n) => { const [x, y] = n.style.transform.match(/-?\\d+/g).map(Number); return { id: n.dataset.id, x, y, w: n.offsetWidth, h: n.offsetHeight }; });
+    const by = Object.fromEntries(nodes.map((n) => [n.id, n]));
+    const rows = [...document.querySelectorAll(".layers .row")].map((r) => r.dataset.id);
+    if (rows.join() !== nodes.map((n) => n.id).join()) out.push("layers " + rows.join(" ") + " vs nodes " + nodes.map((n) => n.id).join(" "));
+    for (const a of nodes) for (const b of nodes) if (a.id < b.id && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) out.push(a.id + " overlaps " + b.id);
+    if (nodes.some((n) => n.x % 8 || n.y % 8)) out.push("off the 8 px grid");
+    // b and c read a; d reads b and c: columns 0, 1, 1, 2 after the starting node
+    const [a, b, c, d] = nodes.slice(-4);
+    if (!(b.x > a.x + a.w && c.x > a.x + a.w && d.x > b.x + b.w && d.x > c.x + c.w)) out.push("columns " + nodes.slice(-4).map((n) => n.x).join(" "));
+    if (b.x !== c.x) out.push("b and c in different columns");
+    if (document.querySelectorAll(".field .wire").length !== 4) out.push(document.querySelectorAll(".field .wire").length + " wires, not 4");
+    const sel = document.querySelector(".node.selected")?.dataset.id; const ins = document.querySelector(".inspector h2")?.textContent ?? "";
+    if (!sel || !ins.startsWith(sel)) out.push("inspector shows " + JSON.stringify(ins) + " for " + sel);
+    document.querySelector(".add-node").click(); const kinds = [...document.querySelectorAll(".add-menu button")].map((b) => b.firstChild.textContent); document.querySelector(".add-node").click();
+    for (const k of ["Formula", "Graph", "Solve", "Parameters", "Scene", "View", "Sound"]) if (!kinds.some((x) => x.startsWith(k))) out.push("no " + k + " in the Add menu");
+    return out; })()`);
+  return m.join("; ");
+});
 
 // Complaint 18: the gallery is a page of its own, linked from the bar, loading no core
 await criterion("gallery is its own page", async () => {
