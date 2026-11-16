@@ -202,6 +202,10 @@ TEST_CASE("respond: an inequality is the set where it holds, by the interval met
     CHECK(set("2x - 1 < 0") == "x \\in (-\\infty, \\frac{1}{2})");
     // a break where it has no value is never in the set: (x - 1)/(x + 2) <= 0 at -2
     CHECK(set("(x - 1)/(x + 2) <= 0") == "x \\in (-2, 1]");
+    // on the whole line the budget went to the tails, a run left undecided only by being wide was
+    // taken for a break, and this set came back empty and proved; on the line it is what a bracket gives
+    CHECK(set("x: (x - 1)/(x + 2) > 3") == "x \\in (-\\frac{7}{2}, -2)");
+    CHECK(set("x: (x - 1)/(x + 2) > 3") == set("x: (x - 1)/(x + 2) > 3 on [-10, 10]"));
     // every number, and none
     CHECK(set("x^2 + 1 > 0") == "x \\in \\mathbb{R}");
     CHECK(set("x^2 + 1 < 0") == "x \\in \\varnothing");
