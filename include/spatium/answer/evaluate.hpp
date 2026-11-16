@@ -543,6 +543,33 @@ inline Candidate interval_method(const Expr& f, const Expr& written, const std::
     auto proof = spatium::prove_on(spatium::Box<double, 1>{box}, holds);
     c.cost = proof.evaluations;
     std::ranges::sort(proof.pieces, {}, [](const auto& p) { return p.first[0].lo; });
+    // On the whole line the budget goes to the tails before the middle is cut fine enough: a run left
+    // undecided there may only be wide, (x - 1)/(x + 2) - 3 on [-46, -16] reading [-2.6, 0.36] for
+    // a value near -2. Each run is proved again on its own, with a budget of its own, while that
+    // still decides something.
+    for (int round = 0; round < 3; ++round) {
+        decltype(proof.pieces) next;
+        bool decided = false;
+        for (std::size_t i = 0; i < proof.pieces.size();) {
+            if (proof.pieces[i].second != Truth::Undecided) {
+                next.push_back(proof.pieces[i++]);
+                continue;
+            }
+            const double lo = proof.pieces[i].first[0].lo;
+            double hi = proof.pieces[i].first[0].hi;
+            std::size_t j = i + 1;
+            for (; j < proof.pieces.size() && proof.pieces[j].second == Truth::Undecided && proof.pieces[j].first[0].lo == hi; ++j)
+                hi = proof.pieces[j].first[0].hi;
+            auto again = spatium::prove_on(spatium::Box<double, 1>{I{lo, hi}}, holds);
+            c.cost += again.evaluations;
+            std::ranges::sort(again.pieces, {}, [](const auto& p) { return p.first[0].lo; });
+            decided |= std::ranges::any_of(again.pieces, [](const auto& p) { return p.second != Truth::Undecided; });
+            next.insert(next.end(), again.pieces.begin(), again.pieces.end());
+            i = j;
+        }
+        proof.pieces = std::move(next);
+        if (!decided) break;
+    }
     // a root or a break at a short fraction, checked in fractions: f is zero there, or has no
     // value -- 2, not 2.000000000000000; -2, not -1.9999999999999998
     const auto pod_written = bd::lower(written);
@@ -598,7 +625,17 @@ inline Candidate interval_method(const Expr& f, const Expr& written, const std::
             p = {Axis::Kind::Root, r.lo, r.hi, !fraction.empty() ? fraction : proved.digits > 0 ? proved.text : std::format("{}", r.mid())};
             c.values.push_back(r.mid());
         } else if (found.complete() && found.roots.empty()) {
-            p.kind = Axis::Kind::Break, p.text = exact(I{p.lo, p.hi}, false);
+            // No root on it. Where f is bounded on the whole piece it has a value at every point and
+            // no pole, so its sign does not change and one point decides it; only an unbounded or
+            // empty value is a break.
+            const I y = field(I{p.lo, p.hi});
+            if (!y.is_empty() && std::isfinite(y.lo) && std::isfinite(y.hi)) {
+                const double at = std::midpoint(p.lo, p.hi);
+                const auto t = holds(spatium::Box<double, 1>{I{at}}).truth;
+                if (t != Truth::Undecided) p.kind = t == Truth::Yes ? Axis::Kind::Holds : Axis::Kind::Fails;
+            } else {
+                p.kind = Axis::Kind::Break, p.text = exact(I{p.lo, p.hi}, false);
+            }
         }
     }
     // its steps: each end of the set, a root or a break, then the set
