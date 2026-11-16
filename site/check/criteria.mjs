@@ -120,7 +120,7 @@ async function write(latex, { settle = 4000 } = {}) {
     await sleep(100);
     if (await js(`!document.querySelector(".card.pending") && Boolean(document.querySelector(".card .answer > *"))`)) break;
   }
-  await sleep(150);
+  await sleep(600);
 }
 
 const line = () => js(`document.querySelector("math-field")?.value ?? null`);
@@ -292,7 +292,7 @@ await criterion("hint popover takes no space", async () => {
 // The quadratic answered: steps open, as the reference's chain
 await write(QUAD);
 await criterion("quadratic: answered with a result and the chain", async () => {
-  const [res, steps] = await js(`[document.querySelector(".card .result .math")?.textContent ?? "", document.querySelectorAll(".card ol.chain li").length]`);
+  const [res, steps] = await js(`[document.querySelector(".card .result > .math")?.textContent ?? "", document.querySelectorAll(".card ol.chain li").length]`);
   return res && steps >= 3 ? "" : `result ${JSON.stringify(res)}, ${steps} steps`;
 });
 
@@ -306,12 +306,45 @@ await criterion("steps rendered open and never fold", async () => {
   return (await js(`${sel}?.open`)) ? "" : "Steps folded on a click";
 });
 
-// Complaint 4: no graph hangs after the answer; Plot is a section, closed by default
-await criterion("plot is a closed section, no graph after the answer", async () => {
-  const [plots, open, loose] = await js(`(() => { const d = [...document.querySelectorAll(".card details.sec")].filter((d) => d.querySelector("summary")?.textContent.trim().toLowerCase().startsWith("plot"));
-    return [d.length, d.some((x) => x.open), document.querySelectorAll(".card > .also > *, .card > .graph").length]; })()`);
+// The plot is a section of the sheet, open, and drawn on its own once in view; no graph outside
+// the sheet; the pods in the order of immediacy: steps, plot, check, properties, routes, next
+await criterion("plot open and drawn on its own; pods in order: steps, plot, check, routes, next", async () => {
+  await js(`document.querySelector(".plot-slot")?.scrollIntoView()`);
+  await sleep(900);
+  const [open, drawn, loose, order] = await js(`(() => { const d = document.querySelector(".card .plot-slot details.sec");
+    const titles = [...document.querySelectorAll(".card .answer details.sec")].map((x) => x.querySelector("summary").firstChild.textContent.trim());
+    return [d?.open ?? null, Boolean(d?.querySelector("canvas.gl")), document.querySelectorAll(".card > .also > *, .card > .graph").length, titles.join(" > ")]; })()`);
   if (loose) return `${loose} graph elements outside the sheet`;
-  return plots === 1 && !open ? "" : `${plots} plot sections, open ${open}`;
+  if (open !== true || !drawn) return `plot open ${open}, drawn ${drawn}`;
+  const want = ["Steps", "Plot", "Check", "Properties", "How it was found", "Next"];
+  const got = order.split(" > ").filter((t) => want.includes(t));
+  return got.join(" > ") === want.join(" > ") ? "" : `order ${order}`;
+});
+
+// The head reads as the reference's top: how the question was read, above the result
+await criterion("head: read-as line above the result, no Input section", async () => {
+  const [kids, read, input] = await js(`[[...document.querySelector(".card .result").children].map((e) => e.className).join(","),
+    document.querySelector(".card .result .read")?.textContent ?? "", [...document.querySelectorAll(".card details.sec summary")].some((s) => /^input/i.test(s.textContent.trim()))]`);
+  if (!kids.startsWith("read,math")) return `head children ${kids}`;
+  if (!/read as/i.test(read) || !/asks for/i.test(read)) return `read line ${JSON.stringify(read)}`;
+  return input ? "an Input section remains" : "";
+});
+
+// The routes as a decision tree: a branch per route with its cost and what it gave, the taken one
+// marked, and a branch's chain opening that route's tab in Steps
+await criterion("routes as a tree: branches with cost and outcome, taken marked, a branch opens its chain", async () => {
+  const m = await js(`(() => { const t = document.querySelector(".card .tree"); if (!t) return ["no tree"]; const out = [];
+    const b = [...t.querySelectorAll(".branch")]; if (b.length < 2) out.push(b.length + " branches");
+    if (t.querySelectorAll(".branch.taken").length !== 1) out.push("taken branches " + t.querySelectorAll(".branch.taken").length);
+    if (!b.every((x) => /\\d/.test(x.querySelector(".cost")?.textContent ?? ""))) out.push("a branch without a cost");
+    if (!b.some((x) => !x.classList.contains("taken") && x.querySelector("button.steps"))) out.push("no other branch with a chain to open");
+    if (!t.closest("details").open) out.push("the tree is closed");
+    return out; })()`);
+  if (m.length) return m.join("; ");
+  const name = await js(`(() => { const b = [...document.querySelectorAll(".card .tree .branch")].find((x) => !x.classList.contains("taken") && x.querySelector("button.steps")); b.querySelector("button.steps").click(); return b.querySelector(".name").textContent; })()`);
+  await sleep(200);
+  const selected = await js(`document.querySelector(".card .route-tabs [aria-selected=true]")?.firstChild?.textContent ?? null`);
+  return selected === name ? "" : `clicked ${JSON.stringify(name)}, Steps shows ${JSON.stringify(selected)}`;
 });
 
 // Answer sheet anatomy: the cell measured against answer-sheet.html, value for value
@@ -319,7 +352,7 @@ await criterion("sheet measures as the reference", async () => {
   const m = await js(`(() => { const cs = (s) => getComputedStyle(document.querySelector(s)); const out = [];
     const cell = cs(".card.cell"); if (cell.borderTopWidth !== "1px" || cell.borderTopLeftRadius !== "8px") out.push("cell border " + cell.borderTopWidth + " radius " + cell.borderTopLeftRadius);
     const r = cs(".card .result"); if (r.paddingLeft !== "24px" || r.rowGap !== "8px") out.push("result padding " + r.paddingLeft + " gap " + r.rowGap);
-    const rm = cs(".card .result .math"); if (Math.abs(parseFloat(rm.fontSize) - 17 * 1.35) > .5) out.push("result at " + rm.fontSize);
+    const rm = cs(".card .result > .math"); if (Math.abs(parseFloat(rm.fontSize) - 17 * 1.35) > .5) out.push("result at " + rm.fontSize);
     const ink = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim();
     const st = cs(".card .verdict .strength"), ac = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
     const hex = (c) => "#" + c.match(/\\d+/g).slice(0, 3).map((n) => (+n).toString(16).padStart(2, "0")).join("");
@@ -337,7 +370,7 @@ await criterion("sheet measures as the reference", async () => {
 
 // Numbers: no run of trailing zeros, no 16-digit tail, no -0 in a result or a step (the core's rule)
 async function numbers() {
-  return js(`(() => { const t = [...document.querySelectorAll(".card .result .math .katex-mathml annotation, .card ol.chain .math .katex-mathml annotation")].map((a) => a.textContent);
+  return js(`(() => { const t = [...document.querySelectorAll(".card .result > .math .katex-mathml annotation, .card ol.chain .math .katex-mathml annotation")].map((a) => a.textContent);
     return t.filter((s) => /\\d\\.\\d*?0{2,}(?![\\d])/.test(s) || /\\d{16,}/.test(s) || /(?<![\\d.])-0(?![\\d.])/.test(s)).slice(0, 3); })()`);
 }
 await criterion("numbers: no trailing zeros, 16-digit tails or -0 (quadratic)", async () => (await numbers()).join(" | "));
@@ -491,7 +524,7 @@ await criterion("sin, ln, lg, log keys answered", async () => {
   for (const [label, example] of keys) {
     await write(example);
     const a = await answerText();
-    if (!a || /refused|not answered|did not load/i.test(a) || !(await js(`Boolean(document.querySelector(".card .result .math"))`))) refused.push(label);
+    if (!a || /refused|not answered|did not load/i.test(a) || !(await js(`Boolean(document.querySelector(".card .result > .math"))`))) refused.push(label);
   }
   return refused.length ? `refused: ${refused.join(", ")}` : "";
 });
@@ -545,7 +578,7 @@ await criterion("slow answer: busy state, then Still working with Stop", async (
   await sleep(10200);
   const still = await js(`/still working/i.test(document.querySelector(".card .status")?.textContent ?? "") && Boolean(document.querySelector(".card .status button"))`);
   await sleep(2500);
-  const done = await js(`!document.querySelector(".card.pending") && Boolean(document.querySelector(".card .result .math"))`);
+  const done = await js(`!document.querySelector(".card.pending") && Boolean(document.querySelector(".card .result > .math"))`);
   return busy && still && done ? "" : `busy ${busy}, still working ${still}, answered ${done}`;
 });
 
@@ -554,7 +587,7 @@ await criterion("newest request wins", async () => {
   await js(`window.__hold = [3000]`);
   await write("3*3", { settle: 300 });
   await write("2*2", { settle: 5000 });
-  const r = await js(`document.querySelector(".card .result .math")?.textContent ?? ""`);
+  const r = await js(`document.querySelector(".card .result > .math")?.textContent ?? ""`);
   return r.includes("4") && !r.includes("9") ? "" : `result reads ${JSON.stringify(r)}`;
 });
 

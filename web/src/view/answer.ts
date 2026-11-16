@@ -56,6 +56,13 @@ export function refusal(a: Answer, typed: string): HTMLElement {
   return box;
 }
 
+// The sheet's pods in the order a person wants them: what was read and the result first (the
+// head), then the steps, the route's own sections, the plot, the checks, the properties, the
+// routes compared, and what to ask next. The core's order puts Plot after Properties; here it
+// follows the result's own sections, as a plot of the roots is read before their checks.
+const ORDER = ["Steps", "Roots", "Axis", "Pieces", "Ends", "Certificate", "Plot", "Check", "Properties", "How it was found", "Next"];
+const rank = (title: string) => { const k = ORDER.indexOf(title); return k < 0 ? ORDER.indexOf("Plot") - .5 : k; };
+
 export function answerView(a: Answer, typed: string, shown: Shown): DocumentFragment {
   const out = document.createDocumentFragment();
   const tex = (latex: string, cls = "math", display = false) => math(latex, { display, cls, source: shown.source });
@@ -65,22 +72,33 @@ export function answerView(a: Answer, typed: string, shown: Shown): DocumentFrag
     else if (typeof a.latex === "string") out.append(el("div", { class: "result" }, tex(a.latex, "math", true)));
     return out;
   }
-  // the result, then how strongly it holds and how: "exact  two real roots  checked by two routes"
-  if (s.outcome === "refused") out.append(el("div", { class: "result" }, refusal(a, typed)));
-  else out.append(el("div", { class: "result" }, s.result ? tex(s.result, "math", true) : null,
+  // the head: how the question was read, the result, then how strongly it holds and how
+  const input = s.sections.find((sec) => sec.title === "Input");
+  const read = input?.facts?.length ? el("p", { class: "read" }, ...input.facts.flatMap((f) => [el("span", { class: "label", text: f.label }),
+    f.latex !== undefined ? tex(f.latex) : el("span", { class: "mono", text: f.text ?? "" })])) : null;
+  if (s.outcome === "refused") out.append(el("div", { class: "result" }, read, refusal(a, typed)));
+  else out.append(el("div", { class: "result" }, read, s.result ? tex(s.result, "math", true) : null,
     el("p", { class: s.ok ? "verdict ok" : "verdict" }, el("span", { class: "strength", text: s.verdict.strength }),
       ...s.verdict.notes.map((n) => el("span", { text: n })))));
-  for (const sec of s.sections) {
-    // the plot, which the page draws, goes where the sheet's order puts it: before how it was found
-    if (sec.title === "How it was found") out.append(el("div", { class: "plot-slot" }));
-    // steps where the settings hide them
+  const ctx: SheetContext = { routes: s.routes ?? [], ask: shown.ask, question: input?.facts?.[0]?.latex };
+  const ordered = s.sections.filter((sec) => sec !== input).map((sec, k) => [sec, k] as const).sort((x, y) => rank(x[0].title) - rank(y[0].title) || x[1] - y[1]);
+  let plotted = false;
+  for (const [sec] of ordered) {
+    // the plot, which the page draws, goes where the order puts it
+    if (!plotted && rank(sec.title) >= rank("Plot")) { out.append(el("div", { class: "plot-slot" })); plotted = true; }
     if (sec.steps && !shown.steps) continue;
-    out.append(section(sec, tex, sec.title === "Steps" ? s.routes ?? [] : [], shown.ask));
+    out.append(section(sec, tex, ctx));
   }
+  if (!plotted) out.append(el("div", { class: "plot-slot" }));
   return out;
 }
 
 type Tex = (latex: string, cls?: string, display?: boolean) => HTMLElement;
+
+// what the sections of one sheet share: the routes with their chains, the way to ask a question the
+// sheet offers, the question as read (the root of the routes' tree), and the Steps' tab picker once
+// Steps is drawn, so the tree can open a route's chain
+interface SheetContext { routes: RouteChain[]; ask?: (text: string, rows?: string[]) => void; question?: string; pickRoute?: (route: string) => boolean }
 
 function chain(steps: Step[], title: string, tex: Tex) {
   // numbered by the list itself; what the step does above, its formula under it, the last one paid
@@ -94,7 +112,8 @@ function chain(steps: Step[], title: string, tex: Tex) {
 
 // a section of the sheet; its open state as the person left it, else the core's. Steps with more
 // than one route answering carry a tab each, the route read before first, else the one taken.
-export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?: (text: string, rows?: string[]) => void) {
+export function section(sec: Section, tex: Tex, ctx: SheetContext = { routes: [] }) {
+  const { routes, ask } = ctx;
   const body = el("div", { class: "body" });
   const gist = el("span", { class: "tag", text: sec.gist ?? "" });
   if (sec.rows) for (const r of sec.rows) body.append(tex(r, "math", true));
@@ -113,6 +132,7 @@ export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?:
       el("span", { text: r.route }), r.cost !== undefined ? el("span", { class: "cost", text: String(r.cost) }) : null)));
     body.append(tabs, panel);
     pick(first, false);
+    ctx.pickRoute = (route) => { const k = routes.findIndex((r) => r.route === route); if (k < 0) return false; pick(k, true); return true; };
   } else if (sec.steps) body.append(chain(sec.steps, sec.title, tex));
   if (sec.facts) {
     const dl = el("dl", { class: "facts" });
@@ -122,11 +142,10 @@ export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?:
     body.append(dl);
   }
   if (sec.table) {
-    // the routes tried, the taken one marked; any other table is numbers, in columns
-    const how = sec.title === "How it was found";
-    const table = el("table", { class: how ? "" : "roots" }, el("tr", {}, ...sec.table.columns.map((c) => el("th", { text: c }))),
-      ...sec.table.rows.map((r) => el("tr", {}, ...r.map((c, j) => el("td", { class: how ? (j === 0 && c.endsWith(", taken") ? "taken" : j === 1 ? "num" : "") : "", text: c })))));
-    body.append(el("div", { class: how ? "scroll how" : "scroll" }, table));
+    // the routes tried are a tree from the question; any other table is numbers, in columns
+    if (sec.title === "How it was found") body.append(routeTree(sec.table, ctx, tex));
+    else body.append(el("div", { class: "scroll" }, el("table", { class: "roots" }, el("tr", {}, ...sec.table.columns.map((c) => el("th", { text: c }))),
+      ...sec.table.rows.map((r) => el("tr", {}, ...r.map((c) => el("td", { text: c })))))));
   }
   if (sec.axis) body.append(axisView(sec.axis));
   // what else the question can become: a caption and the question as the library writes it
@@ -135,8 +154,40 @@ export function section(sec: Section, tex: Tex, routes: RouteChain[] = [], ask?:
     return el("li", {}, ask ? el("button", { type: "button", class: "ask", onclick: () => ask(n.text, [n.latex]) }, ...inner) : el("div", {}, ...inner));
   })));
   if (sec.note) body.append(el("p", { class: "note", text: sec.note }));
-  // the steps are the product: shown whatever `open` says, and never folded
-  return foldable(sec.title, gist, sec.steps ? true : sec.open, body, undefined, Boolean(sec.steps));
+  // the steps are the product: shown whatever `open` says, and never folded; the routes compared
+  // are why the answer is what it is, open too
+  return foldable(sec.title, gist, sec.steps || sec.title === "How it was found" ? true : sec.open, body, undefined, Boolean(sec.steps));
+}
+
+// The routes as a decision tree: the question at the root, one branch per route in the core's
+// order of preference, each with its cost drawn against the dearest, what it gave, and its chain
+// (a button that opens that route's tab in Steps); the taken branch marked. A route in the
+// sheet's chains but not in the table (a check of another route) is a branch with its gist. Each
+// branch has a slot for its odds, filled when the core learns how often a route wins.
+function routeTree(table: Table, ctx: SheetContext, tex: Tex): HTMLElement {
+  const col = (name: string) => table.columns.indexOf(name);
+  const rows = table.rows.map((r) => {
+    const name = r[col("route")] ?? r[0] ?? "", taken = name.endsWith(", taken");
+    return { route: taken ? name.slice(0, -", taken".length) : name, cost: Number(r[col("cost")] ?? NaN), gave: r[col("gave")] ?? "", taken };
+  });
+  for (const r of ctx.routes) if (!rows.some((x) => x.route === r.route)) rows.push({ route: r.route, cost: r.cost ?? NaN, gave: "", taken: r.taken });
+  const most = Math.max(1, ...rows.map((r) => (isFinite(r.cost) ? r.cost : 0)));
+  const branch = (r: typeof rows[number], odds?: string) => {
+    const steps = ctx.routes.find((x) => x.route === r.route);
+    const open = steps && ctx.pickRoute ? el("button", { type: "button", class: "steps", text: steps.gist, onclick: () => {
+      if (!ctx.pickRoute?.(r.route)) return;
+      document.querySelector(".route-tabs")?.closest("details")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    } }) : steps ? el("span", { class: "steps", text: steps.gist }) : null;
+    return el("li", { class: r.taken ? "branch taken" : "branch" },
+      el("span", { class: "name" }, r.route, r.taken ? el("span", { class: "chosen", text: "taken" }) : null),
+      el("span", { class: "cost", "aria-label": `cost ${r.cost}` }, isFinite(r.cost) ? el("i", { style: `width: ${Math.round((r.cost / most) * 100)}%` }) : null,
+        el("span", { class: "mono", text: isFinite(r.cost) ? String(r.cost) : "" })),
+      el("span", { class: r.gave ? "gave mono" : "gave gap", text: r.gave || (steps && !r.taken ? "checks" : "") }),
+      odds !== undefined ? el("span", { class: "odds mono", text: odds }) : null, open);
+  };
+  return el("div", { class: "tree" },
+    el("div", { class: "root" }, ctx.question !== undefined ? tex(ctx.question) : el("span", { class: "label", text: "the question" })),
+    el("ol", { class: "branches", "aria-label": "Routes" }, ...rows.map((r) => branch(r))));
 }
 
 // a titled part that folds, open as the person last left one of that title, else as `open`; `fill`

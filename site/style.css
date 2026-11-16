@@ -185,8 +185,11 @@ textarea.text:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 .math .katex-display { margin: 0; text-align: left; }
 .math .katex-display > .katex { text-align: left; }
 code.source { font: 400 var(--t-label)/1.5 var(--f-mono); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-/* the head: the result, then how strongly it holds and how */
+/* the head: how the question was read, the result, then how strongly it holds and how */
 .result { padding: 24px; display: grid; gap: 8px; min-width: 0; }
+.result .read { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 8px; font-size: var(--t-label); color: var(--ink-2); }
+.result .read .label { margin-right: 4px; }
+.result .read .label:not(:first-child) { margin-left: 16px; }
 .result > .math { font-size: 1.35em; color: var(--ink); }
 .verdict { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; font-size: var(--t-label); color: var(--ink-2); }
 .verdict .strength { color: var(--ink-3); font-weight: 500; }
@@ -223,6 +226,30 @@ dl.facts .no { color: var(--warn); }
 table.roots { border-collapse: collapse; font: 400 var(--t-label) var(--f-mono); font-variant-numeric: tabular-nums; width: 100%; }
 table.roots th { text-align: left; font: 500 var(--t-label) var(--f-ui); color: var(--ink-3); padding: 4px 16px 8px 0; border-bottom: 1px solid var(--line-faint); }
 table.roots td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-faint); white-space: nowrap; }
+/* the routes as a tree: the question at the root, a branch per route with its cost drawn against
+   the dearest, what it gave, and its chain; the taken branch in accent */
+.tree { display: grid; gap: 8px; font-size: var(--t-label); }
+.tree .root { color: var(--ink-2); }
+.tree .branches { margin: 0; padding: 0 0 0 24px; list-style: none; display: grid; }
+.tree .branch { position: relative; display: grid; grid-template-columns: minmax(96px, 1fr) 112px minmax(0, 1.4fr) auto; grid-template-areas: "name cost gave steps";
+  gap: 4px 16px; align-items: baseline; padding: 8px 0; }
+.tree .name { grid-area: name; } .tree .cost { grid-area: cost; } .tree .gave { grid-area: gave; } .tree .steps { grid-area: steps; }
+.tree .chosen { margin-left: 8px; }
+.tree .branch::before { content: ""; position: absolute; left: -16px; top: 0; width: 12px; height: 50%; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.tree .branch:not(:last-child)::after { content: ""; position: absolute; left: -16px; top: 50%; bottom: 0; border-left: 1px solid var(--line); }
+.tree .name { color: var(--ink); }
+.tree .taken .name, .tree .chosen { color: var(--accent); font-weight: 500; }
+.tree .cost { display: grid; gap: 3px; align-content: start; }
+.tree .cost i { display: block; height: 3px; border-radius: 2px; background: var(--line); }
+.tree .taken .cost i { background: var(--accent); }
+.tree .gave { overflow-wrap: anywhere; }
+.tree .steps { padding: 0; border: 0; background: none; font: inherit; color: var(--ink-3); white-space: nowrap; }
+.tree button.steps { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+.tree button.steps:hover { color: var(--ink); text-decoration-color: var(--ink-3); }
+@media (max-width: 560px) {
+  .tree .branch { grid-template-columns: minmax(0, 1fr) 96px; grid-template-areas: "name cost" "gave steps"; }
+  .tree .steps { justify-self: end; }
+}
 .how { font-size: var(--t-label); }
 .how table { border-collapse: collapse; width: 100%; }
 .how td, .how th { text-align: left; padding: 6px 16px 6px 0; border-bottom: 1px solid var(--line-faint); vertical-align: top; }

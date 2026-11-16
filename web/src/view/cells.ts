@@ -71,10 +71,12 @@ export class Cards {
     if (from) {
       const box = this.shown.get(from)?.box;
       const slot = box?.querySelector(".answer .plot-slot") ?? box?.querySelector(".also");
-      // closed unless the person keeps plots open; drawn the first time it opens
+      // open, as the plot is part of the answer; drawn on its own once it is in view and the
+      // answer has stood for a moment, so typing does not build a graph per keystroke
       const body = el("div", { class: "body" });
-      if (slot && answer) slot.replaceChildren(foldable("Plot", null, false, body,
-        () => body.append(graphView(answer, { height: 260, curve: this.host.curve(cell) }))));
+      const along = (this.shown.get(from)?.answer?.graph as { along?: string } | undefined)?.along;
+      if (slot && answer) slot.replaceChildren(foldable("Plot", along ? el("span", { class: "tag", text: `along ${along}` }) : null, true, body,
+        () => this.whenSeen(body, () => body.append(graphView(answer, { height: 260, curve: this.host.curve(cell) })))));
       return;
     }
     const s = this.shown.get(cell);
@@ -98,6 +100,22 @@ export class Cards {
     }
     const typed = "text" in cell.written ? cell.written.text : "";
     out.replaceChildren(answerView(answer, typed, { steps: setting(this.doc, cell, "steps"), source: this.host.source(), ask: this.host.ask }));
+  }
+
+  // `draw` once `body` is in view and still on the page 300 ms later; a graph drawn before in
+  // this card gives its WebGL context back first
+  private whenSeen(body: HTMLElement, draw: () => void) {
+    const seen = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      seen.disconnect();
+      setTimeout(() => {
+        if (!body.isConnected || body.firstChild) return;
+        for (const c of this.root.querySelectorAll<HTMLCanvasElement>("canvas.gl")) if (!c.isConnected || !body.contains(c))
+          (c.getContext("webgl2") as WebGL2RenderingContext | null)?.getExtension("WEBGL_lose_context")?.loseContext();
+        draw();
+      }, 300);
+    });
+    seen.observe(body);
   }
 
   // every card is being asked again: its answer stays, dimmed, until the new one comes; one still
