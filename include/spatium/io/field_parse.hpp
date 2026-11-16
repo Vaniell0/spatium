@@ -134,11 +134,22 @@ inline constexpr std::array<Constant, 3> constants{{
 // The reader itself, for a text in which a field is one part: it reads an expression from where
 // it stands up to the first thing that cannot continue it, and a caller reads the words around
 // it (a document line's `x: ... on [0, 1]` is read this way).
+// A function a document defines, `f(t) = 726t + 2815`: its name, its argument, and its body in that
+// argument. A call `f(-5)` on a later line is the body with the argument put in.
+struct UserFunction {
+    std::string name;
+    std::string parameter;
+    Field<double> body;
+};
+
 class FieldReader {
 public:
     // `reserved` are words of the surrounding text (a document line's `in` and `on`), which are not names
     FieldReader(std::string_view text, std::string u, std::string v, std::vector<std::string> reserved = {})
         : s_(text), u_(std::move(u)), v_(std::move(v)), reserved_(std::move(reserved)) {}
+
+    // The functions a call may name besides the language's: those defined above the line.
+    void with_functions(const std::vector<UserFunction>* defined) { user_ = defined; }
 
     // A sum, from the current position up to the first thing that cannot continue it.
     Result<Field<double>> expression() {
@@ -309,6 +320,14 @@ private:
     Result<Field<double>> call(std::string_view name, std::size_t name_at) {
         const int arity = arity_of(name);
         const bool one = arity == 1;
+        if (const UserFunction* f = user_function(name); arity == 0 && f) {
+            take('(');
+            auto a = expression();
+            if (!a) return a;
+            if (!take(')')) return fail(std::format("')' after the argument of {}, which takes one", name));
+            // through a name no text can hold, so f(t + 1) with f's argument t is not read twice
+            return f->body.bind(f->parameter, Field<double>::symbol("\x01")).bind("\x01", *a);
+        }
         if (arity == 0) {
             at_ = name_at;
             std::string known;
@@ -335,10 +354,18 @@ private:
         return f ? f->arity : 0;
     }
 
+    const UserFunction* user_function(std::string_view name) const {
+        if (!user_) return nullptr;
+        for (const auto& f : *user_)
+            if (f.name == name) return &f;
+        return nullptr;
+    }
+
     std::string_view s_;
     std::size_t at_ = 0;
     std::string u_, v_;
     std::vector<std::string> reserved_;
+    const std::vector<UserFunction>* user_ = nullptr;
 };
 
 inline Result<Field<double>> parse(std::string_view text, std::string u = "u", std::string v = "v") {

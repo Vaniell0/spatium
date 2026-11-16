@@ -47,6 +47,8 @@ const Case cases[] = {
     {"", "answer = d/dx sin(x)^2", "d/dx sin(x)^2"},
     {"", "answer = d/dx x^3 at 2", "d/dx x^3 at 2"},
     {"p in [0.5, 4]\n", "g = d/dp exp(-p^2)", ""},
+    {"", "f(t) = 726t + 2815", ""},
+    {"f(t) = 726t + 2815\n", "c = f(-5)", ""},
 };
 
 bd::Document read(const Case& c) {

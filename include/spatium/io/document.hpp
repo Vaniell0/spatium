@@ -165,6 +165,8 @@ inline constexpr StatementForm statement_forms[] = {
                      ["Integrate", "<integrand>", ["Limits|Tuple", "<variable>", "<lo>", "<hi>"]]])"},
     {.kind = StatementKind::Shape, .line = "<name> = <operation>(<args>)"},
     {.kind = StatementKind::Value, .line = "<name> = <value>", .latex = "<named><value>"},
+    // a function of one argument, `f(t) = 726t + 2815`, which a later line calls, `f(-5)`
+    {.kind = StatementKind::Value, .line = "<name>(<variable>) = <value>", .latex = "<name>\\left(<variable>\\right) = <value>"},
     {.kind = StatementKind::Root,
      .line = "<name>: <lhs> <relation> <rhs>",
      .latex = "<lhs> <relation> <rhs>",
@@ -223,11 +225,12 @@ inline Written Statement::* written_slot(std::string_view slot) {
 
 inline bool is_named(const StatementForm& f) { return f.line.starts_with("<name"); }
 inline bool is_system(const StatementForm& f) { return f.line.starts_with("<names>"); }
+inline bool is_function(const StatementForm& f) { return f.line.starts_with("<name>(<variable>)"); }
 
-// the form a statement is written in
-inline const StatementForm& form_of(StatementKind kind, bool system) {
+// the form a statement is written in; a value with an argument is a function
+inline const StatementForm& form_of(StatementKind kind, bool system, bool function = false) {
     for (const auto& f : statement_forms)
-        if (f.kind == kind && is_named(f) && is_system(f) == system) return f;
+        if (f.kind == kind && is_named(f) && is_system(f) == system && is_function(f) == function) return f;
     return statement_forms[0];   // every kind has a named form; held by the round-trip tests
 }
 
@@ -386,6 +389,12 @@ inline Result<void> check(const Document& doc, const std::vector<std::size_t>& l
             if (d.variable == d.name || defined_above(d.variable))
                 return detail::doc_error(line(i), std::format("the variable '{}' of the integral is a name already", d.variable));
         }
+        // a function's argument is a new name: one defined above would be read in its place
+        if (d.kind == StatementKind::Value && !d.variable.empty()) {
+            if (detail::reserved_name(d.variable)) return detail::doc_error(line(i), std::format("'{}' is a word of the language, not a name", d.variable));
+            if (d.variable == d.name || defined_above(d.variable))
+                return detail::doc_error(line(i), std::format("the argument '{}' of {} is a name already", d.variable, d.name));
+        }
         // a derivative's variable is a new name, or a parameter above, which the point is then chosen from
         if (d.kind == StatementKind::Derivative) {
             if (d.variable.empty()) return detail::doc_error(line(i), "a derivative names its variable by d/d, as in d/dx sin(x)");
@@ -466,13 +475,14 @@ struct FormRead {
     bool committed = false;
 };
 
-inline FormRead read_form(const StatementForm& form, std::string_view text) {
+inline FormRead read_form(const StatementForm& form, std::string_view text, const std::vector<UserFunction>* functions = nullptr) {
     const std::string variable = form.kind == StatementKind::Derivative ? derivative_variable(text) : integral_variable(text);
     std::vector<std::string> reserved{"in", "on", "integral"};
     if (form.kind == StatementKind::Derivative) reserved.push_back("at");
     else if (!variable.empty()) reserved.push_back("d" + variable);
     FormRead out{Statement{}, FieldReader(text, "", "", std::move(reserved)), {}, false};
     FieldReader& r = out.reader;
+    r.with_functions(functions);
     Statement& d = *out.statement;
     d.kind = form.kind;
     std::optional<Error> error;
@@ -493,6 +503,7 @@ inline FormRead read_form(const StatementForm& form, std::string_view text) {
     const auto slot = [&](std::string_view p) {
         if (Written Statement::* w = written_slot(p)) return expression(d.*w);
         if (p == "name") return name(d.name);
+        if (p == "variable") return name(d.variable);   // a function's argument
         if (p == "relation") {
             d.relation = relation(r);
             return !d.relation.empty() || stop(r.fail("'=', '<' or '>'"));
@@ -574,12 +585,12 @@ inline FormRead read_form(const StatementForm& form, std::string_view text) {
 // shorthands: the first form that reads it whole, or the error of the first that committed to it;
 // where none did, the error of the one that read furthest, its marks and those of the forms that
 // stopped at the same place named together ("expected '=', ':' or 'in'").
-inline Result<Statement> read_statement(std::string_view text, bool named = true) {
+inline Result<Statement> read_statement(std::string_view text, bool named = true, const std::vector<UserFunction>* functions = nullptr) {
     std::optional<FormRead> furthest;
     std::vector<std::string> expected;
     for (const auto& form : statement_forms) {
         if (is_named(form) != named) continue;
-        FormRead f = read_form(form, text);
+        FormRead f = read_form(form, text, functions);
         if (f.statement || f.committed) return std::move(f.statement);
         const std::size_t at = f.reader.position();
         if (furthest && at < furthest->reader.position()) continue;
@@ -595,10 +606,12 @@ inline Result<Statement> read_statement(std::string_view text, bool named = true
 } // namespace detail
 
 // A document from its text, a definition a line; blank lines and `#` comments are skipped. An
-// error names the line, and a parse error its column in that line.
+// error names the line, and a parse error its column in that line. A function defined on a line,
+// `f(t) = ...`, may be called on the lines below it.
 inline Result<Document> read_document(std::string_view text) {
     Document doc;
     std::vector<std::size_t> line_of;
+    std::vector<UserFunction> functions;
     std::size_t number = 0;
     while (!text.empty()) {
         const std::size_t end = text.find('\n');
@@ -607,8 +620,9 @@ inline Result<Document> read_document(std::string_view text) {
         ++number;
         if (const auto hash = line.find('#'); hash != std::string_view::npos) line = line.substr(0, hash);
         if (detail::trim(line).empty()) continue;
-        auto d = detail::read_statement(line);
+        auto d = detail::read_statement(line, true, &functions);
         if (!d) return detail::doc_error(number, d.error().message);
+        if (d->kind == StatementKind::Value && !d->variable.empty()) functions.push_back({d->name, d->variable, d->value.field});
         doc.statements.push_back(std::move(*d));
         line_of.push_back(number);
     }
@@ -619,7 +633,9 @@ inline Result<Document> read_document(std::string_view text) {
 namespace detail {
 
 // a statement's form, and whether it is written with its bracket
-inline const StatementForm& form_of(const Statement& d) { return form_of(d.kind, !d.also.empty()); }
+inline const StatementForm& form_of(const Statement& d) {
+    return form_of(d.kind, !d.also.empty(), d.kind == StatementKind::Value && !d.variable.empty());
+}
 inline bool written_on(const Statement& d) { return !d.lo.text.empty() || !d.hi.text.empty(); }
 
 // what a slot of a statement's form holds, as the line writes it
@@ -772,7 +788,7 @@ inline Result<Document> document_from_json(const JsonValue& json) {
             return v ? read(key, *v) : std::string();
         };
         const JsonValue* also = d.find("also");
-        const StatementForm& form = detail::form_of(st.kind, also && also->is_array());
+        const StatementForm& form = detail::form_of(st.kind, also && also->is_array(), st.kind == StatementKind::Value && d.find("variable"));
         for (const std::string_view part_of_form : {form.line, d.find("lo") || d.find("hi") ? form.on : std::string_view{}})
             for (const auto& [slot, is_slot] : detail::form_parts(part_of_form)) {
                 if (!is_slot || slot == "name" || slot == "names") continue;

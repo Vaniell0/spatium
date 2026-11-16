@@ -70,6 +70,25 @@ TEST_CASE("document: printed back as written, and read back the same through tex
     CHECK_FALSE(bd::same_document(*doc, *other));
 }
 
+TEST_CASE("document: a function of one argument, called on the lines below it", "[document]") {
+    // the call is the body with the argument put in: 726 * (-5) + 2815
+    const auto doc = bd::read_document("c(t) = 726t + 2815\nanswer = c(-5)\ny = c(c(0) - 2815)");
+    REQUIRE(doc.has_value());
+    CHECK(doc->statements[0].variable == "t");
+    CHECK(bd::to_text(doc->statements[0]) == "c(t) = 726t + 2815");
+    CHECK(bd::to_text(doc->statements[1]) == "answer = c(-5)");   // printed as written, not as the body
+    CHECK(bd::same_value(doc->statements[1].value.field, *bd::parse("726 * (-5) + 2815")));
+    CHECK(bd::same_value(doc->statements[2].value.field, *bd::parse("726 * (726 * 0 + 2815 - 2815) + 2815")));
+    // an argument that holds the parameter's own name is put in once, not read again
+    const auto shifted = bd::read_document("f(t) = t^2\ng(t) = f(t + 1)");
+    REQUIRE(shifted.has_value());
+    CHECK(bd::same_value(shifted->statements[1].value.field, *bd::parse("(t + 1)^2")));
+    // refused: an argument that is a name already, a call with no argument's worth, a call before the definition
+    CHECK_FALSE(bd::read_document("t = 1\nf(t) = t + 1").has_value());
+    CHECK_FALSE(bd::read_document("f(t) = t + 1\nanswer = f(1, 2)").has_value());
+    CHECK_FALSE(bd::read_document("answer = f(1)\nf(t) = t + 1").has_value());
+}
+
 TEST_CASE("document: a system names its unknowns, then an equation each", "[document]") {
     const char* text = "a = 2\nx, y: x + a*y = 5, 3*x - y = 1\n";
     const auto doc = bd::read_document(text);
