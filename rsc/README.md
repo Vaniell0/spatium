@@ -170,7 +170,9 @@ without the model in the loop.
 `rsc/core` is generic: a typed graph with the query for routes, and the tree search; it includes nothing of the
 library. `rsc/spatium` binds it to this library: the graph (`gen_graph.py`), the routes and their witness pairs
 (`rsc_find.py`), the laws, the judge and the fixer, each described in the root `CLAUDE.md`. The answer door the
-site calls, with the synthesis it runs, lives in the library, `include/spatium/answer/`. The design not built yet, the
+site calls, with the synthesis it runs, lives in the library, `include/spatium/answer/`: the boundary is who waits,
+not whether there is a search. What runs while a person waits, bounded and reproducible, is the library's; open-ended
+search, learning and the loop over a project are `rsc/`, and what they find reaches the door as artifacts. The design not built yet, the
 contract of a job, how RSC is brought into another project, and the prototype of 2026-09 are in
 [`docs/roadmap/rsc/README.md`](../docs/roadmap/rsc/README.md); where the idea came from, in
 [`docs/open-problem-rsc.md`](../docs/open-problem-rsc.md).
