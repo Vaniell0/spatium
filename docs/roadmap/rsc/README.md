@@ -18,6 +18,73 @@ The entries of this area, by date, and what they did not do: `python3 scripts/ge
 
 ## Reasoning and earlier history
 
+### Bringing RSC into another project
+
+Moved here from `rsc/README.md` on 2026-11-19, word for word, when that page went back to describing RSC as a
+whole. What a project needs, the parts to build or take from elsewhere, the kinds of task, what a person keeps,
+the task format and the stake a change is scored by: the method of bringing RSC into a project such as GoodNet,
+design until a second project holds it.
+
+#### The parts
+
+| part | what it does | here | state |
+|---|---|---|---|
+| map | who calls whom, who owns what | `rsc/spatium/graph.json`, the call map | built |
+| laws | contracts read off behaviour: what holds, on which objects | `rsc/spatium/rsc_laws.py`, `laws.json` (637 laws, 25 spaces); each law it derives with its chain (`rsc_laws <size> <file>`) | built; consequence pruning to take from QuickSpec |
+| trace invariants | what a stateful component always does across its calls: once per session, never after shutdown | a shim on the plugin table's calls | to build (Daikon's idea) |
+| breaker | moves inputs, or sequences of calls, to where a contract breaks, and shrinks what it finds to the smallest case | the tuples `rsc_laws.cpp` evaluates on | inputs built; sequences and shrinking to take (RapidCheck) |
+| siblings | implementations of one interface run on the same inputs or calls; the one that differs is the task | spaces by the laws; plugins of one table by a shared conformance suite | built for spaces; plugins to build |
+| scheduler | the same interleaving of asynchronous work run twice, so an ordering bug can be checked | an event loop on a fake clock, interleaving by seed | to build; the one heavy part |
+| structural queries | who may call what, which declared surface is empty, which size field goes unchecked | Joern or CodeQL | to take |
+| sanitizers, fuzzing, mutation | the cheapest finders, and the strength of a test | ASan, TSan, libFuzzer, Mull | taken |
+| history | which past fixes a finder would have caught; files that change together | `scripts/replay_fixes.py`; co-change from git | replay built; co-change to build |
+| fixer | whoever writes the fix: a person or a general model run headless | `rsc/spatium/rsc_propose.py` | built |
+| judge | takes a fix only on checks, and cannot be talked round | `rsc/spatium/rsc_judge.py` | built; rules grow from loopholes |
+| task format | one row for every kind of task: the check, the witness, the neighbours that hold it, the verdict's command | `rsc/spatium/tasks.json` | laws' tasks built; one schema for all kinds to build |
+| axioms | what is meant, kept apart from what is observed: each norm with its source, yes or no from a person | `laws-triaged.json`; a norms file | triage built; norms to build |
+
+The breaker and the fixer are two players; the judge decides between them.
+Every case the breaker finds, shrunk, becomes a regression test.
+
+#### What a project needs
+
+A build in one command, tests addressable by name, a sanitizer configuration,
+and fix commits that can be found in its history. GoodNet adds one more: its
+bugs are about order (shutdown, completion after disconnect), and a check of
+order needs a scheduler that runs the same interleaving twice.
+
+#### Kinds of task and their check
+
+| kind | found by | the judge accepts when |
+|---|---|---|
+| a bug | siblings disagree (implementations of one interface on the same inputs), a breaker's case, a sanitizer | the law or clause now holds and nothing else got worse |
+| a clause no test checks | a clause or law no test reaches, an attribute with no single owner | the new test passes on the code and fails on mutants the judge picks |
+| a missing abstraction | a type used in many places and owned by few, one technique repeated, files that always change together | tests and laws hold and the score below is positive |
+
+#### What a person does
+
+Four things, each a file with a format and a check, never a procedure in prose:
+how a plugin is set up for the shared conformance suite; the table from a
+contract's clauses to the tests that check them; the triage of what a finder
+raised and was no defect (`laws-triaged.json`, each with its reason); and yes
+or no on each norm harvested from past fixes, tests and contracts, each with
+its source.
+
+#### Task format
+
+One row of `tasks.json` per task: its kind, the object, the check it names
+(a law, a clause, an invariant), the witness (an input or a sequence of
+calls), the neighbours that hold it, and the command that gives the verdict.
+
+#### The stake a change is scored by
+
+A change is scored as a stake: its price grows faster than its size, and it is
+paid only for gain the judge measured -- a shorter description of the project,
+new laws or clauses checked, a lower counted cost -- growing faster than the
+gain, so a bold change that holds earns more than the small ones adding up to
+it. A refused change loses its stake. A reformat gains nothing and pays its
+size.
+
 ### The contract of a job, the prototype's parts, and the design not built yet
 
 Moved here from `rsc/README.md` on 2026-11-15, word for word, when that page was cut to what is built and
