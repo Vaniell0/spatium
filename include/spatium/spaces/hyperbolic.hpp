@@ -41,12 +41,10 @@ struct Hyperbolic {
     // (acosh of that is 1e-8, not 0). On the sheet a0 b0 = sqrt((1+|a|^2)(1+|b|^2)),
     // and (a0 b0)^2 - (a.b + 1)^2 = |a - b|^2 + sum_{i<j} (a_i b_j - a_j b_i)^2 by
     // Lagrange's identity, so cosh d - 1 is that sum of squares over a0 b0 + a.b + 1,
-    // a denominator of at least 1. Equal points give exactly 0, and d = 2 asinh
-    // sqrt((cosh d - 1)/2) keeps the digits of a short distance as well.
+    // a denominator of at least 1. Equal points give exactly 0.
     // A NaN coordinate stays NaN: every sum below carries it, and nothing is
     // raised by a comparison or max() (which Boost drops a NaN through).
-    ScalarType distance(const PointType& a, const PointType& b) const {
-        using std::asinh; using std::sqrt;
+    static T cosh_minus_one(const PointType& a, const PointType& b) {
         T diff{0}, wedge{0}, dot{0};
         for (std::size_t i = 1; i <= N; ++i) {
             const T d = a[i] - b[i];
@@ -57,8 +55,13 @@ struct Hyperbolic {
                 wedge += w * w;
             }
         }
-        const T cosh_m1 = (diff + wedge) / (a[0] * b[0] + dot + T{1});
-        return T{2} * asinh(sqrt(cosh_m1 / T{2}));
+        return (diff + wedge) / (a[0] * b[0] + dot + T{1});
+    }
+
+    // d = 2 asinh sqrt((cosh d - 1)/2) keeps the digits of a short distance as well.
+    ScalarType distance(const PointType& a, const PointType& b) const {
+        using std::asinh; using std::sqrt;
+        return T{2} * asinh(sqrt(cosh_minus_one(a, b) / T{2}));
     }
 
     // As Sphere::exp_map: the arc length t |v|_L is signed and linear in t,
@@ -102,25 +105,19 @@ struct Hyperbolic {
         return r;
     }
 
+    // proj = q + p <p,q> = (q - p) - p c with c = cosh d - 1 as distance() reads it, of
+    // length sinh d = sqrt(c (c + 2)): nothing cancels in either, so a point's log at
+    // itself is 0 and a short way keeps its digits however far out the two points are.
+    // Read off acosh(-<p,q>), -<q,q> was 1 plus rounding 9 away from the origin, log_q q
+    // a vector 8e-5 long and off the tangent space, and log_q of a point 1e-4 away 3.5e-2
+    // wrong at 8 away (9 at 12).
     TangentVector log_map(const PointType& p, const PointType& q) const {
-        using std::acosh; using std::sqrt; using std::abs;
-        T inner = -minkowski(p, q);       // raised to 1 as in distance(): NaN stays NaN
-        if (inner < T{1}) inner = T{1};
-        auto d = acosh(inner);
-        if (d < epsilon<T>()) return TangentVector{};
-        auto proj = q + p * minkowski(p, q);
-        // |proj|_L is sinh d. Read off proj it cancels as exp's length does;
-        // past d = 1 it is taken from the inner product, sqrt((x - 1)(x + 1)),
-        // where nothing cancels. Below that proj is short and its own length
-        // is the better one.
-        T proj_norm;
-        if (inner > T{2}) proj_norm = sqrt((inner - T{1}) * (inner + T{1}));
-        else {
-            auto proj_norm_sq = minkowski(proj, proj);
-            if (abs(proj_norm_sq) < epsilon<T>() * epsilon<T>()) return TangentVector{};
-            proj_norm = sqrt(abs(proj_norm_sq));
-        }
-        return proj * (d / proj_norm);
+        using std::asinh; using std::sqrt;
+        const T c = cosh_minus_one(p, q);
+        if (!(c > T{0})) return c == T{0} ? TangentVector{} : TangentVector{q * c};   // NaN stays NaN
+        const T d = T{2} * asinh(sqrt(c / T{2}));
+        const TangentVector proj{(q - p) - p * c};
+        return proj * (d / sqrt(c * (c + T{2})));
     }
 
     constexpr ScalarType metric_at(const PointType&,
