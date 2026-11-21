@@ -67,6 +67,23 @@ TEST_CASE("Hyperbolic distance: far from the origin agrees with the closed form"
     }
 }
 
+TEST_CASE("Hyperbolic log: a point's log at itself is 0 and a short way keeps its digits far out", "[hyperbolic][distance_self]") {
+    // Found by chaining laws that hold one by one: d(q, exp_q(log_q q)) = d(q, q)
+    // failed on H^n once the breaker put q 8 away. log read d off acosh(-<p,q>),
+    // which for -<q,q> = 1 plus rounding gave a vector 8e-5 long off the tangent
+    // space, and log_q of a point 1e-4 away was 3.5e-2 wrong at 8 away, 9 at 12.
+    H2 space;
+    for (double far : {0.5, 3.0, 8.0, 12.0}) {
+        const auto q = space.exp_map(H2::origin(), Vec3{0.0, 0.6 * far, 0.8 * far}, 1.0);
+        INFO("far = " << far);
+        CHECK(H2::tangent_norm_sq(q, space.log_map(q, q)) == 0.0);
+        Vec3 v{(0.3 * q[1] - 0.7 * q[2]) / q[0], 0.3, -0.7};   // tangent at q
+        v = v * (1e-4 / std::sqrt(H2::tangent_norm_sq(q, v)));
+        const Vec3 e{space.log_map(q, space.exp_map(q, v, 1.0)) - v};
+        CHECK(std::sqrt(H2::tangent_norm_sq(q, e)) < 1e-4 * 1e-7);
+    }
+}
+
 TEST_CASE("Hyperbolic distance: known values", "[hyperbolic]") {
     H2 space;
     auto o = H2::origin(); // (1, 0, 0)
