@@ -280,7 +280,7 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on Hyperbolic<2>@Real50 > log_map[lift:Real50] | L3 | 1 | 6.4e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on Hyperbolic<2>@Real50 > log_map[lift:Real50] | L3 | 1 | 2e-10 | agrees; the chain of the reference at another scalar |
 | 3 | log_map[member] on Hyperbolic<2>@Dual > log_map[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
@@ -298,9 +298,9 @@ None.
 | 1 | distance[member] | L3 | 1 | 0 | reference: member closed form, L3 |
 | 2 | distance[member] on Hyperbolic<2>@Real50 > distance[lift:Real50] | L3 | 1 | 8.6e-11 | agrees; the chain of the reference at another scalar |
 | 3 | distance[member] on Hyperbolic<2>@Dual > distance[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 6.5e-10 | agrees and independent: witness |
+| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 2.7e-10 | agrees and independent: witness |
 | 5 | log_map[member] on Hyperbolic<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > distance[derived] on Hyperbolic<2>@Real50 > distance[lift:Real50] | L3 | 3 | 8.6e-11 | agrees; the chain of route 4 at another scalar |
-| 6 | log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[lift:Dual] | L3 | 3 | 6.5e-10 | agrees; the chain of route 4 at another scalar |
+| 6 | log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[lift:Dual] | L3 | 3 | 2.7e-10 | agrees; the chain of route 4 at another scalar |
 
 #### norm_at  (reference: route 2, Real50 lift)
 
@@ -330,17 +330,17 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 1.6e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 9.1e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > geodesic[generic] on Hyperbolic<2>@Real50 > geodesic[lift:Real50] | L3 | 3 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > geodesic[generic] on Hyperbolic<2>@Dual > geodesic[lift:Dual] | L3 | 3 | 1.6e-10 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > geodesic[generic] on Hyperbolic<2>@Dual > geodesic[lift:Dual] | L3 | 3 | 9.1e-11 | agrees; the chain of the reference at another scalar |
 
 #### midpoint  (reference: route 2, Real50 lift)
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 3.2e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 1.2e-10 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > geodesic[generic] on Hyperbolic<2>@Real50 > midpoint[generic] on Hyperbolic<2>@Real50 > midpoint[lift:Real50] | L3 | 4 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > geodesic[generic] on Hyperbolic<2>@Dual > midpoint[generic] on Hyperbolic<2>@Dual > midpoint[lift:Dual] | L3 | 4 | 3.2e-10 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > geodesic[generic] on Hyperbolic<2>@Dual > midpoint[generic] on Hyperbolic<2>@Dual > midpoint[lift:Dual] | L3 | 4 | 1.2e-10 | agrees; the chain of the reference at another scalar |
 
 ### S2xE1
 
@@ -784,10 +784,10 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on S2xH2@Real50 > log_map[lift:Real50] | L3 | 1 | 9.2e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on S2xH2@Real50 > log_map[lift:Real50] | L3 | 1 | 3.9e-10 | agrees; the chain of the reference at another scalar |
 | 3 | log_map[member] on S2xH2@Dual > log_map[lift:Dual] | L3 | 1 | 8.6e-10 | agrees; the chain of the reference at another scalar |
 | 4 | log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > log_map[components] | L0 | 3 | 0 | agrees and independent: witness |
-| 5 | log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[components] on S2xH2@Real50 > log_map[lift:Real50] | L0 | 3 | 9.2e-10 | agrees; the chain of route 4 at another scalar |
+| 5 | log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[components] on S2xH2@Real50 > log_map[lift:Real50] | L0 | 3 | 3.9e-10 | agrees; the chain of route 4 at another scalar |
 | 6 | log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[components] on S2xH2@Dual > log_map[lift:Dual] | L0 | 3 | 8.6e-10 | agrees; the chain of route 4 at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
@@ -809,29 +809,29 @@ None.
 | 2 | distance[member] on S2xH2@Real50 > distance[lift:Real50] | L3 | 1 | 1.2e-10 | agrees; the chain of the reference at another scalar |
 | 3 | distance[member] on S2xH2@Dual > distance[lift:Dual] | L3 | 1 | 3.6e-10 | agrees; the chain of the reference at another scalar |
 | 4 | distance[member] on Sphere<2> > distance[member] on Hyperbolic<2> > distance[components] | L0 | 3 | 0 | agrees and independent: witness |
-| 5 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 2.9e-10 | agrees and independent: witness |
+| 5 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 2.2e-10 | agrees and independent: witness |
 | 6 | distance[member] on Sphere<2>@Real50 > distance[member] on Hyperbolic<2>@Real50 > distance[components] on S2xH2@Real50 > distance[lift:Real50] | L0 | 3 | 1.2e-10 | agrees; the chain of route 4 at another scalar |
 | 7 | distance[member] on Sphere<2>@Dual > distance[member] on Hyperbolic<2>@Dual > distance[components] on S2xH2@Dual > distance[lift:Dual] | L0 | 3 | 3.6e-10 | agrees; the chain of route 4 at another scalar |
 | 8 | log_map[member] on S2xH2@Real50 > metric[member] on S2xH2@Real50 > distance[derived] on S2xH2@Real50 > distance[lift:Real50] | L3 | 3 | 1.2e-10 | agrees; the chain of route 5 at another scalar |
-| 9 | log_map[member] on S2xH2@Dual > metric[member] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L3 | 3 | 5.6e-10 | agrees; the chain of route 5 at another scalar |
+| 9 | log_map[member] on S2xH2@Dual > metric[member] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L3 | 3 | 3.6e-10 | agrees; the chain of route 5 at another scalar |
 | 10 | log_map[member] on Sphere<2> > metric[member] on Sphere<2> > distance[member] on Hyperbolic<2> > distance[derived] on Sphere<2> > distance[components] | L0 | 5 | 9.6e-11 | agrees and independent; every node already witnessed |
-| 11 | log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] > log_map[components] > distance[derived] | L0 | 5 | 2.9e-10 | agrees and independent; every node already witnessed |
-| 12 | distance[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > distance[derived] on Hyperbolic<2> > distance[components] | L0 | 5 | 2.9e-10 | agrees and independent; every node already witnessed |
-| 13 | log_map[member] > metric[member] on Sphere<2> > metric[member] on Hyperbolic<2> > metric[components] > distance[derived] | L0 | 5 | 2.9e-10 | agrees and independent; every node already witnessed |
+| 11 | log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] > log_map[components] > distance[derived] | L0 | 5 | 2.2e-10 | agrees and independent; every node already witnessed |
+| 12 | distance[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > distance[derived] on Hyperbolic<2> > distance[components] | L0 | 5 | 2.2e-10 | agrees and independent; every node already witnessed |
+| 13 | log_map[member] > metric[member] on Sphere<2> > metric[member] on Hyperbolic<2> > metric[components] > distance[derived] | L0 | 5 | 2.2e-10 | agrees and independent; every node already witnessed |
 | 14 | log_map[member] on Sphere<2>@Real50 > metric[member] on Sphere<2>@Real50 > distance[member] on Hyperbolic<2>@Real50 > distance[derived] on Sphere<2>@Real50 > distance[components] on S2xH2@Real50 > distance[lift:Real50] | L0 | 5 | 1.2e-10 | agrees; the chain of route 10 at another scalar |
 | 15 | log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > metric[member] on S2xH2@Real50 > log_map[components] on S2xH2@Real50 > distance[derived] on S2xH2@Real50 > distance[lift:Real50] | L0 | 5 | 1.2e-10 | agrees; the chain of route 11 at another scalar |
 | 16 | distance[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > distance[derived] on Hyperbolic<2>@Real50 > distance[components] on S2xH2@Real50 > distance[lift:Real50] | L0 | 5 | 1.2e-10 | agrees; the chain of route 12 at another scalar |
 | 17 | log_map[member] on Sphere<2>@Dual > metric[member] on Sphere<2>@Dual > distance[member] on Hyperbolic<2>@Dual > distance[derived] on Sphere<2>@Dual > distance[components] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 3.6e-10 | agrees; the chain of route 10 at another scalar |
-| 18 | log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on S2xH2@Dual > log_map[components] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 5.6e-10 | agrees; the chain of route 11 at another scalar |
-| 19 | distance[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[components] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 5.6e-10 | agrees; the chain of route 12 at another scalar |
+| 18 | log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on S2xH2@Dual > log_map[components] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 3.6e-10 | agrees; the chain of route 11 at another scalar |
+| 19 | distance[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[components] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 3.6e-10 | agrees; the chain of route 12 at another scalar |
 | 20 | log_map[member] on S2xH2@Real50 > metric[member] on Sphere<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > metric[components] on S2xH2@Real50 > distance[derived] on S2xH2@Real50 > distance[lift:Real50] | L0 | 5 | 1.2e-10 | agrees; the chain of route 13 at another scalar |
-| 21 | log_map[member] on S2xH2@Dual > metric[member] on Sphere<2>@Dual > metric[member] on Hyperbolic<2>@Dual > metric[components] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 5.6e-10 | agrees; the chain of route 13 at another scalar |
-| 22 | log_map[member] on Sphere<2> > metric[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > distance[derived] on Sphere<2> > distance[derived] on Hyperbolic<2> > distance[components] | L0 | 7 | 2.9e-10 | agrees and independent; every node already witnessed |
-| 23 | log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] on Sphere<2> > metric[member] on Hyperbolic<2> > log_map[components] > metric[components] > distance[derived] | L0 | 7 | 2.9e-10 | agrees and independent; every node already witnessed |
+| 21 | log_map[member] on S2xH2@Dual > metric[member] on Sphere<2>@Dual > metric[member] on Hyperbolic<2>@Dual > metric[components] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L0 | 5 | 3.6e-10 | agrees; the chain of route 13 at another scalar |
+| 22 | log_map[member] on Sphere<2> > metric[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > distance[derived] on Sphere<2> > distance[derived] on Hyperbolic<2> > distance[components] | L0 | 7 | 2.2e-10 | agrees and independent; every node already witnessed |
+| 23 | log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > metric[member] on Sphere<2> > metric[member] on Hyperbolic<2> > log_map[components] > metric[components] > distance[derived] | L0 | 7 | 2.2e-10 | agrees and independent; every node already witnessed |
 | 24 | log_map[member] on Sphere<2>@Real50 > metric[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > distance[derived] on Sphere<2>@Real50 > distance[derived] on Hyperbolic<2>@Real50 > distance[components] on S2xH2@Real50 > distance[lift:Real50] | L0 | 7 | 1.2e-10 | agrees; the chain of route 22 at another scalar |
 | 25 | log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > metric[member] on Sphere<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > log_map[components] on S2xH2@Real50 > metric[components] on S2xH2@Real50 > distance[derived] on S2xH2@Real50 > distance[lift:Real50] | L0 | 7 | 1.2e-10 | agrees; the chain of route 23 at another scalar |
-| 26 | log_map[member] on Sphere<2>@Dual > metric[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[derived] on Sphere<2>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[components] on S2xH2@Dual > distance[lift:Dual] | L0 | 7 | 5.6e-10 | agrees; the chain of route 22 at another scalar |
-| 27 | log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on Sphere<2>@Dual > metric[member] on Hyperbolic<2>@Dual > log_map[components] on S2xH2@Dual > metric[components] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L0 | 7 | 5.6e-10 | agrees; the chain of route 23 at another scalar |
+| 26 | log_map[member] on Sphere<2>@Dual > metric[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[derived] on Sphere<2>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[components] on S2xH2@Dual > distance[lift:Dual] | L0 | 7 | 3.6e-10 | agrees; the chain of route 22 at another scalar |
+| 27 | log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > metric[member] on Sphere<2>@Dual > metric[member] on Hyperbolic<2>@Dual > log_map[components] on S2xH2@Dual > metric[components] on S2xH2@Dual > distance[derived] on S2xH2@Dual > distance[lift:Dual] | L0 | 7 | 3.6e-10 | agrees; the chain of route 23 at another scalar |
 
 #### norm_at  (reference: route 2, Real50 lift)
 
@@ -864,16 +864,16 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 1.9e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 9.6e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on S2xH2@Real50 > log_map[member] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > geodesic[lift:Real50] | L3 | 3 | 0 | reference: Real50 lift |
 | 3 | exp_map[member] on S2xH2@Dual > log_map[member] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > geodesic[lift:Dual] | L3 | 3 | 2.4e-10 | agrees; the chain of the reference at another scalar |
-| 4 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] > exp_map[components] > geodesic[generic] | L0 | 5 | 1.9e-10 | agrees; shares S2xH2.geodesic[generic], S2xH2.log_map[member] with the reference |
-| 5 | exp_map[member] > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > log_map[components] > geodesic[generic] | L0 | 5 | 1.9e-10 | agrees; shares S2xH2.exp_map[member], S2xH2.geodesic[generic] with the reference |
+| 4 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] > exp_map[components] > geodesic[generic] | L0 | 5 | 9.6e-11 | agrees; shares S2xH2.geodesic[generic], S2xH2.log_map[member] with the reference |
+| 5 | exp_map[member] > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > log_map[components] > geodesic[generic] | L0 | 5 | 9.6e-11 | agrees; shares S2xH2.exp_map[member], S2xH2.geodesic[generic] with the reference |
 | 6 | exp_map[member] on Sphere<2>@Real50 > exp_map[member] on Hyperbolic<2>@Real50 > log_map[member] on S2xH2@Real50 > exp_map[components] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > geodesic[lift:Real50] | L0 | 5 | 0 | agrees; the chain of route 4 at another scalar |
 | 7 | exp_map[member] on Sphere<2>@Dual > exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on S2xH2@Dual > exp_map[components] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > geodesic[lift:Dual] | L0 | 5 | 2.4e-10 | agrees; the chain of route 4 at another scalar |
 | 8 | exp_map[member] on S2xH2@Real50 > log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[components] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > geodesic[lift:Real50] | L0 | 5 | 0 | agrees; the chain of route 5 at another scalar |
 | 9 | exp_map[member] on S2xH2@Dual > log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[components] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > geodesic[lift:Dual] | L0 | 5 | 2.4e-10 | agrees; the chain of route 5 at another scalar |
-| 10 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > exp_map[components] > log_map[components] > geodesic[generic] | L0 | 7 | 1.9e-10 | agrees; shares S2xH2.geodesic[generic] with the reference |
+| 10 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > exp_map[components] > log_map[components] > geodesic[generic] | L0 | 7 | 9.6e-11 | agrees; shares S2xH2.geodesic[generic] with the reference |
 | 11 | exp_map[member] on Sphere<2>@Real50 > exp_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > exp_map[components] on S2xH2@Real50 > log_map[components] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > geodesic[lift:Real50] | L0 | 7 | 0 | agrees; the chain of route 10 at another scalar |
 | 12 | exp_map[member] on Sphere<2>@Dual > exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > exp_map[components] on S2xH2@Dual > log_map[components] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > geodesic[lift:Dual] | L0 | 7 | 2.4e-10 | agrees; the chain of route 10 at another scalar |
 
@@ -881,16 +881,16 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 3.8e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 1.9e-10 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on S2xH2@Real50 > log_map[member] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > midpoint[generic] on S2xH2@Real50 > midpoint[lift:Real50] | L3 | 4 | 0 | reference: Real50 lift |
 | 3 | exp_map[member] on S2xH2@Dual > log_map[member] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > midpoint[generic] on S2xH2@Dual > midpoint[lift:Dual] | L3 | 4 | 4.7e-10 | agrees; the chain of the reference at another scalar |
-| 4 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] > exp_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 3.8e-10 | agrees; shares S2xH2.geodesic[generic], S2xH2.log_map[member], S2xH2.midpoint[generic] with the reference |
-| 5 | exp_map[member] > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 3.8e-10 | agrees; shares S2xH2.exp_map[member], S2xH2.geodesic[generic], S2xH2.midpoint[generic] with the reference |
+| 4 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] > exp_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 1.9e-10 | agrees; shares S2xH2.geodesic[generic], S2xH2.log_map[member], S2xH2.midpoint[generic] with the reference |
+| 5 | exp_map[member] > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 1.9e-10 | agrees; shares S2xH2.exp_map[member], S2xH2.geodesic[generic], S2xH2.midpoint[generic] with the reference |
 | 6 | exp_map[member] on Sphere<2>@Real50 > exp_map[member] on Hyperbolic<2>@Real50 > log_map[member] on S2xH2@Real50 > exp_map[components] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > midpoint[generic] on S2xH2@Real50 > midpoint[lift:Real50] | L0 | 6 | 0 | agrees; the chain of route 4 at another scalar |
 | 7 | exp_map[member] on Sphere<2>@Dual > exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on S2xH2@Dual > exp_map[components] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > midpoint[generic] on S2xH2@Dual > midpoint[lift:Dual] | L0 | 6 | 4.7e-10 | agrees; the chain of route 4 at another scalar |
 | 8 | exp_map[member] on S2xH2@Real50 > log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[components] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > midpoint[generic] on S2xH2@Real50 > midpoint[lift:Real50] | L0 | 6 | 0 | agrees; the chain of route 5 at another scalar |
 | 9 | exp_map[member] on S2xH2@Dual > log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[components] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > midpoint[generic] on S2xH2@Dual > midpoint[lift:Dual] | L0 | 6 | 4.7e-10 | agrees; the chain of route 5 at another scalar |
-| 10 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > exp_map[components] > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 8 | 3.8e-10 | agrees; shares S2xH2.geodesic[generic], S2xH2.midpoint[generic] with the reference |
+| 10 | exp_map[member] on Sphere<2> > exp_map[member] on Hyperbolic<2> > log_map[member] on Sphere<2> > log_map[member] on Hyperbolic<2> > exp_map[components] > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 8 | 1.9e-10 | agrees; shares S2xH2.geodesic[generic], S2xH2.midpoint[generic] with the reference |
 | 11 | exp_map[member] on Sphere<2>@Real50 > exp_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Sphere<2>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > exp_map[components] on S2xH2@Real50 > log_map[components] on S2xH2@Real50 > geodesic[generic] on S2xH2@Real50 > midpoint[generic] on S2xH2@Real50 > midpoint[lift:Real50] | L0 | 8 | 0 | agrees; the chain of route 10 at another scalar |
 | 12 | exp_map[member] on Sphere<2>@Dual > exp_map[member] on Hyperbolic<2>@Dual > log_map[member] on Sphere<2>@Dual > log_map[member] on Hyperbolic<2>@Dual > exp_map[components] on S2xH2@Dual > log_map[components] on S2xH2@Dual > geodesic[generic] on S2xH2@Dual > midpoint[generic] on S2xH2@Dual > midpoint[lift:Dual] | L0 | 8 | 4.7e-10 | agrees; the chain of route 10 at another scalar |
 
@@ -912,10 +912,10 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on H2xE3@Real50 > log_map[lift:Real50] | L3 | 1 | 6.4e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on H2xE3@Real50 > log_map[lift:Real50] | L3 | 1 | 2e-10 | agrees; the chain of the reference at another scalar |
 | 3 | log_map[member] on H2xE3@Dual > log_map[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
 | 4 | log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > log_map[components] | L0 | 3 | 0 | agrees and independent: witness |
-| 5 | log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > log_map[components] on H2xE3@Real50 > log_map[lift:Real50] | L0 | 3 | 6.4e-10 | agrees; the chain of route 4 at another scalar |
+| 5 | log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > log_map[components] on H2xE3@Real50 > log_map[lift:Real50] | L0 | 3 | 2e-10 | agrees; the chain of route 4 at another scalar |
 | 6 | log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > log_map[components] on H2xE3@Dual > log_map[lift:Dual] | L0 | 3 | 0 | agrees; the chain of route 4 at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
@@ -943,23 +943,23 @@ None.
 | 8 | log_map[member] on H2xE3@Real50 > metric[member] on H2xE3@Real50 > distance[derived] on H2xE3@Real50 > distance[lift:Real50] | L3 | 3 | 1.1e-10 | agrees; the chain of route 5 at another scalar |
 | 9 | log_map[member] on H2xE3@Dual > metric[member] on H2xE3@Dual > distance[derived] on H2xE3@Dual > distance[lift:Dual] | L3 | 3 | 1.9e-10 | agrees; the chain of route 5 at another scalar |
 | 10 | log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > metric[member] > log_map[components] > distance[derived] | L0 | 5 | 1.9e-10 | agrees and independent; every node already witnessed |
-| 11 | log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > distance[member] on Euclidean<3> > distance[derived] on Hyperbolic<2> > distance[components] | L0 | 5 | 2.5e-10 | agrees and independent; every node already witnessed |
+| 11 | log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > distance[member] on Euclidean<3> > distance[derived] on Hyperbolic<2> > distance[components] | L0 | 5 | 1.9e-10 | agrees and independent; every node already witnessed |
 | 12 | distance[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > metric[member] on Euclidean<3> > distance[derived] on Euclidean<3> > distance[components] | L0 | 5 | 0 | agrees and independent; every node already witnessed |
 | 13 | log_map[member] > metric[member] on Hyperbolic<2> > metric[member] on Euclidean<3> > metric[components] > distance[derived] | L0 | 5 | 1.9e-10 | agrees and independent; every node already witnessed |
 | 14 | log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > metric[member] on H2xE3@Real50 > log_map[components] on H2xE3@Real50 > distance[derived] on H2xE3@Real50 > distance[lift:Real50] | L0 | 5 | 1.1e-10 | agrees; the chain of route 10 at another scalar |
 | 15 | log_map[member] on Hyperbolic<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > distance[member] on Euclidean<3>@Real50 > distance[derived] on Hyperbolic<2>@Real50 > distance[components] on H2xE3@Real50 > distance[lift:Real50] | L0 | 5 | 1.1e-10 | agrees; the chain of route 11 at another scalar |
 | 16 | distance[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > metric[member] on Euclidean<3>@Real50 > distance[derived] on Euclidean<3>@Real50 > distance[components] on H2xE3@Real50 > distance[lift:Real50] | L0 | 5 | 1.1e-10 | agrees; the chain of route 12 at another scalar |
 | 17 | log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > metric[member] on H2xE3@Dual > log_map[components] on H2xE3@Dual > distance[derived] on H2xE3@Dual > distance[lift:Dual] | L0 | 5 | 1.9e-10 | agrees; the chain of route 10 at another scalar |
-| 18 | log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[member] on Euclidean<3>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[components] on H2xE3@Dual > distance[lift:Dual] | L0 | 5 | 2.5e-10 | agrees; the chain of route 11 at another scalar |
+| 18 | log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > distance[member] on Euclidean<3>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[components] on H2xE3@Dual > distance[lift:Dual] | L0 | 5 | 1.9e-10 | agrees; the chain of route 11 at another scalar |
 | 19 | distance[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > metric[member] on Euclidean<3>@Dual > distance[derived] on Euclidean<3>@Dual > distance[components] on H2xE3@Dual > distance[lift:Dual] | L0 | 5 | 0 | agrees; the chain of route 12 at another scalar |
 | 20 | log_map[member] on H2xE3@Real50 > metric[member] on Hyperbolic<2>@Real50 > metric[member] on Euclidean<3>@Real50 > metric[components] on H2xE3@Real50 > distance[derived] on H2xE3@Real50 > distance[lift:Real50] | L0 | 5 | 1.1e-10 | agrees; the chain of route 13 at another scalar |
 | 21 | log_map[member] on H2xE3@Dual > metric[member] on Hyperbolic<2>@Dual > metric[member] on Euclidean<3>@Dual > metric[components] on H2xE3@Dual > distance[derived] on H2xE3@Dual > distance[lift:Dual] | L0 | 5 | 1.9e-10 | agrees; the chain of route 13 at another scalar |
 | 22 | log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > metric[member] on Hyperbolic<2> > metric[member] on Euclidean<3> > log_map[components] > metric[components] > distance[derived] | L0 | 7 | 1.9e-10 | agrees and independent; every node already witnessed |
-| 23 | log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > metric[member] on Euclidean<3> > distance[derived] on Hyperbolic<2> > distance[derived] on Euclidean<3> > distance[components] | L0 | 7 | 2.5e-10 | agrees and independent; every node already witnessed |
+| 23 | log_map[member] on Hyperbolic<2> > metric[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > metric[member] on Euclidean<3> > distance[derived] on Hyperbolic<2> > distance[derived] on Euclidean<3> > distance[components] | L0 | 7 | 1.9e-10 | agrees and independent; every node already witnessed |
 | 24 | log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > metric[member] on Hyperbolic<2>@Real50 > metric[member] on Euclidean<3>@Real50 > log_map[components] on H2xE3@Real50 > metric[components] on H2xE3@Real50 > distance[derived] on H2xE3@Real50 > distance[lift:Real50] | L0 | 7 | 1.1e-10 | agrees; the chain of route 22 at another scalar |
 | 25 | log_map[member] on Hyperbolic<2>@Real50 > metric[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > metric[member] on Euclidean<3>@Real50 > distance[derived] on Hyperbolic<2>@Real50 > distance[derived] on Euclidean<3>@Real50 > distance[components] on H2xE3@Real50 > distance[lift:Real50] | L0 | 7 | 1.1e-10 | agrees; the chain of route 23 at another scalar |
 | 26 | log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > metric[member] on Hyperbolic<2>@Dual > metric[member] on Euclidean<3>@Dual > log_map[components] on H2xE3@Dual > metric[components] on H2xE3@Dual > distance[derived] on H2xE3@Dual > distance[lift:Dual] | L0 | 7 | 1.9e-10 | agrees; the chain of route 22 at another scalar |
-| 27 | log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > metric[member] on Euclidean<3>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[derived] on Euclidean<3>@Dual > distance[components] on H2xE3@Dual > distance[lift:Dual] | L0 | 7 | 2.5e-10 | agrees; the chain of route 23 at another scalar |
+| 27 | log_map[member] on Hyperbolic<2>@Dual > metric[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > metric[member] on Euclidean<3>@Dual > distance[derived] on Hyperbolic<2>@Dual > distance[derived] on Euclidean<3>@Dual > distance[components] on H2xE3@Dual > distance[lift:Dual] | L0 | 7 | 1.9e-10 | agrees; the chain of route 23 at another scalar |
 
 #### norm_at  (reference: route 2, Real50 lift)
 
@@ -992,35 +992,35 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 1.6e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 9.1e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on H2xE3@Real50 > log_map[member] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > geodesic[lift:Real50] | L3 | 3 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on H2xE3@Dual > log_map[member] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L3 | 3 | 1.6e-10 | agrees; the chain of the reference at another scalar |
-| 4 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] > exp_map[components] > geodesic[generic] | L0 | 5 | 1.6e-10 | agrees; shares H2xE3.geodesic[generic], H2xE3.log_map[member] with the reference |
-| 5 | exp_map[member] > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > log_map[components] > geodesic[generic] | L0 | 5 | 1.6e-10 | agrees; shares H2xE3.exp_map[member], H2xE3.geodesic[generic] with the reference |
+| 3 | exp_map[member] on H2xE3@Dual > log_map[member] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L3 | 3 | 9.1e-11 | agrees; the chain of the reference at another scalar |
+| 4 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] > exp_map[components] > geodesic[generic] | L0 | 5 | 9.1e-11 | agrees; shares H2xE3.geodesic[generic], H2xE3.log_map[member] with the reference |
+| 5 | exp_map[member] > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > log_map[components] > geodesic[generic] | L0 | 5 | 9.1e-11 | agrees; shares H2xE3.exp_map[member], H2xE3.geodesic[generic] with the reference |
 | 6 | exp_map[member] on Hyperbolic<2>@Real50 > exp_map[member] on Euclidean<3>@Real50 > log_map[member] on H2xE3@Real50 > exp_map[components] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > geodesic[lift:Real50] | L0 | 5 | 0 | agrees; the chain of route 4 at another scalar |
-| 7 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on H2xE3@Dual > exp_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L0 | 5 | 1.6e-10 | agrees; the chain of route 4 at another scalar |
+| 7 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on H2xE3@Dual > exp_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L0 | 5 | 9.1e-11 | agrees; the chain of route 4 at another scalar |
 | 8 | exp_map[member] on H2xE3@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > log_map[components] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > geodesic[lift:Real50] | L0 | 5 | 0 | agrees; the chain of route 5 at another scalar |
-| 9 | exp_map[member] on H2xE3@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L0 | 5 | 1.6e-10 | agrees; the chain of route 5 at another scalar |
-| 10 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > exp_map[components] > log_map[components] > geodesic[generic] | L0 | 7 | 1.6e-10 | agrees; shares H2xE3.geodesic[generic] with the reference |
+| 9 | exp_map[member] on H2xE3@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L0 | 5 | 9.1e-11 | agrees; the chain of route 5 at another scalar |
+| 10 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > exp_map[components] > log_map[components] > geodesic[generic] | L0 | 7 | 9.1e-11 | agrees; shares H2xE3.geodesic[generic] with the reference |
 | 11 | exp_map[member] on Hyperbolic<2>@Real50 > exp_map[member] on Euclidean<3>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > exp_map[components] on H2xE3@Real50 > log_map[components] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > geodesic[lift:Real50] | L0 | 7 | 0 | agrees; the chain of route 10 at another scalar |
-| 12 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > exp_map[components] on H2xE3@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L0 | 7 | 1.6e-10 | agrees; the chain of route 10 at another scalar |
+| 12 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > exp_map[components] on H2xE3@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > geodesic[lift:Dual] | L0 | 7 | 9.1e-11 | agrees; the chain of route 10 at another scalar |
 
 #### midpoint  (reference: route 2, Real50 lift)
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 3.2e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 1.2e-10 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on H2xE3@Real50 > log_map[member] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > midpoint[generic] on H2xE3@Real50 > midpoint[lift:Real50] | L3 | 4 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on H2xE3@Dual > log_map[member] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L3 | 4 | 3.2e-10 | agrees; the chain of the reference at another scalar |
-| 4 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] > exp_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 3.2e-10 | agrees; shares H2xE3.geodesic[generic], H2xE3.log_map[member], H2xE3.midpoint[generic] with the reference |
-| 5 | exp_map[member] > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 3.2e-10 | agrees; shares H2xE3.exp_map[member], H2xE3.geodesic[generic], H2xE3.midpoint[generic] with the reference |
+| 3 | exp_map[member] on H2xE3@Dual > log_map[member] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L3 | 4 | 1.2e-10 | agrees; the chain of the reference at another scalar |
+| 4 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] > exp_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 1.2e-10 | agrees; shares H2xE3.geodesic[generic], H2xE3.log_map[member], H2xE3.midpoint[generic] with the reference |
+| 5 | exp_map[member] > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 6 | 1.2e-10 | agrees; shares H2xE3.exp_map[member], H2xE3.geodesic[generic], H2xE3.midpoint[generic] with the reference |
 | 6 | exp_map[member] on Hyperbolic<2>@Real50 > exp_map[member] on Euclidean<3>@Real50 > log_map[member] on H2xE3@Real50 > exp_map[components] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > midpoint[generic] on H2xE3@Real50 > midpoint[lift:Real50] | L0 | 6 | 0 | agrees; the chain of route 4 at another scalar |
-| 7 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on H2xE3@Dual > exp_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L0 | 6 | 3.2e-10 | agrees; the chain of route 4 at another scalar |
+| 7 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on H2xE3@Dual > exp_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L0 | 6 | 1.2e-10 | agrees; the chain of route 4 at another scalar |
 | 8 | exp_map[member] on H2xE3@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > log_map[components] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > midpoint[generic] on H2xE3@Real50 > midpoint[lift:Real50] | L0 | 6 | 0 | agrees; the chain of route 5 at another scalar |
-| 9 | exp_map[member] on H2xE3@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L0 | 6 | 3.2e-10 | agrees; the chain of route 5 at another scalar |
-| 10 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > exp_map[components] > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 8 | 3.2e-10 | agrees; shares H2xE3.geodesic[generic], H2xE3.midpoint[generic] with the reference |
+| 9 | exp_map[member] on H2xE3@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L0 | 6 | 1.2e-10 | agrees; the chain of route 5 at another scalar |
+| 10 | exp_map[member] on Hyperbolic<2> > exp_map[member] on Euclidean<3> > log_map[member] on Hyperbolic<2> > log_map[member] on Euclidean<3> > exp_map[components] > log_map[components] > geodesic[generic] > midpoint[generic] | L0 | 8 | 1.2e-10 | agrees; shares H2xE3.geodesic[generic], H2xE3.midpoint[generic] with the reference |
 | 11 | exp_map[member] on Hyperbolic<2>@Real50 > exp_map[member] on Euclidean<3>@Real50 > log_map[member] on Hyperbolic<2>@Real50 > log_map[member] on Euclidean<3>@Real50 > exp_map[components] on H2xE3@Real50 > log_map[components] on H2xE3@Real50 > geodesic[generic] on H2xE3@Real50 > midpoint[generic] on H2xE3@Real50 > midpoint[lift:Real50] | L0 | 8 | 0 | agrees; the chain of route 10 at another scalar |
-| 12 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > exp_map[components] on H2xE3@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L0 | 8 | 3.2e-10 | agrees; the chain of route 10 at another scalar |
+| 12 | exp_map[member] on Hyperbolic<2>@Dual > exp_map[member] on Euclidean<3>@Dual > log_map[member] on Hyperbolic<2>@Dual > log_map[member] on Euclidean<3>@Dual > exp_map[components] on H2xE3@Dual > log_map[components] on H2xE3@Dual > geodesic[generic] on H2xE3@Dual > midpoint[generic] on H2xE3@Dual > midpoint[lift:Dual] | L0 | 8 | 1.2e-10 | agrees; the chain of route 10 at another scalar |
 
 ### S2xS2
 
@@ -2244,7 +2244,7 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on Hyperbolic<1>@Real50 > log_map[lift:Real50] | L3 | 1 | 9.3e-09 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on Hyperbolic<1>@Real50 > log_map[lift:Real50] | L3 | 1 | 1.9e-10 | agrees; the chain of the reference at another scalar |
 | 3 | log_map[member] on Hyperbolic<1>@Dual > log_map[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
@@ -2262,9 +2262,9 @@ None.
 | 1 | distance[member] | L3 | 1 | 0 | reference: member closed form, L3 |
 | 2 | distance[member] on Hyperbolic<1>@Real50 > distance[lift:Real50] | L3 | 1 | 5.4e-11 | agrees; the chain of the reference at another scalar |
 | 3 | distance[member] on Hyperbolic<1>@Dual > distance[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 6.7e-09 | agrees and independent: witness |
+| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 2.3e-10 | agrees and independent: witness |
 | 5 | log_map[member] on Hyperbolic<1>@Real50 > metric[member] on Hyperbolic<1>@Real50 > distance[derived] on Hyperbolic<1>@Real50 > distance[lift:Real50] | L3 | 3 | 5.4e-11 | agrees; the chain of route 4 at another scalar |
-| 6 | log_map[member] on Hyperbolic<1>@Dual > metric[member] on Hyperbolic<1>@Dual > distance[derived] on Hyperbolic<1>@Dual > distance[lift:Dual] | L3 | 3 | 6.7e-09 | agrees; the chain of route 4 at another scalar |
+| 6 | log_map[member] on Hyperbolic<1>@Dual > metric[member] on Hyperbolic<1>@Dual > distance[derived] on Hyperbolic<1>@Dual > distance[lift:Dual] | L3 | 3 | 2.3e-10 | agrees; the chain of route 4 at another scalar |
 
 #### norm_at  (reference: route 2, Real50 lift)
 
@@ -2294,17 +2294,17 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 2.3e-09 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 6.9e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<1>@Real50 > log_map[member] on Hyperbolic<1>@Real50 > geodesic[generic] on Hyperbolic<1>@Real50 > geodesic[lift:Real50] | L3 | 3 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<1>@Dual > log_map[member] on Hyperbolic<1>@Dual > geodesic[generic] on Hyperbolic<1>@Dual > geodesic[lift:Dual] | L3 | 3 | 2.3e-09 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<1>@Dual > log_map[member] on Hyperbolic<1>@Dual > geodesic[generic] on Hyperbolic<1>@Dual > geodesic[lift:Dual] | L3 | 3 | 6.9e-11 | agrees; the chain of the reference at another scalar |
 
 #### midpoint  (reference: route 2, Real50 lift)
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 4.7e-09 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 8e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<1>@Real50 > log_map[member] on Hyperbolic<1>@Real50 > geodesic[generic] on Hyperbolic<1>@Real50 > midpoint[generic] on Hyperbolic<1>@Real50 > midpoint[lift:Real50] | L3 | 4 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<1>@Dual > log_map[member] on Hyperbolic<1>@Dual > geodesic[generic] on Hyperbolic<1>@Dual > midpoint[generic] on Hyperbolic<1>@Dual > midpoint[lift:Dual] | L3 | 4 | 4.7e-09 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<1>@Dual > log_map[member] on Hyperbolic<1>@Dual > geodesic[generic] on Hyperbolic<1>@Dual > midpoint[generic] on Hyperbolic<1>@Dual > midpoint[lift:Dual] | L3 | 4 | 8e-11 | agrees; the chain of the reference at another scalar |
 
 ### Hyperbolic<4>
 
@@ -2321,7 +2321,7 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on Hyperbolic<4>@Real50 > log_map[lift:Real50] | L3 | 1 | 5.7e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on Hyperbolic<4>@Real50 > log_map[lift:Real50] | L3 | 1 | 3.2e-10 | agrees; the chain of the reference at another scalar |
 | 3 | log_map[member] on Hyperbolic<4>@Dual > log_map[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
@@ -2339,9 +2339,9 @@ None.
 | 1 | distance[member] | L3 | 1 | 0 | reference: member closed form, L3 |
 | 2 | distance[member] on Hyperbolic<4>@Real50 > distance[lift:Real50] | L3 | 1 | 1.3e-10 | agrees; the chain of the reference at another scalar |
 | 3 | distance[member] on Hyperbolic<4>@Dual > distance[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 4.1e-10 | agrees and independent: witness |
+| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 3.9e-10 | agrees and independent: witness |
 | 5 | log_map[member] on Hyperbolic<4>@Real50 > metric[member] on Hyperbolic<4>@Real50 > distance[derived] on Hyperbolic<4>@Real50 > distance[lift:Real50] | L3 | 3 | 1.3e-10 | agrees; the chain of route 4 at another scalar |
-| 6 | log_map[member] on Hyperbolic<4>@Dual > metric[member] on Hyperbolic<4>@Dual > distance[derived] on Hyperbolic<4>@Dual > distance[lift:Dual] | L3 | 3 | 4.1e-10 | agrees; the chain of route 4 at another scalar |
+| 6 | log_map[member] on Hyperbolic<4>@Dual > metric[member] on Hyperbolic<4>@Dual > distance[derived] on Hyperbolic<4>@Dual > distance[lift:Dual] | L3 | 3 | 3.9e-10 | agrees; the chain of route 4 at another scalar |
 
 #### norm_at  (reference: route 2, Real50 lift)
 
@@ -2371,17 +2371,17 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 8e-11 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 9.8e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<4>@Real50 > log_map[member] on Hyperbolic<4>@Real50 > geodesic[generic] on Hyperbolic<4>@Real50 > geodesic[lift:Real50] | L3 | 3 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<4>@Dual > log_map[member] on Hyperbolic<4>@Dual > geodesic[generic] on Hyperbolic<4>@Dual > geodesic[lift:Dual] | L3 | 3 | 8e-11 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<4>@Dual > log_map[member] on Hyperbolic<4>@Dual > geodesic[generic] on Hyperbolic<4>@Dual > geodesic[lift:Dual] | L3 | 3 | 9.8e-11 | agrees; the chain of the reference at another scalar |
 
 #### midpoint  (reference: route 2, Real50 lift)
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 1.6e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 2.1e-10 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<4>@Real50 > log_map[member] on Hyperbolic<4>@Real50 > geodesic[generic] on Hyperbolic<4>@Real50 > midpoint[generic] on Hyperbolic<4>@Real50 > midpoint[lift:Real50] | L3 | 4 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<4>@Dual > log_map[member] on Hyperbolic<4>@Dual > geodesic[generic] on Hyperbolic<4>@Dual > midpoint[generic] on Hyperbolic<4>@Dual > midpoint[lift:Dual] | L3 | 4 | 1.6e-10 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<4>@Dual > log_map[member] on Hyperbolic<4>@Dual > geodesic[generic] on Hyperbolic<4>@Dual > midpoint[generic] on Hyperbolic<4>@Dual > midpoint[lift:Dual] | L3 | 4 | 2.1e-10 | agrees; the chain of the reference at another scalar |
 
 ### Hyperbolic<8>
 
@@ -2398,7 +2398,7 @@ None.
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
 | 1 | log_map[member] | L3 | 1 | 0 | reference: member closed form, L3 |
-| 2 | log_map[member] on Hyperbolic<8>@Real50 > log_map[lift:Real50] | L3 | 1 | 5.6e-10 | agrees; the chain of the reference at another scalar |
+| 2 | log_map[member] on Hyperbolic<8>@Real50 > log_map[lift:Real50] | L3 | 1 | 4.9e-10 | agrees; the chain of the reference at another scalar |
 | 3 | log_map[member] on Hyperbolic<8>@Dual > log_map[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
 
 #### metric  (reference: route 1, member closed form, L3)
@@ -2416,9 +2416,9 @@ None.
 | 1 | distance[member] | L3 | 1 | 0 | reference: member closed form, L3 |
 | 2 | distance[member] on Hyperbolic<8>@Real50 > distance[lift:Real50] | L3 | 1 | 7.1e-11 | agrees; the chain of the reference at another scalar |
 | 3 | distance[member] on Hyperbolic<8>@Dual > distance[lift:Dual] | L3 | 1 | 0 | agrees; the chain of the reference at another scalar |
-| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 1.5e-09 | agrees and independent: witness |
+| 4 | log_map[member] > metric[member] > distance[derived] | L3 | 3 | 1.6e-09 | agrees and independent: witness |
 | 5 | log_map[member] on Hyperbolic<8>@Real50 > metric[member] on Hyperbolic<8>@Real50 > distance[derived] on Hyperbolic<8>@Real50 > distance[lift:Real50] | L3 | 3 | 7.1e-11 | agrees; the chain of route 4 at another scalar |
-| 6 | log_map[member] on Hyperbolic<8>@Dual > metric[member] on Hyperbolic<8>@Dual > distance[derived] on Hyperbolic<8>@Dual > distance[lift:Dual] | L3 | 3 | 1.5e-09 | agrees; the chain of route 4 at another scalar |
+| 6 | log_map[member] on Hyperbolic<8>@Dual > metric[member] on Hyperbolic<8>@Dual > distance[derived] on Hyperbolic<8>@Dual > distance[lift:Dual] | L3 | 3 | 1.6e-09 | agrees; the chain of route 4 at another scalar |
 
 #### norm_at  (reference: route 2, Real50 lift)
 
@@ -2448,17 +2448,17 @@ None.
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 1.2e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] | L3 | 3 | 9.2e-11 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<8>@Real50 > log_map[member] on Hyperbolic<8>@Real50 > geodesic[generic] on Hyperbolic<8>@Real50 > geodesic[lift:Real50] | L3 | 3 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<8>@Dual > log_map[member] on Hyperbolic<8>@Dual > geodesic[generic] on Hyperbolic<8>@Dual > geodesic[lift:Dual] | L3 | 3 | 1.2e-10 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<8>@Dual > log_map[member] on Hyperbolic<8>@Dual > geodesic[generic] on Hyperbolic<8>@Dual > geodesic[lift:Dual] | L3 | 3 | 9.2e-11 | agrees; the chain of the reference at another scalar |
 
 #### midpoint  (reference: route 2, Real50 lift)
 
 | # | route | level | calls | worst ratio | outcome |
 |---|---|---|---|---|---|
-| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 2.4e-10 | agrees; the chain of the reference at another scalar |
+| 1 | exp_map[member] > log_map[member] > geodesic[generic] > midpoint[generic] | L3 | 4 | 2.7e-10 | agrees; the chain of the reference at another scalar |
 | 2 | exp_map[member] on Hyperbolic<8>@Real50 > log_map[member] on Hyperbolic<8>@Real50 > geodesic[generic] on Hyperbolic<8>@Real50 > midpoint[generic] on Hyperbolic<8>@Real50 > midpoint[lift:Real50] | L3 | 4 | 0 | reference: Real50 lift |
-| 3 | exp_map[member] on Hyperbolic<8>@Dual > log_map[member] on Hyperbolic<8>@Dual > geodesic[generic] on Hyperbolic<8>@Dual > midpoint[generic] on Hyperbolic<8>@Dual > midpoint[lift:Dual] | L3 | 4 | 2.4e-10 | agrees; the chain of the reference at another scalar |
+| 3 | exp_map[member] on Hyperbolic<8>@Dual > log_map[member] on Hyperbolic<8>@Dual > geodesic[generic] on Hyperbolic<8>@Dual > midpoint[generic] on Hyperbolic<8>@Dual > midpoint[lift:Dual] | L3 | 4 | 2.7e-10 | agrees; the chain of the reference at another scalar |
 
 ### TorusTyped
 
