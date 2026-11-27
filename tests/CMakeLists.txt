@@ -188,6 +188,14 @@ target_compile_options(spatium_tests PRIVATE
     -Wall -Wextra -Wpedantic -Wno-unused-parameter
 )
 
+# A kernel on the device against the host, where the headless compute library
+# is built; with no GPU its cases are skipped (SPATIUM_VK_ALLOW_CPU=1 runs them
+# on a software device).
+if(TARGET spatium_compute)
+    target_sources(spatium_tests PRIVATE test_compute.cpp)
+    target_link_libraries(spatium_tests PRIVATE spatium_compute)
+endif()
+
 # ── Modules tests ──────────────────────────────────────────────
 # Compiled only when modules are enabled. Each phase consumes the matching
 # module via `import`; the smoke check (test_modules_smoke.cpp) imports

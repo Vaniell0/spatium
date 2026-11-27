@@ -20,7 +20,7 @@ included.
 | Trees over moving instances | `render/gpu/lbvh.hpp`, `render/gpu/gpu_lbvh_glsl.hpp` | a linear BVH (Karras 2012) on the host, and its build as compute kernels with the sort left on the host |
 | Instances moved on the device | `render/gpu/gpu_instances.hpp` | a Scatter's motion as a kernel generated from its fields |
 | Shaders | `render/gpu/gpu_trace_glsl.hpp`, `render/gpu/gpu_splat_glsl.hpp`, `render/gpu/blackhole_glsl.hpp` | the scene's trace and shade, sub-pixel particles drawn by projection, and a spacetime traced ray by ray through its metric |
-| Device | `viewer/compute.hpp`, `viewer/gpu_lbvh.hpp` (`src/viewer/`) | headless Vulkan compute: a device, host-visible storage buffers, a kernel compiled from GLSL; the LBVH build on it |
+| Device | `viewer/compute.hpp`, `viewer/gpu_lbvh.hpp` (`src/viewer/`) | headless Vulkan compute: a device, host-visible storage buffers, a kernel compiled from GLSL; the LBVH build on it. Its own library, `Spatium::compute`, needs Vulkan and shaderc and no window; `Spatium::viewer` adds the window (`present.cpp`) on top of it |
 
 ## Generated from the IR, and written by hand
 

@@ -297,21 +297,43 @@ if(SPATIUM_BUILD_VIEWER)
             "to silence this warning, or install the missing packages.")
     endif()
 
+    # Headless compute -- a device, buffers, kernels compiled from GLSL at run
+    # time, the device BVH -- needs Vulkan and shaderc and no window, so a
+    # program that only computes links it alone.
+    if(Vulkan_FOUND AND SHADERC_FOUND)
+        add_library(spatium_compute SHARED
+            src/viewer/compute.cpp
+            src/viewer/gpu_lbvh.cpp
+        )
+        add_library(Spatium::compute ALIAS spatium_compute)
+        set_target_properties(spatium_compute PROPERTIES
+            EXPORT_NAME compute
+            POSITION_INDEPENDENT_CODE ON
+        )
+        target_link_libraries(spatium_compute PUBLIC spatium_core Vulkan::Vulkan)
+        target_link_libraries(spatium_compute PRIVATE ${SHADERC_LIBRARIES})
+        target_include_directories(spatium_compute PRIVATE ${SHADERC_INCLUDE_DIRS})
+        target_compile_options(spatium_compute PRIVATE
+            -Wall -Wextra -Wpedantic -Wno-unused-parameter
+        )
+        set(SPATIUM_HAS_COMPUTE TRUE)
+        message(STATUS "Spatium: Vulkan compute ENABLED")
+    else()
+        set(SPATIUM_HAS_COMPUTE FALSE)
+    endif()
+
     if(Vulkan_FOUND AND glfw3_FOUND AND SHADERC_FOUND)
         add_library(spatium_viewer SHARED
             src/viewer/app.cpp
             src/viewer/camera.cpp
-            src/viewer/compute.cpp
-            src/viewer/gpu_lbvh.cpp
+            src/viewer/present.cpp
         )
         add_library(Spatium::viewer ALIAS spatium_viewer)
         set_target_properties(spatium_viewer PROPERTIES
             EXPORT_NAME viewer
             POSITION_INDEPENDENT_CODE ON
         )
-        target_link_libraries(spatium_viewer PUBLIC spatium_core Vulkan::Vulkan glfw)
-        target_link_libraries(spatium_viewer PRIVATE ${SHADERC_LIBRARIES})
-        target_include_directories(spatium_viewer PRIVATE ${SHADERC_INCLUDE_DIRS})
+        target_link_libraries(spatium_viewer PUBLIC spatium_compute glfw)
         target_compile_options(spatium_viewer PRIVATE
             -Wall -Wextra -Wpedantic -Wno-unused-parameter
         )
@@ -385,6 +407,9 @@ endif()
 include(CMakePackageConfigHelpers)
 
 set(_install_targets spatium_sdk spatium_core)
+if(SPATIUM_HAS_COMPUTE)
+    list(APPEND _install_targets spatium_compute)
+endif()
 if(SPATIUM_HAS_VIEWER)
     list(APPEND _install_targets spatium_viewer)
 endif()
@@ -406,6 +431,7 @@ install(EXPORT SpatiumTargets
 
 # Track which optional pieces shipped so downstream consumers can react.
 set(SPATIUM_INSTALLED_HAS_VIEWER ${SPATIUM_HAS_VIEWER})
+set(SPATIUM_INSTALLED_HAS_COMPUTE ${SPATIUM_HAS_COMPUTE})
 set(SPATIUM_INSTALLED_HAS_EIGEN  ${SPATIUM_EIGEN})
 set(SPATIUM_INSTALLED_HAS_IMGUI  ${SPATIUM_HAS_IMGUI})
 set(SPATIUM_INSTALLED_HAS_BOOST  ${SPATIUM_BOOST})
