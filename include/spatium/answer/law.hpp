@@ -34,6 +34,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,12 @@ struct LawSpec {
     std::size_t max_candidates = 4000;
     std::size_t pair_pool = 600;   // the first terms among which every pair is tried
     std::size_t triple_pool = 60;  // and every triple
+    std::vector<double> powers;    // x^e for each e among the terms, for exponents the four rules cannot build (see SynthesisSpec)
+    // The noise covariance of y, n x n row by row, for points whose errors are not independent (overlapping windows,
+    // a shared reference). When it is given, sigma is not read: the data and each term are whitened by its Cholesky
+    // factor, so the residual, the standard errors and the length are those of the correlated noise. Empty: independent
+    // points with the sigma each. A matrix that is not n x n, symmetric and positive definite gives no law.
+    std::vector<double> covariance;
 };
 
 // A coefficient read as a named constant: its value and how it is written.
@@ -227,6 +234,60 @@ inline std::optional<NamedConstant> named(double c, double se) {
     return std::nullopt;
 }
 
+// The lower Cholesky factor of an n x n row-major matrix; empty when it is not symmetric positive definite.
+inline std::vector<double> cholesky_lower(const std::vector<double>& a, std::size_t n) {
+    std::vector<double> l(n * n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j <= i; ++j) {
+            double v = a[i * n + j];
+            if (std::abs(v - a[j * n + i]) > 1e-9 * (std::abs(v) + std::abs(a[j * n + i]) + 1e-300)) return {};
+            for (std::size_t k = 0; k < j; ++k) v -= l[i * n + k] * l[j * n + k];
+            if (i == j) {
+                if (!(v > 0) || !std::isfinite(v)) return {};
+                l[i * n + i] = std::sqrt(v);
+            } else l[i * n + j] = v / l[j * n + j];
+        }
+    return l;
+}
+// z with L z = v (forward substitution), in place.
+inline void whiten(const std::vector<double>& l, std::size_t n, std::vector<double>& v) {
+    for (std::size_t i = 0; i < n; ++i) {
+        double s = v[i];
+        for (std::size_t k = 0; k < i; ++k) s -= l[i * n + k] * v[k];
+        v[i] = s / l[i * n + i];
+    }
+}
+
+// The noise of n points as what weighs a vector: each point divided by its sigma, or the whole whitened by the
+// Cholesky factor of a covariance. Nothing when the noise does not line up with n points, or one point's is no
+// positive finite number, or the matrix is not symmetric positive definite.
+struct Weigh {
+    std::vector<double> chol, sigma;
+    bool correlated = false;
+    std::size_t n = 0;
+    void apply(std::vector<double>& v) const {
+        if (correlated) whiten(chol, n, v);
+        else
+            for (std::size_t i = 0; i < n; ++i) v[i] /= sigma[i];
+    }
+};
+inline std::optional<Weigh> weigh(std::size_t n, const std::vector<double>& sigma, const std::vector<double>& covariance) {
+    Weigh w;
+    w.n = n;
+    w.correlated = !covariance.empty();
+    if (w.correlated) {
+        if (covariance.size() != n * n) return std::nullopt;
+        w.chol = cholesky_lower(covariance, n);
+        if (w.chol.empty()) return std::nullopt;
+    } else {
+        if (sigma.size() != n) return std::nullopt;
+        for (double s : sigma)
+            if (!(s > 0) || !std::isfinite(s)) return std::nullopt;
+        w.sigma = sigma;
+    }
+    return w;
+}
+
 } // namespace law_detail
 
 inline Law synthesize_law(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& sigma,
@@ -234,15 +295,23 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
     using namespace law_detail;
     namespace bd = spatium::io::build;
     const std::size_t n = x.size();
+    // no data, data that does not line up, or a point whose noise is no positive number to weigh it by: no law
+    // (a Law with no terms and an infinite length), not a read of the end of an empty vector
+    if (n == 0 || y.size() != n) return Law{};
+    for (std::size_t i = 0; i < n; ++i)
+        if (!std::isfinite(x[i]) || !std::isfinite(y[i])) return Law{};
+    const auto weigh_of = weigh(n, sigma, spec.covariance);
+    if (!weigh_of) return Law{};
     SynthesisSpec s{.lo = *std::ranges::min_element(x), .hi = *std::ranges::max_element(x), .max_size = spec.max_size,
-                    .unary = spec.unary, .max_candidates = spec.max_candidates, .scaled_variable = false};
+                    .unary = spec.unary, .max_candidates = spec.max_candidates, .scaled_variable = false, .powers = spec.powers};
     const std::vector<Term> terms = enumerate(s, x);
-    // each term's column and y, divided by the noise at each point
+    // each term's column and y, divided by the noise at each point, or whitened by the covariance
     std::vector<std::vector<double>> col(terms.size(), std::vector<double>(n));
-    std::vector<double> b(n);
-    for (std::size_t i = 0; i < n; ++i) b[i] = y[i] / sigma[i];
+    std::vector<double> b = y;
     for (std::size_t t = 0; t < terms.size(); ++t)
-        for (std::size_t i = 0; i < n; ++i) col[t][i] = terms[t].at[i] / sigma[i];
+        for (std::size_t i = 0; i < n; ++i) col[t][i] = terms[t].at[i];
+    weigh_of->apply(b);
+    for (auto& c : col) weigh_of->apply(c);
     const double ln_n = std::log(double(n));
     // a term written out, a symbol a node, each one of x, 1, + - * / and the unary operations
     const double symbol = std::log(6.0 + double(spec.unary.size()));
@@ -254,7 +323,8 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
     Law best;
     std::vector<std::size_t> chosen;
     Fit chosen_fit;
-    std::vector<std::pair<double, std::vector<std::size_t>>> pairs_by_length;
+    // every set offered, by its size and description length: the beam for the sets one term longer
+    std::vector<std::vector<std::pair<double, std::vector<std::size_t>>>> by_size(spec.max_terms + 1);
     const auto offer = [&](std::vector<std::size_t> set) {
         if (set.size() > spec.max_terms) return;
         std::vector<std::vector<double>> cols;
@@ -262,7 +332,7 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
         Fit f = fit(cols, b);
         if (!std::isfinite(f.rss)) return;
         const double l = length(set, f);
-        if (set.size() == 2) pairs_by_length.emplace_back(l, set);
+        if (set.size() >= 2) by_size[set.size()].emplace_back(l, set);
         if (l < best.length) best.length = l, chosen = std::move(set), chosen_fit = std::move(f);
     };
     const std::size_t pairs = std::min(terms.size(), spec.pair_pool), triples = std::min(terms.size(), spec.triple_pool);
@@ -274,13 +344,22 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
         for (std::size_t a = 0; a < triples; ++a)
             for (std::size_t c = a + 1; c < triples; ++c)
                 for (std::size_t d = c + 1; d < triples; ++d) offer({a, c, d});
-        // the best pairs, each with a third term from the whole pool: a law of three whose terms are
-        // not all among the shortest -- x log x, x and 1 for the count of zeros
-        std::ranges::sort(pairs_by_length, {}, &std::pair<double, std::vector<std::size_t>>::first);
-        const auto top = std::vector(pairs_by_length.begin(), pairs_by_length.begin() + std::min<std::ptrdiff_t>(20, std::ssize(pairs_by_length)));
-        for (const auto& [l, pair] : top)
-            for (std::size_t d = 0; d < pairs; ++d)
-                if (d != pair[0] && d != pair[1]) offer({pair[0], pair[1], d});
+        // the best sets of k - 1 terms, each with one more from the pool: a law of three whose terms are
+        // not all among the shortest -- x log x, x and 1 for the count of zeros -- and the same step again past three
+        for (std::size_t k = 3; k <= spec.max_terms; ++k) {
+            auto& prev = by_size[k - 1];
+            std::ranges::sort(prev, {}, &std::pair<double, std::vector<std::size_t>>::first);
+            const auto top = std::vector(prev.begin(), prev.begin() + std::min<std::ptrdiff_t>(20, std::ssize(prev)));
+            std::set<std::vector<std::size_t>> seen;
+            for (const auto& [l, base] : top)
+                for (std::size_t d = 0; d < pairs; ++d) {
+                    if (std::ranges::find(base, d) != base.end()) continue;
+                    auto set = base;
+                    set.push_back(d);
+                    std::ranges::sort(set);
+                    if (seen.insert(set).second) offer(std::move(set));
+                }
+        }
     }
     if (chosen.empty()) return best;
     best.coefficients = chosen_fit.c, best.errors = chosen_fit.se;
