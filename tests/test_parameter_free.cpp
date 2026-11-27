@@ -133,7 +133,7 @@ TEST_CASE("parameter-free: Muon-DoG fits a matrix at any scale with no rate", "[
             return loss;
         };
         MuonDoG<> rule;
-        rule.blocks = {{0, r, c}};
+        rule.blocks = {ParamBlock{.offset = 0, .rows = r, .cols = c}};
         std::array<double, r * c> w{}, g{};
         const double first = loss_grad(w, nullptr);
         for (int t = 0; t < 3000; ++t) {
