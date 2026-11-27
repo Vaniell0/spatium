@@ -35,7 +35,9 @@ public:
 
     // The same, able to present into `window`: the instance gets the
     // surface extensions, the device the swapchain one, and the queue is
-    // one that can compute, draw (ImGui) and present.
+    // one that can compute, draw (ImGui) and present. Defined with the
+    // Presenter, in the viewer library; the compute library alone has
+    // only the constructor above.
     Context(const char* app_name, GLFWwindow* window);
     ~Context();
     Context(const Context&) = delete;
@@ -62,7 +64,10 @@ private:
     friend class Buffer;
     friend class Kernel;
     friend class Presenter;
-    void init_(const char* app_name, GLFWwindow* window);
+    // A window's surface, made once the instance exists; null for none.
+    using SurfaceMaker = VkSurfaceKHR (*)(VkInstance, void* window);
+    void init_(const char* app_name, std::span<const char* const> instance_exts,
+               SurfaceMaker make_surface, void* window);
     std::uint32_t memory_type_(std::uint32_t bits) const;
     void begin_();
     double end_and_wait_();
