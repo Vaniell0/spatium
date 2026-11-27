@@ -46,6 +46,7 @@ struct LawSpec {
     std::size_t max_candidates = 4000;
     std::size_t pair_pool = 600;   // the first terms among which every pair is tried
     std::size_t triple_pool = 60;  // and every triple
+    std::vector<double> powers;    // x^e for each e among the terms, for exponents the four rules cannot build (see SynthesisSpec)
 };
 
 // A coefficient read as a named constant: its value and how it is written.
@@ -234,8 +235,13 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
     using namespace law_detail;
     namespace bd = spatium::io::build;
     const std::size_t n = x.size();
+    // no data, data that does not line up, or a point whose noise is no positive number to weigh it by: no law
+    // (a Law with no terms and an infinite length), not a read of the end of an empty vector
+    if (n == 0 || y.size() != n || sigma.size() != n) return Law{};
+    for (std::size_t i = 0; i < n; ++i)
+        if (!(sigma[i] > 0) || !std::isfinite(sigma[i]) || !std::isfinite(x[i]) || !std::isfinite(y[i])) return Law{};
     SynthesisSpec s{.lo = *std::ranges::min_element(x), .hi = *std::ranges::max_element(x), .max_size = spec.max_size,
-                    .unary = spec.unary, .max_candidates = spec.max_candidates, .scaled_variable = false};
+                    .unary = spec.unary, .max_candidates = spec.max_candidates, .scaled_variable = false, .powers = spec.powers};
     const std::vector<Term> terms = enumerate(s, x);
     // each term's column and y, divided by the noise at each point
     std::vector<std::vector<double>> col(terms.size(), std::vector<double>(n));

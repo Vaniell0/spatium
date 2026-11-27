@@ -107,3 +107,48 @@ TEST_CASE("law: a coefficient that is no named constant keeps its digits", "[ans
             CHECK(std::abs(l.coefficients[j] + 1.7) < 3 * l.errors[j] + 1e-9);
         }
 }
+
+TEST_CASE("law: no data, data of unequal lengths or a point with no noise gives no law", "[answer][law]") {
+    const std::vector<double> none, six{1, 2, 3, 4, 5, 6};
+    const std::vector<sa::Law> laws{
+        sa::synthesize_law(none, none, none),
+        sa::synthesize_law(six, std::vector<double>(5, 1.0), std::vector<double>(6, 1.0)),   // one value short
+        sa::synthesize_law(six, six, std::vector<double>(3, 1.0)),                           // too few noises
+        sa::synthesize_law(six, six, std::vector<double>{1, 1, 0, 1, 1, 1}),                 // a point of noise 0 weighs infinitely
+        sa::synthesize_law(six, six, std::vector<double>{1, 1, -1, 1, 1, 1}),
+    };
+    for (const sa::Law& l : laws) {
+        CHECK(l.terms.empty());
+        CHECK(std::isinf(l.length));
+        CHECK(l.text.empty());
+    }
+}
+
+TEST_CASE("law: powers the caller names are terms the four rules cannot build", "[answer][law]") {
+    // two terms of a phase law, 3 x^(-5/3) + 0.5 x^(-2/3): no sum of 1, x, +, -, *, /, log and sqrt in five nodes is a
+    // power with a third in its exponent, so without the powers the law is not found
+    const auto truth = [](double t) { return 3 * std::pow(t, -5.0 / 3) + 0.5 * std::pow(t, -2.0 / 3); };
+    Data d;
+    Noise unit;
+    for (double t = 20; t <= 400; t *= 1.04) {
+        d.x.push_back(t);
+        d.sigma.push_back(1e-5);
+        d.y.push_back(truth(t) + 1e-5 * unit());
+    }
+    sa::LawSpec with;
+    with.max_terms = 2;
+    with.powers = {-5.0 / 3, -4.0 / 3, -1.0, -2.0 / 3, -1.0 / 3};
+    const sa::Law found = sa::synthesize_law(d.x, d.y, d.sigma, with);
+    INFO(found.text);
+    REQUIRE(found.terms.size() == 2);
+    CHECK(found.rms < 1.5);   // the residual in units of the noise
+    for (double t : {25.0, 100.0, 380.0}) CHECK(std::abs(found.expr(t, 0.0) - truth(t)) < 1e-3 * truth(t));
+    for (std::size_t j = 0; j < found.terms.size(); ++j) CHECK(std::abs(found.coefficients[j]) > 5 * found.errors[j]);
+
+    sa::LawSpec without;
+    without.max_terms = 2;
+    const sa::Law plain = sa::synthesize_law(d.x, d.y, d.sigma, without);
+    INFO(plain.text);
+    CHECK(plain.rms > 5);                  // the case it must fail: no two terms of the four rules reach the noise
+    CHECK(plain.length > found.length);
+}

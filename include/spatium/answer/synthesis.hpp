@@ -54,6 +54,10 @@ struct SynthesisSpec {
     std::size_t exhaustive_triples = 40000; // and of three among the shortest terms, when no pair reaches rounding
     std::size_t polynomial_degree = 0;  // the largest degree of the Chebyshev fallback of a piece; 0 for none
     bool scaled_variable = true;   // the interval's own variable t beside x; a law over data is in x alone
+    // x^e for each e, as terms of two nodes (the power and its exponent). A power with a fractional exponent is no sum, product or
+    // unary operation of x and 1 in a few nodes, and a law over data in a frequency, say a phase in f^(-5/3), f^(-2/3), is a sum of
+    // such powers; the caller who knows which exponents can occur names them here.
+    std::vector<double> powers;
 };
 
 struct Term {
@@ -229,6 +233,12 @@ inline std::vector<Term> enumerate(const SynthesisSpec& spec, const std::vector<
     if (spec.scaled_variable) offer((Expr::u() - Expr(centre)) * Expr(scale), 1);
     offer(Expr::u(), 1); // and x itself, for the forms that are global (sin x, 4 / b)
     offer(Expr(1.0), 1);
+    if (spec.max_size >= 2)
+        for (double e : spec.powers) {
+            // an exponent that is a small fraction is built as that fraction, so the law reads x^(-5 / 3) and not x^(-1.6666666666666667)
+            const auto q = synthesis_detail::simplest_fraction(e, 1e-12, 64);
+            offer(pow(Expr::u(), q && q->second > 1 ? Expr(double(q->first)) / Expr(double(q->second)) : Expr(e)), 2);
+        }
     for (std::size_t s = 2; s <= spec.max_size && count < spec.max_candidates; ++s) {
         for (const Term& t : std::vector<Term>(by_size[s - 1]))
             for (Unary op : spec.unary)
