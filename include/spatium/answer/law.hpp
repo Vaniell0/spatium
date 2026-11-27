@@ -258,6 +258,36 @@ inline void whiten(const std::vector<double>& l, std::size_t n, std::vector<doub
     }
 }
 
+// The noise of n points as what weighs a vector: each point divided by its sigma, or the whole whitened by the
+// Cholesky factor of a covariance. Nothing when the noise does not line up with n points, or one point's is no
+// positive finite number, or the matrix is not symmetric positive definite.
+struct Weigh {
+    std::vector<double> chol, sigma;
+    bool correlated = false;
+    std::size_t n = 0;
+    void apply(std::vector<double>& v) const {
+        if (correlated) whiten(chol, n, v);
+        else
+            for (std::size_t i = 0; i < n; ++i) v[i] /= sigma[i];
+    }
+};
+inline std::optional<Weigh> weigh(std::size_t n, const std::vector<double>& sigma, const std::vector<double>& covariance) {
+    Weigh w;
+    w.n = n;
+    w.correlated = !covariance.empty();
+    if (w.correlated) {
+        if (covariance.size() != n * n) return std::nullopt;
+        w.chol = cholesky_lower(covariance, n);
+        if (w.chol.empty()) return std::nullopt;
+    } else {
+        if (sigma.size() != n) return std::nullopt;
+        for (double s : sigma)
+            if (!(s > 0) || !std::isfinite(s)) return std::nullopt;
+        w.sigma = sigma;
+    }
+    return w;
+}
+
 } // namespace law_detail
 
 inline Law synthesize_law(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& sigma,
@@ -267,32 +297,21 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
     const std::size_t n = x.size();
     // no data, data that does not line up, or a point whose noise is no positive number to weigh it by: no law
     // (a Law with no terms and an infinite length), not a read of the end of an empty vector
-    const bool correlated = !spec.covariance.empty();
-    if (n == 0 || y.size() != n || (correlated ? spec.covariance.size() != n * n : sigma.size() != n)) return Law{};
+    if (n == 0 || y.size() != n) return Law{};
     for (std::size_t i = 0; i < n; ++i)
-        if ((!correlated && (!(sigma[i] > 0) || !std::isfinite(sigma[i]))) || !std::isfinite(x[i]) || !std::isfinite(y[i])) return Law{};
-    std::vector<double> chol;
-    if (correlated) {
-        chol = cholesky_lower(spec.covariance, n);
-        if (chol.empty()) return Law{};
-    }
+        if (!std::isfinite(x[i]) || !std::isfinite(y[i])) return Law{};
+    const auto weigh_of = weigh(n, sigma, spec.covariance);
+    if (!weigh_of) return Law{};
     SynthesisSpec s{.lo = *std::ranges::min_element(x), .hi = *std::ranges::max_element(x), .max_size = spec.max_size,
                     .unary = spec.unary, .max_candidates = spec.max_candidates, .scaled_variable = false, .powers = spec.powers};
     const std::vector<Term> terms = enumerate(s, x);
     // each term's column and y, divided by the noise at each point, or whitened by the covariance
     std::vector<std::vector<double>> col(terms.size(), std::vector<double>(n));
-    std::vector<double> b(n);
-    for (std::size_t i = 0; i < n; ++i) b[i] = y[i];
+    std::vector<double> b = y;
     for (std::size_t t = 0; t < terms.size(); ++t)
         for (std::size_t i = 0; i < n; ++i) col[t][i] = terms[t].at[i];
-    if (correlated) {
-        whiten(chol, n, b);
-        for (auto& c : col) whiten(chol, n, c);
-    } else {
-        for (std::size_t i = 0; i < n; ++i) b[i] /= sigma[i];
-        for (auto& c : col)
-            for (std::size_t i = 0; i < n; ++i) c[i] /= sigma[i];
-    }
+    weigh_of->apply(b);
+    for (auto& c : col) weigh_of->apply(c);
     const double ln_n = std::log(double(n));
     // a term written out, a symbol a node, each one of x, 1, + - * / and the unary operations
     const double symbol = std::log(6.0 + double(spec.unary.size()));

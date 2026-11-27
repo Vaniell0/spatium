@@ -1,0 +1,15 @@
+---
+date: 2026-11-27
+title: a resonance in noisy data is counted, and its frequency and decay time read with their errors
+files: [include/spatium/answer/modes.hpp, include/spatium/answer/law.hpp, tests/test_answer_modes.cpp]
+resolves: [evaluation/a-law-over-data-takes-named-powers-and-refuses-no-data#2]
+open:
+  - only the damped sinusoid is a family with nonlinear numbers; a power law with a free exponent, or a Lorentzian line, would be another column function and the same projection of the amplitudes, but nothing asks for it yet
+  - the search is a grid for the start and a simplex for the refinement, a local optimum of a surface with several; a mode narrower than a grid step can be missed, and the grid's range and step are the caller's to set
+---
+
+`synthesize_law` fits a sum of terms whose only free numbers stand in front of them, so a resonance, exp(-x / tau) cos(2 pi f x), whose f and tau sit inside the operations, was out of its reach. `synthesize_modes` (`answer/modes.hpp`) fits a sum of N such modes with the amplitudes of the cosine and the sine linear and f, tau nonlinear. At each trial of the nonlinear numbers the amplitudes are eliminated by least squares (the same fit as the law's), so the search is over 2N numbers: mode N + 1 starts from the best point of a grid of f and tau with the first N held, then all 2(N + 1) numbers are refined by the simplex method of Nelder and Mead. The count is the one of least description length, n ln(RSS / n) + 4 N ln n, and each mode comes with the standard errors of f and tau from the Gauss-Newton Jacobian of the whitened model.
+
+The noise is read as in the law: a sigma at each point, or a covariance whitened by its Cholesky factor, a bad one giving nothing. The weighing is now one helper (`law_detail::weigh`) that both functions call, so the law's behaviour is unchanged (its 54 assertions still hold).
+
+Held two ways. On a signal of two modes near 250 and 340 Hz with decay times of 4 and 2 ms over 30 ms at 4096 samples a second: with white noise one mode is counted as one in 20 of 20 seeds with the frequency and the decay time within three standard errors of the truth, two as two, and noise alone as none; with AR(1) noise of correlation 0.8 given as a covariance, one mode is found in at least 18 of 20 and none in noise alone in at least 18 of 20. And on the post-peak strain of GW150914 in H1 against the Python prototype of the same model (generalised least squares with the noise covariance estimated off source): windows of 30 ms starting at 0, 2 and 4 ms after the peak give the same count (one mode), the same description lengths for none, one and two modes (66.2, 11.9, 20.1; 38.3, 14.4, 25.9; 11.0, 7.7, 21.0), and the same f and tau with their errors to the printed digits (229.0 +- 7.2 Hz and 5.03 +- 1.05 ms at the start of the window, 250.7 +- 9.0 Hz and 6.6 +- 2.7 ms at 4 ms), in 0.5 s for the three windows. The second mode costs more than it gains in all three: the data do not hold two modes at this signal to noise, which the description length says in numbers.
