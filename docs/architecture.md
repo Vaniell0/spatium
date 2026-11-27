@@ -266,6 +266,7 @@ algebra/                                — linear algebra, complex, polynomials
   models/network.hpp                     TanhNet<F, H, T> — one hidden tanh layer, squared loss, backward pass
   models/tree.hpp                        ScoreTree<K, T> — column thresholds scoring a row, bits; softmax of scores
   analysis/optimize.hpp                  AdaGrad<N, T>, Adam<N, T>, Muon<N, R, C, T> — step rules given a gradient
+  analysis/parameter_free.hpp            LayerDoG<T>, MuonDoG<T>, PolyAverage<T> — step rules with no rate, shaped at run time
 
 spaces/                                 — concrete mathematical spaces
   euclidean.hpp          94 lines        Euclidean<N,T> — flat space, satisfies all concepts
@@ -324,6 +325,7 @@ render/                                 — CPU-raytracer utilities
 statistics/                             — fitting parameters to a sample
   fit.hpp                                fit_pass — one pass, the loss and gradient from the caller, the step from a rule
   information.hpp                        entropy, cross_entropy, kl_divergence, in_bits
+  sprt.hpp                               Sprt — Wald's sequential test of which of two players is stronger
   tree_fit.hpp                           fit_tree — a regression tree by CART
 
 discrete/                               — finite sets and the rules of chess

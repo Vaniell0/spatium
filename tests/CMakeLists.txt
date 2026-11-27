@@ -22,6 +22,8 @@ add_executable(spatium_tests
     test_softmax.cpp
     test_network.cpp
     test_information.cpp
+    test_parameter_free.cpp
+    test_sprt.cpp
     test_tree.cpp
     test_tree_search.cpp
     test_return_time.cpp
