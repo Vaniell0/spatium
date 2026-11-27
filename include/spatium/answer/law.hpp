@@ -48,6 +48,11 @@ struct LawSpec {
     std::size_t pair_pool = 600;   // the first terms among which every pair is tried
     std::size_t triple_pool = 60;  // and every triple
     std::vector<double> powers;    // x^e for each e among the terms, for exponents the four rules cannot build (see SynthesisSpec)
+    // The noise covariance of y, n x n row by row, for points whose errors are not independent (overlapping windows,
+    // a shared reference). When it is given, sigma is not read: the data and each term are whitened by its Cholesky
+    // factor, so the residual, the standard errors and the length are those of the correlated noise. Empty: independent
+    // points with the sigma each. A matrix that is not n x n, symmetric and positive definite gives no law.
+    std::vector<double> covariance;
 };
 
 // A coefficient read as a named constant: its value and how it is written.
@@ -229,6 +234,30 @@ inline std::optional<NamedConstant> named(double c, double se) {
     return std::nullopt;
 }
 
+// The lower Cholesky factor of an n x n row-major matrix; empty when it is not symmetric positive definite.
+inline std::vector<double> cholesky_lower(const std::vector<double>& a, std::size_t n) {
+    std::vector<double> l(n * n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j <= i; ++j) {
+            double v = a[i * n + j];
+            if (std::abs(v - a[j * n + i]) > 1e-9 * (std::abs(v) + std::abs(a[j * n + i]) + 1e-300)) return {};
+            for (std::size_t k = 0; k < j; ++k) v -= l[i * n + k] * l[j * n + k];
+            if (i == j) {
+                if (!(v > 0) || !std::isfinite(v)) return {};
+                l[i * n + i] = std::sqrt(v);
+            } else l[i * n + j] = v / l[j * n + j];
+        }
+    return l;
+}
+// z with L z = v (forward substitution), in place.
+inline void whiten(const std::vector<double>& l, std::size_t n, std::vector<double>& v) {
+    for (std::size_t i = 0; i < n; ++i) {
+        double s = v[i];
+        for (std::size_t k = 0; k < i; ++k) s -= l[i * n + k] * v[k];
+        v[i] = s / l[i * n + i];
+    }
+}
+
 } // namespace law_detail
 
 inline Law synthesize_law(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& sigma,
@@ -238,18 +267,32 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
     const std::size_t n = x.size();
     // no data, data that does not line up, or a point whose noise is no positive number to weigh it by: no law
     // (a Law with no terms and an infinite length), not a read of the end of an empty vector
-    if (n == 0 || y.size() != n || sigma.size() != n) return Law{};
+    const bool correlated = !spec.covariance.empty();
+    if (n == 0 || y.size() != n || (correlated ? spec.covariance.size() != n * n : sigma.size() != n)) return Law{};
     for (std::size_t i = 0; i < n; ++i)
-        if (!(sigma[i] > 0) || !std::isfinite(sigma[i]) || !std::isfinite(x[i]) || !std::isfinite(y[i])) return Law{};
+        if ((!correlated && (!(sigma[i] > 0) || !std::isfinite(sigma[i]))) || !std::isfinite(x[i]) || !std::isfinite(y[i])) return Law{};
+    std::vector<double> chol;
+    if (correlated) {
+        chol = cholesky_lower(spec.covariance, n);
+        if (chol.empty()) return Law{};
+    }
     SynthesisSpec s{.lo = *std::ranges::min_element(x), .hi = *std::ranges::max_element(x), .max_size = spec.max_size,
                     .unary = spec.unary, .max_candidates = spec.max_candidates, .scaled_variable = false, .powers = spec.powers};
     const std::vector<Term> terms = enumerate(s, x);
-    // each term's column and y, divided by the noise at each point
+    // each term's column and y, divided by the noise at each point, or whitened by the covariance
     std::vector<std::vector<double>> col(terms.size(), std::vector<double>(n));
     std::vector<double> b(n);
-    for (std::size_t i = 0; i < n; ++i) b[i] = y[i] / sigma[i];
+    for (std::size_t i = 0; i < n; ++i) b[i] = y[i];
     for (std::size_t t = 0; t < terms.size(); ++t)
-        for (std::size_t i = 0; i < n; ++i) col[t][i] = terms[t].at[i] / sigma[i];
+        for (std::size_t i = 0; i < n; ++i) col[t][i] = terms[t].at[i];
+    if (correlated) {
+        whiten(chol, n, b);
+        for (auto& c : col) whiten(chol, n, c);
+    } else {
+        for (std::size_t i = 0; i < n; ++i) b[i] /= sigma[i];
+        for (auto& c : col)
+            for (std::size_t i = 0; i < n; ++i) c[i] /= sigma[i];
+    }
     const double ln_n = std::log(double(n));
     // a term written out, a symbol a node, each one of x, 1, + - * / and the unary operations
     const double symbol = std::log(6.0 + double(spec.unary.size()));
