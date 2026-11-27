@@ -34,6 +34,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -260,7 +261,8 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
     Law best;
     std::vector<std::size_t> chosen;
     Fit chosen_fit;
-    std::vector<std::pair<double, std::vector<std::size_t>>> pairs_by_length;
+    // every set offered, by its size and description length: the beam for the sets one term longer
+    std::vector<std::vector<std::pair<double, std::vector<std::size_t>>>> by_size(spec.max_terms + 1);
     const auto offer = [&](std::vector<std::size_t> set) {
         if (set.size() > spec.max_terms) return;
         std::vector<std::vector<double>> cols;
@@ -268,7 +270,7 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
         Fit f = fit(cols, b);
         if (!std::isfinite(f.rss)) return;
         const double l = length(set, f);
-        if (set.size() == 2) pairs_by_length.emplace_back(l, set);
+        if (set.size() >= 2) by_size[set.size()].emplace_back(l, set);
         if (l < best.length) best.length = l, chosen = std::move(set), chosen_fit = std::move(f);
     };
     const std::size_t pairs = std::min(terms.size(), spec.pair_pool), triples = std::min(terms.size(), spec.triple_pool);
@@ -280,13 +282,22 @@ inline Law synthesize_law(const std::vector<double>& x, const std::vector<double
         for (std::size_t a = 0; a < triples; ++a)
             for (std::size_t c = a + 1; c < triples; ++c)
                 for (std::size_t d = c + 1; d < triples; ++d) offer({a, c, d});
-        // the best pairs, each with a third term from the whole pool: a law of three whose terms are
-        // not all among the shortest -- x log x, x and 1 for the count of zeros
-        std::ranges::sort(pairs_by_length, {}, &std::pair<double, std::vector<std::size_t>>::first);
-        const auto top = std::vector(pairs_by_length.begin(), pairs_by_length.begin() + std::min<std::ptrdiff_t>(20, std::ssize(pairs_by_length)));
-        for (const auto& [l, pair] : top)
-            for (std::size_t d = 0; d < pairs; ++d)
-                if (d != pair[0] && d != pair[1]) offer({pair[0], pair[1], d});
+        // the best sets of k - 1 terms, each with one more from the pool: a law of three whose terms are
+        // not all among the shortest -- x log x, x and 1 for the count of zeros -- and the same step again past three
+        for (std::size_t k = 3; k <= spec.max_terms; ++k) {
+            auto& prev = by_size[k - 1];
+            std::ranges::sort(prev, {}, &std::pair<double, std::vector<std::size_t>>::first);
+            const auto top = std::vector(prev.begin(), prev.begin() + std::min<std::ptrdiff_t>(20, std::ssize(prev)));
+            std::set<std::vector<std::size_t>> seen;
+            for (const auto& [l, base] : top)
+                for (std::size_t d = 0; d < pairs; ++d) {
+                    if (std::ranges::find(base, d) != base.end()) continue;
+                    auto set = base;
+                    set.push_back(d);
+                    std::ranges::sort(set);
+                    if (seen.insert(set).second) offer(std::move(set));
+                }
+        }
     }
     if (chosen.empty()) return best;
     best.coefficients = chosen_fit.c, best.errors = chosen_fit.se;

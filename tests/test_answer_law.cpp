@@ -152,3 +152,28 @@ TEST_CASE("law: powers the caller names are terms the four rules cannot build", 
     CHECK(plain.rms > 5);                  // the case it must fail: no two terms of the four rules reach the noise
     CHECK(plain.length > found.length);
 }
+
+TEST_CASE("law: more than three terms are searched when the caller allows them", "[answer][law]") {
+    // four terms, each a named power or x: a search that stops at triples leaves a residual far above the noise
+    const auto truth = [](double t) { return 3 * std::pow(t, -5.0 / 3) + 2 * std::pow(t, -1.0) - 1.5 * std::pow(t, -1.0 / 3) + 0.01 * t; };
+    Data d;
+    Noise unit;
+    for (double t = 5; t <= 400; t *= 1.04) {
+        d.x.push_back(t);
+        d.sigma.push_back(1e-6);
+        d.y.push_back(truth(t) + 1e-6 * unit());
+    }
+    sa::LawSpec spec;
+    spec.max_terms = 4;
+    spec.powers = {-5.0 / 3, -1.0, -1.0 / 3};
+    const sa::Law found = sa::synthesize_law(d.x, d.y, d.sigma, spec);
+    INFO(found.text);
+    REQUIRE(found.terms.size() == 4);
+    CHECK(found.rms < 1.5);
+    for (double t : {6.0, 50.0, 390.0}) CHECK(std::abs(found.expr(t, 0.0) - truth(t)) < 1e-4 * std::abs(truth(t)));
+
+    spec.max_terms = 3;
+    const sa::Law three = sa::synthesize_law(d.x, d.y, d.sigma, spec);
+    CHECK(three.terms.size() <= 3);
+    CHECK(three.rms > 5);
+}

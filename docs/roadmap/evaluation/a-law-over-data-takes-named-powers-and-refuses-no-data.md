@@ -1,6 +1,6 @@
 ---
 date: 2026-11-27
-title: a law over data takes the powers its caller names, and gives no law for no data
+title: a law over data takes the powers its caller names, searches past three terms, and gives no law for no data
 files: [include/spatium/answer/law.hpp, include/spatium/answer/synthesis.hpp, tests/test_answer_law.cpp]
 open:
   - the exponent of a named power is written x^((-5) / 3), the fraction built from two constants, not x^(-5/3)
@@ -11,3 +11,5 @@ open:
 `synthesize_law` read the end of an empty vector when it was given no data: an empty file or a first argument that is no file ended in a segmentation fault. It now returns a `Law` with no terms and an infinite length, as it does for data that do not line up (y or sigma of another length than x) and for a point whose noise is not a positive finite number, which would weigh it infinitely, or whose x or y is not finite.
 
 A law over data in a frequency, a phase in f^(-5/3), f^(-2/3), is a sum of powers with a third in the exponent, and no expression of x and 1 under + - * / and log, sqrt, sin, cos, exp in five nodes is one. `LawSpec::powers` (and `SynthesisSpec::powers`) lets the caller who knows which exponents can occur name them: each is a term of two nodes, the exponent built as the fraction it is where it is a small one. Held on 3 x^(-5/3) + 0.5 x^(-2/3) from 20 to 400 with noise 1e-5: with the powers named the law is found, the residual is within 1.5 sigma and its values are within 1e-3 of the truth at three points; with none, no two terms of the other rules reach the noise (residual over 5 sigma) and the length is larger.
+
+`LawSpec::max_terms` above three was ignored: the search enumerated single terms, pairs and triples and stopped, so a law of four or six terms, a phase ladder with its time and phase offsets, came back as three terms and a residual far above the noise. The search now grows past three the way it already grew the triples from the pairs: for each size k, the twenty shortest sets of k - 1 terms, each with one more term from the pool. Held on four terms (x^(-5/3), x^(-1), x^(-1/3), x) from 5 to 400 with noise 1e-6: with `max_terms = 4` four terms are found, the residual is within 1.5 sigma and the values within 1e-4 of the truth; with `max_terms = 3` the residual stays over 5 sigma. The beam is a heuristic, not an exhaustive search, as the triples from pairs already were; a phase over a band of a decade or less has terms so nearly collinear (x^(-1), x^(-2/3), x^(-1/3), 1, x) that several sets of four reach the noise, and the one chosen need not be the one that generated the data.
