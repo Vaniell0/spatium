@@ -25,6 +25,7 @@ export import :models_softmax;
 export import :models_network;
 export import :models_tree;
 export import :analysis_optimize;
+export import :analysis_parameter_free;
 export import :dual;
 export import :ode;
 export import :linear_solve;
