@@ -228,6 +228,46 @@ TEST_CASE("evaluate: the calculator's shorthand is the document line it stands f
     CHECK(bd::to_text(*back) == "y: (y - 1)(y + 2) = 4 - y\n");
 }
 
+TEST_CASE("evaluate: an inequality is drawn as its left side less its right", "[rsc][evaluate][plot]") {
+    // around the roots on its axis, with a margin on each side; the request draws
+    const auto graph = [](std::string_view line) {
+        const auto r = spatium::answer::respond(line);
+        const JsonValue* g = r.find("graph");
+        REQUIRE(g);
+        return *g;
+    };
+    const auto g = graph("x^2 - 4 >= 0");
+    CHECK(g.string_or("along", "") == "x");
+    CHECK(contains(g.string_or("document", ""), "x in [-4, 4]"));
+    CHECK(contains(g.string_or("document", ""), "graph = (x^2 - 4) - (0)"));
+    const auto drawn = spatium::answer::plot_request(JsonValue(g.as_object()).dump());
+    CHECK(drawn.string_or("refused", "none") == "none");
+    // no root on the line: the sign about the origin
+    CHECK(contains(graph("x^2 + 1 > 0").string_or("document", ""), "x in [-5, 5]"));
+}
+
+TEST_CASE("evaluate: an identity is not read as a quadratic of rounding noise", "[rsc][evaluate]") {
+    // sin^2(a - pi/6) + sin^2(a + pi/6) - sin^2(a) is 1/2 for every a; its values at 0, 1, -1 are
+    // rounding, 1.1e-16 a^2 - 1.1e-16, which gave the roots +-1
+    const auto r = spatium::answer::respond("sin(a - pi/6)^2 + sin(a + pi/6)^2 - sin(a)^2 = 1/2");
+    CHECK(r.find("values") == nullptr);
+    CHECK(contains(r.string_or("refused", ""), "an identity, true for every a"));
+    // the case it must still answer: a quadratic whose coefficients are not noise
+    CHECK(contains(JsonValue(*spatium::answer::respond("x^2 - 1 = 0").find("values")).dump(), "-1"));
+}
+
+TEST_CASE("evaluate: a system in one line, its equations split by commas", "[rsc][evaluate]") {
+    // the same system as a line each; a comma inside a bracket does not split
+    const auto solution = [](std::string_view q) {
+        const JsonValue r = spatium::answer::respond(q);
+        const JsonValue* s = r.find("solution");
+        return s ? s->dump() : r.string_or("refused", "none");
+    };
+    CHECK(solution("x + y = 3, x - y = 1") == solution("x + y = 3\nx - y = 1"));
+    CHECK(contains(solution("x + y = 3, x - y = 1"), "\"x\":2"));
+    CHECK(contains(JsonValue(spatium::answer::respond("max(x, 1) = 3")).dump(), "\"values\":[3]"));
+}
+
 TEST_CASE("evaluate: a document sent as text and as JSON is answered the same", "[rsc][evaluate]") {
     const std::string text = "p in [0.5, 4]\nx: x^2 - p = 0 on [0, 10]";
     JsonValue::ObjectType as_text{{"document", text}, {"name", "x"}, {"chosen", JsonValue::ObjectType{{"p", 2.0}}}};
